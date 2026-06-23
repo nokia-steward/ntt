@@ -892,6 +892,131 @@ func (n *CaseClause) End() int {
 	return -1
 }
 
+func (n *CatchClause) Kind() Kind {
+	return CatchClauseNode
+}
+
+func (n *CatchClause) FirstTok() Token {
+	switch {
+
+	case n.CatchTok != nil:
+		return n.CatchTok
+
+	case n.LParen != nil:
+		return n.LParen
+
+	case n.Type != nil:
+		return n.Type.FirstTok()
+
+	case n.Var != nil:
+		return n.Var.FirstTok()
+
+	case n.RParen != nil:
+		return n.RParen
+
+	case n.Body != nil:
+		return n.Body.FirstTok()
+
+	default:
+		return nil
+	}
+}
+
+func (n *CatchClause) LastTok() Token {
+	switch {
+
+	case n.Body != nil:
+		return n.Body.LastTok()
+
+	case n.RParen != nil:
+		return n.RParen
+
+	case n.Var != nil:
+		return n.Var.LastTok()
+
+	case n.Type != nil:
+		return n.Type.LastTok()
+
+	case n.LParen != nil:
+		return n.LParen
+
+	case n.CatchTok != nil:
+		return n.CatchTok
+
+	default:
+		return nil
+	}
+}
+
+func (n *CatchClause) Children() []Node {
+	ret := make([]Node, 0, 6)
+
+	if n.CatchTok != nil {
+		ret = append(ret, n.CatchTok)
+	}
+
+	if n.LParen != nil {
+		ret = append(ret, n.LParen)
+	}
+
+	if n.Type != nil {
+		ret = append(ret, n.Type)
+	}
+
+	if n.Var != nil {
+		ret = append(ret, n.Var)
+	}
+
+	if n.RParen != nil {
+		ret = append(ret, n.RParen)
+	}
+
+	if n.Body != nil {
+		ret = append(ret, n.Body)
+	}
+
+	return ret
+}
+
+func (n *CatchClause) Inspect(f func(Node) bool) {
+
+	if c := n.Type; c != nil {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+	if c := n.Var; c != nil {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+	if c := n.Body; c != nil {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+}
+
+func (n *CatchClause) Pos() int {
+	if tok := n.FirstTok(); tok != nil {
+		return tok.Pos()
+	}
+	return -1
+}
+
+func (n *CatchClause) End() int {
+	if tok := n.LastTok(); tok != nil {
+		return tok.End()
+	}
+	return -1
+}
+
 func (n *ClassTypeDecl) Kind() Kind {
 	return ClassTypeDeclNode
 }
@@ -901,6 +1026,9 @@ func (n *ClassTypeDecl) FirstTok() Token {
 
 	case n.TypeTok != nil:
 		return n.TypeTok
+
+	case n.ExternalTok != nil:
+		return n.ExternalTok
 
 	case n.KindTok != nil:
 		return n.KindTok
@@ -935,6 +1063,12 @@ func (n *ClassTypeDecl) FirstTok() Token {
 	case n.RBrace != nil:
 		return n.RBrace
 
+	case n.FinallyTok != nil:
+		return n.FinallyTok
+
+	case n.Finally != nil:
+		return n.Finally.FirstTok()
+
 	case n.With != nil:
 		return n.With.FirstTok()
 
@@ -948,6 +1082,12 @@ func (n *ClassTypeDecl) LastTok() Token {
 
 	case n.With != nil:
 		return n.With.LastTok()
+
+	case n.Finally != nil:
+		return n.Finally.LastTok()
+
+	case n.FinallyTok != nil:
+		return n.FinallyTok
 
 	case n.RBrace != nil:
 		return n.RBrace
@@ -982,6 +1122,9 @@ func (n *ClassTypeDecl) LastTok() Token {
 	case n.KindTok != nil:
 		return n.KindTok
 
+	case n.ExternalTok != nil:
+		return n.ExternalTok
+
 	case n.TypeTok != nil:
 		return n.TypeTok
 
@@ -991,10 +1134,14 @@ func (n *ClassTypeDecl) LastTok() Token {
 }
 
 func (n *ClassTypeDecl) Children() []Node {
-	ret := make([]Node, 0, 13)
+	ret := make([]Node, 0, 16)
 
 	if n.TypeTok != nil {
 		ret = append(ret, n.TypeTok)
+	}
+
+	if n.ExternalTok != nil {
+		ret = append(ret, n.ExternalTok)
 	}
 
 	if n.KindTok != nil {
@@ -1039,6 +1186,14 @@ func (n *ClassTypeDecl) Children() []Node {
 
 	if n.RBrace != nil {
 		ret = append(ret, n.RBrace)
+	}
+
+	if n.FinallyTok != nil {
+		ret = append(ret, n.FinallyTok)
+	}
+
+	if n.Finally != nil {
+		ret = append(ret, n.Finally)
 	}
 
 	if n.With != nil {
@@ -1086,6 +1241,13 @@ func (n *ClassTypeDecl) Inspect(f func(Node) bool) {
 	}
 
 	for _, c := range n.Defs {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+	if c := n.Finally; c != nil {
 		if f(c) {
 			c.Inspect(f)
 		}
@@ -1493,6 +1655,12 @@ func (n *ConstructorDecl) FirstTok() Token {
 	case n.Params != nil:
 		return n.Params.FirstTok()
 
+	case n.ColonTok != nil:
+		return n.ColonTok
+
+	case n.Init != nil:
+		return n.Init.FirstTok()
+
 	case n.Body != nil:
 		return n.Body.FirstTok()
 
@@ -1507,6 +1675,12 @@ func (n *ConstructorDecl) LastTok() Token {
 	case n.Body != nil:
 		return n.Body.LastTok()
 
+	case n.Init != nil:
+		return n.Init.LastTok()
+
+	case n.ColonTok != nil:
+		return n.ColonTok
+
 	case n.Params != nil:
 		return n.Params.LastTok()
 
@@ -1519,7 +1693,7 @@ func (n *ConstructorDecl) LastTok() Token {
 }
 
 func (n *ConstructorDecl) Children() []Node {
-	ret := make([]Node, 0, 3)
+	ret := make([]Node, 0, 5)
 
 	if n.Name != nil {
 		ret = append(ret, n.Name)
@@ -1527,6 +1701,14 @@ func (n *ConstructorDecl) Children() []Node {
 
 	if n.Params != nil {
 		ret = append(ret, n.Params)
+	}
+
+	if n.ColonTok != nil {
+		ret = append(ret, n.ColonTok)
+	}
+
+	if n.Init != nil {
+		ret = append(ret, n.Init)
 	}
 
 	if n.Body != nil {
@@ -1546,6 +1728,13 @@ func (n *ConstructorDecl) Inspect(f func(Node) bool) {
 	}
 
 	if c := n.Params; c != nil {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+	if c := n.Init; c != nil {
 		if f(c) {
 			c.Inspect(f)
 		}
@@ -3227,6 +3416,9 @@ func (n *FormalPar) FirstTok() Token {
 	case n.Modif != nil:
 		return n.Modif
 
+	case n.Modif2 != nil:
+		return n.Modif2
+
 	case n.Type != nil:
 		return n.Type.FirstTok()
 
@@ -3265,6 +3457,9 @@ func (n *FormalPar) LastTok() Token {
 	case n.Type != nil:
 		return n.Type.LastTok()
 
+	case n.Modif2 != nil:
+		return n.Modif2
+
 	case n.Modif != nil:
 		return n.Modif
 
@@ -3280,7 +3475,7 @@ func (n *FormalPar) LastTok() Token {
 }
 
 func (n *FormalPar) Children() []Node {
-	ret := make([]Node, 0, 8)
+	ret := make([]Node, 0, 9)
 
 	if n.Direction != nil {
 		ret = append(ret, n.Direction)
@@ -3292,6 +3487,10 @@ func (n *FormalPar) Children() []Node {
 
 	if n.Modif != nil {
 		ret = append(ret, n.Modif)
+	}
+
+	if n.Modif2 != nil {
+		ret = append(ret, n.Modif2)
 	}
 
 	if n.Type != nil {
@@ -3670,8 +3869,23 @@ func (n *FuncDecl) FirstTok() Token {
 	case n.Return != nil:
 		return n.Return.FirstTok()
 
+	case n.ExceptionTok != nil:
+		return n.ExceptionTok
+
+	case n.Exception != nil:
+		return n.Exception.FirstTok()
+
 	case n.Body != nil:
 		return n.Body.FirstTok()
+
+	case len(n.Catch) > 0:
+		return n.Catch[0].FirstTok()
+
+	case n.FinallyTok != nil:
+		return n.FinallyTok
+
+	case n.Finally != nil:
+		return n.Finally.FirstTok()
 
 	case n.With != nil:
 		return n.With.FirstTok()
@@ -3687,8 +3901,23 @@ func (n *FuncDecl) LastTok() Token {
 	case n.With != nil:
 		return n.With.LastTok()
 
+	case n.Finally != nil:
+		return n.Finally.LastTok()
+
+	case n.FinallyTok != nil:
+		return n.FinallyTok
+
+	case len(n.Catch) > 0:
+		return n.Catch[len(n.Catch)-1].LastTok()
+
 	case n.Body != nil:
 		return n.Body.LastTok()
+
+	case n.Exception != nil:
+		return n.Exception.LastTok()
+
+	case n.ExceptionTok != nil:
+		return n.ExceptionTok
 
 	case n.Return != nil:
 		return n.Return.LastTok()
@@ -3729,7 +3958,7 @@ func (n *FuncDecl) LastTok() Token {
 }
 
 func (n *FuncDecl) Children() []Node {
-	ret := make([]Node, 0, 13)
+	ret := make([]Node, 0, 18)
 
 	if n.External != nil {
 		ret = append(ret, n.External)
@@ -3775,8 +4004,28 @@ func (n *FuncDecl) Children() []Node {
 		ret = append(ret, n.Return)
 	}
 
+	if n.ExceptionTok != nil {
+		ret = append(ret, n.ExceptionTok)
+	}
+
+	if n.Exception != nil {
+		ret = append(ret, n.Exception)
+	}
+
 	if n.Body != nil {
 		ret = append(ret, n.Body)
+	}
+
+	for _, c := range n.Catch {
+		ret = append(ret, c)
+	}
+
+	if n.FinallyTok != nil {
+		ret = append(ret, n.FinallyTok)
+	}
+
+	if n.Finally != nil {
+		ret = append(ret, n.Finally)
 	}
 
 	if n.With != nil {
@@ -3837,7 +4086,28 @@ func (n *FuncDecl) Inspect(f func(Node) bool) {
 		f(nil)
 	}
 
+	if c := n.Exception; c != nil {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
 	if c := n.Body; c != nil {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+	for _, c := range n.Catch {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+	if c := n.Finally; c != nil {
 		if f(c) {
 			c.Inspect(f)
 		}
@@ -5479,6 +5749,97 @@ func (n *NodeList) End() int {
 	return -1
 }
 
+func (n *ObjidLiteral) Kind() Kind {
+	return ObjidLiteralNode
+}
+
+func (n *ObjidLiteral) FirstTok() Token {
+	switch {
+
+	case n.Tok != nil:
+		return n.Tok
+
+	case n.LBrace != nil:
+		return n.LBrace
+
+	case len(n.List) > 0:
+		return n.List[0].FirstTok()
+
+	case n.RBrace != nil:
+		return n.RBrace
+
+	default:
+		return nil
+	}
+}
+
+func (n *ObjidLiteral) LastTok() Token {
+	switch {
+
+	case n.RBrace != nil:
+		return n.RBrace
+
+	case len(n.List) > 0:
+		return n.List[len(n.List)-1].LastTok()
+
+	case n.LBrace != nil:
+		return n.LBrace
+
+	case n.Tok != nil:
+		return n.Tok
+
+	default:
+		return nil
+	}
+}
+
+func (n *ObjidLiteral) Children() []Node {
+	ret := make([]Node, 0, 4)
+
+	if n.Tok != nil {
+		ret = append(ret, n.Tok)
+	}
+
+	if n.LBrace != nil {
+		ret = append(ret, n.LBrace)
+	}
+
+	for _, c := range n.List {
+		ret = append(ret, c)
+	}
+
+	if n.RBrace != nil {
+		ret = append(ret, n.RBrace)
+	}
+
+	return ret
+}
+
+func (n *ObjidLiteral) Inspect(f func(Node) bool) {
+
+	for _, c := range n.List {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+}
+
+func (n *ObjidLiteral) Pos() int {
+	if tok := n.FirstTok(); tok != nil {
+		return tok.Pos()
+	}
+	return -1
+}
+
+func (n *ObjidLiteral) End() int {
+	if tok := n.LastTok(); tok != nil {
+		return tok.End()
+	}
+	return -1
+}
+
 func (n *ParamExpr) Kind() Kind {
 	return ParamExprNode
 }
@@ -6202,6 +6563,77 @@ func (n *PostExpr) End() int {
 	return -1
 }
 
+func (n *RaiseStmt) Kind() Kind {
+	return RaiseStmtNode
+}
+
+func (n *RaiseStmt) FirstTok() Token {
+	switch {
+
+	case n.Tok != nil:
+		return n.Tok
+
+	case n.X != nil:
+		return n.X.FirstTok()
+
+	default:
+		return nil
+	}
+}
+
+func (n *RaiseStmt) LastTok() Token {
+	switch {
+
+	case n.X != nil:
+		return n.X.LastTok()
+
+	case n.Tok != nil:
+		return n.Tok
+
+	default:
+		return nil
+	}
+}
+
+func (n *RaiseStmt) Children() []Node {
+	ret := make([]Node, 0, 2)
+
+	if n.Tok != nil {
+		ret = append(ret, n.Tok)
+	}
+
+	if n.X != nil {
+		ret = append(ret, n.X)
+	}
+
+	return ret
+}
+
+func (n *RaiseStmt) Inspect(f func(Node) bool) {
+
+	if c := n.X; c != nil {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+}
+
+func (n *RaiseStmt) Pos() int {
+	if tok := n.FirstTok(); tok != nil {
+		return tok.Pos()
+	}
+	return -1
+}
+
+func (n *RaiseStmt) End() int {
+	if tok := n.LastTok(); tok != nil {
+		return tok.End()
+	}
+	return -1
+}
+
 func (n *RedirectExpr) Kind() Kind {
 	return RedirectExprNode
 }
@@ -6220,6 +6652,12 @@ func (n *RedirectExpr) FirstTok() Token {
 
 	case len(n.Value) > 0:
 		return n.Value[0].FirstTok()
+
+	case n.VerdictTok != nil:
+		return n.VerdictTok
+
+	case len(n.Verdict) > 0:
+		return n.Verdict[0].FirstTok()
 
 	case n.ParamTok != nil:
 		return n.ParamTok
@@ -6283,6 +6721,12 @@ func (n *RedirectExpr) LastTok() Token {
 	case n.ParamTok != nil:
 		return n.ParamTok
 
+	case len(n.Verdict) > 0:
+		return n.Verdict[len(n.Verdict)-1].LastTok()
+
+	case n.VerdictTok != nil:
+		return n.VerdictTok
+
 	case len(n.Value) > 0:
 		return n.Value[len(n.Value)-1].LastTok()
 
@@ -6301,7 +6745,7 @@ func (n *RedirectExpr) LastTok() Token {
 }
 
 func (n *RedirectExpr) Children() []Node {
-	ret := make([]Node, 0, 13)
+	ret := make([]Node, 0, 15)
 
 	if n.X != nil {
 		ret = append(ret, n.X)
@@ -6316,6 +6760,14 @@ func (n *RedirectExpr) Children() []Node {
 	}
 
 	for _, c := range n.Value {
+		ret = append(ret, c)
+	}
+
+	if n.VerdictTok != nil {
+		ret = append(ret, n.VerdictTok)
+	}
+
+	for _, c := range n.Verdict {
 		ret = append(ret, c)
 	}
 
@@ -6368,6 +6820,13 @@ func (n *RedirectExpr) Inspect(f func(Node) bool) {
 	}
 
 	for _, c := range n.Value {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+	for _, c := range n.Verdict {
 		if f(c) {
 			c.Inspect(f)
 		}
@@ -6921,6 +7380,9 @@ func (n *SelectStmt) FirstTok() Token {
 	case n.Union != nil:
 		return n.Union
 
+	case n.Class != nil:
+		return n.Class
+
 	case n.Tag != nil:
 		return n.Tag.FirstTok()
 
@@ -6953,6 +7415,9 @@ func (n *SelectStmt) LastTok() Token {
 	case n.Tag != nil:
 		return n.Tag.LastTok()
 
+	case n.Class != nil:
+		return n.Class
+
 	case n.Union != nil:
 		return n.Union
 
@@ -6965,7 +7430,7 @@ func (n *SelectStmt) LastTok() Token {
 }
 
 func (n *SelectStmt) Children() []Node {
-	ret := make([]Node, 0, 6)
+	ret := make([]Node, 0, 7)
 
 	if n.Tok != nil {
 		ret = append(ret, n.Tok)
@@ -6973,6 +7438,10 @@ func (n *SelectStmt) Children() []Node {
 
 	if n.Union != nil {
 		ret = append(ret, n.Union)
+	}
+
+	if n.Class != nil {
+		ret = append(ret, n.Class)
 	}
 
 	if n.Tag != nil {
@@ -8575,6 +9044,7 @@ const (
 	CallExprNode
 	CallStmtNode
 	CaseClauseNode
+	CatchClauseNode
 	ClassTypeDeclNode
 	CommClauseNode
 	ComponentTypeDeclNode
@@ -8617,6 +9087,7 @@ const (
 	ModuleParameterGroupNode
 	MtcSpecNode
 	NodeListNode
+	ObjidLiteralNode
 	ParamExprNode
 	ParametrizedIdentNode
 	ParenExprNode
@@ -8625,6 +9096,7 @@ const (
 	PortMapAttributeNode
 	PortTypeDeclNode
 	PostExprNode
+	RaiseStmtNode
 	RedirectExprNode
 	RefSpecNode
 	RegexpExprNode

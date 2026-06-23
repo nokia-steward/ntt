@@ -1,0 +1,44 @@
+-- Compact fixture exercising the X.680 features the new frontend
+-- supports: module header, tagging defaults, IMPORTS, type/value
+-- assignments, sequences, choices, enumerated, sequence-of, named
+-- numbers, OPTIONAL/DEFAULT, parameterised type, simple constraints.
+RRC-Sample {
+    itu-t (0) recommendation (0) x (24) asn1-test (1) modules (3) sample (1) version-1 (1)
+} DEFINITIONS AUTOMATIC TAGS ::= BEGIN
+
+EXPORTS
+    Status ;
+
+IMPORTS
+    BaseCounter
+FROM Common ;
+
+Status ::= ENUMERATED { ok(0), error(1), unknown(255), ..., timeout(2) }
+
+Counter ::= INTEGER { initial(0), max(65535) } (0..65535)
+
+Person ::= SEQUENCE {
+    name      PrintableString (SIZE (1..32)),
+    age       INTEGER OPTIONAL,
+    weight    INTEGER DEFAULT 0,
+    ...
+}
+
+Names ::= SEQUENCE (SIZE (0..10)) OF PrintableString
+
+Tagged ::= [APPLICATION 1] IMPLICIT INTEGER
+
+Pair { ItemType } ::= SEQUENCE { first ItemType, second ItemType }
+
+IntPair ::= Pair { INTEGER }
+
+Reply ::= CHOICE {
+    yes      NULL,
+    no       NULL,
+    maybe    INTEGER (0..100),
+    ...
+}
+
+maxRetries Counter ::= 3
+
+END

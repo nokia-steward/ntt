@@ -7,7 +7,7 @@
 
 /* The following requirements are tested:
  * check that  hostid function correctly evaluates the IPv4 or IPv6 address of the host.
- * The output of this test must be manually validated. Todo for future STF: automated validation via external function.
+ * The output of this test must be manually validated. Todo for future STF: automated validation vian external function.
  * */
 
 module Sem_C0602_The_hostid_function_001 {

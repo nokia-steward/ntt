@@ -48,6 +48,18 @@ type Root struct {
 	Filename string
 	tokens   []token
 	errs     []error
+
+	// lineCache memoises the line lookup result from the previous
+	// Position() call. Most LSP traversals visit tokens in source
+	// order, so the next position lands either on the same line or
+	// shortly after - both cases short-circuit the binary search.
+	// Concurrent reads are tolerated because the cache only stores
+	// a hint; a stale read produces the correct answer via the
+	// fallback search below.
+	lineCacheLine int
+	lineCacheLo   int // first byte of the cached line
+	lineCacheHi   int // first byte of the next line (or len(src))
+	lineCacheOk   bool
 }
 
 func (n *Root) Err() error {
@@ -67,19 +79,41 @@ func (n *Root) Position(offset int) Position {
 	return Position{}
 }
 
+// searchLines returns the index of the line that contains the byte
+// offset pos. The result is cached so that the common access pattern
+// (looking up positions in monotonically non-decreasing order, as
+// happens when the LSP walks a tree from start to end) collapses to a
+// single bounds check on the cache.
 func (n *Root) searchLines(pos int) int {
-	// TODO(5nord) add line cache
+	if n.lineCacheOk && pos >= n.lineCacheLo && pos < n.lineCacheHi {
+		return n.lineCacheLine
+	}
+
 	i, j := 0, len(n.lines)
 	for i < j {
 		h := int(uint(i+j) >> 1) // avoid overflow when computing h
-		// i ≤ h < j
 		if n.lines[h] <= pos {
 			i = h + 1
 		} else {
 			j = h
 		}
 	}
-	return int(i) - 1
+	idx := i - 1
+
+	if idx >= 0 {
+		n.lineCacheLine = idx
+		n.lineCacheLo = n.lines[idx]
+		if idx+1 < len(n.lines) {
+			n.lineCacheHi = n.lines[idx+1]
+		} else {
+			// We don't know the buffer length here, but any
+			// position past the last newline still belongs to
+			// the last line. Mark hi as a sentinel.
+			n.lineCacheHi = 1 << 62
+		}
+		n.lineCacheOk = true
+	}
+	return idx
 }
 
 func (n *Root) PosFor(line, col int) int {
@@ -197,6 +231,16 @@ type (
 		RBrace Token  // Position of "{"
 	}
 
+	// An ObjidLiteral represents an OBJECT IDENTIFIER value notation,
+	// e.g. `objid { itu_t question(1) 7 }`. Components are whitespace
+	// separated name forms, number forms, or name-and-number forms.
+	ObjidLiteral struct {
+		Tok    Token  // Position of "objid"
+		LBrace Token  // Position of "{"
+		List   []Expr // OID components
+		RBrace Token  // Position of "}"
+	}
+
 	// A UnaryExpr represents a unary expresions.
 	UnaryExpr struct {
 		Op Token // Operator token, like "+", "-", "!", ...
@@ -258,6 +302,8 @@ type (
 		Tok           Token  // Position of "->"
 		ValueTok      Token  // Position of "value" or nil
 		Value         []Expr // Value expression
+		VerdictTok    Token  // Position of "verdict" or nil
+		Verdict       []Expr // Verdict expression (call/done redirect)
 		ParamTok      Token  // Position of "param" or nil
 		Param         []Expr // Param expression
 		SenderTok     Token  // Position of "sender" or nil
@@ -361,6 +407,7 @@ func (x *Ident) exprNode()             {}
 func (x *ParametrizedIdent) exprNode() {}
 func (x *ValueLiteral) exprNode()      {}
 func (x *CompositeLiteral) exprNode()  {}
+func (x *ObjidLiteral) exprNode()      {}
 func (x *UnaryExpr) exprNode()         {}
 func (x *PostExpr) exprNode()          {}
 func (x *BinaryExpr) exprNode()        {}
@@ -412,6 +459,14 @@ type (
 	ReturnStmt struct {
 		Tok    Token // Position of "return"
 		Result Expr  // Resulting expression of nil
+	}
+
+	// A RaiseStmt represents the object-oriented `raise <expr>`
+	// statement that throws an exception value to the nearest
+	// enclosing catch clause (ETSI ES 201 873-1 clause 5.2.3).
+	RaiseStmt struct {
+		Tok Token // Position of "raise"
+		X   Expr  // Raised value
 	}
 
 	// A AltStmt represents an alternative statement.
@@ -484,6 +539,7 @@ type (
 	SelectStmt struct {
 		Tok    Token         // Position of "select"
 		Union  Token         // Position of "union" or nil
+		Class  Token         // Position of "class" or nil
 		Tag    *ParenExpr    // Tag expression
 		LBrace Token         // Position of "{"
 		Body   []*CaseClause // List of case clauses
@@ -513,6 +569,7 @@ func (x *DeclStmt) stmtNode()     {}
 func (x *ExprStmt) stmtNode()     {}
 func (x *BranchStmt) stmtNode()   {}
 func (x *ReturnStmt) stmtNode()   {}
+func (x *RaiseStmt) stmtNode()    {}
 func (x *CallStmt) stmtNode()     {}
 func (x *AltStmt) stmtNode()      {}
 func (x *ForStmt) stmtNode()      {}
@@ -644,26 +701,45 @@ type (
 
 	// A FuncDecl represents a behaviour definition.
 	FuncDecl struct {
-		External   Token // Position of "external" or nil
-		KindTok    Token // TESTCASE, ALTSTEP, FUNCTION
-		Interleave Token // INTERLEAVE or nil
-		Name       *Ident
-		Modif      Token // Position of "@deterministic" or nil
-		TypePars   *FormalPars
-		Params     *FormalPars // Formal parameter list or nil
-		RunsOn     *RunsOnSpec // Optional runs-on-spec
-		Mtc        *MtcSpec    // Optional mtc-spec
-		System     *SystemSpec // Optional system-spec
-		Return     *ReturnSpec // Optional return-spec
-		Body       *BlockStmt  // Body or nil
-		With       *WithSpec
+		External     Token // Position of "external" or nil
+		KindTok      Token // TESTCASE, ALTSTEP, FUNCTION
+		Interleave   Token // INTERLEAVE or nil
+		Name         *Ident
+		Modif        Token // Position of "@deterministic" or nil
+		TypePars     *FormalPars
+		Params       *FormalPars    // Formal parameter list or nil
+		RunsOn       *RunsOnSpec    // Optional runs-on-spec
+		Mtc          *MtcSpec       // Optional mtc-spec
+		System       *SystemSpec    // Optional system-spec
+		Return       *ReturnSpec    // Optional return-spec
+		ExceptionTok Token          // Position of "exception" or nil (OO exception clause)
+		Exception    *ParenExpr     // Exception type list or nil
+		Body         *BlockStmt     // Body or nil
+		Catch        []*CatchClause // OO exception handlers after the body
+		FinallyTok   Token          // Position of "finally" or nil
+		Finally      *BlockStmt     // OO finally block or nil
+		With         *WithSpec
+	}
+
+	// A CatchClause represents an object-oriented exception handler
+	// attached after a function, altstep or testcase body:
+	// `catch (Type [name]) { ... }` (ETSI ES 201 873-1 clause 5.2).
+	CatchClause struct {
+		CatchTok Token      // Position of "catch"
+		LParen   Token      // Position of "("
+		Type     Expr       // Caught exception type
+		Var      *Ident     // Optional bound variable name or nil
+		RParen   Token      // Position of ")"
+		Body     *BlockStmt // Handler body
 	}
 
 	// A ConstructorDecl represents a class constructor definition.
 	ConstructorDecl struct {
-		Name   *Ident      // CREATE
-		Params *FormalPars // Formal parameter list
-		Body   *BlockStmt  // Body
+		Name     *Ident      // CREATE
+		Params   *FormalPars // Formal parameter list
+		ColonTok Token       // Position of ":" before the super-call or nil
+		Init     Expr        // Super-constructor init call (`: Super(args)`) or nil
+		Body     *BlockStmt  // Body
 	}
 
 	// A SignatureDecl represents a signature type for procedure based communication.
@@ -700,19 +776,22 @@ type (
 
 	// A StructTypeDecl represents a name struct type.
 	ClassTypeDecl struct {
-		TypeTok    Token  // Position of "type"
-		KindTok    Token  // CLASS
-		Modif      Token  // "@abstract" or nil
-		Name       *Ident // Name
-		ExtendsTok Token
-		Extends    []Expr
-		RunsOn     *RunsOnSpec // Optional runs-on-spec
-		Mtc        *MtcSpec    // Optional mtc-spec
-		System     *SystemSpec // Optional system-spec
-		LBrace     Token       // Position of "{"
-		Defs       []*ModuleDef
-		RBrace     Token // Position of }"
-		With       *WithSpec
+		TypeTok     Token  // Position of "type"
+		ExternalTok Token  // Position of "external" or nil
+		KindTok     Token  // CLASS
+		Modif       Token  // "@abstract" or nil
+		Name        *Ident // Name
+		ExtendsTok  Token
+		Extends     []Expr
+		RunsOn      *RunsOnSpec // Optional runs-on-spec
+		Mtc         *MtcSpec    // Optional mtc-spec
+		System      *SystemSpec // Optional system-spec
+		LBrace      Token       // Position of "{"
+		Defs        []*ModuleDef
+		RBrace      Token      // Position of }"
+		FinallyTok  Token      // Position of "finally" or nil
+		Finally     *BlockStmt // Destructor body or nil
+		With        *WithSpec
 	}
 
 	MapTypeDecl struct {
@@ -912,6 +991,7 @@ type (
 		Direction           Token
 		TemplateRestriction *RestrictionSpec
 		Modif               Token
+		Modif2              Token
 		Type                Expr
 		Name                *Ident
 		ArrayDef            []*ParenExpr

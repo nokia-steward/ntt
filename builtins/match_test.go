@@ -163,24 +163,34 @@ func TestMatch(t *testing.T) {
 		{List(runtime.SET_OF, 1, 2, 3), List(runtime.SUBSET, runtime.AnyOrNone), true},
 		{List(runtime.SET_OF), List(runtime.SUBSET, runtime.AnyOrNone), true},
 
-		// Strings
+		// Strings. A plain charstring template compares literally:
+		// `?` / `*` only act as wildcards inside `pattern "..."`
+		// templates (ETSI 15.11 / B.1.5; the conformance suite pins
+		// the literal behaviour via Sem_1511_*_010).
 		{makeObj(""), makeObj(""), true},
 		{makeObj(""), makeObj("abc"), false},
 		{makeObj("abc"), makeObj(""), false},
 		{makeObj("abc"), makeObj("abc"), true},
 		{makeObj("abc"), makeObj("abd"), false},
-		{makeObj("abc"), makeObj("ab?"), true},
-		{makeObj("abc"), makeObj("a?c"), true},
-		{makeObj(""), makeObj("?"), false},
-		{makeObj("abc"), makeObj("abc*"), true},
-		{makeObj("abc"), makeObj("*abc"), true},
-		{makeObj("abc"), makeObj("a*c"), true},
-		{makeObj("abc"), makeObj("a*"), true},
-		{makeObj("abc"), makeObj("*"), true},
-		{makeObj(""), makeObj("*"), true},
-		{makeObj("abcdef"), makeObj("a*d*ef"), true},
-		{makeObj("abcdcdefaf"), makeObj("a*de*f"), true},
-		{makeObj("abcdcdefab"), makeObj("a*de*f"), false},
+		{makeObj("abc"), makeObj("ab?"), false},
+		{makeObj("ab?"), makeObj("ab?"), true},
+		{makeObj("abc"), makeObj("a*c"), false},
+		{makeObj("a*c"), makeObj("a*c"), true},
+
+		// `pattern "..."` charstring templates: `?` matches exactly
+		// one character, `*` any run (including none).
+		{makeObj("abc"), patObj("ab?"), true},
+		{makeObj("abc"), patObj("a?c"), true},
+		{makeObj(""), patObj("?"), false},
+		{makeObj("abc"), patObj("abc*"), true},
+		{makeObj("abc"), patObj("*abc"), true},
+		{makeObj("abc"), patObj("a*c"), true},
+		{makeObj("abc"), patObj("a*"), true},
+		{makeObj("abc"), patObj("*"), true},
+		{makeObj(""), patObj("*"), true},
+		{makeObj("abcdef"), patObj("a*d*ef"), true},
+		{makeObj("abcdcdefaf"), patObj("a*de*f"), true},
+		{makeObj("abcdcdefab"), patObj("a*de*f"), false},
 	}
 
 	for _, test := range tests {
@@ -194,6 +204,16 @@ func TestMatch(t *testing.T) {
 			t.Errorf("Error verification not implemented yet. Sorry")
 		}
 	}
+}
+
+
+// patObj builds a `pattern "..."` charstring template, where `?` and
+// `*` act as wildcards - unlike plain charstring templates, which
+// compare literally.
+func patObj(s string) runtime.Object {
+	p := runtime.NewCharstring(s)
+	p.IsPattern = true
+	return p
 }
 
 func Record(a ...interface{}) *runtime.Record {

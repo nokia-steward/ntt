@@ -106,22 +106,45 @@ func (s *Server) initialize(ctx context.Context, params *protocol.ParamInitializ
 	return &protocol.InitializeResult{
 		Capabilities: protocol.ServerCapabilities{
 			InlayHintProvider:               s.registerInlayHintIfNoDynReg(),
-			CodeActionProvider:              false,
-			CompletionProvider:              protocol.CompletionOptions{TriggerCharacters: []string{"."}},
+			// Advertise the kinds we actually emit so clients can
+			// surface them in their menus (e.g. "Source Action"
+			// in VS Code) and pre-filter via the `Only` field.
+			CodeActionProvider: protocol.CodeActionOptions{
+				CodeActionKinds: []protocol.CodeActionKind{
+					protocol.QuickFix,
+					protocol.SourceOrganizeImports,
+				},
+			},
+			CompletionProvider: protocol.CompletionOptions{
+				TriggerCharacters: []string{"."},
+				ResolveProvider:   true,
+			},
+			CallHierarchyProvider: true,
 			DefinitionProvider:              true,
-			TypeDefinitionProvider:          false,
+			TypeDefinitionProvider:          true,
 			ImplementationProvider:          false,
 			DocumentFormattingProvider:      s.registerFormatterIfNoDynReg(),
 			DocumentRangeFormattingProvider: false,
 			DocumentSymbolProvider:          true,
-			WorkspaceSymbolProvider:         false,
-			FoldingRangeProvider:            false,
+			WorkspaceSymbolProvider:         true,
+			FoldingRangeProvider:            true,
 			HoverProvider:                   true,
-			DocumentHighlightProvider:       false,
+			DocumentHighlightProvider:       true,
 			DocumentLinkProvider:            protocol.DocumentLinkOptions{},
 			ReferencesProvider:              true,
+			RenameProvider: protocol.RenameOptions{
+				PrepareProvider: true,
+			},
+			SignatureHelpProvider: protocol.SignatureHelpOptions{
+				TriggerCharacters:   []string{"(", ","},
+				RetriggerCharacters: []string{","},
+			},
 			TextDocumentSync: &protocol.TextDocumentSyncOptions{
-				Change:    protocol.Full,
+				// Incremental sync sends only the edited range
+				// per keystroke. We splice it into our cached
+				// content (see didChange) instead of having the
+				// client retransmit the whole file every time.
+				Change:    protocol.Incremental,
 				OpenClose: true,
 				Save: protocol.SaveOptions{
 					IncludeText: false,

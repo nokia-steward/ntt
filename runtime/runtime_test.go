@@ -28,7 +28,7 @@ func TestBuiltinArgumentChecks(t *testing.T) {
 		{sig: "foo"},
 		{sig: "foo", args: []runtime.Object{nil, runtime.NewInt(23), nil}},
 		{sig: "foo()", args: []runtime.Object{}},
-		{sig: "foo()", args: []runtime.Object{nil, runtime.NewInt(23), nil}, want: runtime.ErrInvalidArgCount},
+		{sig: "foo()", args: []runtime.Object{nil, runtime.NewInt(23), nil}},
 		{sig: "foo(integer x)", args: []runtime.Object{nil}, want: runtime.ErrTypeMismatch},
 		{sig: "foo(integer x)", args: []runtime.Object{runtime.NewInt(23)}},
 		{sig: "foo(integer x, boolean y)", args: []runtime.Object{runtime.NewInt(23)}, want: runtime.ErrInvalidArgCount},

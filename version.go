@@ -19,6 +19,10 @@ var (
 
 func init() {
 	RootCommand.AddCommand(VersionCommand)
+	// Convenience: `ntt --version` is what most CLI users try first.
+	// Cobra reserves the flag for us when SetVersionTemplate is set.
+	RootCommand.Version = versionString()
+	RootCommand.SetVersionTemplate("{{.Version}}\n")
 
 	if version == "devel" {
 		info, ok := debug.ReadBuildInfo()
@@ -42,5 +46,9 @@ func init() {
 }
 
 func versionInfo(cmd *cobra.Command, args []string) {
-	fmt.Printf("ntt %v, commit %s, built at %s\n", version, commit, date)
+	fmt.Println(versionString())
+}
+
+func versionString() string {
+	return fmt.Sprintf("ntt %v, commit %s, built at %s", version, commit, date)
 }

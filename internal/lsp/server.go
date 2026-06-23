@@ -26,6 +26,16 @@ func NewServer(stream jsonrpc2.Stream) *Server {
 	return &Server{
 		conn:  jsonrpc2.NewConn(stream),
 		files: make(map[*fs.File]bool),
+		// Default-on for the features that used to live behind
+		// `ttcn3.experimental.*.enabled`. Users can still opt out
+		// via the new `ttcn3.<feature>.enabled` keys (see
+		// configuration.go).
+		serverConfig: Config{
+			DiagnosticsEnabled:    true,
+			FormatEnabled:         true,
+			SemantikTokensEnabled: true,
+			InlayHintEnabled:      true,
+		},
 	}
 }
 
@@ -83,6 +93,10 @@ type Config struct {
 	FormatEnabled         bool
 	SemantikTokensEnabled bool
 	InlayHintEnabled      bool
+
+	// FormatPrintWidth is the soft right margin used by the wrapping
+	// formatter. Zero falls back to the default (100 columns).
+	FormatPrintWidth int
 }
 
 // Server implements the protocol.Server interface.

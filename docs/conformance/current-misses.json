@@ -1,0 +1,1441 @@
+{
+ "summary": "ran 4948 files: 4788 matched, 23 skipped (97.22% match rate)",
+ "source": "/tmp/run-002.json",
+ "miss_count": 160,
+ "outcomes": {
+  "reject->pass": 106,
+  "->": 23,
+  "pass->fail": 23,
+  "error->pass": 2,
+  "fail->pass": 2,
+  "pass->parse-error": 2,
+  "error->timeout": 1,
+  "none->pass": 1
+ },
+ "chapters": [
+  {
+   "chapter": "core_language/06_types_and_values",
+   "misses": 38,
+   "outcomes": {
+    "->": 9,
+    "reject->pass": 25,
+    "pass->fail": 4
+   }
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "misses": 28,
+   "outcomes": {
+    "reject->pass": 22,
+    "pass->fail": 6
+   }
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "misses": 20,
+   "outcomes": {
+    "reject->pass": 17,
+    "->": 3
+   }
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "misses": 20,
+   "outcomes": {
+    "reject->pass": 16,
+    "->": 2,
+    "pass->fail": 2
+   }
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "misses": 10,
+   "outcomes": {
+    "reject->pass": 5,
+    "pass->fail": 4,
+    "->": 1
+   }
+  },
+  {
+   "chapter": "core_language/26_module_control",
+   "misses": 9,
+   "outcomes": {
+    "error->pass": 2,
+    "fail->pass": 2,
+    "error->timeout": 1,
+    "->": 3,
+    "pass->fail": 1
+   }
+  },
+  {
+   "chapter": "core_language/09_test_configurations",
+   "misses": 7,
+   "outcomes": {
+    "reject->pass": 7
+   }
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "misses": 7,
+   "outcomes": {
+    "reject->pass": 4,
+    "pass->fail": 3
+   }
+  },
+  {
+   "chapter": "core_language/B_matching_incoming_values",
+   "misses": 4,
+   "outcomes": {
+    "reject->pass": 4
+   }
+  },
+  {
+   "chapter": "core_language/08_modules",
+   "misses": 3,
+   "outcomes": {
+    "->": 2,
+    "pass->fail": 1
+   }
+  },
+  {
+   "chapter": "oo/501_classes_and_objects",
+   "misses": 3,
+   "outcomes": {
+    "pass->parse-error": 2,
+    "pass->fail": 1
+   }
+  },
+  {
+   "chapter": "core_language/07_expressions",
+   "misses": 2,
+   "outcomes": {
+    "reject->pass": 2
+   }
+  },
+  {
+   "chapter": "core_language/11_variables",
+   "misses": 2,
+   "outcomes": {
+    "->": 2
+   }
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "misses": 2,
+   "outcomes": {
+    "reject->pass": 2
+   }
+  },
+  {
+   "chapter": "core_language/27_specifying_attributes",
+   "misses": 2,
+   "outcomes": {
+    "->": 1,
+    "reject->pass": 1
+   }
+  },
+  {
+   "chapter": "core_language/14_procedure_signatures",
+   "misses": 1,
+   "outcomes": {
+    "pass->fail": 1
+   }
+  },
+  {
+   "chapter": "core_language/23_timer_operations",
+   "misses": 1,
+   "outcomes": {
+    "none->pass": 1
+   }
+  },
+  {
+   "chapter": "core_language/D_preprocessing_macros",
+   "misses": 1,
+   "outcomes": {
+    "reject->pass": 1
+   }
+  }
+ ],
+ "misses": [
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0503_ordering_of_declarations/NegSem_0503_Ordering_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0503_ordering_of_declarations/NegSem_0503_Ordering_003.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050401_formal_parameters/05040101_parameters_of_kind_value/NegSem_05040101_parameters_of_kind_value_010.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050401_formal_parameters/05040102_parameters_of_kind_template/NegSem_05040102_parameters_of_kind_template_010.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050401_formal_parameters/05040102_parameters_of_kind_template/NegSem_05040102_parameters_of_kind_template_020.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050401_formal_parameters/05040102_parameters_of_kind_template/NegSem_05040102_parameters_of_kind_template_021.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050401_formal_parameters/05040102_parameters_of_kind_template/NegSyn_05040102_parameters_of_kind_template_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050401_formal_parameters/05040103_parameters_of_kind_timer/NegSyn_05040103_parameters_of_kind_timer_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050401_formal_parameters/05040103_parameters_of_kind_timer/NegSyn_05040103_parameters_of_kind_timer_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050401_formal_parameters/05040104_parameters_of_kind_port/NegSem_05040104_parameters_of_kind_port_003.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050401_formal_parameters/05040104_parameters_of_kind_port/NegSem_05040104_parameters_of_kind_port_004.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050402_actual_parameters/NegSem_050402_actual_parameters_221.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050402_actual_parameters/NegSem_050402_actual_parameters_223.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050402_actual_parameters/NegSem_050402_actual_parameters_224.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050402_actual_parameters/NegSem_050402_actual_parameters_225.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050402_actual_parameters/NegSem_050402_actual_parameters_229.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050402_actual_parameters/NegSem_050402_actual_parameters_230.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/05_basic_language_elements/0504_parametrization/0504_toplevel/NegSyn_0504_forbidden_parametrization_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/05_basic_language_elements/0505_cyclic_definitions/NegSem_0505_cyclic_definitions_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/05_basic_language_elements",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/05_basic_language_elements/05_toplevel/NegSyn_05_TopLevel_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/06_types_and_values/0601_basic_types_and_values/060100_simple_basic_types_and_values/NegSyn_060100_SimpleBasicTypes_005.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/06_types_and_values/0601_basic_types_and_values/060100_simple_basic_types_and_values/NegSyn_060100_SimpleBasicTypes_006.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0601_basic_types_and_values/060102_subtyping_of_basic_types/06010202_lists_of_types/NegSem_06010202_ListOfTypes_005.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0601_basic_types_and_values/060102_subtyping_of_basic_types/06010205_pattern_subtyping_of_character_string_types/NegSyn_06010205_StringPattern_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060201_record_type_and_values/06020101_referencing_fields_of_record_type/NegSem_06020101_ReferencingRecordFields_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060201_record_type_and_values/060201_toplevel/NegSem_060201_RecordTypeValues_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060202_set_type_and_values/NegSem_060202_SetTypeValues_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060202_set_type_and_values/NegSem_060202_SetTypeValues_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060203_records_and_sets_of_single_types/NegSem_060203_records_and_sets_of_single_types_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060203_records_and_sets_of_single_types/NegSem_060203_records_and_sets_of_single_types_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060204_enumerated_type_and_values/NegSyn_060204_enumerated_type_and_values_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060204_enumerated_type_and_values/NegSyn_060204_enumerated_type_and_values_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060205_unions/06020501_referencing_fields_of_union_type/NegSem_06020501_referencing_fields_of_union_type_005.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060205_unions/06020502_option_and_union/NegSyn_06020502_option_and_union_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060206_anytype/NegSem_060206_anytype_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSem_060207_arrays_026.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSem_060207_arrays_027.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSem_060207_arrays_028.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSyn_060207_arrays_004.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060210_component_types/06021002_reuse_component_type/Sem_060210_ReuseofComponentTypes_002.ttcn",
+   "message": "\"Unexpected result\""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060210_component_types/06021002_reuse_component_type/Sem_060210_ReuseofComponentTypes_003.ttcn",
+   "message": "\"Unexpected result\""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_003.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_004.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060213_subtyping_of_structured_types/06021302_list_subtyping/NegSem_06021302_ListSubtyping_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060213_subtyping_of_structured_types/06021302_list_subtyping/NegSem_06021302_ListSubtyping_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060213_subtyping_of_structured_types/06021302_list_subtyping/NegSem_06021302_ListSubtyping_003.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021501_map_type_definition/NegSem_06021501_map_type_definition_004.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021502_indexed_assignment_notation/NegSem_06021502_indexed_assignment_notation_003.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021503_unmapping_keys/NegSem_06021503_unmapping_keys_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021504_index_notation/NegSem_06021504_index_notation_006.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/0602_toplevel/Sem_0602_TopLevel_015.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0603_type_compatibility/060301_non-structured_types/NegSem_060301_non_structured_types_005.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0603_type_compatibility/060301_non-structured_types/NegSem_060301_non_structured_types_006.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0603_type_compatibility/060301_non-structured_types/NegSem_060301_non_structured_types_010.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0603_type_compatibility/060302_structured_types/NegSem_060302_structured_types_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/06_types_and_values/0603_type_compatibility/060302_structured_types/Sem_060302_structured_types_010.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/06_types_and_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0603_type_compatibility/060304_compatibility_of_communication_operations/NegSem_060304_compatibility_of_communication_operations_004.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/07_expressions",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/07_expressions/0703_decoded_field_reference/NegSem_0703_decoded_field_reference_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/07_expressions",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/07_expressions/07_toplevel/NegSem_07_toplevel_004.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/08_modules",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/08_modules/0801_definition_of_a_module/NegSyn_0801_DefinitionOfAModule_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/08_modules",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/08_modules/0802_module_definitions_part/080201_module_parameters/NegSyn_080201_ModuleParameters_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/08_modules",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/08_modules/0802_module_definitions_part/080203_importing_from_modules/08020301_general_format_of_import/Sem_08020301_GeneralFormatOfImport_004.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/09_test_configurations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/09_test_configurations/0901_communication_ports/NegSem_0901_Communication_ports_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/09_test_configurations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/09_test_configurations/0901_communication_ports/NegSem_0901_Communication_ports_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/09_test_configurations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/09_test_configurations/0901_communication_ports/NegSem_0901_Communication_ports_003.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/09_test_configurations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/09_test_configurations/0901_communication_ports/NegSem_0901_Communication_ports_005.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/09_test_configurations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/09_test_configurations/0901_communication_ports/NegSem_0901_Communication_ports_006.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/09_test_configurations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/09_test_configurations/0901_communication_ports/NegSem_0901_Communication_ports_007.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/09_test_configurations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/09_test_configurations/0902_test_system_interface/NegSem_0902_Communication_ports_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/11_variables",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/11_variables/1101_value_variables/NegSyn_1101_ValueVars_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/11_variables",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/11_variables/1102_template_variables/NegSyn_1102_TemplateVars_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/14_procedure_signatures",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/14_procedure_signatures/Sem_1400_procedure_signatures_004.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1503_global_and_local_templates/NegSem_1503_GlobalAndLocalTemplates_007.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1503_global_and_local_templates/NegSem_1503_GlobalAndLocalTemplates_008.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/15_templates/1503_global_and_local_templates/NegSyn_1503_GlobalAndLocalTemplates_006.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1503_global_and_local_templates/Sem_1503_GlobalAndLocalTemplates_010.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_010.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_011.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_012.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_013.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_015.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150605_Referencing_union_alternatives/Sem_150605_Referencing_union_alternatives_002.ttcn",
+   "message": "undefined value"
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1508_template_restrictions/NegSem_1508_TemplateRestrictions_055.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1508_template_restrictions/NegSem_1508_TemplateRestrictions_056.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1508_template_restrictions/NegSem_1508_TemplateRestrictions_057.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1508_template_restrictions/NegSem_1508_TemplateRestrictions_058.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1508_template_restrictions/NegSem_1508_TemplateRestrictions_059.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1508_template_restrictions/NegSem_1508_TemplateRestrictions_060.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1508_template_restrictions/NegSem_1508_TemplateRestrictions_061.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/15_templates/1511_concatenating_templates_of_string_and_list_types/NegSem_1511_ConcatenatingTemplatesOfStringAndListTypes_004.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/15_templates/1511_concatenating_templates_of_string_and_list_types/Sem_1511_ConcatenatingTemplatesOfStringAndListTypes_013.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/15_templates/15_toplevel/NegSyn_15_TopLevel_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/NegSem_160102_predefined_functions_009.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/NegSem_160102_predefined_functions_039.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/Sem_160102_predefined_functions_107.ttcn",
+   "message": "1 undefined value"
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/Sem_160102_predefined_functions_110.ttcn",
+   "message": "'00'O"
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160103_external_functions/NegSem_160103_external_functions_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160103_external_functions/Sem_160103_external_functions_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160103_external_functions/Sem_160103_external_functions_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160105_explicit_control_functions/NegSem_160105_explicit_control_functions_009.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/1601_toplevel/NegSem_1601_toplevel_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/16_functions_altsteps_testcases/1602_altsteps/160201_invoking_altsteps/NegSyn_160201_invoking_altsteps_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2002_the_alt_statement/NegSem_2002_TheAltStatement_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2004_the_interleave_statement/Sem_2004_InterleaveStatement_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2004_the_interleave_statement/Sem_2004_InterleaveStatement_013.ttcn",
+   "message": "\"altstep a() invocated.\""
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2005_default_handling/200501_the_default_mechanism/Sem_200501_the_default_mechanism_008.ttcn",
+   "message": "\"Component stop expected\""
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2005_default_handling/200502_the_activate_operation/NegSem_200502_the_activate_operation_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2005_default_handling/200502_the_activate_operation/NegSem_200502_the_activate_operation_006.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2005_default_handling/200502_the_activate_operation/NegSem_200502_the_activate_operation_007.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/NegSem_210101_connect_and_map_operations_017.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/NegSem_210101_connect_and_map_operations_018.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/NegSem_220201_SendOperation_005.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/NegSem_220201_SendOperation_011.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2202_message_based_communication/220202_receive_operation/NegSem_220202_ReceiveOperation_006.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2202_message_based_communication/220202_receive_operation/NegSem_220202_ReceiveOperation_023.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2202_message_based_communication/220203_trigger_operation/NegSem_220203_TriggerOperation_006.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2202_message_based_communication/220203_trigger_operation/NegSem_220203_TriggerOperation_023.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_012.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_020.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/Sem_220301_CallOperation_019.ttcn",
+   "message": "\"The reply is not the expected one!\""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/Sem_220301_CallOperation_020.ttcn",
+   "message": "\"The exception is not the expected one!\""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_012.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_017.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_020.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_021.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220303_reply_operation/NegSem_220303_ReplyOperation_008.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220303_reply_operation/NegSem_220303_ReplyOperation_010.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_009.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_014.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_016.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_020.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/NegSem_220305_raise_operation_004.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/NegSem_220305_raise_operation_009.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220306_catch_operation/NegSem_220306_catch_operation_009.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220306_catch_operation/NegSem_220306_catch_operation_014.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220306_catch_operation/NegSyn_220306_catch_operation_003.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/22_communication_operations/2204_the_check_operation/NegSem_2204_the_check_operation_005.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_090.ttcn",
+   "message": "\"Incorrect exception value\""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_094.ttcn",
+   "message": "\"Incorrect exception value\""
+  },
+  {
+   "chapter": "core_language/23_timer_operations",
+   "expected": "none",
+   "actual": "pass",
+   "outcome": "none->pass",
+   "relpath": "core_language/23_timer_operations/2303_the_stop_timer_operation/Sem_2303_timer_stop_004.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/26_module_control",
+   "expected": "error",
+   "actual": "pass",
+   "outcome": "error->pass",
+   "relpath": "core_language/26_module_control/2601_execute_statement/Sem_2601_ExecuteStatement_003.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/26_module_control",
+   "expected": "fail",
+   "actual": "pass",
+   "outcome": "fail->pass",
+   "relpath": "core_language/26_module_control/2601_execute_statement/Sem_2601_ExecuteStatement_005.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/26_module_control",
+   "expected": "error",
+   "actual": "timeout",
+   "outcome": "error->timeout",
+   "relpath": "core_language/26_module_control/2601_execute_statement/Sem_2601_ExecuteStatement_007.ttcn",
+   "message": "execution exceeded 4s"
+  },
+  {
+   "chapter": "core_language/26_module_control",
+   "expected": "error",
+   "actual": "pass",
+   "outcome": "error->pass",
+   "relpath": "core_language/26_module_control/2601_execute_statement/Sem_2601_ExecuteStatement_009.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/26_module_control",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/26_module_control/2602_the_control_part/NegSem_2602_TheControlPart_025.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/26_module_control",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/26_module_control/2602_the_control_part/NegSem_2602_TheControlPart_028.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/26_module_control",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/26_module_control/2602_the_control_part/NegSem_2602_TheControlPart_030.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/26_module_control",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/26_module_control/2602_the_control_part/Sem_2602_TheControlPart_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/26_module_control",
+   "expected": "fail",
+   "actual": "pass",
+   "outcome": "fail->pass",
+   "relpath": "core_language/26_module_control/2602_the_control_part/Sem_2602_TheControlPart_003.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/27_specifying_attributes",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/27_specifying_attributes/2701_attribute_mechanism/270101_scope_of_attributes/NegSem_270101_ScopeOfAttributes_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/27_specifying_attributes",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/27_specifying_attributes/2707_optional_attributes/NegSem_2707_OptionalAttributes_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/B_matching_incoming_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0102_matching_mechanisms/B010201_value_list/NegSem_B010201_value_list_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/B_matching_incoming_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0103_matching_inside_values/B010303_permutation/NegSem_B010303_permutation_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/B_matching_incoming_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0104_matching_attributes_of_values/B010402_ifPresent_indicator/NegSem_B010402_ifPresent_indicator_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/B_matching_incoming_values",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0105_matching_character_pattern/B010504_match_referenced_characters/NegSem_B010504_match_referenced_characters_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/D_preprocessing_macros",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/D_preprocessing_macros/D05_macro_scope/NegSem_D05_macro_scope_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "oo/501_classes_and_objects",
+   "expected": "pass",
+   "actual": "parse-error",
+   "outcome": "pass->parse-error",
+   "relpath": "oo/501_classes_and_objects/50101_classes/5010106_constructor_invocation/Sem_5010106_ConstructorInvocation_002.ttcn",
+   "message": "3 errors occurred:\n\t* {testdata/ttcn3-conformance-tests/ATS/oo/501_classes_and_objects/50101_classes/5010106_constructor_invocation/Sem_5010106_ConstructorInvocation_002.ttcn 24:3 24:11}: expected '{'..."
+  },
+  {
+   "chapter": "oo/501_classes_and_objects",
+   "expected": "pass",
+   "actual": "parse-error",
+   "outcome": "pass->parse-error",
+   "relpath": "oo/501_classes_and_objects/50101_classes/5010110_visibility/Sem_50101010_Visibility_002.ttcn",
+   "message": "1 error occurred:\n\t* {testdata/ttcn3-conformance-tests/ATS/oo/501_classes_and_objects/50101_classes/5010110_visibility/Sem_50101010_Visibility_002.ttcn 33:1 33:2}: expected '}', found EOF\n\n"
+  },
+  {
+   "chapter": "oo/501_classes_and_objects",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "oo/501_classes_and_objects/50102_objects/5010206_casting/Sem_5010206_Casting_001.ttcn",
+   "message": ""
+  }
+ ]
+}

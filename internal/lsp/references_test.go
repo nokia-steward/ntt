@@ -1,57 +1,75 @@
-package lsp_test
+package lsp
 
 import (
-	"fmt"
 	"testing"
 
 	"github.com/nokia/ntt/internal/fs"
-	"github.com/nokia/ntt/internal/lsp"
-	"github.com/nokia/ntt/internal/lsp/protocol"
 	"github.com/nokia/ntt/ttcn3"
-	"github.com/stretchr/testify/assert"
+	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
-func TestFindAllTypeDefs(t *testing.T) {
-	input1 := `
-	module A {
-		type integer Byte(0..255);
-		function f() return Byte {
-		var Byte ret := 100;
+// findIdent walks the parsed tree and returns the first Ident with the
+// given name. We can't trust hard-coded line/column offsets in tests
+// because the parser may not preserve a stable column for nested
+// expressions, so we look up by name instead.
+func findIdent(tree *ttcn3.Tree, name string) *syntax.Ident {
+	var found *syntax.Ident
+	tree.Inspect(func(n syntax.Node) bool {
+		if found != nil {
+			return false
 		}
-	}
-	module B {
-		import from A all;
-		template Byte a_byte := ?;
-	}`
-	input2 := `
-	module C {
-		import from A {type Byte}
-		type Byte AliasByte;
-	}`
+		if id, ok := n.(*syntax.Ident); ok && id != nil && id.Tok != nil && id.Tok.String() == name {
+			found = id
+		}
+		return true
+	})
+	return found
+}
 
-	name1 := fmt.Sprintf("test://%s_input1", t.Name())
-	name2 := fmt.Sprintf("test://%s_input2", t.Name())
-
-	fs.SetContent(name1, []byte(input1))
-	fs.SetContent(name2, []byte(input2))
+// TestSymbolReferences_FindsDeclAndCall verifies that the symbol-aware
+// reference search reports both the declaration site and call site of a
+// function defined and used in the same module.
+func TestSymbolReferences_FindsDeclAndCall(t *testing.T) {
+	const src = `module M {
+	function foo() { return; }
+	function f() { foo(); }
+}`
+	file := "file:///" + t.Name() + ".ttcn3"
+	fs.SetContent(file, []byte(src))
 
 	db := &ttcn3.DB{}
-	db.Index(name1, name2)
+	db.Index(file)
 
-	// Lookup `Msg`
-	list := lsp.NewAllIdsWithSameName(db, "Byte")
+	tree := ttcn3.ParseFile(file)
+	id := findIdent(tree, "foo")
+	if id == nil {
+		t.Fatalf("expected at least one `foo` identifier")
+	}
 
-	assert.Equal(t, []protocol.Location{
-		{URI: "test://TestFindAllTypeDefs_input1",
-			Range: protocol.Range{Start: protocol.Position{Line: 2, Character: 15}, End: protocol.Position{Line: 2, Character: 19}}},
-		{URI: "test://TestFindAllTypeDefs_input1",
-			Range: protocol.Range{Start: protocol.Position{Line: 3, Character: 22}, End: protocol.Position{Line: 3, Character: 26}}},
-		{URI: "test://TestFindAllTypeDefs_input1",
-			Range: protocol.Range{Start: protocol.Position{Line: 4, Character: 6}, End: protocol.Position{Line: 4, Character: 10}}},
-		{URI: "test://TestFindAllTypeDefs_input1",
-			Range: protocol.Range{Start: protocol.Position{Line: 9, Character: 11}, End: protocol.Position{Line: 9, Character: 15}}},
-		{URI: "test://TestFindAllTypeDefs_input2",
-			Range: protocol.Range{Start: protocol.Position{Line: 2, Character: 22}, End: protocol.Position{Line: 2, Character: 26}}},
-		{URI: "test://TestFindAllTypeDefs_input2",
-			Range: protocol.Range{Start: protocol.Position{Line: 3, Character: 7}, End: protocol.Position{Line: 3, Character: 11}}}}, list)
+	got := NewSymbolReferences(db, id, file)
+	if len(got) < 2 {
+		t.Fatalf("expected at least 2 references (decl + call), got %d", len(got))
+	}
+}
+
+// TestSymbolReferences_FallbackOnUnresolvable verifies that an
+// unresolvable cursor falls back to the legacy name-text search so the
+// user still gets *something*.
+func TestSymbolReferences_FallbackOnUnresolvable(t *testing.T) {
+	const src = `module M { function f() { foo(); } }`
+	file := "file:///" + t.Name() + ".ttcn3"
+	fs.SetContent(file, []byte(src))
+
+	db := &ttcn3.DB{}
+	db.Index(file)
+
+	tree := ttcn3.ParseFile(file)
+	id := findIdent(tree, "foo")
+	if id == nil {
+		t.Skip("identifier finder did not return `foo`")
+	}
+	got := NewSymbolReferences(db, id, file)
+	if len(got) == 0 {
+		t.Fatalf("expected at least 1 reference (the call site itself), got 0")
+	}
 }

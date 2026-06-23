@@ -83,6 +83,15 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.List)
 			p.print(unindent, n.RBrace)
 
+		case *syntax.ObjidLiteral:
+			if n == nil {
+				return
+			}
+			p.print(n.Tok)
+			p.print(n.LBrace, indent)
+			p.print(n.List)
+			p.print(unindent, n.RBrace)
+
 		case *syntax.UnaryExpr:
 			if n == nil {
 				return
