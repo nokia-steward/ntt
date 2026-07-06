@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -28,6 +29,16 @@ type TestcaseExec struct {
 	reason  string
 	log     []string
 	stopped bool
+
+	// realScheduler enables real concurrent PTC execution (see
+	// interpreter.TestcaseOptions.RealScheduler). It is written once
+	// before any PTC forks and read-only afterwards, but the accessors
+	// take mu so the race detector is satisfied under the forked
+	// goroutines that read it. mtcID is the component ID of the MTC,
+	// used by PortKey to keep the MTC's ports on bare (unqualified)
+	// names so the default single-MTC path is byte-identical.
+	realScheduler bool
+	mtcID         int64
 
 	// recvMu serializes the peek->match->dequeue->redirect critical
 	// section of a port receive (see interpreter evalPortReceiveInfo).
@@ -762,6 +773,16 @@ func (t *TestcaseExec) PortDriver(instance string) PortDriver {
 
 	typeName := t.PortType(instance)
 	if typeName == "" {
+		// A real-scheduler component-qualified key ("\x00c<id>/p")
+		// won't have its own type binding — the type was recorded
+		// under the bare name at component create — so resolve the
+		// type via the bare name while keeping the qualified instance
+		// for per-PTC driver identity.
+		if bare := barePortName(instance); bare != instance {
+			typeName = t.PortType(bare)
+		}
+	}
+	if typeName == "" {
 		// Without a type binding we still try the lookup with the
 		// instance name itself - some test-port registrations use
 		// the instance name as the registration key. Falls back to
@@ -1441,6 +1462,40 @@ func ClearPortTypeInstances() {
 	}
 }
 
+// execTeardownHooks are invoked once per testcase run when the exec is
+// torn down. A pure-Go port binding (goport) registers one to clear its
+// package-global per-instance cache, so component IDs — which restart at
+// each testcase — cannot alias a stale TestPort across runs. Kept in
+// the runtime package so goport (which already imports runtime) can
+// register without an import cycle.
+var (
+	execTeardownMu    sync.Mutex
+	execTeardownHooks []func()
+)
+
+// RegisterExecTeardownHook adds fn to the set run at the end of every
+// RunTestcaseWith. Idempotent registration is the caller's concern
+// (goport installs its hook once, in Register).
+func RegisterExecTeardownHook(fn func()) {
+	if fn == nil {
+		return
+	}
+	execTeardownMu.Lock()
+	execTeardownHooks = append(execTeardownHooks, fn)
+	execTeardownMu.Unlock()
+}
+
+// RunExecTeardownHooks invokes every registered teardown hook. Called
+// from RunTestcaseWith's teardown defer.
+func RunExecTeardownHooks() {
+	execTeardownMu.Lock()
+	hooks := append([]func(){}, execTeardownHooks...)
+	execTeardownMu.Unlock()
+	for _, fn := range hooks {
+		fn()
+	}
+}
+
 // SetVerdict applies TTCN-3 verdict aggregation: the resulting
 // verdict is the max of the current and the new one by the canonical
 // precedence none < pass < inconc < fail < error. `reason` is kept
@@ -1510,6 +1565,77 @@ func (t *TestcaseExec) Stopped() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.stopped
+}
+
+// SetRealScheduler enables/disables real concurrent PTC execution.
+// Call once, before any PTC is started.
+func (t *TestcaseExec) SetRealScheduler(b bool) {
+	t.mu.Lock()
+	t.realScheduler = b
+	t.mu.Unlock()
+}
+
+// RealScheduler reports whether real concurrent PTC execution is on.
+func (t *TestcaseExec) RealScheduler() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.realScheduler
+}
+
+// SetMTCID records the MTC's component ID so PortKey can leave the
+// MTC's ports unqualified. Call once, right after the MTC ref exists.
+func (t *TestcaseExec) SetMTCID(id int64) {
+	t.mu.Lock()
+	t.mtcID = id
+	t.mu.Unlock()
+}
+
+// portQualPrefix tags a component-qualified port key. The leading NUL
+// cannot appear in a TTCN-3 identifier, so a qualified key never
+// collides with a real port-instance name.
+const portQualPrefix = "\x00c"
+
+// PortKey returns a component-qualified port-instance key
+// ("\x00c<compID>/<name>") so that N PTCs of the same type each get a
+// PRIVATE port instance, queue, driver, and goport TestPort — the
+// prerequisite for routing a Go port's Inject back to the specific
+// worker that sent the request. It qualifies ONLY in real-scheduler
+// mode and ONLY for a non-MTC PTC; the MTC and the default (flag-off)
+// path keep bare names, so the single-MTC and conformance behaviours
+// are byte-identical. `any port` is passed through so the aggregate
+// receive ops keep resolving. Callers must invoke it on the PTC's own
+// goroutine (where CurrentComponent() is that PTC), which is exactly
+// where every send/receive/map runs.
+func (t *TestcaseExec) PortKey(name string) string {
+	if name == "" || name == "any port" {
+		return name
+	}
+	t.mu.Lock()
+	rs := t.realScheduler
+	mtc := t.mtcID
+	t.mu.Unlock()
+	if !rs {
+		return name
+	}
+	cur := t.CurrentComponent()
+	if cur == nil || cur.ID == mtc {
+		return name
+	}
+	return portQualPrefix + strconv.FormatInt(cur.ID, 10) + "/" + name
+}
+
+// barePortName strips the qualifier PortKey added, returning the
+// original TTCN-3 port-instance name; it is the identity for an
+// unqualified name. Used where a bare-name lookup is still correct
+// (e.g. resolving a port instance's declared type).
+func barePortName(key string) string {
+	if !strings.HasPrefix(key, portQualPrefix) {
+		return key
+	}
+	if i := strings.IndexByte(key, '/'); i >= 0 {
+		return key[i+1:]
+	}
+	return key
 }
 
 func (t *TestcaseExec) Type() ObjectType { return "testcase_exec" }

@@ -41,6 +41,7 @@ var (
 	instances = map[string]api.TestPort{}
 	installed bool
 	prev      runtime.PortDriverProvider
+	hookOnce  sync.Once
 )
 
 // Register binds a Go test port to a TTCN-3 port TYPE name (e.g.
@@ -60,6 +61,26 @@ func Register(portTypeName string, factory func(instance string) api.TestPort) {
 		prev = runtime.SetPortDriverProvider(provide)
 		installed = true
 	}
+	// Drop the per-instance cache at each testcase teardown so
+	// real-scheduler component-qualified instances (keyed by a
+	// component ID that restarts per testcase) can't alias a stale
+	// TestPort across runs. Registered once per process; clearing an
+	// already-empty cache is a harmless no-op for non-goport runs.
+	hookOnce.Do(func() {
+		runtime.RegisterExecTeardownHook(ResetInstances)
+	})
+}
+
+// ResetInstances drops the per-instance TestPort cache while keeping
+// type registrations. Installed as a runtime exec-teardown hook (see
+// Register) so each testcase starts with a clean instance table; also
+// callable directly from tests. Safe to call between runs — every
+// mapped port has already been unmap'd/OnStop'd by the interpreter's
+// teardown drain before the hooks fire.
+func ResetInstances() {
+	mu.Lock()
+	defer mu.Unlock()
+	instances = map[string]api.TestPort{}
 }
 
 // Reset clears every registration and restores the port-driver provider

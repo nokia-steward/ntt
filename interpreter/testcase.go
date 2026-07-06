@@ -35,6 +35,18 @@ type TestcaseOptions struct {
 	// drop". The default exec driver wires this to stderr so users
 	// see typos in their cfg without a hard failure.
 	ModuleParamWarning func(msg string)
+
+	// RealScheduler opts a testcase into real concurrent PTC
+	// execution: started `alive` PTC bodies (including
+	// `while(true){ send; alt{receive|timer}; pace }` load workers)
+	// run on real goroutines instead of the default skip/virtual
+	// model, and each PTC gets a component-private port instance so a
+	// Go test port's Inject routes replies back to the specific
+	// worker. Default false keeps the conformance-safe behaviour
+	// (the skip heuristic exists to satisfy ETSI 21.3.x); only
+	// callers that want TTCN-3-side concurrency (e.g. an external
+	// load driver) set it true.
+	RealScheduler bool
 }
 
 // RunTestcase is the canonical entry point the executor uses to
@@ -259,6 +271,7 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 	}
 
 	exec := runtime.NewTestcaseExec(qname)
+	exec.SetRealScheduler(opts.RealScheduler)
 	env.Set(runtime.TestcaseExecKey, exec)
 	// Record exec as the runtime's "current testcase" so a C test
 	// port that pushes traffic back through runtime.inject() can find
@@ -270,6 +283,10 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 	defer func() {
 		runtime.SetCurrentExec(nil)
 		runtime.ClearPortTypeInstances()
+		// Let port bindings (e.g. goport) drop per-testcase instance
+		// caches so component IDs, which restart each run, can't alias
+		// a stale TestPort across testcases.
+		runtime.RunExecTeardownHooks()
 	}()
 	// Surface the module/testcase names so __MODULE__ / __SCOPE__
 	// macros resolve to the running fixture's identity. The runner
@@ -318,6 +335,7 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 		mtcTypeName = syntax.Name(tcNode.RunsOn.Comp)
 	}
 	mtcRef := newComponentRef(mtcTypeName, "", tcEnv)
+	exec.SetMTCID(mtcRef.ID)
 	env.Set("mtc", mtcRef)
 	env.Set("self", mtcRef)
 	exec.PushComponent(mtcRef)
@@ -800,6 +818,15 @@ func evalAllComponentAction(kind string, sel syntax.Expr, env runtime.Scope) (ru
 		r.Done = true
 		if op == "kill" || !r.AliveModifier {
 			r.Alive = false
+		}
+		// Real-scheduler mode: `all component.stop` must actually
+		// cancel the forked worker goroutines (the default path only
+		// flips the flags above). Mirror the single `comp.stop` path:
+		// close the PTC's StopChan (which also wakes a parked alt /
+		// blocking timer via signalMessageReady) and unmap its ports.
+		if exec.RealScheduler() {
+			exec.StopPTC(r.ID)
+			drainComponentPortMaps(exec, r.ID)
 		}
 	}
 	return runtime.Undefined, true
@@ -1859,6 +1886,19 @@ func evalAltStmtBestEffort(n *syntax.AltStmt, env runtime.Scope) runtime.Object 
 	// is bounded by MaxEvalDepth so a pathologically chatty queue
 	// can't run away.
 	if altHasExternalPortGuard(n, env) {
+		// Real-scheduler mode: a load worker's alt mixes the port
+		// receive with a timer guard (`[] t_guard.timeout`). Park on
+		// port traffic OR the soonest timer deadline OR this PTC's
+		// stop, so the guard actually fires; the port-only park below
+		// would ignore the timer. Gated so the default external-port
+		// daemon path is unchanged.
+		if schedulerEnabled(env) {
+			dur, haveTimer := nextAltTimerDeadlineLenient(n, env)
+			if waitForAltCombined(dur, haveTimer, env) {
+				return evalAltStmtBestEffort(n, env)
+			}
+			return nil
+		}
 		if waitForAltPortTraffic(env) {
 			return evalAltStmtBestEffort(n, env)
 		}
@@ -2014,6 +2054,83 @@ func nextAltTimerDeadline(n *syntax.AltStmt, env runtime.Scope) (time.Duration, 
 			// matched. Let the caller bail out and re-enter
 			// normally; we don't want to inject a sleep when
 			// the alt would have made progress.
+			return 0, false
+		}
+		if !have || remaining < soonest {
+			soonest = remaining
+			have = true
+		}
+	}
+	if !have {
+		return 0, false
+	}
+	return soonest, true
+}
+
+// nextAltTimerDeadlineLenient is nextAltTimerDeadline for a MIXED alt:
+// it returns the soonest live-timer `.timeout` deadline among the
+// clauses, ignoring (rather than bailing on) non-timer guards such as
+// `p.receive`. Used by the real-scheduler combined park so a load
+// worker's `alt{ [] p.receive [] t_guard.timeout }` still honours its
+// timer guard. Returns (0,false) when no clause has a live timer guard,
+// or when a timer guard has already expired (so the caller re-enters
+// the first pass immediately instead of sleeping).
+func nextAltTimerDeadlineLenient(n *syntax.AltStmt, env runtime.Scope) (time.Duration, bool) {
+	if n == nil || n.Body == nil {
+		return 0, false
+	}
+	now := time.Now()
+	var soonest time.Duration
+	have := false
+	for _, s := range n.Body.Stmts {
+		cc, ok := s.(*syntax.CommClause)
+		if !ok || cc.Else != nil || cc.Comm == nil {
+			continue
+		}
+		es, ok := cc.Comm.(*syntax.ExprStmt)
+		if !ok {
+			continue
+		}
+		sel, ok := es.Expr.(*syntax.SelectorExpr)
+		if !ok {
+			continue
+		}
+		recvIdent, ok := sel.X.(*syntax.Ident)
+		if !ok {
+			continue
+		}
+		opIdent, ok := sel.Sel.(*syntax.Ident)
+		if !ok || opIdent.String() != "timeout" {
+			continue
+		}
+		if rn := recvIdent.String(); rn == "any timer" || rn == "all timer" {
+			for _, th := range collectScopeTimers(env) {
+				if th == nil || !th.Running || th.StartedAt.IsZero() {
+					continue
+				}
+				deadline := th.StartedAt.Add(time.Duration(th.Duration * float64(time.Second)))
+				remaining := deadline.Sub(now)
+				if remaining <= 0 {
+					continue
+				}
+				if !have || remaining < soonest {
+					soonest = remaining
+					have = true
+				}
+			}
+			continue
+		}
+		v, ok := env.Get(recvIdent.String())
+		if !ok {
+			continue
+		}
+		th, ok := v.(*runtime.TimerHandle)
+		if !ok || th == nil || !th.Running || th.StartedAt.IsZero() {
+			continue
+		}
+		deadline := th.StartedAt.Add(time.Duration(th.Duration * float64(time.Second)))
+		remaining := deadline.Sub(now)
+		if remaining <= 0 {
 			return 0, false
 		}
 		if !have || remaining < soonest {
@@ -2279,6 +2396,46 @@ func waitForAltPortTraffic(env runtime.Scope) bool {
 	}
 }
 
+// waitForAltCombined parks a real-scheduler PTC on an alt that mixes an
+// external-port receive guard with a timer guard (the load-worker
+// shape `alt{ [] p.receive [] t_guard.timeout }`). It wakes on the
+// first of: inbound port traffic (MessageReady), the soonest live timer
+// deadline (when haveTimer), the PTC's own stop, or a 2ms backstop
+// (which covers a coalesced cap-1 MessageReady, as waitForAltPortTraffic
+// documents). Returns true to re-enter the alt first pass, false to
+// unwind (the testcase or this PTC was stopped).
+func waitForAltCombined(dur time.Duration, haveTimer bool, env runtime.Scope) bool {
+	exec := runtime.FindTestcaseExec(env)
+	if exec == nil || exec.Stopped() {
+		return false
+	}
+	var stopChan <-chan struct{}
+	if cur := exec.CurrentComponent(); cur != nil {
+		if exit := exec.PTCExit(cur.ID); exit != nil {
+			stopChan = exit.StopChan
+		}
+	}
+	// A nil timer channel is never selected, so with no live timer
+	// guard the wait reduces to MessageReady / stop / backstop.
+	var timerC <-chan time.Time
+	if haveTimer && dur > 0 {
+		t := time.NewTimer(dur)
+		defer t.Stop()
+		timerC = t.C
+	}
+	ready := exec.MessageReady()
+	select {
+	case <-ready:
+		return !exec.Stopped()
+	case <-timerC:
+		return !exec.Stopped()
+	case <-stopChan:
+		return false
+	case <-time.After(2 * time.Millisecond):
+		return !exec.Stopped()
+	}
+}
+
 // altHasExternalPortGuard reports whether any clause in the alt
 // is guarded by a `port.receive(...)` / `.check(...)` /
 // `.trigger(...)` operation on a port that has an external driver
@@ -2339,7 +2496,10 @@ func altHasExternalPortGuard(n *syntax.AltStmt, env runtime.Scope) bool {
 		if !ok {
 			continue
 		}
-		if exec.PortDriver(portIdent.String()) != nil {
+		// Resolve the driver on THIS PTC's qualified port key (no-op
+		// by default), so the park decision doesn't instantiate a
+		// second bare-named driver/TestPort for the same port.
+		if exec.PortDriver(exec.PortKey(portIdent.String())) != nil {
 			return true
 		}
 	}
@@ -2409,6 +2569,7 @@ func evalPortReceiveBare(port string, env runtime.Scope, consume bool) bool {
 	if exec == nil {
 		return false
 	}
+	port = exec.PortKey(port) // real-scheduler: per-PTC port identity (no-op by default; "any port" passes through)
 	if port == "any port" {
 		for _, name := range exec.PortNames() {
 			if _, ok := exec.PeekMessage(name); ok {

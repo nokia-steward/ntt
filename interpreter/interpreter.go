@@ -3844,8 +3844,14 @@ func needBreak(v interface{}) bool {
 func evalBlockStmts(stmts []syntax.Stmt, env runtime.Scope) runtime.Object {
 	var result runtime.Object
 	for i := 0; i < len(stmts); i++ {
-		if exec := runtime.FindTestcaseExec(env); exec != nil && exec.Stopped() {
-			return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
+		if exec := runtime.FindTestcaseExec(env); exec != nil {
+			// Whole-testcase stop, or (real-scheduler mode) this PTC
+			// was individually stopped — the latter breaks a
+			// while(true) load worker out of its loop.
+			if exec.Stopped() ||
+				(exec.RealScheduler() && componentStopRequested(exec)) {
+				return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
+			}
 		}
 		result = eval(stmts[i], env)
 		if g, ok := result.(*runtime.Goto); ok {
@@ -6453,6 +6459,13 @@ func waitForTimerTimeout(th *runtime.TimerHandle, env runtime.Scope) {
 			if exec.Stopped() {
 				return
 			}
+			// Real-scheduler mode: `comp.stop`/`all component.stop`
+			// closes this PTC's StopChan and fires signalMessageReady,
+			// so break the pacing wait promptly instead of sleeping
+			// out the remaining duration.
+			if exec.RealScheduler() && componentStopRequested(exec) {
+				return
+			}
 			// Stale wake from an unrelated enqueue; loop.
 		}
 	}
@@ -6504,6 +6517,41 @@ func functionWithEnv(fn *runtime.Function, env runtime.Scope) *runtime.Function 
 	cp := *fn
 	cp.Env = env
 	return &cp
+}
+
+// schedulerEnabled reports whether the current testcase runs in
+// real-scheduler mode (interpreter.TestcaseOptions.RealScheduler). When
+// off, every real-scheduler branch is bypassed and behaviour is
+// byte-identical to the default skip/virtual-clock model.
+func schedulerEnabled(env runtime.Scope) bool {
+	exec := runtime.FindTestcaseExec(env)
+	return exec != nil && exec.RealScheduler()
+}
+
+// componentStopRequested reports whether the current PTC has been asked
+// to stop via `comp.stop` / `all component.stop` (both close the PTC's
+// PTCExit.StopChan in real-scheduler mode). It is the per-PTC analogue
+// of exec.Stopped() and lets a while(true) worker and its blocking
+// timer waits unwind. Only consulted when RealScheduler is on, so the
+// conformance hot path is untouched. Uses the StopChan close (a
+// happens-before-safe signal) rather than reading ComponentRef flags
+// across goroutines.
+func componentStopRequested(exec *runtime.TestcaseExec) bool {
+	if exec == nil {
+		return false
+	}
+	cur := exec.CurrentComponent()
+	if cur == nil {
+		return false
+	}
+	if exit := exec.PTCExit(cur.ID); exit != nil {
+		select {
+		case <-exit.StopChan:
+			return true
+		default:
+		}
+	}
+	return false
 }
 
 // startBodyContainsProcedureOp walks the body of `comp.start(call)`
@@ -6869,6 +6917,14 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		// on the old "PTC body is a no-op" path). We still tag the
 		// ref as alive so `comp.alive`/`comp.done` answer correctly.
 		skip := startBodyShouldSkip(body, env)
+		// Real-scheduler mode: an `alive` PTC body (including a
+		// while(true) send/receive load worker) runs on a real
+		// goroutine instead of the skip/virtual-clock model, so never
+		// send it to the skip branch. Gated on RealScheduler so the
+		// default path is byte-identical.
+		if op == "start" && ref != nil && ref.AliveModifier && schedulerEnabled(env) {
+			skip = false
+		}
 		// Exception: a finite responder body (getcall/reply/raise)
 		// runs when the caller already queued its nowait calls
 		// (pattern A: `p.call(..., nowait); ...; comp.start(f)`).
@@ -6961,7 +7017,12 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		// stays synchronous so the conformance suite's
 		// sequential `.start; .done; .start` fixtures keep
 		// their pre-existing behaviour.
-		if op == "start" && ref != nil && ref.AliveModifier && startBodyBlocksOnPortReceive(body, env) {
+		// In real-scheduler mode every `alive` start forks onto a real
+		// goroutine (the whole point of the mode) — a while(true)
+		// send/receive worker would hang the MTC if run inline. When
+		// off, this reduces to the daemon-receive predicate exactly.
+		if op == "start" && ref != nil && ref.AliveModifier &&
+			(schedulerEnabled(env) || startBodyBlocksOnPortReceive(body, env)) {
 			exec := runtime.FindTestcaseExec(env)
 			if exec != nil {
 				// Eagerly snapshot the call arguments in the
@@ -8805,6 +8866,7 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 	if exec == nil {
 		return runtime.Undefined
 	}
+	port = exec.PortKey(port) // real-scheduler: per-PTC port identity (no-op by default)
 	switch op {
 	case "call":
 		var params runtime.Object
@@ -9175,11 +9237,15 @@ func evalPortMap(opName string, n *syntax.CallExpr, env runtime.Scope) (runtime.
 	if exec == nil || n.Args == nil || len(n.Args.List) < 2 {
 		return nil, false
 	}
-	local := portMapArgName(n.Args.List[0])
+	localName := portMapArgName(n.Args.List[0])
 	remote := portMapArgName(n.Args.List[1])
-	if local == "" {
+	if localName == "" {
 		return nil, false
 	}
+	// real-scheduler: bind THIS PTC's own port instance (no-op by
+	// default). RecordPortMap/drain later resolve the same qualified
+	// key, so teardown stays consistent.
+	local := exec.PortKey(localName)
 	drv := exec.PortDriver(local)
 	if drv == nil {
 		return nil, false
@@ -9228,7 +9294,7 @@ func evalPortMap(opName string, n *syntax.CallExpr, env runtime.Scope) (runtime.
 		return nil, false
 	}
 	if err != nil {
-		return runtime.Errorf("%s(%s, %s): driver returned: %v", opName, local, remote, err), true
+		return runtime.Errorf("%s(%s, %s): driver returned: %v", opName, localName, remote, err), true
 	}
 	return runtime.Undefined, true
 }
@@ -9435,6 +9501,7 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 	if exec == nil || n.Args == nil || len(n.Args.List) == 0 {
 		return runtime.Undefined
 	}
+	port = exec.PortKey(port) // real-scheduler: per-PTC port identity (no-op by default)
 	payload := eval(n.Args.List[0], env)
 	if runtime.IsError(payload) {
 		return payload
@@ -9620,6 +9687,7 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 	if exec == nil {
 		return runtime.Undefined
 	}
+	port = exec.PortKey(port) // real-scheduler: per-PTC port identity (no-op by default)
 	// Serialize the match-and-consume section: when two PTC
 	// goroutines share a port-instance name (e.g. two daemon-style
 	// PTCs each with `port MyServer_PT srv`), this guarantees each
