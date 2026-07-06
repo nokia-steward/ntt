@@ -1,8 +1,10 @@
 # Remaining Conformance Work
 
-State as of 2026-06-17: **4788 / 4948 matched (97.22%)**, 23 skipped
-(inconclusive / no-verdict), **137 real misses**. Baseline and the full
-miss inventory live in [`testdata/conformance-baseline.json`](../../testdata/conformance-baseline.json)
+State as of 2026-07-06: **4790 / 4948 matched (97.26%)**, 23 skipped
+(inconclusive / no-verdict), **135 real misses** (was 4788 / 97.22% on
+2026-06-17; +2 from procedure signature qualification, see 1a below).
+Baseline and the full miss inventory live in
+[`testdata/conformance-baseline.json`](../../testdata/conformance-baseline.json)
 and [`current-misses.json`](current-misses.json); regenerate with
 [`refresh_artifacts.py`](refresh_artifacts.py).
 
@@ -55,11 +57,27 @@ These are worth doing; each is a multi-hour focused slice with real
 regression risk on a load-bearing path. Listed by ROI.
 
 ### 1a. Strict procedure-payload matching (recommended first)
-**~8 tests.** `Sem_220301_CallOperation_019/020`,
-`Sem_220302_getcall_operation_020/021`, `Sem_2204_the_check_operation_090/094`,
-plus part of the `220304_getreply` / `220306_catch` reject clusters.
+**~6 tests left.** `Sem_220302_getcall_operation_020/021`,
+`Sem_2204_the_check_operation_090/094`, plus part of the
+`220304_getreply` / `220306_catch` reject clusters.
 
-The loopback model matches procedure receives **leniently** — a
+**DONE 2026-07-06 (+2): signature qualification.** `call`/`reply`/`raise`
+now record `PortMessage.Signature` (the signature identifier peeled from
+the `S:{…}` / bare-`S` argument via `procSignatureName`), the blocking
+`call(S,…){ }` handler stashes S on the scope (`procCallSigKey`,
+save/restore for nesting), and an **unqualified** `getreply`/`catch`
+inside that block now skips a queued head whose known signature differs
+(the filter lives in `commGuardMatches` for the bare `[] p.getreply`
+guard and in `evalPortReceiveInfo` for the `from`-qualified variant).
+This fixed `Sem_220301_CallOperation_019/020` (ETSI 22.3.1 h: unqualified
+getreply/catch treat only the called procedure's reply/exception) with
+0 per-file regressions. It is deliberately scoped to the *implicit*
+call-block qualifier and leaves explicit-signature / getcall matching
+lenient, so the 119 `Sem_2204` check fixtures are untouched. Guarded by
+`interpreter/proc_signature_test.go`.
+
+The remaining ~6 need the harder, coupled change below. The loopback
+model still matches those procedure receives **leniently** — a
 `getreply`/`catch`/`getcall` fires on "an envelope of this kind arrived",
 ignoring the signature/parameter template (see the comment at
 `interpreter/interpreter.go` `evalPortReceiveInfo`, the
@@ -77,11 +95,11 @@ matched. The two requirements are coupled and must land together:
   via a `HasPendingCall`-style check) avoids the over-broad
   "run at every receive" that caused the regressions.
 
-`Sem_220301_CallOperation_019/020` additionally need the **signature**
-recorded on the envelope (`call`/`reply`/`raise` enqueue without setting
-`PortMessage.Signature` at `interpreter/interpreter.go:~8395-8426`) so an
-unqualified `getreply`/`catch` inside a blocking `call(S2,…){}` block
-matches only S2's reply.
+The signature is now recorded on every `call`/`reply`/`raise` envelope
+(see the 1a DONE note above), so a strict-match attempt can rely on
+`PortMessage.Signature` being populated; the remaining risk is purely in
+flipping the lenient `payloadOk` for the `check`/getcall paths without
+regressing the 119 `Sem_2204` fixtures.
 
 ### 1b. Async multi-PTC message echo — attempted, blocked on the alt core
 **~6 tests**, and **not one mechanism**: `Sem_060210_ReuseofComponentTypes_002/003`

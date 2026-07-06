@@ -2150,6 +2150,19 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 						// enqueued one).
 						if kind, ok := procKindForOp(op.String()); ok {
 							if exec := runtime.FindTestcaseExec(env); exec != nil {
+								// ETSI 22.3.1 h: an unqualified
+								// getreply / catch inside a blocking
+								// call(S,...){ } block treats only
+								// S's reply / exception. Leave a
+								// mismatched head queued so the block
+								// falls through to its timeout branch.
+								if kind == runtime.MsgReply || kind == runtime.MsgException {
+									if csig := currentCallSignature(env); csig != "" {
+										if head, ok := exec.PeekKind(portIdent.String(), kind); ok && head.Signature != "" && head.Signature != csig {
+											return false
+										}
+									}
+								}
 								if _, ok := exec.DequeueKind(portIdent.String(), kind); ok {
 									return true
 								}

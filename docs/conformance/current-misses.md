@@ -1,15 +1,15 @@
 # Current Conformance Misses
 
-Generated from `/tmp/run-002.json` using the current workspace runner.
+Generated from `/tmp/full_now.json` using the current workspace runner.
 
-- Summary: `ran 4948 files: 4788 matched, 23 skipped (97.22% match rate)`
-- Misses: `160`
+- Summary: `ran 4948 files: 4790 matched, 23 skipped (97.26% match rate)`
+- Misses: `158`
 
 ## Misses By Outcome
 
 - `reject->pass`: `106`
 - `->`: `23`
-- `pass->fail`: `23`
+- `pass->fail`: `21`
 - `error->pass`: `2`
 - `fail->pass`: `2`
 - `pass->parse-error`: `2`
@@ -19,7 +19,7 @@ Generated from `/tmp/run-002.json` using the current workspace runner.
 ## Misses By Chapter
 
 - `core_language/06_types_and_values`: `38` (`->`=9, `pass->fail`=4, `reject->pass`=25)
-- `core_language/22_communication_operations`: `28` (`pass->fail`=6, `reject->pass`=22)
+- `core_language/22_communication_operations`: `26` (`pass->fail`=4, `reject->pass`=22)
 - `core_language/05_basic_language_elements`: `20` (`->`=3, `reject->pass`=17)
 - `core_language/15_templates`: `20` (`->`=2, `pass->fail`=2, `reject->pass`=16)
 - `core_language/16_functions_altsteps_testcases`: `10` (`->`=1, `pass->fail`=4, `reject->pass`=5)
@@ -73,8 +73,6 @@ Generated from `/tmp/run-002.json` using the current workspace runner.
 - `core_language/22_communication_operations/2202_message_based_communication/220203_trigger_operation/NegSem_220203_TriggerOperation_023.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_012.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_020.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/Sem_220301_CallOperation_019.ttcn`: `pass -> fail` - "The reply is not the expected one!"
-- `core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/Sem_220301_CallOperation_020.ttcn`: `pass -> fail` - "The exception is not the expected one!"
 - `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_012.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_017.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_020.ttcn`: `pass -> fail`
@@ -85,7 +83,9 @@ Generated from `/tmp/run-002.json` using the current workspace runner.
 - `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_014.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_016.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_020.ttcn`: `reject -> pass`
-- ... `8` more in `current-misses.json`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/NegSem_220305_raise_operation_004.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/NegSem_220305_raise_operation_009.ttcn`: `reject -> pass`
+- ... `6` more in `current-misses.json`
 
 ### `core_language/05_basic_language_elements`
 

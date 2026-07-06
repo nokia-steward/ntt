@@ -173,17 +173,24 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 	case *syntax.CallStmt:
 		// `p.call(...) { ... }` is the blocking procedure-call form:
 		// queue the call, let any deferred PTC responder run, then
-		// schedule the response block like an alt.
+		// schedule the response block like an alt. The call's signature
+		// qualifies the block's unqualified getreply / catch guards
+		// (ETSI 22.3.1 h).
+		var restoreCallSig func()
 		if es, ok := n.Stmt.(*syntax.ExprStmt); ok {
 			if ce, ok := es.Expr.(*syntax.CallExpr); ok {
 				if sel, ok := ce.Fun.(*syntax.SelectorExpr); ok {
 					if op, ok := sel.Sel.(*syntax.Ident); ok && op.String() == "call" {
 						if pname, ok := portExprName(sel.X, env); ok {
 							_ = evalProcedurePortOp("call", pname, ce, env)
+							restoreCallSig = pushCallSignature(ce, env)
 						}
 					}
 				}
 			}
+		}
+		if restoreCallSig != nil {
+			defer restoreCallSig()
 		}
 		if n.Body != nil {
 			return evalAltStmtBestEffort(&syntax.AltStmt{Body: n.Body}, env)
@@ -8801,8 +8808,10 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 	switch op {
 	case "call":
 		var params runtime.Object
+		var sig string
 		if n != nil && n.Args != nil && len(n.Args.List) > 0 {
 			params, _ = procSignatureArg(n.Args.List[0], env)
+			sig = procSignatureName(n.Args.List[0])
 		}
 		// Route to a bound port driver that opts into PortCaller (a
 		// pure-Go or C test port): the driver answers the call and we
@@ -8817,31 +8826,36 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 				}
 				if reply != nil {
 					exec.EnqueueEnvelope(port, runtime.PortMessage{
-						Kind:     runtime.MsgReply,
-						Sender:   exec.CurrentComponent(),
-						RetValue: reply,
+						Kind:      runtime.MsgReply,
+						Sender:    exec.CurrentComponent(),
+						RetValue:  reply,
+						Signature: sig,
 					})
 				}
 				return runtime.Undefined
 			}
 		}
 		exec.EnqueueEnvelope(port, runtime.PortMessage{
-			Kind:    runtime.MsgCall,
-			Sender:  exec.CurrentComponent(),
-			Payload: params,
+			Kind:      runtime.MsgCall,
+			Sender:    exec.CurrentComponent(),
+			Payload:   params,
+			Signature: sig,
 		})
 		exec.RunDeferredResponders()
 		return runtime.Undefined
 	case "reply":
 		var params, ret runtime.Object
+		var sig string
 		if n != nil && n.Args != nil && len(n.Args.List) > 0 {
 			params, ret = procSignatureArg(n.Args.List[0], env)
+			sig = procSignatureName(n.Args.List[0])
 		}
 		exec.EnqueueEnvelope(port, runtime.PortMessage{
-			Kind:     runtime.MsgReply,
-			Sender:   exec.CurrentComponent(),
-			Payload:  params,
-			RetValue: ret,
+			Kind:      runtime.MsgReply,
+			Sender:    exec.CurrentComponent(),
+			Payload:   params,
+			RetValue:  ret,
+			Signature: sig,
 		})
 		return runtime.Undefined
 	case "raise":
@@ -8849,13 +8863,18 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 		// signature, arg[1] carries the exception value caught by
 		// `catch(Signature, <template>) -> value v`.
 		var exc runtime.Object
+		var sig string
+		if n != nil && n.Args != nil && len(n.Args.List) >= 1 {
+			sig = procSignatureName(n.Args.List[0])
+		}
 		if n != nil && n.Args != nil && len(n.Args.List) >= 2 {
 			exc = evalExceptionValue(n.Args.List[1], env)
 		}
 		exec.EnqueueEnvelope(port, runtime.PortMessage{
-			Kind:     runtime.MsgException,
-			Sender:   exec.CurrentComponent(),
-			RetValue: exc,
+			Kind:      runtime.MsgException,
+			Sender:    exec.CurrentComponent(),
+			RetValue:  exc,
+			Signature: sig,
 		})
 		return runtime.Undefined
 	case "getcall", "getreply", "catch":
@@ -8904,6 +8923,80 @@ func procSignatureArg(arg syntax.Expr, env runtime.Scope) (params, ret runtime.O
 		params = eval(arg, env)
 	}
 	return
+}
+
+// procSignatureName extracts the signature identifier carried by a
+// call / reply / raise argument: `S:{}` / `S:?` (a COLON BinaryExpr
+// whose left operand is the signature) or a bare `S` ident (raise's
+// first argument). Returns "" when no name can be determined, in which
+// case signature-qualified matching stays lenient.
+func procSignatureName(arg syntax.Expr) string {
+	switch v := arg.(type) {
+	case *syntax.ParenExpr:
+		if len(v.List) == 1 {
+			return procSignatureName(v.List[0])
+		}
+	case *syntax.ValueExpr:
+		return procSignatureName(v.X)
+	case *syntax.BinaryExpr:
+		if v.Op != nil && v.Op.Kind() == syntax.COLON {
+			return procSignatureName(v.X)
+		}
+	case *syntax.Ident:
+		if v != nil && v.Tok != nil {
+			return v.String()
+		}
+	}
+	return ""
+}
+
+// procCallSigKey stashes the signature of the enclosing blocking
+// `call(S,...) { ... }` response block on the scope, so an unqualified
+// getreply / catch inside that block matches only S's reply / exception
+// (ETSI 22.3.1 h). The \x00 prefix keeps it out of the variable
+// namespace, mirroring xmlLoopbackTransformKey.
+const procCallSigKey = "\x00ttcn3:proc-call-signature"
+
+// pushCallSignature records the blocking call's signature for the
+// duration of its response block and returns a restorer that reinstates
+// the previous value (supporting nested call blocks). Returns nil when
+// no signature can be determined.
+func pushCallSignature(ce *syntax.CallExpr, env runtime.Scope) func() {
+	if ce == nil || ce.Args == nil || len(ce.Args.List) == 0 {
+		return nil
+	}
+	sig := procSignatureName(ce.Args.List[0])
+	if sig == "" {
+		return nil
+	}
+	prev, had := env.Get(procCallSigKey)
+	env.Set(procCallSigKey, runtime.NewCharstring(sig))
+	return func() {
+		if had {
+			env.Set(procCallSigKey, prev)
+		} else {
+			env.Set(procCallSigKey, runtime.Undefined)
+		}
+	}
+}
+
+// currentCallSignature returns the signature of the enclosing blocking
+// call response block, or "" when there is none.
+func currentCallSignature(env runtime.Scope) string {
+	if v, ok := env.Get(procCallSigKey); ok {
+		if s, ok := v.(*runtime.String); ok {
+			return s.String()
+		}
+	}
+	return ""
+}
+
+// procReceiveIsUnqualified reports whether a getreply / catch receive
+// carries no explicit signature template (the bare `p.getreply` /
+// `p.catch` forms). Only these pick up the enclosing call block's
+// implicit signature qualification.
+func procReceiveIsUnqualified(call *syntax.CallExpr) bool {
+	return call == nil || call.Args == nil || len(call.Args.List) == 0
 }
 
 // evalExceptionValue evaluates a `raise` exception value, stripping a
@@ -9576,6 +9669,19 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 		// 22.3 honours it for procedure ops too (e.g.
 		// `p.getcall(S:?) from v_ptc`), so always evaluate it.
 		payloadOk := isProc || info.call == nil || portReceiveMatches(head.Payload, info.call, env)
+		// ETSI 22.3.1 h: an *unqualified* getreply / catch inside a
+		// blocking `call(S,...) { ... }` response block treats only the
+		// called procedure's reply / exception. When both the enclosing
+		// call's signature and the head envelope's signature are known
+		// and differ, skip this head (leave it queued) so the block
+		// falls through to its timeout branch instead of matching a
+		// reply/exception left over from a different, unhandled call.
+		if payloadOk && (kind == runtime.MsgReply || kind == runtime.MsgException) &&
+			procReceiveIsUnqualified(info.call) && head.Signature != "" {
+			if csig := currentCallSignature(env); csig != "" && csig != head.Signature {
+				payloadOk = false
+			}
+		}
 		fromOk := fromAddrMatches(head.Sender, info.from, env)
 		if !payloadOk || !fromOk {
 			if isTrigger {

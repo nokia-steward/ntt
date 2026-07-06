@@ -1,11 +1,11 @@
 {
- "summary": "ran 4948 files: 4788 matched, 23 skipped (97.22% match rate)",
- "source": "/tmp/run-002.json",
- "miss_count": 160,
+ "summary": "ran 4948 files: 4790 matched, 23 skipped (97.26% match rate)",
+ "source": "/tmp/full_now.json",
+ "miss_count": 158,
  "outcomes": {
   "reject->pass": 106,
   "->": 23,
-  "pass->fail": 23,
+  "pass->fail": 21,
   "error->pass": 2,
   "fail->pass": 2,
   "pass->parse-error": 2,
@@ -24,10 +24,10 @@
   },
   {
    "chapter": "core_language/22_communication_operations",
-   "misses": 28,
+   "misses": 26,
    "outcomes": {
     "reject->pass": 22,
-    "pass->fail": 6
+    "pass->fail": 4
    }
   },
   {
@@ -1116,22 +1116,6 @@
    "outcome": "reject->pass",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_020.ttcn",
    "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/Sem_220301_CallOperation_019.ttcn",
-   "message": "\"The reply is not the expected one!\""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/Sem_220301_CallOperation_020.ttcn",
-   "message": "\"The exception is not the expected one!\""
   },
   {
    "chapter": "core_language/22_communication_operations",
