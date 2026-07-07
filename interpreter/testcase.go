@@ -43,6 +43,14 @@ type TestcaseOptions struct {
 	// as a shim (see below).
 	Profile runtime.SemanticsProfile
 
+	// DeterministicClock, when true, makes timers advance the
+	// per-testcase virtual clock (firing at their deadline instantly)
+	// instead of sleeping real wall-clock time — reproducible, fast, no
+	// real 5s waits. Intended for the conformance harness's strict runs;
+	// a real load driver leaves it off so timers pace real I/O.
+	// Orthogonal to Profile (only takes effect under ProfileStrict).
+	DeterministicClock bool
+
 	// Context, when non-nil, bounds the run: on ctx cancellation the
 	// executor is asked to stop (exec.Stop), which unwinds a blocked alt
 	// / timer wait promptly. Essential for the strict profile, whose
@@ -294,6 +302,7 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 		profile = runtime.ProfileStrict
 	}
 	exec.SetProfile(profile)
+	exec.SetDeterministicClock(opts.DeterministicClock)
 	// Cancellation: when the caller supplies a context, stop the
 	// executor on cancellation so a blocked (strict) alt / timer wait
 	// unwinds instead of leaking a goroutine. The watcher is bounded by
@@ -2113,11 +2122,83 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 // MessageReady signal. Returns true to re-snapshot, false when there is
 // nothing to wait for or the PTC was stopped.
 func blockForAltEvents(n *syntax.AltStmt, env runtime.Scope) bool {
+	if deterministicClockEnabled(env) {
+		// Advance the virtual clock to the soonest timer deadline so
+		// exactly that timer fires on the next snapshot — no real sleep,
+		// deadline ordering preserved. (A queued message would already
+		// have matched in the snapshot pass before we got here.)
+		if vd, ok := nextAltTimerVirtualDeadline(n, env); ok {
+			if exec := runtime.FindTestcaseExec(env); exec != nil {
+				exec.AdvanceVirtualClock(vd)
+			}
+			return true
+		}
+		// No timer guard: a real wait for port / component events, which
+		// concurrent PTCs deliver in real time even under the virtual
+		// clock. altHasEventGuard gates giving up on pure-boolean alts.
+		if altHasEventGuard(n) {
+			return waitForAltCombined(0, false, env)
+		}
+		return false
+	}
 	dur, hasTimer := nextAltTimerDeadlineLenient(n, env)
 	if hasTimer || altHasEventGuard(n) {
 		return waitForAltCombined(dur, hasTimer, env)
 	}
 	return false
+}
+
+// nextAltTimerVirtualDeadline returns the soonest virtual-clock deadline
+// (StartedAtVirtual + Duration) among the alt's running timer guards —
+// what the deterministic clock advances to so exactly that timer fires
+// next. Ignores non-timer guards; (0,false) when no timer guard runs.
+func nextAltTimerVirtualDeadline(n *syntax.AltStmt, env runtime.Scope) (float64, bool) {
+	if n == nil || n.Body == nil {
+		return 0, false
+	}
+	var soonest float64
+	have := false
+	consider := func(th *runtime.TimerHandle) {
+		if th == nil || !th.Running || th.Duration <= 0 {
+			return
+		}
+		if dl := th.StartedAtVirtual + th.Duration; !have || dl < soonest {
+			soonest, have = dl, true
+		}
+	}
+	for _, s := range n.Body.Stmts {
+		cc, ok := s.(*syntax.CommClause)
+		if !ok || cc.Else != nil || cc.Comm == nil {
+			continue
+		}
+		es, ok := cc.Comm.(*syntax.ExprStmt)
+		if !ok {
+			continue
+		}
+		sel, ok := es.Expr.(*syntax.SelectorExpr)
+		if !ok {
+			continue
+		}
+		recvIdent, ok := sel.X.(*syntax.Ident)
+		if !ok {
+			continue
+		}
+		op, ok := sel.Sel.(*syntax.Ident)
+		if !ok || op.String() != "timeout" {
+			continue
+		}
+		if rn := recvIdent.String(); rn == "any timer" || rn == "all timer" {
+			for _, th := range collectScopeTimers(env) {
+				consider(th)
+			}
+			continue
+		} else if v, ok := env.Get(rn); ok {
+			if th, ok := v.(*runtime.TimerHandle); ok {
+				consider(th)
+			}
+		}
+	}
+	return soonest, have
 }
 
 // altHasEventGuard reports whether any clause guard is event-driven — a

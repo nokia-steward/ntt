@@ -392,9 +392,16 @@ func execVerdict(trees []*ttcn3.Tree, tcName string, profile runtime.SemanticsPr
 	go func() {
 		// Pass ctx so a strict run that blocks (honest alt/timer waits)
 		// is cancelled on timeout instead of leaking a spinning
-		// goroutine after we return "timeout" below.
+		// goroutine after we return "timeout" below. Strict runs use the
+		// deterministic clock so real-time timers fire instantly (no 5s
+		// waits, no timeout artifacts in the differential); approximate
+		// runs keep the historical real-clock behaviour.
 		v, r, err := interpreter.RunTestcaseWith(trees, tcName,
-			interpreter.TestcaseOptions{Profile: profile, Context: ctx})
+			interpreter.TestcaseOptions{
+				Profile:            profile,
+				DeterministicClock: profile == runtime.ProfileStrict,
+				Context:            ctx,
+			})
 		ch <- out{v: v, reason: r, err: err}
 	}()
 	select {

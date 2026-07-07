@@ -42,6 +42,15 @@ type TestcaseExec struct {
 	profile SemanticsProfile
 	mtcID   int64
 
+	// deterministicClock, when set, makes strict execution advance the
+	// per-testcase virtual clock to a timer's deadline (firing it
+	// instantly) instead of sleeping real wall-clock time. Timer expiry
+	// then reads the virtual clock. This keeps timer-driven tests fast
+	// and reproducible under the conformance harness (no real 5s waits,
+	// no timeout artifacts); a real load driver leaves it off so timers
+	// pace real I/O. Orthogonal to profile. Set once before PTCs fork.
+	deterministicClock bool
+
 	// recvMu serializes the peek->match->dequeue->redirect critical
 	// section of a port receive (see interpreter evalPortReceiveInfo).
 	// Without it two PTC goroutines that share a port-instance name
@@ -1658,6 +1667,22 @@ func (t *TestcaseExec) SetMTCID(id int64) {
 	t.mu.Lock()
 	t.mtcID = id
 	t.mu.Unlock()
+}
+
+// SetDeterministicClock enables/disables the deterministic (virtual)
+// clock. Call once, before any PTC is started.
+func (t *TestcaseExec) SetDeterministicClock(b bool) {
+	t.mu.Lock()
+	t.deterministicClock = b
+	t.mu.Unlock()
+}
+
+// DeterministicClock reports whether timers advance the virtual clock
+// instead of sleeping real wall-clock time.
+func (t *TestcaseExec) DeterministicClock() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.deterministicClock
 }
 
 // portQualPrefix tags a component-qualified port key. The leading NUL

@@ -107,3 +107,63 @@ func TestStrictAlt_ContextCancelsBlockedAlt(t *testing.T) {
 		t.Fatal("blocked strict alt was not cancelled by context (leak/hang)")
 	}
 }
+
+// TestStrictAlt_DeterministicClockFiresTimerInstantly covers the
+// deterministic clock: a 30s timer guard fires virtually-instantly
+// (virtual-clock advance, no real sleep) with the correct verdict — the
+// property that removes real-timer "pass->timeout" artifacts from the
+// strict differential.
+func TestStrictAlt_DeterministicClockFiresTimerInstantly(t *testing.T) {
+	src := `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer t := 30.0;
+			t.start;
+			alt {
+				[] p.receive(charstring:"never") { setverdict(fail, "unexpected message"); }
+				[] t.timeout { setverdict(pass); }
+			}
+		}
+	}`
+	start := time.Now()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicClock: true})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass via the timer guard", v, reason)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("deterministic 30s timer took %v; it must fire instantly (virtual clock)", elapsed)
+	}
+}
+
+// TestStrictAlt_DeterministicClockSoonestTimerWins guards deadline
+// ordering: the block step advances to the SOONEST timer deadline, so a
+// 5s timer wins over a 30s one even though the 30s clause is listed
+// first — not naive source order.
+func TestStrictAlt_DeterministicClockSoonestTimerWins(t *testing.T) {
+	src := `module M {
+		type component C { }
+		testcase tc() runs on C system C {
+			timer t_long := 30.0;
+			timer t_short := 5.0;
+			t_long.start;
+			t_short.start;
+			alt {
+				[] t_long.timeout { setverdict(fail, "long timer fired first"); }
+				[] t_short.timeout { setverdict(pass); }
+			}
+		}
+	}`
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicClock: true})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (soonest timer must win)", v, reason)
+	}
+}

@@ -671,30 +671,41 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			case "read":
 				return timerReadVirtual(th, env)
 			case "timeout":
-				// A bare `T.timeout` fast-forwards the
-				// per-testcase virtual clock to this
-				// timer's deadline so a later `T2.read`
-				// observes the elapsed time (ETSI 23.4).
-				if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
-					exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
-				}
+				det := deterministicClockEnabled(env)
 				// Inside an alt guard the call has to be
 				// non-blocking: the scheduler decides
 				// which clause to wait for. Return a
 				// boolean so commGuardMatches can take
 				// the "this timer has already fired"
-				// branch when applicable. Outside an alt
-				// guard we block until the timer
-				// deadline elapses.
+				// branch when applicable. Under the
+				// deterministic clock the alt's block step
+				// advances time to the soonest deadline, so
+				// we must NOT advance here (that would let a
+				// later-deadline timer fire out of order).
 				if altCtx.active() {
-					expired := timerExpired(th)
+					if !det {
+						if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
+							exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
+						}
+					}
+					expired := timerExpired(th, env)
 					if expired {
 						th.Ticks = th.MaxTicks
 						th.Running = false
 					}
 					return runtime.NewBool(expired)
 				}
-				waitForTimerTimeout(th, env)
+				// Outside an alt: fast-forward the virtual
+				// clock to this timer's deadline (so a later
+				// `T2.read` is exact), then fire instantly
+				// (deterministic) or sleep the real remaining
+				// time.
+				if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
+					exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
+				}
+				if !det {
+					waitForTimerTimeout(th, env)
+				}
 				th.Ticks = th.MaxTicks
 				th.Running = false
 				return runtime.Undefined
@@ -6278,7 +6289,7 @@ func evalTimerAggregate(kind string, sel syntax.Expr, env runtime.Scope) (runtim
 			var best *runtime.TimerHandle
 			var bestDeadline time.Time
 			for _, th := range timers {
-				if !timerExpired(th) {
+				if !timerExpired(th, env) {
 					continue
 				}
 				dl := th.StartedAt.Add(time.Duration(th.Duration * float64(time.Second)))
@@ -6299,7 +6310,7 @@ func evalTimerAggregate(kind string, sel syntax.Expr, env runtime.Scope) (runtim
 		for _, th := range timers {
 			if th.Running {
 				hasRunning = true
-				if !timerExpired(th) {
+				if !timerExpired(th, env) {
 					return runtime.NewBool(false), true
 				}
 			}
@@ -6376,27 +6387,35 @@ func evalTimerMethod(th *runtime.TimerHandle, sel syntax.Expr, n *syntax.CallExp
 	case "read":
 		return timerReadVirtual(th, env)
 	case "timeout":
-		// A `T.timeout` fast-forwards the per-testcase virtual
-		// clock to this timer's deadline, so a later `T2.read`
-		// observes the elapsed time deterministically (ETSI 23.4).
-		if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
-			exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
-		}
-		// ETSI 23.7: outside an alt, `T.timeout` blocks until
-		// the timer has actually expired. We previously
-		// short-circuited this (no real clock), which made
-		// `timer T := N; T.start; T.timeout;` a no-op. Now we sleep for the remaining wall-clock time
-		// before unwinding. Inside an alt the matching path is
-		// covered by altTimerTimeout below.
+		det := deterministicClockEnabled(env)
+		// Inside an alt the guard is non-blocking; the alt scheduler
+		// decides which clause to wait for. Under the deterministic
+		// clock the alt block step advances time to the soonest
+		// deadline, so don't advance here (preserves multi-timer
+		// ordering).
 		if altCtx.active() {
-			expired := timerExpired(th)
+			if !det {
+				if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
+					exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
+				}
+			}
+			expired := timerExpired(th, env)
 			if expired {
 				th.Ticks = th.MaxTicks
 				th.Running = false
 			}
 			return runtime.NewBool(expired)
 		}
-		waitForTimerTimeout(th, env)
+		// ETSI 23.7: outside an alt, `T.timeout` blocks until the timer
+		// expires. Fast-forward the virtual clock to the deadline (so a
+		// later `T2.read` is exact), then fire instantly (deterministic)
+		// or sleep the real remaining time.
+		if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
+			exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
+		}
+		if !det {
+			waitForTimerTimeout(th, env)
+		}
 		th.Ticks = th.MaxTicks
 		th.Running = false
 		return runtime.Undefined
@@ -6404,15 +6423,23 @@ func evalTimerMethod(th *runtime.TimerHandle, sel syntax.Expr, n *syntax.CallExp
 	return runtime.Undefined
 }
 
-// timerExpired reports whether th's deadline has passed (wall-clock).
-// An unstarted or zero-duration timer is treated as expired so the
-// non-blocking alt guard fires immediately.
-func timerExpired(th *runtime.TimerHandle) bool {
+// timerExpired reports whether th's deadline has passed. An unstarted
+// or zero-duration timer is treated as expired so the non-blocking alt
+// guard fires immediately. Under the deterministic clock, expiry is
+// measured against the per-testcase virtual clock (advanced to timer
+// deadlines by the alt block step / non-alt timeout) rather than
+// real wall-clock time.
+func timerExpired(th *runtime.TimerHandle, env runtime.Scope) bool {
 	if th == nil || !th.Running {
 		return false
 	}
 	if th.Duration <= 0 {
 		return true
+	}
+	if deterministicClockEnabled(env) {
+		if exec := runtime.FindTestcaseExec(env); exec != nil {
+			return exec.VirtualClock() >= th.StartedAtVirtual+th.Duration
+		}
 	}
 	if th.StartedAt.IsZero() {
 		return false
@@ -6529,6 +6556,15 @@ func functionWithEnv(fn *runtime.Function, env runtime.Scope) *runtime.Function 
 func schedulerEnabled(env runtime.Scope) bool {
 	exec := runtime.FindTestcaseExec(env)
 	return exec != nil && exec.RealScheduler()
+}
+
+// deterministicClockEnabled reports whether timers should advance the
+// per-testcase virtual clock (firing instantly at their deadline)
+// instead of sleeping real wall-clock time. Only effective under the
+// strict profile.
+func deterministicClockEnabled(env runtime.Scope) bool {
+	exec := runtime.FindTestcaseExec(env)
+	return exec != nil && exec.Profile() == runtime.ProfileStrict && exec.DeterministicClock()
 }
 
 // componentStopRequested reports whether the current PTC has been asked
