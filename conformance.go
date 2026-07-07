@@ -74,15 +74,40 @@ type ConformanceResult struct {
 	Actual   string `json:"actual"`
 	Match    bool   `json:"match"`
 	Reason   string `json:"reason,omitempty"`
+	// Provenance records HOW the outcome was determined, so a match
+	// can be traced to real execution vs an approximation:
+	//   "executed"    - ran the testcase; runtime verdict compared to
+	//                   the (non-reject) expectation. The only value
+	//                   that certifies operational-semantics correctness.
+	//   "exec-reject" - negative test; the interpreter aborted ("error")
+	//                   or the body reported "fail", relaxed to a reject
+	//                   match (the violation may not have been truly
+	//                   detected - it may just have crashed).
+	//   "static"      - matched by a semantic-analyzer rejection.
+	//   "parse"       - matched by a parse-error rejection.
+	//   "parse-only"  - accepted without executing (noexecution / no
+	//                   testcase): parse+analyze succeeded.
+	//   "runtime-error"/"timeout" - the interpreter errored/timed out.
+	Provenance string `json:"provenance,omitempty"`
 }
 
 // ConformanceSummary is the suite-wide aggregate.
 type ConformanceSummary struct {
-	Total    int                 `json:"total"`
-	Matched  int                 `json:"matched"`
-	Skipped  int                 `json:"skipped"`
-	PassRate float64             `json:"pass_rate"`
-	Results  []ConformanceResult `json:"results,omitempty"`
+	Total    int     `json:"total"`
+	Matched  int     `json:"matched"`
+	Skipped  int     `json:"skipped"`
+	PassRate float64 `json:"pass_rate"`
+	// Provenance is a histogram of matched files by how the match was
+	// obtained (see ConformanceResult.Provenance). It exposes how much
+	// of PassRate rests on real execution vs static/approximate paths.
+	Provenance map[string]int `json:"provenance,omitempty"`
+	// RealExecRate is the honest metric the semantics roadmap grows:
+	// the fraction of considered (non-skipped) files matched by real
+	// execution ("executed"), i.e. the interpreter ran the testcase and
+	// produced the expected verdict. Expected to sit below PassRate
+	// until the strict operational-semantics paths land.
+	RealExecRate float64             `json:"real_exec_rate"`
+	Results      []ConformanceResult `json:"results,omitempty"`
 }
 
 func runConformance(cmd *cobra.Command, args []string) error {
@@ -100,6 +125,20 @@ func runConformance(cmd *cobra.Command, args []string) error {
 	} else {
 		fmt.Printf("ran %d files: %d matched, %d skipped (%.2f%% match rate)\n",
 			summary.Total, summary.Matched, summary.Skipped, summary.PassRate)
+		fmt.Printf("  real-execution match rate: %.2f%% (%d executed)\n",
+			summary.RealExecRate, summary.Provenance["executed"])
+		if len(summary.Provenance) > 0 {
+			keys := make([]string, 0, len(summary.Provenance))
+			for k := range summary.Provenance {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			fmt.Printf("  matched by:")
+			for _, k := range keys {
+				fmt.Printf(" %s=%d", k, summary.Provenance[k])
+			}
+			fmt.Println()
+		}
 		if verbose > 0 {
 			for _, r := range summary.Results {
 				if !r.Match {
@@ -158,12 +197,27 @@ func runConformanceFiles(files []string) ConformanceSummary {
 	if considered > 0 {
 		rate = float64(matched) / float64(considered) * 100
 	}
+	// Provenance histogram over matched files, and the honest
+	// real-execution rate (matches obtained by actually running the
+	// testcase and getting the expected verdict).
+	prov := map[string]int{}
+	for _, r := range results {
+		if r.Match && r.Provenance != "" {
+			prov[r.Provenance]++
+		}
+	}
+	realRate := 0.0
+	if considered > 0 {
+		realRate = float64(prov["executed"]) / float64(considered) * 100
+	}
 	return ConformanceSummary{
-		Total:    len(files),
-		Matched:  int(matched),
-		Skipped:  int(skipped),
-		PassRate: rate,
-		Results:  results,
+		Total:        len(files),
+		Matched:      int(matched),
+		Skipped:      int(skipped),
+		PassRate:     rate,
+		Provenance:   prov,
+		RealExecRate: realRate,
+		Results:      results,
 	}
 }
 
@@ -188,6 +242,7 @@ func runOneConformance(path string) ConformanceResult {
 	if tree == nil || tree.Err != nil {
 		r.Actual = "parse-error"
 		r.Match = expected == "reject"
+		r.Provenance = "parse"
 		if !r.Match && tree != nil && tree.Err != nil {
 			r.Reason = tree.Err.Error()
 		}
@@ -209,6 +264,7 @@ func runOneConformance(path string) ConformanceResult {
 		}
 		r.Actual = "semantic-error"
 		r.Match = expected == "reject"
+		r.Provenance = "static"
 		if !r.Match {
 			r.Reason = d.Message
 		}
@@ -224,6 +280,7 @@ func runOneConformance(path string) ConformanceResult {
 	if expected == "pass" && strings.Contains(matchLine(string(data), "@verdict"), "noexecution") {
 		r.Actual = "pass"
 		r.Match = true
+		r.Provenance = "parse-only"
 		return r
 	}
 
@@ -239,6 +296,7 @@ func runOneConformance(path string) ConformanceResult {
 		if expected == "pass" {
 			r.Actual = "pass"
 			r.Match = true
+			r.Provenance = "parse-only"
 			return r
 		}
 		// Otherwise (no annotation we recognise as positive),
@@ -275,10 +333,14 @@ func runOneConformance(path string) ConformanceResult {
 			r.Actual = "runtime-error"
 			r.Reason = o.err.Error()
 			r.Match = expected == "reject" || expected == "error"
+			r.Provenance = "runtime-error"
 			return r
 		}
 		r.Actual = string(o.v)
 		r.Match = expected == r.Actual
+		// Genuine execution match: the interpreter ran the body and
+		// produced the expected verdict.
+		r.Provenance = "executed"
 		// A negative test (`@verdict pass reject`) wants the
 		// implementation to refuse the code. Eclipse Titan and
 		// other static analysers catch most violations at
@@ -291,6 +353,9 @@ func runOneConformance(path string) ConformanceResult {
 		// because they mean the violation slipped through.
 		if !r.Match && expected == "reject" && (r.Actual == "error" || r.Actual == "fail") {
 			r.Match = true
+			// Not a real-execution verdict match: the violation may
+			// have been detected, or the interpreter merely crashed.
+			r.Provenance = "exec-reject"
 		}
 		if !r.Match {
 			r.Reason = o.reason
@@ -298,6 +363,7 @@ func runOneConformance(path string) ConformanceResult {
 	case <-ctx.Done():
 		r.Actual = "timeout"
 		r.Reason = "execution exceeded " + conformanceTimeout.String()
+		r.Provenance = "timeout"
 	}
 	return r
 }
