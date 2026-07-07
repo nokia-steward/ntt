@@ -36,16 +36,22 @@ type TestcaseOptions struct {
 	// see typos in their cfg without a hard failure.
 	ModuleParamWarning func(msg string)
 
-	// RealScheduler opts a testcase into real concurrent PTC
-	// execution: started `alive` PTC bodies (including
-	// `while(true){ send; alt{receive|timer}; pace }` load workers)
-	// run on real goroutines instead of the default skip/virtual
-	// model, and each PTC gets a component-private port instance so a
-	// Go test port's Inject routes replies back to the specific
-	// worker. Default false keeps the conformance-safe behaviour
-	// (the skip heuristic exists to satisfy ETSI 21.3.x); only
-	// callers that want TTCN-3-side concurrency (e.g. an external
-	// load driver) set it true.
+	// Profile selects the execution semantics (runtime.ProfileApproximate
+	// default, or runtime.ProfileStrict for the faithful path). It is the
+	// coherent successor to the RealScheduler bool; RealScheduler is kept
+	// as a shim (see below).
+	Profile runtime.SemanticsProfile
+
+	// RealScheduler opts a testcase into real concurrent PTC execution:
+	// started `alive` PTC bodies (including
+	// `while(true){ send; alt{receive|timer}; pace }` load workers) run
+	// on real goroutines instead of the default skip/virtual model, and
+	// each PTC gets a component-private port instance so a Go test port's
+	// Inject routes replies back to the specific worker. It is the first
+	// domain of ProfileStrict, so setting it true selects Strict.
+	// Default false keeps the conformance-safe behaviour (the skip
+	// heuristic exists to satisfy ETSI 21.3.x); only callers that want
+	// TTCN-3-side concurrency (e.g. an external load driver) set it.
 	RealScheduler bool
 }
 
@@ -271,7 +277,13 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 	}
 
 	exec := runtime.NewTestcaseExec(qname)
-	exec.SetRealScheduler(opts.RealScheduler)
+	// Effective profile: opts.Profile, upgraded to Strict when the
+	// RealScheduler back-compat flag is set.
+	profile := opts.Profile
+	if opts.RealScheduler {
+		profile = runtime.ProfileStrict
+	}
+	exec.SetProfile(profile)
 	env.Set(runtime.TestcaseExecKey, exec)
 	// Record exec as the runtime's "current testcase" so a C test
 	// port that pushes traffic back through runtime.inject() can find

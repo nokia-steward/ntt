@@ -30,15 +30,17 @@ type TestcaseExec struct {
 	log     []string
 	stopped bool
 
-	// realScheduler enables real concurrent PTC execution (see
-	// interpreter.TestcaseOptions.RealScheduler). It is written once
-	// before any PTC forks and read-only afterwards, but the accessors
-	// take mu so the race detector is satisfied under the forked
-	// goroutines that read it. mtcID is the component ID of the MTC,
-	// used by PortKey to keep the MTC's ports on bare (unqualified)
-	// names so the default single-MTC path is byte-identical.
-	realScheduler bool
-	mtcID         int64
+	// profile selects the execution semantics: ProfileApproximate
+	// (default; the conformance-tuned model) or ProfileStrict (faithful
+	// operational semantics, being wired in domain by domain — real
+	// concurrent PTCs, snapshot alt, ...). Written once before any PTC
+	// forks and read-only afterwards; the accessors take mu so the race
+	// detector is satisfied under the forked goroutines that read it.
+	// mtcID is the component ID of the MTC, used by PortKey to keep the
+	// MTC's ports on bare (unqualified) names so the default single-MTC
+	// path is byte-identical.
+	profile SemanticsProfile
+	mtcID   int64
 
 	// recvMu serializes the peek->match->dequeue->redirect critical
 	// section of a port receive (see interpreter evalPortReceiveInfo).
@@ -1567,19 +1569,54 @@ func (t *TestcaseExec) Stopped() bool {
 	return t.stopped
 }
 
-// SetRealScheduler enables/disables real concurrent PTC execution.
-// Call once, before any PTC is started.
-func (t *TestcaseExec) SetRealScheduler(b bool) {
+// SemanticsProfile selects how faithfully the engine executes TTCN-3.
+// It is the single coherent carrier the semantic-correctness roadmap
+// converges on: strict paths land behind ProfileStrict, are
+// differential-tested against ProfileApproximate, then become the
+// default. Transitional per-domain opt-ins (e.g. RealScheduler) fold
+// into it.
+type SemanticsProfile int
+
+const (
+	// ProfileApproximate is the default conformance-tuned model
+	// (skip heuristic, best-effort alt, virtual clock, loopback ports).
+	ProfileApproximate SemanticsProfile = iota
+	// ProfileStrict is the faithful operational-semantics path, wired in
+	// domain by domain. Currently it enables real concurrent PTC
+	// execution + per-component port routing; further domains (snapshot
+	// alt, real codecs, ...) attach here as they land.
+	ProfileStrict
+)
+
+// SetProfile selects the execution semantics. Call once, before any PTC
+// is started.
+func (t *TestcaseExec) SetProfile(p SemanticsProfile) {
 	t.mu.Lock()
-	t.realScheduler = b
+	t.profile = p
 	t.mu.Unlock()
 }
 
-// RealScheduler reports whether real concurrent PTC execution is on.
-func (t *TestcaseExec) RealScheduler() bool {
+// Profile reports the active execution-semantics profile.
+func (t *TestcaseExec) Profile() SemanticsProfile {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	return t.realScheduler
+	return t.profile
+}
+
+// SetRealScheduler is a back-compat shim: real concurrent PTC execution
+// is the first domain of ProfileStrict, so enabling it selects Strict.
+func (t *TestcaseExec) SetRealScheduler(b bool) {
+	p := ProfileApproximate
+	if b {
+		p = ProfileStrict
+	}
+	t.SetProfile(p)
+}
+
+// RealScheduler reports whether real concurrent PTC execution is on,
+// i.e. whether the strict profile is active.
+func (t *TestcaseExec) RealScheduler() bool {
+	return t.Profile() == ProfileStrict
 }
 
 // SetMTCID records the MTC's component ID so PortKey can leave the
@@ -1611,10 +1648,10 @@ func (t *TestcaseExec) PortKey(name string) string {
 		return name
 	}
 	t.mu.Lock()
-	rs := t.realScheduler
+	strict := t.profile == ProfileStrict
 	mtc := t.mtcID
 	t.mu.Unlock()
-	if !rs {
+	if !strict {
 		return name
 	}
 	cur := t.CurrentComponent()
