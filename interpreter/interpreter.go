@@ -8905,6 +8905,7 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 	if exec == nil {
 		return runtime.Undefined
 	}
+	bareName := port          // pre-qualification instance name, for the connect graph
 	port = exec.PortKey(port) // real-scheduler: per-PTC port identity (no-op by default)
 	switch op {
 	case "call":
@@ -8936,7 +8937,7 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 				return runtime.Undefined
 			}
 		}
-		exec.EnqueueEnvelope(port, runtime.PortMessage{
+		enqueueEnvelopeRouted(exec, port, bareName, runtime.PortMessage{
 			Kind:      runtime.MsgCall,
 			Sender:    exec.CurrentComponent(),
 			Payload:   params,
@@ -8951,7 +8952,7 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 			params, ret = procSignatureArg(n.Args.List[0], env)
 			sig = procSignatureName(n.Args.List[0])
 		}
-		exec.EnqueueEnvelope(port, runtime.PortMessage{
+		enqueueEnvelopeRouted(exec, port, bareName, runtime.PortMessage{
 			Kind:      runtime.MsgReply,
 			Sender:    exec.CurrentComponent(),
 			Payload:   params,
@@ -8971,7 +8972,7 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 		if n != nil && n.Args != nil && len(n.Args.List) >= 2 {
 			exc = evalExceptionValue(n.Args.List[1], env)
 		}
-		exec.EnqueueEnvelope(port, runtime.PortMessage{
+		enqueueEnvelopeRouted(exec, port, bareName, runtime.PortMessage{
 			Kind:      runtime.MsgException,
 			Sender:    exec.CurrentComponent(),
 			RetValue:  exc,
@@ -9535,6 +9536,46 @@ func portMapArgName(e syntax.Expr) string {
 	return ""
 }
 
+// strictConnectedTargets returns the component-qualified queue keys a
+// strict-profile send / call / reply / raise on bareName (from the
+// current component) must be delivered to: the connected peer(s) via the
+// connect graph. Returns nil when not strict, no current component, or
+// the port has no peer — the caller then self-delivers on its own key
+// (loopback-to-self / self-connect). bareName is the pre-qualification
+// instance name (the connect graph keys on bare names per component).
+func strictConnectedTargets(exec *runtime.TestcaseExec, bareName string) []string {
+	if exec.Profile() != runtime.ProfileStrict {
+		return nil
+	}
+	cur := exec.CurrentComponent()
+	if cur == nil {
+		return nil
+	}
+	peers := exec.ConnectedPeers(runtime.PortEndpoint{Comp: cur.ID, Port: bareName})
+	if len(peers) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(peers))
+	for _, peer := range peers {
+		keys = append(keys, exec.PortKeyFor(peer.Comp, peer.Port))
+	}
+	return keys
+}
+
+// enqueueEnvelopeRouted delivers a procedure envelope (call/reply/raise)
+// the way a message send is routed: under the strict profile a CONNECTED
+// port delivers to the peer(s)' queue(s); otherwise (and for
+// self-connect / no peer) it enqueues on the given qualified port key.
+func enqueueEnvelopeRouted(exec *runtime.TestcaseExec, port, bareName string, msg runtime.PortMessage) {
+	if targets := strictConnectedTargets(exec, bareName); targets != nil {
+		for _, key := range targets {
+			exec.EnqueueEnvelope(key, msg)
+		}
+		return
+	}
+	exec.EnqueueEnvelope(port, msg)
+}
+
 func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syntax.Expr) runtime.Object {
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil || n.Args == nil || len(n.Args.List) == 0 {
@@ -9594,16 +9635,11 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 	// shared port-name, so it keeps the historical self-queue enqueue
 	// below.) Falls through to self-delivery when the port has no peer
 	// (loopback-to-self / self-connect handled by ConnectedPeers).
-	if exec.Profile() == runtime.ProfileStrict {
-		if cur := exec.CurrentComponent(); cur != nil {
-			senderEP := runtime.PortEndpoint{Comp: cur.ID, Port: bareName}
-			if peers := exec.ConnectedPeers(senderEP); len(peers) > 0 {
-				for _, peer := range peers {
-					exec.EnqueueMessageFrom(exec.PortKeyFor(peer.Comp, peer.Port), payload, cur)
-				}
-				return runtime.Undefined
-			}
+	if targets := strictConnectedTargets(exec, bareName); targets != nil {
+		for _, key := range targets {
+			exec.EnqueueMessageFrom(key, payload, exec.CurrentComponent())
 		}
+		return runtime.Undefined
 	}
 	exec.EnqueueMessageFrom(port, payload, sender)
 	return runtime.Undefined

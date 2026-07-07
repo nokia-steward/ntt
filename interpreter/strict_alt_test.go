@@ -167,3 +167,34 @@ func TestStrictAlt_DeterministicClockSoonestTimerWins(t *testing.T) {
 		t.Fatalf("verdict = %s (%s), want pass (soonest timer must win)", v, reason)
 	}
 }
+
+// TestStrictProc_ConnectedCallReply covers strict connection routing for
+// procedure-based communication: a caller's `call` must reach the
+// connected server's queue, and the server's `reply` must reach the
+// caller's queue. Without proc routing under strict the call/reply land
+// on the sender's own queue and the caller's getreply never matches.
+func TestStrictProc_ConnectedCallReply(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		signature S() return integer;
+		type port P procedure { inout S }
+		type component C { port P p }
+		function server() runs on C {
+			p.getcall(S:?);
+			p.reply(S:{} value 42);
+		}
+		testcase tc() runs on C system C {
+			var C peer := C.create alive;
+			connect(self:p, peer:p);
+			p.call(S:{}, nowait);
+			peer.start(server());
+			peer.done;
+			alt {
+				[] p.getreply(S:?) { setverdict(pass); }
+				[else] { setverdict(fail, "no reply reached the caller"); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (connected call/reply routing)", v, reason)
+	}
+}
