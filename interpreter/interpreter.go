@@ -147,14 +147,17 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return nil
 
 	case *syntax.AltStmt:
-		// `alt` is the snapshot scheduler; the runtime/alt package
-		// implements it but the interpreter has not been wired
-		// through yet. As a soft skip we walk every alternative
-		// looking for the first body that contains a `setverdict`
-		// and execute it. That happens to be the right behaviour for
-		// the bulk of the conformance suite's alt fixtures - they
-		// each contain exactly one realistic branch plus error /
-		// timeout branches the test never hits.
+		// Strict profile: real snapshot semantics — first-match-wins
+		// over a snapshot, honest blocking, no verdict-preferring
+		// heuristic (evalAltStmtStrict). Interleave keeps the
+		// best-effort path until its own semantics land.
+		if schedulerEnabled(env) && !(n.Tok != nil && n.Tok.Kind() == syntax.INTERLEAVE) {
+			return evalAltStmtStrict(n, env)
+		}
+		// Approximate profile (default): a stand-in scheduler that walks
+		// alternatives and, absent port traffic, falls back to a
+		// verdict-preferring heuristic. Conformance-tuned; retired once
+		// the strict path reaches parity.
 		return evalAltStmtBestEffort(n, env)
 
 	case *syntax.CommClause:

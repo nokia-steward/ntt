@@ -1989,6 +1989,185 @@ func evalAltStmtBestEffort(n *syntax.AltStmt, env runtime.Scope) runtime.Object 
 	return nil
 }
 
+// evalAltStmtStrict is the ProfileStrict alt evaluator (ES 201 873-4
+// clause 20). It reuses the *correct* part of the best-effort path —
+// source-order, first-match-wins guard evaluation via commGuardMatches
+// (which consumes only the selected, matching event), [else], repeat,
+// and activated defaults — but REPLACES the verdict-preferring heuristic
+// with honest snapshot semantics: when no guard matches and there is no
+// [else], it blocks on the alt's event sources (port traffic, the
+// soonest timer deadline, a component transition, or this PTC's stop)
+// and re-snapshots. It never fabricates a verdict for a branch whose
+// guard did not fire. Reached only under ProfileStrict, so the default
+// (approximate) behaviour is byte-identical.
+func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
+	if n.Body == nil {
+		return nil
+	}
+	// Bounded only as a backstop against a `repeat` whose state never
+	// changes; genuine blocking is ended by a matching event, this PTC's
+	// stop, or the harness/testcase timeout.
+	const maxRounds = 1 << 20
+	for round := 0; round < maxRounds; round++ {
+		// Alt-local declarations are re-evaluated each round (ETSI 20.2).
+		for _, s := range n.Body.Stmts {
+			if _, ok := s.(*syntax.CommClause); ok {
+				continue
+			}
+			if r := eval(s, env); needBreak(r) {
+				return r
+			}
+		}
+
+		// Snapshot pass: the first clause whose guard fires wins.
+		var elseClause *syntax.CommClause
+		matched := false
+		for _, s := range n.Body.Stmts {
+			cc, ok := s.(*syntax.CommClause)
+			if !ok {
+				continue
+			}
+			if cc.Else != nil {
+				if elseClause == nil {
+					elseClause = cc
+				}
+				continue
+			}
+			if cc.Comm == nil {
+				continue
+			}
+			if commGuardMatches(cc.Comm, env) {
+				matched = true
+				if cc.Body != nil {
+					if res := evalAltClauseBody(cc.Body, env); res == runtime.Repeat {
+						break
+					} else {
+						return res
+					}
+				}
+				return nil
+			}
+		}
+		if matched {
+			continue // a body returned Repeat -> re-snapshot
+		}
+		if elseClause != nil {
+			res := evalAltClauseBody(elseClause.Body, env)
+			if res == runtime.Repeat {
+				continue
+			}
+			return res
+		}
+
+		// Activated defaults are appended after the alternatives (20.5).
+		if runDefaults(env) {
+			return nil
+		}
+		if defaultCtx.active() && altHasRealPortGuard(n) {
+			return nil
+		}
+
+		// No guard fired and no [else]: block on the alt's event sources
+		// and re-snapshot. Crucially, NO verdict-preferring heuristic —
+		// a clause runs only when its guard actually matches.
+		if !blockForAltEvents(n, env) {
+			// Nothing to wait for (only boolean / unmodelled guards) or
+			// this PTC was stopped: conclude without fabricating a
+			// verdict, per real alt semantics (the caller's outer
+			// context / timeout governs a genuinely blocked alt).
+			return nil
+		}
+	}
+	return nil
+}
+
+// blockForAltEvents parks a strict alt on its event sources — inbound
+// port traffic (MessageReady), the soonest running-timer deadline, a
+// component transition, or this PTC's stop — via waitForAltCombined,
+// whose 2ms backstop also covers component / timer guards that raise no
+// MessageReady signal. Returns true to re-snapshot, false when there is
+// nothing to wait for or the PTC was stopped.
+func blockForAltEvents(n *syntax.AltStmt, env runtime.Scope) bool {
+	dur, hasTimer := nextAltTimerDeadlineLenient(n, env)
+	if hasTimer || altHasEventGuard(n) {
+		return waitForAltCombined(dur, hasTimer, env)
+	}
+	return false
+}
+
+// altHasEventGuard reports whether any clause guard is event-driven — a
+// port receive/check/trigger/getcall/getreply/catch, a component
+// done/killed/running op, or an altstep-call guard (which may contain
+// such ops). Pure boolean-expr guards and [else] are not event-driven,
+// so an alt with only those cannot usefully block.
+func altHasEventGuard(n *syntax.AltStmt) bool {
+	if n == nil || n.Body == nil {
+		return false
+	}
+	for _, s := range n.Body.Stmts {
+		cc, ok := s.(*syntax.CommClause)
+		if !ok || cc.Else != nil || cc.Comm == nil {
+			continue
+		}
+		switch commClauseOp(cc) {
+		case "receive", "check", "trigger", "getcall", "getreply", "catch",
+			"done", "killed", "running":
+			return true
+		}
+		// `[] a_altstep()` (Fun is a bare Ident): may hold event guards,
+		// so treat it as blockable rather than give up.
+		if es, ok := cc.Comm.(*syntax.ExprStmt); ok {
+			if ce, ok := es.Expr.(*syntax.CallExpr); ok {
+				if _, isIdent := ce.Fun.(*syntax.Ident); isIdent {
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// commClauseOp extracts the operation name from a clause's comm guard
+// (`p.receive(...)`, bare `p.receive`, `t.timeout`, `c.done`, with an
+// optional `-> redirect` or `from/to addr` wrap peeled off), or "" when
+// the shape is not a port/timer/component operation.
+func commClauseOp(cc *syntax.CommClause) string {
+	es, ok := cc.Comm.(*syntax.ExprStmt)
+	if !ok {
+		return ""
+	}
+	expr := es.Expr
+	for {
+		switch e := expr.(type) {
+		case *syntax.RedirectExpr:
+			if e == nil || e.X == nil {
+				return ""
+			}
+			expr = e.X
+			continue
+		case *syntax.BinaryExpr:
+			if e.Op != nil && (e.Op.Kind() == syntax.FROM || e.Op.Kind() == syntax.TO) && e.X != nil {
+				expr = e.X
+				continue
+			}
+		}
+		break
+	}
+	switch e := expr.(type) {
+	case *syntax.CallExpr:
+		if sel, ok := e.Fun.(*syntax.SelectorExpr); ok {
+			if id, ok := sel.Sel.(*syntax.Ident); ok {
+				return id.String()
+			}
+		}
+	case *syntax.SelectorExpr:
+		if id, ok := e.Sel.(*syntax.Ident); ok {
+			return id.String()
+		}
+	}
+	return ""
+}
+
 // nextAltTimerDeadline scans alt's clauses and returns the
 // shortest wall-clock duration we need to sleep before any of the
 // `T.timeout` guards becomes true. Returns (0,false) when the alt
