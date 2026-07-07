@@ -183,7 +183,7 @@ func TestStrictProc_ConnectedCallReply(t *testing.T) {
 			p.reply(S:{} value 42);
 		}
 		testcase tc() runs on C system C {
-			var C peer := C.create alive;
+			var C peer := C.create;
 			connect(self:p, peer:p);
 			p.call(S:{}, nowait);
 			peer.start(server());

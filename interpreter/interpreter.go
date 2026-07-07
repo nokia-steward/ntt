@@ -6978,6 +6978,17 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				skip = false
 			}
 		}
+		// Strict profile: single-port finite responders (getcall +
+		// reply/raise, no infinite loop) also run at start when a call is
+		// already queued. The approximate exception above only covers
+		// indexed-port responders, so a single-port `getcall; reply`
+		// server stayed skipped and its caller's getreply/catch never
+		// matched under strict (220304/220306).
+		if skip && schedulerEnabled(env) && startBodyIsDeferredResponder(body, env) {
+			if exec := runtime.FindTestcaseExec(env); exec != nil && exec.HasPendingCalls() {
+				skip = false
+			}
+		}
 		if skip {
 			// We're skipping the body to avoid deadlock/divergence.
 			// Pretend the PTC is still "running" (TTCN-3 21.3.6) so
