@@ -1,6 +1,7 @@
 package interpreter_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -71,5 +72,38 @@ func TestStrictAlt_TimerGuardFires(t *testing.T) {
 	// return in ~0ms by faking the branch.
 	if elapsed := time.Since(start); elapsed < 40*time.Millisecond {
 		t.Fatalf("alt returned in %v; the strict timer guard should have waited ~50ms", elapsed)
+	}
+}
+
+// TestStrictAlt_ContextCancelsBlockedAlt covers cancellable execution: a
+// strict alt with only a receive guard that never matches blocks
+// forever; a deadline context must stop the run so the goroutine
+// terminates (no leak / hang) rather than spinning on the backstop.
+func TestStrictAlt_ContextCancelsBlockedAlt(t *testing.T) {
+	src := `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			alt {
+				[] p.receive(charstring:"never") { setverdict(pass); }
+			}
+		}
+	}`
+	tree := parse(t, src)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		_, _, _ = interpreter.RunTestcaseWith([]*ttcn3.Tree{tree}, "M.tc",
+			interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, Context: ctx})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// good: the blocked alt was cancelled and the run returned.
+	case <-time.After(3 * time.Second):
+		t.Fatal("blocked strict alt was not cancelled by context (leak/hang)")
 	}
 }

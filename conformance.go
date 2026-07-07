@@ -390,7 +390,11 @@ func execVerdict(trees []*ttcn3.Tree, tcName string, profile runtime.SemanticsPr
 	}
 	ch := make(chan out, 1)
 	go func() {
-		v, r, err := interpreter.RunTestcaseWith(trees, tcName, interpreter.TestcaseOptions{Profile: profile})
+		// Pass ctx so a strict run that blocks (honest alt/timer waits)
+		// is cancelled on timeout instead of leaking a spinning
+		// goroutine after we return "timeout" below.
+		v, r, err := interpreter.RunTestcaseWith(trees, tcName,
+			interpreter.TestcaseOptions{Profile: profile, Context: ctx})
 		ch <- out{v: v, reason: r, err: err}
 	}()
 	select {

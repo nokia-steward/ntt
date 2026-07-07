@@ -1,6 +1,7 @@
 package interpreter
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"math"
@@ -41,6 +42,15 @@ type TestcaseOptions struct {
 	// coherent successor to the RealScheduler bool; RealScheduler is kept
 	// as a shim (see below).
 	Profile runtime.SemanticsProfile
+
+	// Context, when non-nil, bounds the run: on ctx cancellation the
+	// executor is asked to stop (exec.Stop), which unwinds a blocked alt
+	// / timer wait promptly. Essential for the strict profile, whose
+	// honest blocking can otherwise wait indefinitely on a genuinely
+	// stuck alt — the caller (e.g. the conformance harness's per-testcase
+	// timeout) supplies a deadline context so the goroutine terminates
+	// instead of leaking. Nil = unbounded (unchanged default).
+	Context context.Context
 
 	// RealScheduler opts a testcase into real concurrent PTC execution:
 	// started `alive` PTC bodies (including
@@ -284,6 +294,21 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 		profile = runtime.ProfileStrict
 	}
 	exec.SetProfile(profile)
+	// Cancellation: when the caller supplies a context, stop the
+	// executor on cancellation so a blocked (strict) alt / timer wait
+	// unwinds instead of leaking a goroutine. The watcher is bounded by
+	// `cancelled`, closed on return, so it never outlives the run.
+	if opts.Context != nil {
+		cancelled := make(chan struct{})
+		defer close(cancelled)
+		go func() {
+			select {
+			case <-opts.Context.Done():
+				exec.Stop()
+			case <-cancelled:
+			}
+		}()
+	}
 	env.Set(runtime.TestcaseExecKey, exec)
 	// Record exec as the runtime's "current testcase" so a C test
 	// port that pushes traffic back through runtime.inject() can find
