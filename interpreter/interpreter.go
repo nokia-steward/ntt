@@ -9121,6 +9121,26 @@ func evalExceptionValue(arg syntax.Expr, env runtime.Scope) runtime.Object {
 	return eval(arg, env)
 }
 
+// procReceiveOpName returns the procedure-receive op name (getcall /
+// getreply / catch) from a comm-op call's function part, or "" when the
+// shape isn't recognised.
+func procReceiveOpName(call *syntax.CallExpr) string {
+	if call == nil {
+		return ""
+	}
+	switch f := call.Fun.(type) {
+	case *syntax.Ident:
+		if f != nil && f.Tok != nil {
+			return f.String()
+		}
+	case *syntax.SelectorExpr:
+		if id, ok := f.Sel.(*syntax.Ident); ok && id != nil && id.Tok != nil {
+			return id.String()
+		}
+	}
+	return ""
+}
+
 // procReceiveMatches reports whether a queued procedure envelope
 // matches the template carried by a getcall / getreply / catch call.
 // A nil / parameter-less call matches unconditionally (the bare
@@ -9842,6 +9862,15 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 		// 22.3 honours it for procedure ops too (e.g.
 		// `p.getcall(S:?) from v_ptc`), so always evaluate it.
 		payloadOk := isProc || info.call == nil || portReceiveMatches(head.Payload, info.call, env)
+		// Strict profile: honour the procedure signature template
+		// (parameter record + `value`/exception) rather than the lenient
+		// "any envelope of this kind" match above, so e.g.
+		// `check(getreply(S:{p:=(100..200)} value ?))` does NOT match a
+		// reply whose p is out of range (2204 check fixtures). The `from`
+		// filter below still applies independently.
+		if isProc && info.call != nil && schedulerEnabled(env) {
+			payloadOk = procReceiveMatches(procReceiveOpName(info.call), info.call, head, env)
+		}
 		// ETSI 22.3.1 h: an *unqualified* getreply / catch inside a
 		// blocking `call(S,...) { ... }` response block treats only the
 		// called procedure's reply / exception. When both the enclosing

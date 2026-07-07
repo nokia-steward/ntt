@@ -198,3 +198,34 @@ func TestStrictProc_ConnectedCallReply(t *testing.T) {
 		t.Fatalf("verdict = %s (%s), want pass (connected call/reply routing)", v, reason)
 	}
 }
+
+// TestStrictProc_CheckHonoursTemplate covers strict procedure-payload
+// matching: `check(getreply(S:{p:=(100..200)} value ?))` must NOT match a
+// reply whose parameter is out of range (here p_par1=1), so the fail
+// branch does not fire and the bare-getreply fallback passes. Under the
+// lenient (approximate) match the check wrongly fires. Mirrors
+// Sem_2204_the_check_operation_057.
+func TestStrictProc_CheckHonoursTemplate(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		signature S(out integer p_par1) return integer;
+		type port P procedure { inout S }
+		type component C { port P p }
+		function f() runs on C {
+			p.getcall;
+			p.reply(S:{ p_par1 := 1 } value 5);
+		}
+		testcase tc() runs on C system C {
+			var C peer := C.create;
+			connect(self:p, peer:p);
+			p.call(S:{ p_par1 := - }, nowait);
+			peer.start(f());
+			alt {
+				[] p.check(getreply(S:{ p_par1 := (100..200) } value ?)) { setverdict(fail, "check wrongly matched"); }
+				[] p.getreply { setverdict(pass); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (check must honour the param template)", v, reason)
+	}
+}
