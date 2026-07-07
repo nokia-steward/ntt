@@ -939,6 +939,39 @@ func (t *TestcaseExec) ConnectedToOther(a PortEndpoint) bool {
 	return false
 }
 
+// ConnectedPeers returns the endpoints currently connected to a
+// (including a itself for a self-connect). Used to route a strict-profile
+// send to the connected peer's port queue rather than the sender's own.
+func (t *TestcaseExec) ConnectedPeers(a PortEndpoint) []PortEndpoint {
+	t.connMu.Lock()
+	defer t.connMu.Unlock()
+	if len(t.connections[a]) == 0 {
+		return nil
+	}
+	out := make([]PortEndpoint, 0, len(t.connections[a]))
+	for b := range t.connections[a] {
+		out = append(out, b)
+	}
+	return out
+}
+
+// PortKeyFor is PortKey for an explicit component id (rather than the
+// current goroutine's component), used to address a connected peer's
+// queue when routing a strict-profile send.
+func (t *TestcaseExec) PortKeyFor(compID int64, name string) string {
+	if name == "" || name == "any port" {
+		return name
+	}
+	t.mu.Lock()
+	strict := t.profile == ProfileStrict
+	mtc := t.mtcID
+	t.mu.Unlock()
+	if !strict || compID == mtc {
+		return name
+	}
+	return portQualPrefix + strconv.FormatInt(compID, 10) + "/" + name
+}
+
 // SetPortLifecycle records the operational state ("started", "stopped"
 // or "halted") of a port endpoint set by p.start / p.stop / p.halt
 // (ETSI 22.1).

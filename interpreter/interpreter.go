@@ -9504,6 +9504,7 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 	if exec == nil || n.Args == nil || len(n.Args.List) == 0 {
 		return runtime.Undefined
 	}
+	bareName := port          // pre-qualification instance name, for the connect graph
 	port = exec.PortKey(port) // real-scheduler: per-PTC port identity (no-op by default)
 	payload := eval(n.Args.List[0], env)
 	if runtime.IsError(payload) {
@@ -9549,6 +9550,24 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 			}
 		}
 		return runtime.Undefined
+	}
+	// Strict profile: a send on a CONNECTED port is delivered to the
+	// connected peer(s)' queue(s) via the connect graph, not the
+	// sender's own queue, and tagged with the actual sending component
+	// so the receiver's `from` matches. (Approximate mode routes by
+	// shared port-name, so it keeps the historical self-queue enqueue
+	// below.) Falls through to self-delivery when the port has no peer
+	// (loopback-to-self / self-connect handled by ConnectedPeers).
+	if exec.Profile() == runtime.ProfileStrict {
+		if cur := exec.CurrentComponent(); cur != nil {
+			senderEP := runtime.PortEndpoint{Comp: cur.ID, Port: bareName}
+			if peers := exec.ConnectedPeers(senderEP); len(peers) > 0 {
+				for _, peer := range peers {
+					exec.EnqueueMessageFrom(exec.PortKeyFor(peer.Comp, peer.Port), payload, cur)
+				}
+				return runtime.Undefined
+			}
+		}
 	}
 	exec.EnqueueMessageFrom(port, payload, sender)
 	return runtime.Undefined
