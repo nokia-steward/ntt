@@ -9583,14 +9583,38 @@ func strictConnectedTargets(exec *runtime.TestcaseExec, bareName string) []strin
 		return nil
 	}
 	peers := exec.ConnectedPeers(runtime.PortEndpoint{Comp: cur.ID, Port: bareName})
+	suffix := ""
 	if len(peers) == 0 {
-		return nil
+		// Port-array element: connect records the endpoint under the
+		// array's BASE name (resolvePortEndpoint/portRefName drops the
+		// `[i]`), while comm uses the indexed name "p[i]". Fall back to
+		// the base and re-apply the element suffix to the peer's port so
+		// `connect(self:p[i], v:p[i])` routes p[i] to v's p[i].
+		var base string
+		base, suffix = splitPortIndex(bareName)
+		if suffix == "" {
+			return nil
+		}
+		peers = exec.ConnectedPeers(runtime.PortEndpoint{Comp: cur.ID, Port: base})
+		if len(peers) == 0 {
+			return nil
+		}
 	}
 	keys := make([]string, 0, len(peers))
 	for _, peer := range peers {
-		keys = append(keys, exec.PortKeyFor(peer.Comp, peer.Port))
+		keys = append(keys, exec.PortKeyFor(peer.Comp, peer.Port+suffix))
 	}
 	return keys
+}
+
+// splitPortIndex splits an indexed port-instance name into its array
+// base and subscript suffix: "p[0]" -> ("p","[0]"), "p[0][1]" ->
+// ("p","[0][1]"), "p" -> ("p","").
+func splitPortIndex(name string) (base, suffix string) {
+	if i := strings.IndexByte(name, '['); i >= 0 {
+		return name[:i], name[i:]
+	}
+	return name, ""
 }
 
 // enqueueEnvelopeRouted delivers a procedure envelope (call/reply/raise)

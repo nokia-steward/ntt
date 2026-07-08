@@ -229,3 +229,37 @@ func TestStrictProc_CheckHonoursTemplate(t *testing.T) {
 		t.Fatalf("verdict = %s (%s), want pass (check must honour the param template)", v, reason)
 	}
 }
+
+// TestStrictProc_PortArrayConnectedRouting covers strict routing for
+// port ARRAY elements: connect(self:p[i], v:p[i]) records the endpoint
+// under the base name "p" (portRefName drops the index) while comm uses
+// "p[i]", so strict routing must fall back to the base and re-apply the
+// element index. Mirrors Sem_220304_getreply_operation_002.
+func TestStrictProc_PortArrayConnectedRouting(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		signature S();
+		type port P procedure { inout S }
+		type component C { port P p[2] }
+		function f() runs on C {
+			for (var integer i := 0; i < 2; i := i + 1) {
+				p[i].getcall;
+				p[i].reply(S:{});
+			}
+		}
+		testcase tc() runs on C system C {
+			var C v := C.create;
+			for (var integer i := 0; i < 2; i := i + 1) {
+				connect(self:p[i], v:p[i]);
+				p[i].call(S:{}, nowait);
+			}
+			v.start(f());
+			alt {
+				[] any from p.getreply { setverdict(pass); }
+				[else] { setverdict(fail, "port-array reply not routed to caller"); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (port-array connected routing)", v, reason)
+	}
+}
