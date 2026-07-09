@@ -230,6 +230,48 @@ func TestStrictProc_CheckHonoursTemplate(t *testing.T) {
 	}
 }
 
+// TestStrictProc_TwoPTCBlockingCall covers the concurrent two-PTC
+// blocking-`call` shape (Sem_220301_CallOperation): a non-alive `server`
+// PTC forks and blocks in `getcall` BEFORE any call exists, then a
+// non-alive `client` PTC issues a blocking `call` whose reply the server
+// produces. Both are `create`d (not `create alive`), so the strict
+// forkStrict path must run their blocking bodies on real goroutines; the
+// deterministic clock falls back to the real clock while they are live,
+// so the server's safety timer does not fire before the client's call
+// arrives. The MTC coordinates via component.done.
+func TestStrictProc_TwoPTCBlockingCall(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		signature S() return integer;
+		type port P procedure { inout S }
+		type component C { port P p }
+		function server() runs on C {
+			timer t := 30.0; t.start;
+			alt {
+				[] p.getcall(S:?) { p.reply(S:{} value 42); }
+				[] t.timeout { setverdict(fail, "server timed out"); }
+			}
+		}
+		function client() runs on C {
+			p.call(S:{}, 5.0) {
+				[] p.getreply(S:? value 42) { setverdict(pass); }
+				[] p.getreply { setverdict(fail, "wrong reply"); }
+				[] p.catch(timeout) { setverdict(fail, "call timed out"); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C srv := C.create;
+			var C cli := C.create;
+			connect(srv:p, cli:p);
+			srv.start(server());
+			cli.start(client());
+			all component.done;
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (two-PTC blocking call/reply)", v, reason)
+	}
+}
+
 // TestStrictProc_PortArrayConnectedRouting covers strict routing for
 // port ARRAY elements: connect(self:p[i], v:p[i]) records the endpoint
 // under the base name "p" (portRefName drops the index) while comm uses

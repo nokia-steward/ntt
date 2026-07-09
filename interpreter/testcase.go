@@ -861,9 +861,9 @@ func evalAllComponentAction(kind string, sel syntax.Expr, env runtime.Scope) (ru
 		if !r.Started {
 			continue
 		}
-		r.Done = true
+		r.SetDone(true)
 		if op == "kill" || !r.AliveModifier {
-			r.Alive = false
+			r.SetAlive(false)
 		}
 		// Real-scheduler mode: `all component.stop` must actually
 		// cancel the forked worker goroutines (the default path only

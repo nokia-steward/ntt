@@ -323,6 +323,26 @@ func (t *TestcaseExec) RegisterPTC(refID int64) *PTCExit {
 // PTCExit returns the cancel envelope associated with refID, or
 // nil when the ref was never registered (synchronous .start path,
 // MTC, or an unknown id).
+// HasLivePTCs reports whether any forked PTC goroutine is still running
+// (registered and not yet Done). The deterministic clock uses this to
+// fall back to the real clock while concurrent PTCs are live — their
+// events flow in real time, so advancing a virtual clock in one
+// goroutine would race the others (a safety timer could fire before a
+// peer's message/call arrives).
+func (t *TestcaseExec) HasLivePTCs() bool {
+	t.ptcMu.Lock()
+	defer t.ptcMu.Unlock()
+	for _, p := range t.ptcExits {
+		select {
+		case <-p.DoneChan:
+			// finished; ignore
+		default:
+			return true
+		}
+	}
+	return false
+}
+
 func (t *TestcaseExec) PTCExit(refID int64) *PTCExit {
 	t.ptcMu.Lock()
 	defer t.ptcMu.Unlock()

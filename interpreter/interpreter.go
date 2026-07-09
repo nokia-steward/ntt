@@ -335,7 +335,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 									storeReceiver(n.Value[0], res, env)
 								}
 								if len(n.Verdict) > 0 {
-									v := ref.Verdict
+									v := ref.GetVerdict()
 									if v == "" {
 										v = runtime.NoneVerdict
 									}
@@ -750,9 +750,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			case "stop", "kill":
 				op := strings.ToLower(syntax.Name(n.Sel))
 				if ref != nil {
-					ref.Done = true
+					ref.SetDone(true)
 					if op == "kill" || !ref.AliveModifier {
-						ref.Alive = false
+						ref.SetAlive(false)
 					}
 				}
 				if exec := runtime.FindTestcaseExec(env); exec != nil {
@@ -1163,8 +1163,8 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		if id, ok := n.Expr.(*syntax.Ident); ok && id.Tok != nil && id.String() == "kill" {
 			if exec := runtime.FindTestcaseExec(env); exec != nil {
 				if cur := exec.CurrentComponent(); cur != nil {
-					cur.Done = true
-					cur.Alive = false
+					cur.SetDone(true)
+					cur.SetAlive(false)
 					if stack := exec.AllComponents(); len(stack) > 0 && cur == stack[0] {
 						exec.Stop()
 					}
@@ -6509,7 +6509,8 @@ func waitForTimerTimeout(th *runtime.TimerHandle, env runtime.Scope) {
 // ref with id 0; callers that compare refs always go through
 // (*ComponentRef).Equal which keys on id.
 func newComponentRef(typeName, name string, env runtime.Scope) *runtime.ComponentRef {
-	ref := &runtime.ComponentRef{TypeName: typeName, Module: moduleNameFromEnv(env), Name: name, Alive: true}
+	ref := &runtime.ComponentRef{TypeName: typeName, Module: moduleNameFromEnv(env), Name: name}
+	ref.SetAlive(true)
 	if exec := runtime.FindTestcaseExec(env); exec != nil {
 		ref.ID = exec.NewComponentID()
 		exec.RegisterComponent(ref)
@@ -6562,9 +6563,20 @@ func schedulerEnabled(env runtime.Scope) bool {
 // per-testcase virtual clock (firing instantly at their deadline)
 // instead of sleeping real wall-clock time. Only effective under the
 // strict profile.
+//
+// It deliberately falls back to the REAL clock while concurrent PTC
+// goroutines are live (HasLivePTCs): the virtual clock is only sound in
+// a single-threaded flow, where the sole goroutine's soonest deadline is
+// the global one. With concurrent PTCs, advancing one goroutine's clock
+// to its own deadline would race the others — a safety timer (e.g. a
+// server's 30s guard) could fire before a peer's message/call arrives.
+// The real clock is correct there and, crucially, still fast: inter-PTC
+// events flow in real microseconds, so only genuinely-elapsed waits cost
+// wall time (rare in the suite; bounded by the harness timeout).
 func deterministicClockEnabled(env runtime.Scope) bool {
 	exec := runtime.FindTestcaseExec(env)
-	return exec != nil && exec.Profile() == runtime.ProfileStrict && exec.DeterministicClock()
+	return exec != nil && exec.Profile() == runtime.ProfileStrict &&
+		exec.DeterministicClock() && !exec.HasLivePTCs()
 }
 
 // componentStopRequested reports whether the current PTC has been asked
@@ -6788,6 +6800,88 @@ func startBodyIsDeferredResponder(body syntax.Node, env runtime.Scope) bool {
 //
 // If the function reference can't be resolved we conservatively
 // return false (keep the synchronous path).
+// startBodyBlocksOnComm reports whether a started PTC body would block
+// waiting on inter-component communication — a blocking `call` statement
+// (CallStmt) or a getcall/getreply/receive/trigger/catch operation. Such
+// bodies can only execute correctly on a real goroutine concurrent with
+// the caller (e.g. a `server` PTC blocked in `getcall` while the `client`
+// PTC issues the matching `call`). It is used under the strict profile to
+// fork non-alive PTCs whose bodies the synchronous model would otherwise
+// skip. A pure compute loop (no comm op) returns false and stays skipped,
+// so we never spin a goroutine that can't make observable progress.
+func startBodyBlocksOnComm(body syntax.Node, env runtime.Scope) bool {
+	root := startBodyRoot(body, env)
+	// Only a blocking `call{...}` (a CallStmt, handled below) and a
+	// server `getcall` justify forking. Deliberately NOT `getreply` /
+	// `catch` / `receive` / `trigger`: a body whose only blocking op is a
+	// standalone `getreply`/`receive` alt is one half of a pair whose
+	// counterpart (a `nowait` caller, or a send-only sender) is NOT
+	// forked, so forking just this half makes it wait for traffic that
+	// never comes and time out. Those half-pair shapes stay on the skip
+	// path (unchanged from baseline). getcall is safe because its
+	// counterpart is always a blocking-call client we DO fork (CallStmt)
+	// or an already-queued call (handled inline via HasPendingCalls).
+	commOps := map[string]bool{
+		"getcall": true,
+	}
+	found := false
+	// noFork is set when the body must NOT be forked even though it
+	// contains a comm op: an [else] clause makes the alt finite (no
+	// blocking), and a `@decoded` redirect depends on codec decoding the
+	// strict path does not implement yet.
+	noFork := false
+	visited := map[syntax.Node]bool{}
+	var scan func(n syntax.Node) bool
+	scan = func(rootNode syntax.Node) bool {
+		if rootNode == nil || visited[rootNode] {
+			return false
+		}
+		visited[rootNode] = true
+		syntax.Inspect(rootNode, func(n syntax.Node) bool {
+			if n == nil {
+				return false
+			}
+			// An [else] guard anywhere means the alt always resolves
+			// immediately — the body is finite and handled by the
+			// finite/deferred-responder path, not concurrency.
+			if cc, ok := n.(*syntax.CommClause); ok && cc.Else != nil {
+				noFork = true
+			}
+			if _, ok := n.(*syntax.CallStmt); ok { // blocking call { ... }
+				found = true
+			}
+			// `@decoded` redirect assignment depends on codec decoding
+			// that the strict path does not yet implement (Phase 3). Such
+			// a body, if forked, would run and its getcall param redirect
+			// would fail to decode — so leave it on the skip path (where
+			// approximate never runs it) until decoding lands. Treating it
+			// as "does not block on comm" keeps forkStrict from stealing
+			// it. Guards Sem_220302_getcall_operation_014..019.
+			if _, ok := n.(*syntax.DecodedExpr); ok {
+				noFork = true
+			}
+			if sel, ok := n.(*syntax.SelectorExpr); ok {
+				if id, ok := sel.Sel.(*syntax.Ident); ok && commOps[id.String()] {
+					found = true
+				}
+			}
+			if ce, ok := n.(*syntax.CallExpr); ok {
+				if id, ok := ce.Fun.(*syntax.Ident); ok {
+					if v, ok := env.Get(id.String()); ok {
+						if fn, ok := v.(*runtime.Function); ok && fn.Body != nil {
+							scan(fn.Body)
+						}
+					}
+				}
+			}
+			return true
+		})
+		return found
+	}
+	scan(root)
+	return found && !noFork
+}
+
 func startBodyBlocksOnPortReceive(body syntax.Node, env runtime.Scope) bool {
 	root := body
 	if ce, ok := body.(*syntax.CallExpr); ok {
@@ -6964,6 +7058,40 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		if op == "start" && ref != nil && ref.AliveModifier && schedulerEnabled(env) {
 			skip = false
 		}
+		// Strict profile: a non-alive PTC started with a body that
+		// blocks on inter-component communication (a server blocked in
+		// `getcall`, or a client issuing a blocking `call`) must run
+		// concurrently — TTCN-3 `start` runs the body regardless of the
+		// `alive` modifier (ES 201 873-1 §21.3.2). The synchronous model
+		// skips such bodies (they'd dead-end), so two-PTC call/reply
+		// fixtures (Sem_220301/220302) never execute. Under strict we
+		// fork them onto a real goroutine; the deterministic clock
+		// automatically falls back to the real clock while these PTCs are
+		// live (deterministicClockEnabled), so inter-PTC events race in
+		// real time instead of a virtual-clock advance firing a safety
+		// timer prematurely. Gated on schedulerEnabled so the default
+		// (approximate) path is untouched.
+		forkStrict := false
+		if skip && op == "start" && ref != nil && !ref.AliveModifier &&
+			schedulerEnabled(env) && startBodyBlocksOnComm(body, env) {
+			// Only fork when no call is already queued. A pending call
+			// (the caller did `p.call(...); comp.start(server)`) is
+			// consumed inline by the finite/deferred-responder path
+			// below, which correctly satisfies the responder's getcall
+			// from the shared queue. Forking that case instead races the
+			// routing (the peer queue vs. the inline consume) and the
+			// responder blocks forever. We fork only the genuinely
+			// concurrent shape — the server starts and blocks in getcall
+			// BEFORE any call exists (`comp.start(server); p.call(...)`).
+			pending := false
+			if exec := runtime.FindTestcaseExec(env); exec != nil {
+				pending = exec.HasPendingCalls()
+			}
+			if !pending {
+				skip = false
+				forkStrict = true
+			}
+		}
 		// Exception: a finite responder body (getcall/reply/raise)
 		// runs when the caller already queued its nowait calls
 		// (pattern A: `p.call(..., nowait); ...; comp.start(f)`).
@@ -7025,9 +7153,9 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				// even when the body itself was skipped. `.start` is
 				// non-blocking and keeps the modelled-duration timing.
 				if op == "call" {
-					ref.Done = true
+					ref.SetDone(true)
 					if !ref.AliveModifier {
-						ref.Alive = false
+						ref.SetAlive(false)
 					}
 				}
 				if op == "start" && startBodyIsDeferredResponder(body, env) {
@@ -7043,9 +7171,9 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 							} else {
 								_ = eval(body, runEnv)
 							}
-							ref.Done = true
+							ref.SetDone(true)
 							if !ref.AliveModifier {
-								ref.Alive = false
+								ref.SetAlive(false)
 							}
 						})
 					}
@@ -7071,8 +7199,8 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		// goroutine (the whole point of the mode) — a while(true)
 		// send/receive worker would hang the MTC if run inline. When
 		// off, this reduces to the daemon-receive predicate exactly.
-		if op == "start" && ref != nil && ref.AliveModifier &&
-			(schedulerEnabled(env) || startBodyBlocksOnPortReceive(body, env)) {
+		if op == "start" && ref != nil &&
+			((ref.AliveModifier && (schedulerEnabled(env) || startBodyBlocksOnPortReceive(body, env))) || forkStrict) {
 			exec := runtime.FindTestcaseExec(env)
 			if exec != nil {
 				// Eagerly snapshot the call arguments in the
@@ -7106,7 +7234,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 					// `.stop` / `.kill` drains instead;
 					// see the .stop case below and
 					if ref != nil {
-						ref.Done = true
+						ref.SetDone(true)
 					}
 				}()
 				// Start-barrier: park the parent until the
@@ -7195,14 +7323,14 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 			// if exec := runtime.FindTestcaseExec(env); exec != nil {
 			//     drainComponentPortMaps(exec, ref.ID)
 			// }
-			ref.Done = true
+			ref.SetDone(true)
 			// `comp.call(f)` is a different operation: TTCN-3
 			// 21.3.10 says it blocks until f returns and the
 			// component is finished afterwards. For `.start`
 			// we keep `.alive` true on AliveModifier refs so
 			// they can be re-`.start`-ed.
 			if op == "call" || !ref.AliveModifier {
-				ref.Alive = false
+				ref.SetAlive(false)
 			}
 			if op == "call" {
 				ref.LastCallStopped = stopped
@@ -7227,9 +7355,9 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		return runtime.NewBool(compKilled(ref)), true
 	case "stop", "kill":
 		if ref != nil {
-			ref.Done = true
+			ref.SetDone(true)
 			if op == "kill" || !ref.AliveModifier {
-				ref.Alive = false
+				ref.SetAlive(false)
 			}
 			// Async PTC: signal the goroutine to unwind out
 			// of any alt / receive / timer wait. `comp.stop`

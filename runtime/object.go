@@ -10,6 +10,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 	"unicode"
 
@@ -327,18 +328,28 @@ type ComponentRef struct {
 	TypeName string
 	Module   string
 	Name     string // optional `name := "..."` from MyComp.create(name)
-	Alive    bool   // false once `.stop`/`.kill` ran against the ref
+	// mu guards the mutable lifecycle fields (alive, done, verdict) that
+	// a forked PTC goroutine writes while the MTC concurrently observes
+	// them via `comp.done` / `comp.alive` / `comp.running` /
+	// `comp.done -> value`. All other fields are set on the owning
+	// goroutine before/without concurrency and need no lock.
+	mu sync.Mutex
+	// alive is false once `.stop`/`.kill` ran against the ref. Access via
+	// IsAlive/SetAlive (mu-guarded).
+	alive bool
 	// AliveModifier records whether the component was created with
 	// the `alive` keyword (`MyComp.create alive`). Per TTCN-3 21.3
 	// `comp.stop` on an alive component only suspends behaviour -
 	// the ref stays Alive=true and can be re-`.start`-ed; only
 	// `comp.kill` actually flips Alive=false.
 	AliveModifier bool
-	// Done is set once a `.start(...)` body finished (or `.stop`
+	// done is set once a `.start(...)` body finished (or `.stop`
 	// ran) on this ref. It lets `comp.done` / `all component.done`
-	// answer true while the ref is still Alive=true (the alive
-	// modifier keeps the component reachable for restart).
-	Done bool
+	// answer true while the ref is still alive=true (the alive
+	// modifier keeps the component reachable for restart). Access via
+	// IsDone/SetDone (mu-guarded) — a forked PTC writes it on its own
+	// goroutine while the MTC polls it.
+	done bool
 
 	// Started records that a `.start(...)` ran on this ref, even when
 	// the loopback model skipped the body (e.g. a finite-timer PTC).
@@ -359,10 +370,12 @@ type ComponentRef struct {
 	// would otherwise keep it reusable (ETSI 21.3.4/21.3.8).
 	ModeledKill bool
 
-	// Verdict is this component's local verdict, accumulated from the
+	// verdict is this component's local verdict, accumulated from the
 	// `setverdict(...)` calls executed while it was the running
-	// component. `comp.done -> value v` reads it (ETSI 21.3.7).
-	Verdict Verdict
+	// component. `comp.done -> value v` reads it (ETSI 21.3.7). Access
+	// via GetVerdict/MergeVerdict (mu-guarded) — a forked PTC merges into
+	// it via setverdict on its own goroutine.
+	verdict Verdict
 
 	// Scope holds per-component member state for PTC execution. Alive
 	// components reuse it across restarts; non-alive components get a
@@ -382,12 +395,66 @@ func (c *ComponentRef) MergeVerdict(v Verdict) {
 	if c == nil {
 		return
 	}
-	if c.Verdict == "" {
-		c.Verdict = NoneVerdict
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.verdict == "" {
+		c.verdict = NoneVerdict
 	}
-	if verdictRank(v) > verdictRank(c.Verdict) {
-		c.Verdict = v
+	if verdictRank(v) > verdictRank(c.verdict) {
+		c.verdict = v
 	}
+}
+
+// IsDone reports whether the component's started behaviour has finished.
+// Safe to call from any goroutine (mu-guarded).
+func (c *ComponentRef) IsDone() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.done
+}
+
+// SetDone records completion of the component's started behaviour.
+func (c *ComponentRef) SetDone(v bool) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.done = v
+	c.mu.Unlock()
+}
+
+// IsAlive reports whether the component is still reachable (not
+// stopped/killed). Safe to call from any goroutine (mu-guarded).
+func (c *ComponentRef) IsAlive() bool {
+	if c == nil {
+		return false
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.alive
+}
+
+// SetAlive sets the component's reachability.
+func (c *ComponentRef) SetAlive(v bool) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.alive = v
+	c.mu.Unlock()
+}
+
+// GetVerdict returns the component's accumulated local verdict.
+func (c *ComponentRef) GetVerdict() Verdict {
+	if c == nil {
+		return ""
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.verdict
 }
 
 func (c *ComponentRef) Type() ObjectType { return COMPONENT_REF }

@@ -11,7 +11,11 @@ import (
 // multi-dimensional index path for each leaf and short-circuit when
 // the callback returns false.
 func TestWalkComponentArray(t *testing.T) {
-	leaf := func(id int64) *runtime.ComponentRef { return &runtime.ComponentRef{ID: id, Alive: true} }
+	leaf := func(id int64) *runtime.ComponentRef {
+		r := &runtime.ComponentRef{ID: id}
+		r.SetAlive(true)
+		return r
+	}
 	row := func(refs ...*runtime.ComponentRef) *runtime.List {
 		l := &runtime.List{ListType: runtime.RECORD_OF}
 		for _, r := range refs {

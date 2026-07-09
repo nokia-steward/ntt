@@ -175,7 +175,7 @@ func compAlive(ref *runtime.ComponentRef) bool {
 	if ref == nil {
 		return false
 	}
-	if !ref.Alive {
+	if !ref.IsAlive() {
 		return false
 	}
 	// A completed PTC is no longer alive when its behaviour ended and it
@@ -189,15 +189,15 @@ func compAlive(ref *runtime.ComponentRef) bool {
 }
 
 func compRunning(ref *runtime.ComponentRef) bool {
-	return ref != nil && ref.Alive && !ref.Done && !componentCompleted(ref)
+	return ref != nil && ref.IsAlive() && !ref.IsDone() && !componentCompleted(ref)
 }
 
 func compDone(ref *runtime.ComponentRef) bool {
-	return ref == nil || ref.Done || !ref.Alive || componentCompleted(ref)
+	return ref == nil || ref.IsDone() || !ref.IsAlive() || componentCompleted(ref)
 }
 
 func compKilled(ref *runtime.ComponentRef) bool {
-	if ref == nil || !ref.Alive {
+	if ref == nil || !ref.IsAlive() {
 		return true
 	}
 	// A completed body kills the component unless it was created `alive`
@@ -241,7 +241,7 @@ func evalComponentDoneRedirect(n *syntax.RedirectExpr, env runtime.Scope) (runti
 		matched = compKilled(ref)
 	}
 	if matched && len(n.Value) > 0 {
-		v := ref.Verdict
+		v := ref.GetVerdict()
 		if v == "" {
 			v = runtime.NoneVerdict
 		}
