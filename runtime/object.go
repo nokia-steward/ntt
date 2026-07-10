@@ -280,6 +280,10 @@ type TypeDesc struct {
 	// interpreter can map a positional value literal onto the declared
 	// field names (type-directed coercion). Nil for non-struct types.
 	Struct *syntax.StructTypeDecl
+	// Signature carries a `signature` declaration so a procedure
+	// `-> param(a, -, b)` redirect can bind positional targets onto the
+	// parameter record's fields in formal-parameter order.
+	Signature *syntax.SignatureDecl
 	// ListKind is SET_OF for a `set of` type so values/templates of
 	// the type are tagged unordered (order-independent matching);
 	// empty for record-of and non-list types.

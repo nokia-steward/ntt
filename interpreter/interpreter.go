@@ -310,7 +310,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				if portIdent, ok := sel.X.(*syntax.Ident); ok {
 					if op, ok := sel.Sel.(*syntax.Ident); ok {
 						switch op.String() {
-						case "receive", "trigger", "getreply", "catch":
+						case "receive", "trigger", "getreply", "catch", "getcall":
 							return evalPortReceiveInfo(portIdent.String(), info, env, true)
 						case "check":
 							return evalPortReceiveInfo(portIdent.String(), info, env, false)
@@ -6891,6 +6891,46 @@ func startBodyIsDeferredResponder(body syntax.Node, env runtime.Scope) bool {
 //
 // If the function reference can't be resolved we conservatively
 // return false (keep the synchronous path).
+// startBodyHasBlockingCall reports whether a started PTC body issues a
+// blocking `call { ... }` (a CallStmt), i.e. it is a caller/client rather
+// than a responder. Such a body always forks under strict — it produces a
+// call, so a pending call from another component is irrelevant (unlike a
+// getcall responder, which consumes a queued call inline). Resolves one
+// level of `.start(f())` callee like startBodyBlocksOnComm.
+func startBodyHasBlockingCall(body syntax.Node, env runtime.Scope) bool {
+	root := startBodyRoot(body, env)
+	found := false
+	visited := map[syntax.Node]bool{}
+	var scan func(n syntax.Node)
+	scan = func(rootNode syntax.Node) {
+		if rootNode == nil || visited[rootNode] {
+			return
+		}
+		visited[rootNode] = true
+		syntax.Inspect(rootNode, func(n syntax.Node) bool {
+			if n == nil || found {
+				return false
+			}
+			if _, ok := n.(*syntax.CallStmt); ok {
+				found = true
+				return false
+			}
+			if ce, ok := n.(*syntax.CallExpr); ok {
+				if id, ok := ce.Fun.(*syntax.Ident); ok {
+					if v, ok := env.Get(id.String()); ok {
+						if fn, ok := v.(*runtime.Function); ok && fn.Body != nil {
+							scan(fn.Body)
+						}
+					}
+				}
+			}
+			return true
+		})
+	}
+	scan(root)
+	return found
+}
+
 // startBodyBlocksOnComm reports whether a started PTC body would block
 // waiting on inter-component communication — a blocking `call` statement
 // (CallStmt) or a getcall/getreply/receive/trigger/catch operation. Such
@@ -7165,20 +7205,22 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		forkStrict := false
 		if skip && op == "start" && ref != nil && !ref.AliveModifier &&
 			schedulerEnabled(env) && startBodyBlocksOnComm(body, env) {
-			// Only fork when no call is already queued. A pending call
-			// (the caller did `p.call(...); comp.start(server)`) is
-			// consumed inline by the finite/deferred-responder path
-			// below, which correctly satisfies the responder's getcall
-			// from the shared queue. Forking that case instead races the
-			// routing (the peer queue vs. the inline consume) and the
-			// responder blocks forever. We fork only the genuinely
-			// concurrent shape — the server starts and blocks in getcall
-			// BEFORE any call exists (`comp.start(server); p.call(...)`).
+			// A CLIENT (a body that issues a blocking `call{}`) always
+			// forks: it PRODUCES a call, so another component's pending
+			// call is irrelevant. A RESPONDER (getcall/getreply with no
+			// blocking call of its own) forks only when no call is already
+			// queued — a pending call (the caller did `p.call(...);
+			// comp.start(server)`) is consumed inline by the
+			// finite/deferred-responder path below; forking that case
+			// instead races the routing and the responder blocks forever.
+			// The HasPendingCalls flag is global (any component's call), so
+			// gating a client on it would wrongly skip the second of two
+			// clients once the first has called (multi-client broadcast).
 			pending := false
 			if exec := runtime.FindTestcaseExec(env); exec != nil {
 				pending = exec.HasPendingCalls()
 			}
-			if !pending {
+			if startBodyHasBlockingCall(body, env) || !pending {
 				skip = false
 				forkStrict = true
 			}
@@ -9441,11 +9483,70 @@ func applyRedirectProc(r *syntax.RedirectExpr, msg runtime.PortMessage, env runt
 	for _, v := range r.Value {
 		applyRedirectValueExpr(v, msg.RetValue, env)
 	}
-	for _, v := range r.Param {
-		applyRedirectValueExpr(v, msg.Payload, env)
+	if len(r.Param) > 0 {
+		paramNames := signatureParamNames(msg.Signature, env)
+		for _, pe := range r.Param {
+			applyParamRedirect(pe, msg.Payload, paramNames, env)
+		}
 	}
 	if r.Sender != nil && msg.Sender != nil {
 		assignToLHS(r.Sender, msg.Sender, env)
+	}
+}
+
+// signatureParamNames returns the formal-parameter names of the named
+// signature in declaration order (empty entry for an unnamed slot), or
+// nil when unresolved.
+func signatureParamNames(sigName string, env runtime.Scope) []string {
+	if sigName == "" {
+		return nil
+	}
+	v, ok := env.Get(sigName)
+	if !ok {
+		return nil
+	}
+	td, ok := v.(*runtime.TypeDesc)
+	if !ok || td.Signature == nil || td.Signature.Params == nil {
+		return nil
+	}
+	names := make([]string, 0, len(td.Signature.Params.List))
+	for _, fp := range td.Signature.Params.List {
+		if fp != nil && fp.Name != nil {
+			names = append(names, fp.Name.String())
+		} else {
+			names = append(names, "")
+		}
+	}
+	return names
+}
+
+// applyParamRedirect realises one entry of a `-> param(...)` redirect:
+// named `x := field` binds by name; positional `a, -, b` binds each
+// non-dash target to the parameter record's field at that position (using
+// the signature's formal-parameter order); a non-parenthesised or
+// unresolved target falls back to the whole payload.
+func applyParamRedirect(pe syntax.Expr, payload runtime.Object, paramNames []string, env runtime.Scope) {
+	paren, ok := pe.(*syntax.ParenExpr)
+	if !ok {
+		applyRedirectValueExpr(pe, payload, env)
+		return
+	}
+	rec, isRec := payload.(*runtime.Record)
+	for i, el := range paren.List {
+		if isDashExpr(el) {
+			continue
+		}
+		if b, ok := el.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.ASSIGN {
+			applyRedirectValueExpr(el, payload, env)
+			continue
+		}
+		if isRec && i < len(paramNames) && paramNames[i] != "" {
+			if fv, ok := rec.Fields[paramNames[i]]; ok {
+				assignToLHS(el, fv, env)
+				continue
+			}
+		}
+		applyRedirectValueExpr(el, payload, env)
 	}
 }
 

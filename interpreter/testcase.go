@@ -1053,7 +1053,9 @@ func bindDeclNameScoped(env runtime.Scope, n syntax.Node, scopes []*syntax.WithS
 		}
 	case *syntax.SignatureDecl:
 		if d.Name != nil {
-			env.Set(syntax.Name(d.Name), typeDescForScoped(syntax.Name(d.Name), d.With, scopes))
+			td := typeDescForScoped(syntax.Name(d.Name), d.With, scopes)
+			td.Signature = d
+			env.Set(syntax.Name(d.Name), td)
 		}
 	case *syntax.StructTypeDecl:
 		if d.Name != nil {

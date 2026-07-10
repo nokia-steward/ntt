@@ -353,6 +353,88 @@ func TestStrictProc_TwoPTCBlockingCall(t *testing.T) {
 	}
 }
 
+// TestStrictProc_GetcallPositionalParamRedirect covers two procedure
+// redirect fixes: (1) a `getcall(...) -> param(...)` redirect is applied
+// at all (getcall was missing from the RedirectExpr evaluator), and (2)
+// the POSITIONAL form `param(v1, -, v3)` binds each target to the
+// parameter record's field at that position (in signature order) rather
+// than the whole payload. The server echoes the bound params back as the
+// reply's return value; a wrong binding yields the wrong value and the
+// client's value-qualified getreply would not match. Mirrors
+// Sem_220301_CallOperation_001.
+func TestStrictProc_GetcallPositionalParamRedirect(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		signature S(in integer p1, out integer p2, inout integer p3) return integer;
+		template S s_call := { p1 := 4, p2 := -, p3 := 5 };
+		type port P procedure { inout S }
+		type component C { port P p }
+		function server() runs on C {
+			var integer v1, v3;
+			p.getcall(S:?) -> param(v1, -, v3);
+			p.reply(S:{ p1 := -, p2 := v1 + v3, p3 := - } value v1 + v3);
+		}
+		testcase tc() runs on C system C {
+			var C peer := C.create;
+			connect(self:p, peer:p);
+			p.call(S:s_call, nowait);
+			peer.start(server());
+			peer.done;
+			alt {
+				[] p.getreply(S:? value 8) { setverdict(fail, "wrong return value"); }
+				[] p.getreply(S:{ p1 := -, p2 := 9, p3 := ? } value 9) { setverdict(pass); }
+				[] p.getreply { setverdict(fail, "no positional bind"); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (positional param redirect: v1=4,v3=5 -> value 9)", v, reason)
+	}
+}
+
+// TestStrictProc_MultiClientBroadcast covers the multi-connect broadcast
+// shape (Sem_220303_ReplyOperation): two non-alive client PTCs each issue
+// a blocking `call`, and a server replies `to all component`. Both
+// clients must run and receive the reply. The bug: the global
+// HasPendingCalls flag caused the SECOND client to be skipped once the
+// first had a queued call, so it never finished and `all component.done`
+// hung. A client (blocking call) must always fork regardless of pending
+// calls.
+func TestStrictProc_MultiClientBroadcast(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		signature S() return integer;
+		type port P procedure { inout S }
+		type component C { port P p }
+		function server() runs on C {
+			timer t := 30.0; t.start;
+			alt {
+				[] p.getcall(S:?) { }
+				[] t.timeout { setverdict(fail, "server timeout"); }
+			}
+			p.reply(S:{} value 7) to all component;
+		}
+		function client() runs on C {
+			p.call(S:{}, 5.0) {
+				[] p.getreply(S:? value 7) { setverdict(pass); }
+				[] p.catch(timeout) { setverdict(fail, "client got no reply"); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C srv := C.create;
+			var C a := C.create;
+			var C b := C.create;
+			connect(srv:p, a:p);
+			connect(srv:p, b:p);
+			srv.start(server());
+			a.start(client());
+			b.start(client());
+			all component.done;
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (both clients must run and get the broadcast reply)", v, reason)
+	}
+}
+
 // TestStrictProc_PortArrayConnectedRouting covers strict routing for
 // port ARRAY elements: connect(self:p[i], v:p[i]) records the endpoint
 // under the base name "p" (portRefName drops the index) while comm uses
