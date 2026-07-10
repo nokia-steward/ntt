@@ -2070,6 +2070,20 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			if cc.Comm == nil {
 				continue
 			}
+			// Boolean guard (ETSI 20.2): a clause `[expr] op {...}` is
+			// eligible this round only when `expr` holds. We gate only on
+			// a concretely-false boolean — an Undefined/unmodelled or
+			// non-boolean guard falls through to the comm match, preserving
+			// the pre-existing behaviour (the approximate path ignores the
+			// guard entirely). This lets a snapshot discriminate branches
+			// that differ only by their guard, e.g. a server accepting from
+			// `[v_client1 == null] getcall ... sender v_client1` vs the
+			// already-bound second client.
+			if cc.X != nil {
+				if gv, ok := eval(cc.X, env).(runtime.Bool); ok && !bool(gv) {
+					continue
+				}
+			}
 			if commGuardMatches(cc.Comm, env) {
 				matched = true
 				if cc.Body != nil {

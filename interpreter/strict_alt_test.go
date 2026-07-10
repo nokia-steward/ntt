@@ -230,6 +230,30 @@ func TestStrictProc_CheckHonoursTemplate(t *testing.T) {
 	}
 }
 
+// TestStrictAlt_BooleanGuardGatesClause covers boolean-guard evaluation
+// (ETSI 20.2): a clause `[expr] op {...}` is eligible only when `expr`
+// holds. Both clauses below fire on the same timer, but the first is
+// gated by a false boolean guard, so the strict snapshot must skip it and
+// take the second (true-guarded) clause. Without guard evaluation the
+// first clause would win by source order and the verdict would be fail.
+func TestStrictAlt_BooleanGuardGatesClause(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		type component C { }
+		testcase tc() runs on C system C {
+			var integer x := 0;
+			timer t := 0.05;
+			t.start;
+			alt {
+				[x > 0] t.timeout { setverdict(fail, "false-guarded clause fired"); }
+				[x == 0] t.timeout { setverdict(pass); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (false boolean guard must skip its clause)", v, reason)
+	}
+}
+
 // TestStrictProc_TwoPTCBlockingCall covers the concurrent two-PTC
 // blocking-`call` shape (Sem_220301_CallOperation): a non-alive `server`
 // PTC forks and blocks in `getcall` BEFORE any call exists, then a
