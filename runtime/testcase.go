@@ -51,6 +51,16 @@ type TestcaseExec struct {
 	// pace real I/O. Orthogonal to profile. Set once before PTCs fork.
 	deterministicClock bool
 
+	// sched, when non-nil, is the discrete-event quiescence scheduler
+	// (see scheduler.go). It becomes the authority for virtual time and
+	// for parking/waking component goroutines: time advances only when
+	// every live participant is parked, to the soonest timer deadline.
+	// This subsumes deterministicClock and makes concurrent timer-driven
+	// execution deterministic (no real sleeps, no polling backstop). Set
+	// once before any PTC is started; nil on the default/approximate path
+	// and for the real load driver.
+	sched *quiesceScheduler
+
 	// recvMu serializes the peek->match->dequeue->redirect critical
 	// section of a port receive (see interpreter evalPortReceiveInfo).
 	// Without it two PTC goroutines that share a port-instance name
@@ -377,6 +387,9 @@ func (t *TestcaseExec) FinishPTC(refID int64) {
 		p.SignalSend()
 		p.Done()
 	}
+	// A finishing PTC deregisters from the scheduler: it may satisfy a
+	// `comp.done` waiter and can make the system quiescent.
+	t.SchedGoDone()
 }
 
 // WaitPTCs blocks until every registered PTC goroutine has signaled
@@ -439,6 +452,9 @@ func (t *TestcaseExec) signalMessageReady() {
 	case t.msgReady <- struct{}{}:
 	default:
 	}
+	// Under the quiescence scheduler, waking parked peers is a broadcast
+	// (the cap-1 msgReady bus above can only reliably wake one waiter).
+	t.SchedSignal()
 }
 
 // PushComponent makes ref the currently-running component for the
@@ -1024,7 +1040,11 @@ func (t *TestcaseExec) PortLifecycle(a PortEndpoint) (string, bool) {
 }
 
 // VirtualClock returns the current per-testcase virtual time (seconds).
+// When the quiescence scheduler is active it owns the clock.
 func (t *TestcaseExec) VirtualClock() float64 {
+	if t.sched != nil {
+		return t.sched.now()
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.virtualClock
@@ -1034,6 +1054,10 @@ func (t *TestcaseExec) VirtualClock() float64 {
 // backward), modelling a `T.timeout` that fast-forwards to the timer's
 // deadline. Returns the resulting virtual time.
 func (t *TestcaseExec) AdvanceVirtualClock(to float64) float64 {
+	if t.sched != nil {
+		t.sched.advance(to)
+		return t.sched.now()
+	}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	if to > t.virtualClock {
@@ -1703,6 +1727,67 @@ func (t *TestcaseExec) DeterministicClock() bool {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	return t.deterministicClock
+}
+
+// SetDeterministicScheduler enables the discrete-event quiescence
+// scheduler (see scheduler.go). Call once, before any PTC is started.
+// Implies the deterministic clock. When enabled, component goroutines
+// park through SchedPark instead of the real-clock waits, and virtual
+// time advances only at quiescence.
+func (t *TestcaseExec) SetDeterministicScheduler(b bool) {
+	t.mu.Lock()
+	if b && t.sched == nil {
+		t.sched = newQuiesceScheduler()
+	} else if !b {
+		t.sched = nil
+	}
+	t.mu.Unlock()
+}
+
+// SchedulerActive reports whether the quiescence scheduler owns timing.
+func (t *TestcaseExec) SchedulerActive() bool {
+	return t.sched != nil
+}
+
+// SchedGoLive registers a newly forked component goroutine with the
+// scheduler. Call on the parent, before starting the goroutine. No-op
+// when the scheduler is off.
+func (t *TestcaseExec) SchedGoLive() {
+	if t.sched != nil {
+		t.sched.goLive()
+	}
+}
+
+// SchedGoDone deregisters a finished component goroutine (called from
+// FinishPTC). No-op when the scheduler is off.
+func (t *TestcaseExec) SchedGoDone() {
+	if t.sched != nil {
+		t.sched.goDone()
+	}
+}
+
+// SchedSignal wakes parked participants to re-snapshot after an event a
+// peer may be waiting on (a message/call enqueued, a stop). No-op when
+// the scheduler is off.
+func (t *TestcaseExec) SchedSignal() {
+	if t.sched != nil {
+		t.sched.signal()
+	}
+}
+
+// SchedPark parks the calling component goroutine until it should
+// re-snapshot. deadline/hasTimer describe its soonest timer guard (0/
+// false when it only waits on comm/component events). stop wakes it on
+// this component's stop. Returns reSnapshot=true when a comm event
+// arrived or the clock advanced; reSnapshot=false with stopped=true on
+// stop, or reSnapshot=false with stopped=false on a genuine deadlock.
+// Returns (false,false) immediately when the scheduler is off.
+func (t *TestcaseExec) SchedPark(deadline float64, hasTimer bool, stop <-chan struct{}) (reSnapshot, stopped bool) {
+	if t.sched == nil {
+		return false, false
+	}
+	gid, _ := callerGoroutineID()
+	return t.sched.park(gid, deadline, hasTimer, stop)
 }
 
 // portQualPrefix tags a component-qualified port key. The leading NUL

@@ -196,7 +196,7 @@ func runConformanceFiles(files []string) ConformanceSummary {
 	jobs := make(chan string)
 	results := make([]ConformanceResult, 0, len(files))
 	var (
-		mu              sync.Mutex
+		mu               sync.Mutex
 		matched, skipped int64
 	)
 	var wg sync.WaitGroup
@@ -398,9 +398,10 @@ func execVerdict(trees []*ttcn3.Tree, tcName string, profile runtime.SemanticsPr
 		// runs keep the historical real-clock behaviour.
 		v, r, err := interpreter.RunTestcaseWith(trees, tcName,
 			interpreter.TestcaseOptions{
-				Profile:            profile,
-				DeterministicClock: profile == runtime.ProfileStrict,
-				Context:            ctx,
+				Profile:                profile,
+				DeterministicClock:     profile == runtime.ProfileStrict,
+				DeterministicScheduler: false, // gated off pending proc-redirect fixes (getcall RedirectExpr routing + positional param binding)
+				Context:                ctx,
 			})
 		ch <- out{v: v, reason: r, err: err}
 	}()

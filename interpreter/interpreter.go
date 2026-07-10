@@ -672,18 +672,20 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				return timerReadVirtual(th, env)
 			case "timeout":
 				det := deterministicClockEnabled(env)
+				schedActive := deterministicSchedulerEnabled(env)
 				// Inside an alt guard the call has to be
 				// non-blocking: the scheduler decides
 				// which clause to wait for. Return a
 				// boolean so commGuardMatches can take
 				// the "this timer has already fired"
-				// branch when applicable. Under the
-				// deterministic clock the alt's block step
-				// advances time to the soonest deadline, so
-				// we must NOT advance here (that would let a
-				// later-deadline timer fire out of order).
+				// branch when applicable. Under either the
+				// deterministic clock or the quiescence
+				// scheduler the alt's block step advances time
+				// to the soonest deadline, so we must NOT
+				// advance here (that would let a later-deadline
+				// timer fire out of order).
 				if altCtx.active() {
-					if !det {
+					if !det && !schedActive {
 						if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
 							exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
 						}
@@ -694,6 +696,25 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 						th.Running = false
 					}
 					return runtime.NewBool(expired)
+				}
+				// Outside an alt, under the quiescence scheduler:
+				// park until the virtual clock reaches this
+				// timer's deadline, letting any earlier event or
+				// timer in another participant fire first.
+				if schedActive {
+					if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
+						deadline := th.StartedAtVirtual + th.Duration
+						stop := currentStopChan(exec)
+						for exec.VirtualClock() < deadline {
+							re, stopped := exec.SchedPark(deadline, true, stop)
+							if stopped || !re {
+								break
+							}
+						}
+					}
+					th.Ticks = th.MaxTicks
+					th.Running = false
+					return runtime.Undefined
 				}
 				// Outside an alt: fast-forward the virtual
 				// clock to this timer's deadline (so a later
@@ -5281,7 +5302,20 @@ func evalAnyAllFromTimer(n *syntax.FromExpr, op string, list *runtime.List, redi
 		if bestTh == nil {
 			return runtime.NewBool(false), true
 		}
-		if remaining := time.Until(bestDeadline); remaining > 0 {
+		if deterministicSchedulerEnabled(env) {
+			// Park until the virtual clock reaches this timer's deadline,
+			// letting earlier events/timers in other participants fire.
+			if exec := runtime.FindTestcaseExec(env); exec != nil {
+				deadline := bestTh.StartedAtVirtual + bestTh.Duration
+				stop := currentStopChan(exec)
+				for exec.VirtualClock() < deadline {
+					re, stopped := exec.SchedPark(deadline, true, stop)
+					if stopped || !re {
+						break
+					}
+				}
+			}
+		} else if remaining := time.Until(bestDeadline); remaining > 0 {
 			waitForAltTimerDeadline(remaining, env)
 		}
 		bestTh.Running = false
@@ -6388,13 +6422,14 @@ func evalTimerMethod(th *runtime.TimerHandle, sel syntax.Expr, n *syntax.CallExp
 		return timerReadVirtual(th, env)
 	case "timeout":
 		det := deterministicClockEnabled(env)
+		schedActive := deterministicSchedulerEnabled(env)
 		// Inside an alt the guard is non-blocking; the alt scheduler
 		// decides which clause to wait for. Under the deterministic
-		// clock the alt block step advances time to the soonest
-		// deadline, so don't advance here (preserves multi-timer
-		// ordering).
+		// clock or the quiescence scheduler the alt block step advances
+		// time to the soonest deadline, so don't advance here
+		// (preserves multi-timer ordering).
 		if altCtx.active() {
-			if !det {
+			if !det && !schedActive {
 				if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
 					exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
 				}
@@ -6405,6 +6440,24 @@ func evalTimerMethod(th *runtime.TimerHandle, sel syntax.Expr, n *syntax.CallExp
 				th.Running = false
 			}
 			return runtime.NewBool(expired)
+		}
+		// Outside an alt, under the quiescence scheduler: park until the
+		// virtual clock reaches the deadline so any earlier event or timer
+		// in another participant fires first.
+		if schedActive {
+			if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
+				deadline := th.StartedAtVirtual + th.Duration
+				stop := currentStopChan(exec)
+				for exec.VirtualClock() < deadline {
+					re, stopped := exec.SchedPark(deadline, true, stop)
+					if stopped || !re {
+						break
+					}
+				}
+			}
+			th.Ticks = th.MaxTicks
+			th.Running = false
+			return runtime.Undefined
 		}
 		// ETSI 23.7: outside an alt, `T.timeout` blocks until the timer
 		// expires. Fast-forward the virtual clock to the deadline (so a
@@ -6436,7 +6489,7 @@ func timerExpired(th *runtime.TimerHandle, env runtime.Scope) bool {
 	if th.Duration <= 0 {
 		return true
 	}
-	if deterministicClockEnabled(env) {
+	if useVirtualClock(env) {
 		if exec := runtime.FindTestcaseExec(env); exec != nil {
 			return exec.VirtualClock() >= th.StartedAtVirtual+th.Duration
 		}
@@ -6577,6 +6630,44 @@ func deterministicClockEnabled(env runtime.Scope) bool {
 	exec := runtime.FindTestcaseExec(env)
 	return exec != nil && exec.Profile() == runtime.ProfileStrict &&
 		exec.DeterministicClock() && !exec.HasLivePTCs()
+}
+
+// deterministicSchedulerEnabled reports whether the discrete-event
+// quiescence scheduler owns timing for this run (see runtime/scheduler.go).
+func deterministicSchedulerEnabled(env runtime.Scope) bool {
+	exec := runtime.FindTestcaseExec(env)
+	return exec != nil && exec.SchedulerActive()
+}
+
+// useVirtualClock reports whether timer expiry/read should consult the
+// virtual clock instead of wall time: true under the quiescence scheduler
+// (which owns the clock even with concurrent PTCs), or under the legacy
+// single-threaded deterministic clock.
+func useVirtualClock(env runtime.Scope) bool {
+	exec := runtime.FindTestcaseExec(env)
+	if exec == nil {
+		return false
+	}
+	if exec.SchedulerActive() {
+		return true
+	}
+	return exec.Profile() == runtime.ProfileStrict &&
+		exec.DeterministicClock() && !exec.HasLivePTCs()
+}
+
+// currentStopChan returns the stop channel of the component running on the
+// calling goroutine (nil for the MTC or when unavailable), so a scheduler
+// park unwinds promptly on comp.stop/kill.
+func currentStopChan(exec *runtime.TestcaseExec) <-chan struct{} {
+	if exec == nil {
+		return nil
+	}
+	if cur := exec.CurrentComponent(); cur != nil {
+		if exit := exec.PTCExit(cur.ID); exit != nil {
+			return exit.StopChan
+		}
+	}
+	return nil
 }
 
 // componentStopRequested reports whether the current PTC has been asked
@@ -7214,6 +7305,10 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				// See above.
 				fn, snapArgs, callArgExprs := snapshotPTCArgs(body, env)
 				exit := exec.RegisterPTC(ref.ID)
+				// Register the PTC with the quiescence scheduler before it
+				// can park (FinishPTC deregisters it). No-op when the
+				// scheduler is off.
+				exec.SchedGoLive()
 				go func() {
 					defer exec.FinishPTC(ref.ID)
 					exec.PushComponent(ref)
@@ -7251,7 +7346,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				// `ds[i].stop` -> on_unmap pop-front
 				// contract the external test-port suite
 				// depends on.
-				if exit != nil {
+				if exit != nil && !exec.SchedulerActive() {
 					dbg := os.Getenv("NTT_PORT_DEBUG") != ""
 					select {
 					case <-exit.MapChan:

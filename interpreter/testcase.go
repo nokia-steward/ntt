@@ -51,6 +51,17 @@ type TestcaseOptions struct {
 	// Orthogonal to Profile (only takes effect under ProfileStrict).
 	DeterministicClock bool
 
+	// DeterministicScheduler, when true, enables the discrete-event
+	// quiescence scheduler (runtime/scheduler.go): the virtual clock is
+	// advanced only when every live component goroutine is parked, to the
+	// soonest timer deadline, and comm/component events wake parked peers
+	// at the current instant. This makes concurrent timer-driven
+	// execution fast, sound, and deterministic — superseding
+	// DeterministicClock (which is only sound single-threaded). Intended
+	// for the conformance harness's strict runs; a real load driver
+	// leaves it off. Takes effect under ProfileStrict.
+	DeterministicScheduler bool
+
 	// Context, when non-nil, bounds the run: on ctx cancellation the
 	// executor is asked to stop (exec.Stop), which unwinds a blocked alt
 	// / timer wait promptly. Essential for the strict profile, whose
@@ -303,6 +314,11 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 	}
 	exec.SetProfile(profile)
 	exec.SetDeterministicClock(opts.DeterministicClock)
+	// The quiescence scheduler supersedes the single-threaded
+	// deterministic clock; only engage it under the strict profile.
+	if opts.DeterministicScheduler && profile == runtime.ProfileStrict {
+		exec.SetDeterministicScheduler(true)
+	}
 	// Cancellation: when the caller supplies a context, stop the
 	// executor on cancellation so a blocked (strict) alt / timer wait
 	// unwinds instead of leaking a goroutine. The watcher is bounded by
@@ -2136,6 +2152,18 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 // MessageReady signal. Returns true to re-snapshot, false when there is
 // nothing to wait for or the PTC was stopped.
 func blockForAltEvents(n *syntax.AltStmt, env runtime.Scope) bool {
+	if exec := runtime.FindTestcaseExec(env); exec != nil && exec.SchedulerActive() {
+		// Discrete-event quiescence scheduler owns timing: park this
+		// component until a comm/component event arrives or the virtual
+		// clock advances to fire a timer guard. No real sleep, no polling
+		// backstop — time only moves when every participant is parked.
+		vd, hasTimer := nextAltTimerVirtualDeadline(n, env)
+		if !hasTimer && !altHasEventGuard(n) {
+			return false // only boolean / [else] guards: nothing to await
+		}
+		re, _ := exec.SchedPark(vd, hasTimer, currentStopChan(exec))
+		return re
+	}
 	if deterministicClockEnabled(env) {
 		// Advance the virtual clock to the soonest timer deadline so
 		// exactly that timer fires on the next snapshot — no real sleep,
