@@ -314,11 +314,8 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 	}
 	exec.SetProfile(profile)
 	exec.SetDeterministicClock(opts.DeterministicClock)
-	// The quiescence scheduler supersedes the single-threaded
-	// deterministic clock; only engage it under the strict profile.
-	if opts.DeterministicScheduler && profile == runtime.ProfileStrict {
-		exec.SetDeterministicScheduler(true)
-	}
+	// The cooperative scheduler is engaged after SetMTCID below (it needs
+	// the MTC's component id as the root participant).
 	// Cancellation: when the caller supplies a context, stop the
 	// executor on cancellation so a blocked (strict) alt / timer wait
 	// unwinds instead of leaking a goroutine. The watcher is bounded by
@@ -398,6 +395,11 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 	}
 	mtcRef := newComponentRef(mtcTypeName, "", tcEnv)
 	exec.SetMTCID(mtcRef.ID)
+	// Engage the cooperative scheduler now that the MTC id is known (it is
+	// the root participant that holds the token first). Strict profile only.
+	if opts.DeterministicScheduler && profile == runtime.ProfileStrict {
+		exec.SetDeterministicScheduler(true)
+	}
 	env.Set("mtc", mtcRef)
 	env.Set("self", mtcRef)
 	exec.PushComponent(mtcRef)
@@ -2163,7 +2165,7 @@ func blockForAltEvents(n *syntax.AltStmt, env runtime.Scope) bool {
 		if !hasTimer && !altHasEventGuard(n) {
 			return false // only boolean / [else] guards: nothing to await
 		}
-		re, _ := exec.SchedPark(vd, hasTimer, currentStopChan(exec))
+		re, _ := exec.SchedPark(currentCompID(exec), vd, hasTimer, currentStopChan(exec))
 		return re
 	}
 	if deterministicClockEnabled(env) {

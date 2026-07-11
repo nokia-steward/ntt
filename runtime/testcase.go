@@ -51,15 +51,16 @@ type TestcaseExec struct {
 	// pace real I/O. Orthogonal to profile. Set once before PTCs fork.
 	deterministicClock bool
 
-	// sched, when non-nil, is the discrete-event quiescence scheduler
-	// (see scheduler.go). It becomes the authority for virtual time and
-	// for parking/waking component goroutines: time advances only when
-	// every live participant is parked, to the soonest timer deadline.
+	// sched, when non-nil, is the cooperative token scheduler (see
+	// scheduler.go). It becomes the authority for virtual time and for
+	// scheduling component goroutines: exactly one participant runs at a
+	// time (single-runner token, deterministic handoff by component id),
+	// and time advances only at quiescence to the soonest timer deadline.
 	// This subsumes deterministicClock and makes concurrent timer-driven
-	// execution deterministic (no real sleeps, no polling backstop). Set
-	// once before any PTC is started; nil on the default/approximate path
-	// and for the real load driver.
-	sched *quiesceScheduler
+	// execution deterministic (no real sleeps, no polling backstop, no
+	// interleaving races). Set once before any PTC is started; nil on the
+	// default/approximate path and for the real load driver.
+	sched *coopScheduler
 
 	// recvMu serializes the peek->match->dequeue->redirect critical
 	// section of a port receive (see interpreter evalPortReceiveInfo).
@@ -387,9 +388,10 @@ func (t *TestcaseExec) FinishPTC(refID int64) {
 		p.SignalSend()
 		p.Done()
 	}
-	// A finishing PTC deregisters from the scheduler: it may satisfy a
-	// `comp.done` waiter and can make the system quiescent.
-	t.SchedGoDone()
+	// A finishing PTC deregisters from the scheduler (handing the token
+	// on): it may satisfy a `comp.done` waiter and can make the system
+	// quiescent.
+	t.SchedGoDone(refID)
 }
 
 // WaitPTCs blocks until every registered PTC goroutine has signaled
@@ -1737,57 +1739,71 @@ func (t *TestcaseExec) DeterministicClock() bool {
 func (t *TestcaseExec) SetDeterministicScheduler(b bool) {
 	t.mu.Lock()
 	if b && t.sched == nil {
-		t.sched = newQuiesceScheduler()
+		t.sched = newCoopScheduler(t.mtcID)
 	} else if !b {
 		t.sched = nil
 	}
 	t.mu.Unlock()
 }
 
-// SchedulerActive reports whether the quiescence scheduler owns timing.
+// SchedulerActive reports whether the cooperative scheduler owns timing.
 func (t *TestcaseExec) SchedulerActive() bool {
 	return t.sched != nil
 }
 
-// SchedGoLive registers a newly forked component goroutine with the
-// scheduler. Call on the parent, before starting the goroutine. No-op
+// MTCID returns the MTC's component id (the scheduler's root participant).
+func (t *TestcaseExec) MTCID() int64 {
+	return t.mtcID
+}
+
+// SchedGoLive registers a newly forked component (by its ref id) with the
+// scheduler. Call on the parent, before starting the goroutine, so the
+// child is schedulable the moment the parent hands off the token. No-op
 // when the scheduler is off.
-func (t *TestcaseExec) SchedGoLive() {
+func (t *TestcaseExec) SchedGoLive(id int64) {
 	if t.sched != nil {
-		t.sched.goLive()
+		t.sched.goLive(id)
 	}
 }
 
-// SchedGoDone deregisters a finished component goroutine (called from
-// FinishPTC). No-op when the scheduler is off.
-func (t *TestcaseExec) SchedGoDone() {
+// SchedAcquireToken blocks a freshly forked component goroutine until the
+// scheduler grants it the token. Call at the very start of the goroutine
+// body. No-op when the scheduler is off.
+func (t *TestcaseExec) SchedAcquireToken(id int64) {
 	if t.sched != nil {
-		t.sched.goDone()
+		t.sched.acquireToken(id)
 	}
 }
 
-// SchedSignal wakes parked participants to re-snapshot after an event a
-// peer may be waiting on (a message/call enqueued, a stop). No-op when
-// the scheduler is off.
+// SchedGoDone deregisters a finished component (by ref id), handing the
+// token on. Called from FinishPTC. No-op when the scheduler is off.
+func (t *TestcaseExec) SchedGoDone(id int64) {
+	if t.sched != nil {
+		t.sched.goDone(id)
+	}
+}
+
+// SchedSignal marks parked participants ready to re-snapshot after an
+// event a peer may be waiting on (a message/call enqueued, a stop). The
+// caller keeps the token. No-op when the scheduler is off.
 func (t *TestcaseExec) SchedSignal() {
 	if t.sched != nil {
 		t.sched.signal()
 	}
 }
 
-// SchedPark parks the calling component goroutine until it should
-// re-snapshot. deadline/hasTimer describe its soonest timer guard (0/
-// false when it only waits on comm/component events). stop wakes it on
+// SchedPark releases the token and parks the given component until it
+// should re-snapshot. deadline/hasTimer describe its soonest timer guard
+// (0/false when it only waits on comm/component events). stop wakes it on
 // this component's stop. Returns reSnapshot=true when a comm event
 // arrived or the clock advanced; reSnapshot=false with stopped=true on
-// stop, or reSnapshot=false with stopped=false on a genuine deadlock.
+// stop, or reSnapshot=false with stopped=false on a terminal deadlock.
 // Returns (false,false) immediately when the scheduler is off.
-func (t *TestcaseExec) SchedPark(deadline float64, hasTimer bool, stop <-chan struct{}) (reSnapshot, stopped bool) {
+func (t *TestcaseExec) SchedPark(id int64, deadline float64, hasTimer bool, stop <-chan struct{}) (reSnapshot, stopped bool) {
 	if t.sched == nil {
 		return false, false
 	}
-	gid, _ := callerGoroutineID()
-	return t.sched.park(gid, deadline, hasTimer, stop)
+	return t.sched.park(id, deadline, hasTimer, stop)
 }
 
 // portQualPrefix tags a component-qualified port key. The leading NUL

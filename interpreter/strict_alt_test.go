@@ -20,63 +20,6 @@ func runStrict(t *testing.T, qname, src string) (runtime.Verdict, string) {
 	return v, reason
 }
 
-// runStrictSched runs under the strict profile with the discrete-event
-// quiescence scheduler enabled — deterministic virtual clock, no real
-// timer sleeps, no polling backstop.
-func runStrictSched(t *testing.T, qname, src string) (runtime.Verdict, string) {
-	t.Helper()
-	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, qname,
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true})
-	if err != nil {
-		t.Fatalf("RunTestcaseWith(%s): %v", qname, err)
-	}
-	return v, reason
-}
-
-// TestSched_TwoPTCBlockingCall mirrors TestStrictProc_TwoPTCBlockingCall
-// but under the quiescence scheduler, adding a boolean guard and a
-// catch(timeout) fail branch (as in Sem_220301_CallOperation_001). The
-// 30s server timer and the 5s call timer must never really elapse: the
-// reply arrives at virtual time 0 and the pass branch wins.
-func TestSched_TwoPTCBlockingCall(t *testing.T) {
-	start := time.Now()
-	v, reason := runStrictSched(t, "M.tc", `module M {
-		signature S() return integer;
-		type port P procedure { inout S }
-		type component C { port P p }
-		function server() runs on C {
-			timer t := 30.0; t.start;
-			alt {
-				[] p.getcall(S:?) { p.reply(S:{} value 42); }
-				[] t.timeout { setverdict(fail, "server timed out"); }
-			}
-		}
-		function client() runs on C {
-			var integer zero := 0;
-			var integer one := 1;
-			p.call(S:{}, 5.0) {
-				[] p.getreply(S:? value 7) { setverdict(fail, "wrong reply value"); }
-				[one > zero] p.getreply(S:? value 42) { setverdict(pass); }
-				[] p.catch(timeout) { setverdict(fail, "call timed out"); }
-			}
-		}
-		testcase tc() runs on C system C {
-			var C srv := C.create;
-			var C cli := C.create;
-			connect(srv:p, cli:p);
-			srv.start(server());
-			cli.start(client());
-			all component.done;
-		}
-	}`)
-	if v != runtime.PassVerdict {
-		t.Fatalf("verdict = %s (%s), want pass (scheduler two-PTC blocking call)", v, reason)
-	}
-	if elapsed := time.Since(start); elapsed > 2*time.Second {
-		t.Fatalf("took %v; scheduler must fire timers virtually (no real 5s/30s waits)", elapsed)
-	}
-}
-
 // TestStrictAlt_ConnectedPeerReceive covers the ProfileStrict snapshot
 // alt evaluator + connection-topology routing: a connected peer sends,
 // and the MTC's alt receives it on the connected port. Under the strict

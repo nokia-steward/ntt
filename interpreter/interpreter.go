@@ -196,6 +196,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			defer restoreCallSig()
 		}
 		if n.Body != nil {
+			if schedulerEnabled(env) {
+				return evalAltStmtStrict(&syntax.AltStmt{Body: n.Body}, env)
+			}
 			return evalAltStmtBestEffort(&syntax.AltStmt{Body: n.Body}, env)
 		}
 		return nil
@@ -706,7 +709,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 						deadline := th.StartedAtVirtual + th.Duration
 						stop := currentStopChan(exec)
 						for exec.VirtualClock() < deadline {
-							re, stopped := exec.SchedPark(deadline, true, stop)
+							re, stopped := exec.SchedPark(currentCompID(exec), deadline, true, stop)
 							if stopped || !re {
 								break
 							}
@@ -5309,7 +5312,7 @@ func evalAnyAllFromTimer(n *syntax.FromExpr, op string, list *runtime.List, redi
 				deadline := bestTh.StartedAtVirtual + bestTh.Duration
 				stop := currentStopChan(exec)
 				for exec.VirtualClock() < deadline {
-					re, stopped := exec.SchedPark(deadline, true, stop)
+					re, stopped := exec.SchedPark(currentCompID(exec), deadline, true, stop)
 					if stopped || !re {
 						break
 					}
@@ -6449,7 +6452,7 @@ func evalTimerMethod(th *runtime.TimerHandle, sel syntax.Expr, n *syntax.CallExp
 				deadline := th.StartedAtVirtual + th.Duration
 				stop := currentStopChan(exec)
 				for exec.VirtualClock() < deadline {
-					re, stopped := exec.SchedPark(deadline, true, stop)
+					re, stopped := exec.SchedPark(currentCompID(exec), deadline, true, stop)
 					if stopped || !re {
 						break
 					}
@@ -6668,6 +6671,19 @@ func currentStopChan(exec *runtime.TestcaseExec) <-chan struct{} {
 		}
 	}
 	return nil
+}
+
+// currentCompID returns the id of the component running on the calling
+// goroutine — the cooperative scheduler's participant key. Falls back to
+// the MTC id (the root participant) when no PTC component is pushed.
+func currentCompID(exec *runtime.TestcaseExec) int64 {
+	if exec == nil {
+		return 0
+	}
+	if cur := exec.CurrentComponent(); cur != nil {
+		return cur.ID
+	}
+	return exec.MTCID()
 }
 
 // componentStopRequested reports whether the current PTC has been asked
@@ -7347,12 +7363,15 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				// See above.
 				fn, snapArgs, callArgExprs := snapshotPTCArgs(body, env)
 				exit := exec.RegisterPTC(ref.ID)
-				// Register the PTC with the quiescence scheduler before it
-				// can park (FinishPTC deregisters it). No-op when the
-				// scheduler is off.
-				exec.SchedGoLive()
+				// Register the PTC with the cooperative scheduler before it
+				// can be scheduled (FinishPTC deregisters it). No-op when
+				// the scheduler is off.
+				exec.SchedGoLive(ref.ID)
 				go func() {
 					defer exec.FinishPTC(ref.ID)
+					// Wait for the scheduler to grant this PTC the token so
+					// only one component runs at a time (no-op when off).
+					exec.SchedAcquireToken(ref.ID)
 					exec.PushComponent(ref)
 					defer exec.PopComponent()
 					if fn != nil {
@@ -9357,6 +9376,13 @@ func pushCallSignature(ce *syntax.CallExpr, env runtime.Scope) func() {
 		}
 	}
 }
+
+// procCallTimeoutKey stashes a synthetic TimerHandle for the enclosing
+// blocking `call(S, D) { ... }`'s timeout duration D, so a `catch(timeout)`
+// guard in the response block fires when D elapses (ETSI 22.3.1). Without
+// it `catch(timeout)` never fires under strict (it is otherwise treated as
+// an exception catch that needs a MsgException that never arrives).
+const procCallTimeoutKey = "\x00ttcn3:proc-call-timeout"
 
 // currentCallSignature returns the signature of the enclosing blocking
 // call response block, or "" when there is none.

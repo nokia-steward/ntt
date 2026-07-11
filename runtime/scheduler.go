@@ -1,188 +1,263 @@
 package runtime
 
-// quiesceScheduler is a discrete-event "quiescence barrier" for the
-// strict interpreter's deterministic clock. It replicates, at the
-// application level, what Go's testing/synctest does in the runtime:
+// coopScheduler is a deterministic cooperative scheduler for the strict
+// interpreter. It replaces the broadcast quiescence barrier with a
+// single-runner "token": exactly one component participant executes at a
+// time, and the token is handed to the next participant in a
+// deterministic order (lowest component id first). This removes the
+// residual goroutine-interleaving nondeterminism of the plain quiescence
+// model — with real goroutines running concurrently between park points,
+// two components' snapshots could race (e.g. a client's getreply
+// snapshot vs. a server's reply), making blocking-call verdicts flaky.
 //
-//	Virtual time advances ONLY when every live participant (the MTC and
-//	all live PTC goroutines) is parked, and then it jumps to the soonest
-//	registered timer deadline, waking the goroutine(s) whose timer fires.
-//	A communication event (a message/call reaching a peer, or a peer
-//	finishing) wakes parked participants at the CURRENT instant, before
-//	any clock advance.
+// Model:
+//   - Every component (MTC + PTCs) is a "participant" keyed by its
+//     component id (deterministic, unlike a goroutine id).
+//   - The participant holding the token runs interpreter code until it
+//     parks (blocks) or finishes; then it hands the token off.
+//   - park() registers the participant's soonest timer deadline, releases
+//     the token, and waits to be re-granted. Handoff picks the
+//     lowest-id ready participant; if none is ready it advances the
+//     virtual clock to the soonest deadline (quiescence) and grants that
+//     participant; if nothing can ever fire it is a deadlock.
+//   - A produced event (a send/call/reply, signalled via signal(); a
+//     peer finishing, via goDone) marks parked participants ready so they
+//     re-snapshot when granted.
 //
-// This makes timer-driven concurrent execution fast (no real sleeps),
-// sound (a safety timer can never fire before an earlier event), and free
-// of the 2ms polling backstop's load-dependent flakiness.
-//
-// The type is deliberately self-contained (it owns the virtual clock and
-// takes explicit goroutine ids) so it can be unit-tested in isolation
-// with real goroutines under -race before it is wired into TestcaseExec.
-// It is not yet referenced by the interpreter; enabling it is a separate,
-// gated step.
-//
-// Concurrency: every field is guarded by mu. The wake channel is a
-// broadcast — closing it wakes all parked goroutines; a fresh one is
-// installed for the next round. A parked goroutine captures the current
-// wake channel under the lock, releases the lock, then selects on it, so
-// a broadcast that races the park is never lost.
-//
-// Deadlock is terminal and is decided ONLY on the parking path: it means
-// every live participant is parked and none holds a timer, so no future
-// event can occur (no participant is running to produce one). Because a
-// running goroutine is required to call signal/goDone, neither can race a
-// deadlock, so the flag never needs to be reset.
+// Virtual time advances only at quiescence, to the globally-soonest
+// deadline — same clock discipline as before, but now interleaving is
+// deterministic too. Self-contained and unit-tested in isolation before
+// wiring into TestcaseExec.
 
 import "sync"
 
 type parkEntry struct {
-	deadline float64 // virtual-seconds deadline of this goroutine's soonest timer
-	hasTimer bool    // false => waiting only on comm/component events (no timer)
+	deadline float64 // virtual-seconds deadline of the soonest timer, if any
+	hasTimer bool
 }
 
-type quiesceScheduler struct {
+type coopScheduler struct {
 	mu       sync.Mutex
-	clock    float64              // virtual time, seconds; monotonic
-	live     int                  // live participants (MTC + PTC goroutines)
-	parked   map[uint64]parkEntry // gid -> its registered wait
-	wake     chan struct{}        // broadcast channel; closed+recreated per event
-	deadlock bool                 // terminal: quiescent with no finite deadline
+	clock    float64                 // virtual time, seconds; monotonic
+	running  int64                   // participant id holding the token; 0 = none
+	live     map[int64]bool          // live participants (MTC + PTCs)
+	ready    map[int64]bool          // participants that can run now (forked or woken)
+	blocked  map[int64]parkEntry     // parked participants + their deadlines
+	turn     map[int64]chan struct{} // per-participant token-grant channel (buffered 1)
+	deadlock bool                    // terminal: quiescent with no finite deadline
 }
 
-func newQuiesceScheduler() *quiesceScheduler {
-	return &quiesceScheduler{
-		parked: make(map[uint64]parkEntry),
-		wake:   make(chan struct{}),
-		live:   1, // the MTC (root) participant
+func newCoopScheduler(mtc int64) *coopScheduler {
+	c := &coopScheduler{
+		running: mtc, // the MTC holds the token from the start
+		live:    map[int64]bool{mtc: true},
+		ready:   map[int64]bool{},
+		blocked: map[int64]parkEntry{},
+		turn:    map[int64]chan struct{}{},
 	}
+	c.turn[mtc] = make(chan struct{}, 1)
+	return c
+}
+
+// turnChLocked returns (creating if needed) the grant channel for id.
+func (c *coopScheduler) turnChLocked(id int64) chan struct{} {
+	ch, ok := c.turn[id]
+	if !ok {
+		ch = make(chan struct{}, 1)
+		c.turn[id] = ch
+	}
+	return ch
 }
 
 // now returns the current virtual time.
-func (q *quiesceScheduler) now() float64 {
-	q.mu.Lock()
-	defer q.mu.Unlock()
-	return q.clock
+func (c *coopScheduler) now() float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.clock
 }
 
-// advance moves the clock forward to `to` (never backward). Used for a
-// single-participant timeout that fast-forwards to its own deadline
-// without going through the barrier.
-func (q *quiesceScheduler) advance(to float64) {
-	q.mu.Lock()
-	if to > q.clock {
-		q.clock = to
+// advance moves the clock forward to `to` (never backward).
+func (c *coopScheduler) advance(to float64) {
+	c.mu.Lock()
+	if to > c.clock {
+		c.clock = to
 	}
-	q.mu.Unlock()
+	c.mu.Unlock()
 }
 
-// goLive registers a newly forked participant. Call before the goroutine
-// can park (i.e. at fork time, on the parent).
-func (q *quiesceScheduler) goLive() {
-	q.mu.Lock()
-	q.live++
-	q.mu.Unlock()
+// goLive registers a newly forked participant. Called on the PARENT
+// before the child goroutine starts, so the child is a schedulable
+// candidate the moment its parent hands off the token. The child then
+// calls acquireToken to actually take the token when granted.
+func (c *coopScheduler) goLive(id int64) {
+	c.mu.Lock()
+	c.live[id] = true
+	c.ready[id] = true
+	c.turnChLocked(id)
+	c.mu.Unlock()
 }
 
-// goDone deregisters a finished participant. A finish is itself an event
-// (it may satisfy a `comp.done` waiter), so it always wakes parked
-// participants; if it leaves the system quiescent with a pending timer it
-// also advances the clock so that timer still fires. It never declares a
-// deadlock — a just-finished participant may be exactly what a parked
-// waiter was blocked on, so the waiters get a chance to re-snapshot.
-func (q *quiesceScheduler) goDone() {
-	q.mu.Lock()
-	if q.live > 0 {
-		q.live--
+// acquireToken blocks the calling (freshly forked) participant until it is
+// granted the token. handoff sets running=id before granting, so on
+// return the caller holds the token.
+func (c *coopScheduler) acquireToken(id int64) {
+	c.mu.Lock()
+	c.live[id] = true
+	c.ready[id] = true
+	w := c.turnChLocked(id)
+	if c.running == 0 {
+		c.handoffLocked()
 	}
-	if q.quiescentLocked() {
-		q.advanceToSoonestLocked()
-	}
-	q.broadcastLocked()
-	q.mu.Unlock()
+	c.mu.Unlock()
+	<-w
 }
 
-// signal wakes all parked participants to re-snapshot. Call after a
-// running participant produces an event a parked peer may be waiting on
-// (a send/call/reply enqueued to a peer's queue, a stop, etc.). The
-// caller is still running, so the system is not quiescent and the clock
-// does not advance.
-func (q *quiesceScheduler) signal() {
-	q.mu.Lock()
-	q.broadcastLocked()
-	q.mu.Unlock()
+// goDone deregisters a finished participant (it held the token) and hands
+// the token on. A finish is an event, so parked participants (e.g.
+// comp.done waiters) are marked ready to re-snapshot.
+func (c *coopScheduler) goDone(id int64) {
+	c.mu.Lock()
+	delete(c.live, id)
+	delete(c.ready, id)
+	delete(c.blocked, id)
+	c.wakeAllBlockedLocked()
+	if c.running == id {
+		c.running = 0
+		c.handoffLocked()
+	}
+	c.mu.Unlock()
 }
 
-// park blocks the calling participant (identified by gid) until it should
-// re-snapshot. deadline/hasTimer describe its soonest timer guard (if
-// any). stop wakes it on this participant's stop.
-//
-// Returns reSnapshot=true when a comm event arrived or the clock advanced
-// (the caller re-evaluates its guards). Returns reSnapshot=false with
-// stopped=true when stop fired, or reSnapshot=false with stopped=false on
-// a genuine deadlock (quiescent, nothing left that can ever fire) — in
-// both cases the caller concludes without matching.
-func (q *quiesceScheduler) park(gid uint64, deadline float64, hasTimer bool, stop <-chan struct{}) (reSnapshot, stopped bool) {
-	q.mu.Lock()
-	q.parked[gid] = parkEntry{deadline: deadline, hasTimer: hasTimer}
-	if q.quiescentLocked() {
-		// This park completed a quiescent round. Advance to the soonest
-		// timer; if none exists nobody can ever fire → terminal deadlock.
-		if !q.advanceToSoonestLocked() {
-			q.deadlock = true
-		}
-		dl := q.deadlock
-		q.broadcastLocked()
-		delete(q.parked, gid)
-		q.mu.Unlock()
-		return !dl, false
+// signal marks parked participants ready to re-snapshot after the running
+// participant produced an event (a message/call/reply enqueued to a
+// peer). The caller keeps the token; the handoff happens when it parks.
+func (c *coopScheduler) signal() {
+	c.mu.Lock()
+	c.wakeAllBlockedLocked()
+	c.mu.Unlock()
+}
+
+// wakeAllBlockedLocked moves every parked participant into the ready set
+// so it re-snapshots on its next turn. Coarse but correct — a
+// re-snapshot with no progress simply re-parks. mu held.
+func (c *coopScheduler) wakeAllBlockedLocked() {
+	for id := range c.blocked {
+		c.ready[id] = true
+		delete(c.blocked, id)
 	}
-	w := q.wake
-	q.mu.Unlock()
+}
+
+// park releases the token, records the participant's soonest deadline,
+// and blocks until it is granted the token again (a comm event woke it or
+// the clock advanced to its timer) or `stop` fires. Returns reSnapshot=
+// true to re-evaluate guards; reSnapshot=false with stopped=true on stop,
+// or reSnapshot=false with stopped=false on a terminal deadlock.
+func (c *coopScheduler) park(id int64, deadline float64, hasTimer bool, stop <-chan struct{}) (reSnapshot, stopped bool) {
+	c.mu.Lock()
+	delete(c.ready, id)
+	c.blocked[id] = parkEntry{deadline: deadline, hasTimer: hasTimer}
+	w := c.turnChLocked(id)
+	if c.running == id {
+		c.running = 0
+	}
+	c.handoffLocked()
+	c.mu.Unlock()
 
 	select {
 	case <-w:
-		// Woken by a broadcast: a comm event, a peer finishing, or a
-		// clock advance from another goroutine completing a quiescent
-		// round.
+		c.mu.Lock()
+		dl := c.deadlock
+		c.running = id
+		c.mu.Unlock()
+		return !dl, false
 	case <-stop:
-		q.mu.Lock()
-		delete(q.parked, gid)
-		q.mu.Unlock()
+		c.mu.Lock()
+		delete(c.blocked, id)
+		delete(c.ready, id)
+		// If handoff granted us the token concurrently, release it so the
+		// system doesn't stall on a participant that is giving up.
+		select {
+		case <-w:
+		default:
+		}
+		if c.running == id {
+			c.running = 0
+			c.handoffLocked()
+		}
+		c.mu.Unlock()
 		return false, true
 	}
-
-	q.mu.Lock()
-	delete(q.parked, gid)
-	dl := q.deadlock
-	q.mu.Unlock()
-	return !dl, false
 }
 
-// quiescentLocked reports whether every live participant is parked. mu
-// must be held.
-func (q *quiesceScheduler) quiescentLocked() bool {
-	return q.live > 0 && len(q.parked) >= q.live
-}
-
-// advanceToSoonestLocked moves the clock to the soonest finite deadline
-// among parked participants and reports whether such a deadline existed.
-// mu must be held.
-func (q *quiesceScheduler) advanceToSoonestLocked() bool {
-	var min float64
-	have := false
-	for _, p := range q.parked {
-		if p.hasTimer && (!have || p.deadline < min) {
-			min, have = p.deadline, true
+// handoffLocked grants the token to the next runnable participant. It is
+// called with running==0. Order: (1) the lowest-id ready participant;
+// (2) else, at quiescence, advance the clock to the soonest finite
+// deadline and grant that participant; (3) else a terminal deadlock —
+// release every parked participant so their alts conclude. mu held.
+func (c *coopScheduler) handoffLocked() {
+	if c.running != 0 {
+		return
+	}
+	if id, ok := c.lowestReadyLocked(); ok {
+		delete(c.ready, id)
+		delete(c.blocked, id)
+		c.running = id
+		c.grantLocked(id)
+		return
+	}
+	// No one is ready: quiescent. Advance to the soonest finite deadline.
+	if id, dl, ok := c.soonestDeadlineLocked(); ok {
+		if dl > c.clock {
+			c.clock = dl
+		}
+		delete(c.blocked, id)
+		c.running = id
+		c.grantLocked(id)
+		return
+	}
+	// Nothing can ever fire: deadlock. Release all parked participants so
+	// their blocked alts conclude without matching.
+	if len(c.blocked) > 0 {
+		c.deadlock = true
+		for id := range c.blocked {
+			delete(c.blocked, id)
+			c.grantLocked(id)
 		}
 	}
-	if have && min > q.clock {
-		q.clock = min
-	}
-	return have
 }
 
-// broadcastLocked wakes every parked participant. mu must be held.
-func (q *quiesceScheduler) broadcastLocked() {
-	close(q.wake)
-	q.wake = make(chan struct{})
+func (c *coopScheduler) lowestReadyLocked() (int64, bool) {
+	best := int64(0)
+	found := false
+	for id := range c.ready {
+		if !found || id < best {
+			best, found = id, true
+		}
+	}
+	return best, found
+}
+
+func (c *coopScheduler) soonestDeadlineLocked() (int64, float64, bool) {
+	var bestID int64
+	var bestDL float64
+	found := false
+	for id, b := range c.blocked {
+		if !b.hasTimer {
+			continue
+		}
+		if !found || b.deadline < bestDL || (b.deadline == bestDL && id < bestID) {
+			bestID, bestDL, found = id, b.deadline, true
+		}
+	}
+	return bestID, bestDL, found
+}
+
+// grantLocked hands the token to id (non-blocking; the channel is
+// buffered 1 and a not-yet-waiting participant consumes it on arrival).
+func (c *coopScheduler) grantLocked(id int64) {
+	ch := c.turnChLocked(id)
+	select {
+	case ch <- struct{}{}:
+	default:
+	}
 }
