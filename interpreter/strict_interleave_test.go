@@ -1,12 +1,47 @@
 package interpreter_test
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/nokia/ntt/interpreter"
 	"github.com/nokia/ntt/runtime"
 	"github.com/nokia/ntt/ttcn3"
 )
+
+// TestStrictAlt_AltstepGuardTimerConcludes covers a timer guard nested
+// INSIDE an altstep-call alternative (`alt { [] a() }` where `a` has
+// `[] t.timeout {}`). The strict block step must look THROUGH the altstep
+// call to find t's deadline (nextAltTimerVirtualDeadline recurses into
+// altstep guards); without that no deadline is found and the alt blocks
+// forever. Mirrors Sem_1101_ValueVars_001 / Sem_160201_invoking_altsteps_004.
+// A context bounds the run so a regression surfaces as a non-pass rather
+// than a hang.
+func TestStrictAlt_AltstepGuardTimerConcludes(t *testing.T) {
+	src := `module M {
+		type component C { timer t }
+		altstep a() runs on C {
+			[] t.timeout { setverdict(pass); }
+		}
+		testcase tc() runs on C system C {
+			t.start(0.05);
+			alt {
+				[] a();
+			}
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass via the altstep's nested timer guard", v, reason)
+	}
+}
 
 // TestStrictInterleave_TakesEachBranchOnce covers the core interleave
 // semantics (ETSI ES 201 873-1 §20.4): EVERY alternative is taken exactly

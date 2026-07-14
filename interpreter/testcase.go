@@ -2343,37 +2343,67 @@ func nextAltTimerVirtualDeadline(n *syntax.AltStmt, env runtime.Scope) (float64,
 			soonest, have = dl, true
 		}
 	}
+	// considerComm accounts for one clause guard. A direct `<timer>.timeout`
+	// contributes its deadline; an altstep-call guard `[] a()` is walked into
+	// so a timer guard living INSIDE the altstep (e.g. `alt { [] a() }` where
+	// `a` has `[] t.timeout {}`) still advances the deterministic clock —
+	// otherwise no deadline is found and the run blocks forever. `depth`
+	// bounds mutually-recursive altsteps. Timers resolve in the current env,
+	// which reaches component-scope timers (the common case).
+	var considerComm func(comm syntax.Node, depth int)
+	considerComm = func(comm syntax.Node, depth int) {
+		es, ok := comm.(*syntax.ExprStmt)
+		if !ok {
+			return
+		}
+		switch x := es.Expr.(type) {
+		case *syntax.SelectorExpr:
+			recvIdent, ok := x.X.(*syntax.Ident)
+			if !ok {
+				return
+			}
+			op, ok := x.Sel.(*syntax.Ident)
+			if !ok || op.String() != "timeout" {
+				return
+			}
+			if rn := recvIdent.String(); rn == "any timer" || rn == "all timer" {
+				for _, th := range collectScopeTimers(env) {
+					consider(th)
+				}
+			} else if v, ok := env.Get(rn); ok {
+				if th, ok := v.(*runtime.TimerHandle); ok {
+					consider(th)
+				}
+			}
+		case *syntax.CallExpr:
+			if depth <= 0 {
+				return
+			}
+			id, ok := x.Fun.(*syntax.Ident)
+			if !ok {
+				return
+			}
+			v, ok := env.Get(id.String())
+			if !ok {
+				return
+			}
+			fn, ok := v.(*runtime.Function)
+			if !ok || !fn.IsAltstep || fn.Body == nil {
+				return
+			}
+			for _, s := range fn.Body.Stmts {
+				if cc, ok := s.(*syntax.CommClause); ok && cc.Else == nil && cc.Comm != nil {
+					considerComm(cc.Comm, depth-1)
+				}
+			}
+		}
+	}
 	for _, s := range n.Body.Stmts {
 		cc, ok := s.(*syntax.CommClause)
 		if !ok || cc.Else != nil || cc.Comm == nil {
 			continue
 		}
-		es, ok := cc.Comm.(*syntax.ExprStmt)
-		if !ok {
-			continue
-		}
-		sel, ok := es.Expr.(*syntax.SelectorExpr)
-		if !ok {
-			continue
-		}
-		recvIdent, ok := sel.X.(*syntax.Ident)
-		if !ok {
-			continue
-		}
-		op, ok := sel.Sel.(*syntax.Ident)
-		if !ok || op.String() != "timeout" {
-			continue
-		}
-		if rn := recvIdent.String(); rn == "any timer" || rn == "all timer" {
-			for _, th := range collectScopeTimers(env) {
-				consider(th)
-			}
-			continue
-		} else if v, ok := env.Get(rn); ok {
-			if th, ok := v.(*runtime.TimerHandle); ok {
-				consider(th)
-			}
-		}
+		considerComm(cc.Comm, 4)
 	}
 	return soonest, have
 }
