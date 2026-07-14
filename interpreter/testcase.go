@@ -2149,6 +2149,137 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 	return nil
 }
 
+// interleaveBodyMayBlock reports whether an interleave clause body contains
+// a statement that could itself block — a nested alt/interleave, a blocking
+// `call{}` block, or a receiving operation. Correctly running such a body
+// requires cooperatively SUSPENDING it at the blocking point and resuming a
+// sibling branch (ETSI ES 201 873-1 §20.4), which the snapshot evaluator
+// below does not model; those interleaves fall back to the best-effort path.
+func interleaveBodyMayBlock(body syntax.Node) bool {
+	if body == nil {
+		return false
+	}
+	blocks := false
+	body.Inspect(func(n syntax.Node) bool {
+		if n == nil || blocks {
+			return false
+		}
+		switch v := n.(type) {
+		case *syntax.AltStmt, *syntax.CallStmt:
+			blocks = true
+			return false
+		case *syntax.SelectorExpr:
+			if id, ok := v.Sel.(*syntax.Ident); ok && id != nil && id.Tok != nil {
+				switch id.String() {
+				case "receive", "trigger", "check",
+					"getcall", "getreply", "catch":
+					blocks = true
+					return false
+				}
+			}
+		}
+		return true
+	})
+	return blocks
+}
+
+// evalInterleaveStmtStrict evaluates `interleave { ... }` under the strict
+// profile (ETSI ES 201 873-1 §20.4): every alternative is taken EXACTLY
+// ONCE, in whatever interleaved order its guard becomes ready. Each round
+// re-snapshots the not-yet-taken alternatives and takes the first whose
+// guard matches; when none match it blocks on the branch event sources and
+// re-snapshots. This is the correct semantics for the common case and
+// replaces running interleave as a plain best-effort alt (which took only
+// ONE alternative).
+//
+// It deliberately handles only the SAFE subset and otherwise defers to the
+// historical best-effort evaluator, so nothing outside that subset changes:
+//   - a branch body that may block (interleaveBodyMayBlock) needs
+//     cooperative suspension we do not model yet; and
+//   - an activated default that fires must LEAVE the interleave even when it
+//     doesn't change the verdict — a distinction runDefaults (which reports
+//     by verdict change) cannot make. So an interleave WITHOUT `@nodefault`
+//     while defaults are active also falls back.
+// The remaining subset (`@nodefault`, or no active defaults, and only
+// non-blocking bodies) is exactly what the snapshot models correctly.
+func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
+	if n.Body == nil {
+		return nil
+	}
+	var clauses []*syntax.CommClause
+	for _, s := range n.Body.Stmts {
+		if cc, ok := s.(*syntax.CommClause); ok && cc.Comm != nil && cc.Else == nil {
+			clauses = append(clauses, cc)
+		}
+	}
+	exec := runtime.FindTestcaseExec(env)
+	activeDefaults := exec != nil && len(exec.Defaults()) > 0
+	safe := n.NoDefault != nil || !activeDefaults
+	if safe {
+		for _, cc := range clauses {
+			if interleaveBodyMayBlock(cc.Body) {
+				safe = false
+				break
+			}
+		}
+	}
+	if !safe {
+		return evalAltStmtBestEffort(n, env)
+	}
+
+	taken := make([]bool, len(clauses))
+	remaining := len(clauses)
+	const maxRounds = 1 << 20
+	for round := 0; round < maxRounds && remaining > 0; round++ {
+		// Alt-local declarations are re-evaluated each round (ETSI 20.2).
+		for _, s := range n.Body.Stmts {
+			if _, ok := s.(*syntax.CommClause); ok {
+				continue
+			}
+			if r := eval(s, env); needBreak(r) {
+				return r
+			}
+		}
+		matched := false
+		for i, cc := range clauses {
+			if taken[i] {
+				continue
+			}
+			// Boolean guard (ETSI 20.2): eligible only when it holds.
+			if cc.X != nil {
+				if gv, ok := eval(cc.X, env).(runtime.Bool); ok && !bool(gv) {
+					continue
+				}
+			}
+			if commGuardMatches(cc.Comm, env) {
+				taken[i] = true
+				remaining--
+				matched = true
+				if cc.Body != nil {
+					res := evalAltClauseBody(cc.Body, env)
+					// `repeat` is not permitted in interleave (20.4); ignore
+					// it. `break` / `return` / `stop` / `goto` / error leaves
+					// the interleave immediately.
+					if res != runtime.Repeat && needBreak(res) {
+						return res
+					}
+				}
+				break // re-snapshot: taking one branch may enable another
+			}
+		}
+		if matched {
+			continue
+		}
+		// No alternative matched. `safe` guarantees there is nothing to run
+		// here (no active defaults, or @nodefault): block on the remaining
+		// branch event sources and re-snapshot.
+		if !blockForAltEvents(n, env) {
+			return nil
+		}
+	}
+	return nil
+}
+
 // blockForAltEvents parks a strict alt on its event sources — inbound
 // port traffic (MessageReady), the soonest running-timer deadline, a
 // component transition, or this PTC's stop — via waitForAltCombined,

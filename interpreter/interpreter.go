@@ -149,9 +149,13 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 	case *syntax.AltStmt:
 		// Strict profile: real snapshot semantics — first-match-wins
 		// over a snapshot, honest blocking, no verdict-preferring
-		// heuristic (evalAltStmtStrict). Interleave keeps the
-		// best-effort path until its own semantics land.
-		if schedulerEnabled(env) && !(n.Tok != nil && n.Tok.Kind() == syntax.INTERLEAVE) {
+		// heuristic (evalAltStmtStrict). Interleave has its own snapshot
+		// evaluator for the subset it models correctly (take-each-branch-
+		// once); the rest falls back to best-effort inside it.
+		if schedulerEnabled(env) {
+			if n.Tok != nil && n.Tok.Kind() == syntax.INTERLEAVE {
+				return evalInterleaveStmtStrict(n, env)
+			}
 			return evalAltStmtStrict(n, env)
 		}
 		// Approximate profile (default): a stand-in scheduler that walks
