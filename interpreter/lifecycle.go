@@ -158,9 +158,19 @@ func floatSeconds(v runtime.Object) (float64, bool) {
 // componentCompleted reports whether a modelled finite-timer PTC body
 // has run past its modelled duration. Synchronously-run bodies set Done
 // directly and never carry a ModeledDuration, so they are unaffected.
-func componentCompleted(ref *runtime.ComponentRef) bool {
+//
+// The observation window is measured against the VIRTUAL clock under the
+// deterministic clock / scheduler (where the MTC's `t.timeout` advances
+// virtual time, not wall time — so a real-time measure would read ~0 and
+// the modelled body would never complete) and against wall time otherwise.
+func componentCompleted(ref *runtime.ComponentRef, env runtime.Scope) bool {
 	if ref == nil || !ref.Started || ref.ModeledDuration <= 0 {
 		return false
+	}
+	if useVirtualClock(env) {
+		if exec := runtime.FindTestcaseExec(env); exec != nil {
+			return exec.VirtualClock()-ref.StartedAtVirtual >= ref.ModeledDuration
+		}
 	}
 	if ref.StartedAt.IsZero() {
 		return false
@@ -170,8 +180,10 @@ func componentCompleted(ref *runtime.ComponentRef) bool {
 }
 
 // compAlive / compRunning / compDone / compKilled are the single source
-// of truth for the four component-state predicates.
-func compAlive(ref *runtime.ComponentRef) bool {
+// of truth for the four component-state predicates. They take env so the
+// modelled-completion window can consult the active clock (see
+// componentCompleted).
+func compAlive(ref *runtime.ComponentRef, env runtime.Scope) bool {
 	if ref == nil {
 		return false
 	}
@@ -182,28 +194,28 @@ func compAlive(ref *runtime.ComponentRef) bool {
 	// was not created with the `alive` modifier - or when the modelled
 	// body explicitly `kill`ed itself, which removes even an
 	// alive-modifier component (ETSI 21.3.4).
-	if componentCompleted(ref) && (!ref.AliveModifier || ref.ModeledKill) {
+	if componentCompleted(ref, env) && (!ref.AliveModifier || ref.ModeledKill) {
 		return false
 	}
 	return true
 }
 
-func compRunning(ref *runtime.ComponentRef) bool {
-	return ref != nil && ref.IsAlive() && !ref.IsDone() && !componentCompleted(ref)
+func compRunning(ref *runtime.ComponentRef, env runtime.Scope) bool {
+	return ref != nil && ref.IsAlive() && !ref.IsDone() && !componentCompleted(ref, env)
 }
 
-func compDone(ref *runtime.ComponentRef) bool {
-	return ref == nil || ref.IsDone() || !ref.IsAlive() || componentCompleted(ref)
+func compDone(ref *runtime.ComponentRef, env runtime.Scope) bool {
+	return ref == nil || ref.IsDone() || !ref.IsAlive() || componentCompleted(ref, env)
 }
 
-func compKilled(ref *runtime.ComponentRef) bool {
+func compKilled(ref *runtime.ComponentRef, env runtime.Scope) bool {
 	if ref == nil || !ref.IsAlive() {
 		return true
 	}
 	// A completed body kills the component unless it was created `alive`
 	// (then it stays reusable) - except when the body itself ran a
 	// `kill`, which terminates even an alive-modifier component.
-	return componentCompleted(ref) && (!ref.AliveModifier || ref.ModeledKill)
+	return componentCompleted(ref, env) && (!ref.AliveModifier || ref.ModeledKill)
 }
 
 // evalComponentDoneRedirect handles `comp.done -> value v` /
@@ -236,9 +248,9 @@ func evalComponentDoneRedirect(n *syntax.RedirectExpr, env runtime.Scope) (runti
 	}
 	var matched bool
 	if op.String() == "done" {
-		matched = compDone(ref)
+		matched = compDone(ref, env)
 	} else {
-		matched = compKilled(ref)
+		matched = compKilled(ref, env)
 	}
 	if matched && len(n.Value) > 0 {
 		v := ref.GetVerdict()
@@ -252,7 +264,7 @@ func evalComponentDoneRedirect(n *syntax.RedirectExpr, env runtime.Scope) (runti
 
 // componentStatePredicate maps an op name to its predicate so the
 // array / all-any query paths can share one switch.
-func componentStatePredicate(op string) func(*runtime.ComponentRef) bool {
+func componentStatePredicate(op string) func(*runtime.ComponentRef, runtime.Scope) bool {
 	switch op {
 	case "alive":
 		return compAlive

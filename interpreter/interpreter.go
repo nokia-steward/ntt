@@ -766,13 +766,13 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		if ref, ok := left.(*runtime.ComponentRef); ok {
 			switch strings.ToLower(syntax.Name(n.Sel)) {
 			case "alive":
-				return runtime.NewBool(compAlive(ref))
+				return runtime.NewBool(compAlive(ref, env))
 			case "running":
-				return runtime.NewBool(compRunning(ref))
+				return runtime.NewBool(compRunning(ref, env))
 			case "done":
-				return runtime.NewBool(compDone(ref))
+				return runtime.NewBool(compDone(ref, env))
 			case "killed":
-				return runtime.NewBool(compKilled(ref))
+				return runtime.NewBool(compKilled(ref, env))
 			case "create":
 				return newComponentRef(ref.TypeName, "", env)
 			case "stop", "kill":
@@ -5148,7 +5148,7 @@ func evalAnyAllFrom(n *syntax.FromExpr, redirect *syntax.RedirectExpr, env runti
 		var matchIdx []int
 		found := false
 		walkComponentArray(list, nil, func(idx []int, ref *runtime.ComponentRef) bool {
-			if predicate(ref) {
+			if predicate(ref, env) {
 				matchIdx = append([]int(nil), idx...)
 				found = true
 				return false
@@ -5165,7 +5165,7 @@ func evalAnyAllFrom(n *syntax.FromExpr, redirect *syntax.RedirectExpr, env runti
 		allMatch := true
 		walkComponentArray(list, nil, func(idx []int, ref *runtime.ComponentRef) bool {
 			empty = false
-			if !predicate(ref) {
+			if !predicate(ref, env) {
 				allMatch = false
 				return false
 			}
@@ -7290,6 +7290,9 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 			if ref != nil {
 				ref.Started = true
 				ref.StartedAt = time.Now()
+				if exec := runtime.FindTestcaseExec(env); exec != nil {
+					ref.StartedAtVirtual = exec.VirtualClock()
+				}
 				if d, ok := modeledStartDuration(body, env); ok {
 					ref.ModeledDuration = d
 				}
@@ -7504,15 +7507,15 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		// `comp.running` is true only between `.start` and `.done`.
 		// The Done flag flips once the synchronous body exits; a
 		// modelled finite-timer body completes after its duration.
-		return runtime.NewBool(compRunning(ref)), true
+		return runtime.NewBool(compRunning(ref, env)), true
 	case "alive":
-		return runtime.NewBool(compAlive(ref)), true
+		return runtime.NewBool(compAlive(ref, env)), true
 	case "done":
 		// `comp.done` is true once the body finished, regardless
 		// of the alive modifier.
-		return runtime.NewBool(compDone(ref)), true
+		return runtime.NewBool(compDone(ref, env)), true
 	case "killed":
-		return runtime.NewBool(compKilled(ref)), true
+		return runtime.NewBool(compKilled(ref, env)), true
 	case "stop", "kill":
 		if ref != nil {
 			ref.SetDone(true)

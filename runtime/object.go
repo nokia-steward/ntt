@@ -367,6 +367,13 @@ type ComponentRef struct {
 	StartedAt       time.Time
 	ModeledDuration float64
 
+	// StartedAtVirtual is the per-testcase virtual-clock reading when the
+	// modelled body was started. Under the deterministic clock the MTC's
+	// observation window (`t.timeout`) advances virtual time, not wall
+	// time, so completion is measured as VirtualClock-StartedAtVirtual;
+	// StartedAt (wall time) drives the same check when the clock is real.
+	StartedAtVirtual float64
+
 	// ModeledKill records that the skipped finite-timer body ends in a
 	// `kill` (rather than a natural return or `stop`). Once the modelled
 	// duration elapses such a component counts as killed and no longer

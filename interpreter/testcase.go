@@ -833,14 +833,14 @@ func evalComponentQuery(kind string, sel syntax.Expr, env runtime.Scope) (runtim
 			return runtime.NewBool(true), true
 		}
 		for _, r := range ptcs {
-			if !predicate(r) {
+			if !predicate(r, env) {
 				return runtime.NewBool(false), true
 			}
 		}
 		return runtime.NewBool(true), true
 	case "any component":
 		for _, r := range ptcs {
-			if predicate(r) {
+			if predicate(r, env) {
 				return runtime.NewBool(true), true
 			}
 		}

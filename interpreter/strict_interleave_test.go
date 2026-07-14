@@ -10,6 +10,38 @@ import (
 	"github.com/nokia/ntt/ttcn3"
 )
 
+// TestStrictComp_ModeledDoneUsesVirtualClock covers a skipped finite-timer
+// PTC's `.done` state under the deterministic clock: the MTC's observation
+// window (`g.timeout`) advances VIRTUAL time, so completion of the modelled
+// body must be measured against the virtual clock. A real-time measure would
+// read ~0 (no wall time passed) and the PTC would never be seen as done.
+// Mirrors Sem_210307_done_operation_00x.
+func TestStrictComp_ModeledDoneUsesVirtualClock(t *testing.T) {
+	src := `module M {
+		type component C {}
+		function f() runs on C { timer t := 1.0; t.start; t.timeout; }
+		testcase tc() runs on C system C {
+			var C p := C.create;
+			timer g := 2.0;
+			p.start(f());
+			g.start;
+			g.timeout;
+			if (p.done) { setverdict(pass); }
+			else { setverdict(fail, "modelled PTC not done after the virtual observation window"); }
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (modelled done must use the virtual clock)", v, reason)
+	}
+}
+
 // TestStrictAlt_AltstepGuardTimerConcludes covers a timer guard nested
 // INSIDE an altstep-call alternative (`alt { [] a() }` where `a` has
 // `[] t.timeout {}`). The strict block step must look THROUGH the altstep
