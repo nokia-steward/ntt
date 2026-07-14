@@ -410,6 +410,16 @@ func (t *TestcaseExec) WaitPTCs(timeout time.Duration) {
 	if len(exits) == 0 {
 		return
 	}
+	// The MTC's testcase body has terminated; per ETSI ES 201 873-1 §21.3
+	// every still-running PTC is implicitly stopped when the testcase ends.
+	// Signal them ALL to unwind first, so a never-completing body
+	// (`while(true){}`, a long timer someone forgot to stop) exits promptly
+	// instead of holding teardown for the entire budget and pushing the run
+	// past the harness timeout. A PTC that was about to finish on its own
+	// still reports Done within the join budget below.
+	for _, p := range exits {
+		p.Stop()
+	}
 	deadline := time.Now().Add(timeout)
 	for _, p := range exits {
 		remaining := time.Until(deadline)
@@ -419,7 +429,6 @@ func (t *TestcaseExec) WaitPTCs(timeout time.Duration) {
 		select {
 		case <-p.DoneChan:
 		case <-time.After(remaining):
-			p.Stop()
 			select {
 			case <-p.DoneChan:
 			case <-time.After(50 * time.Millisecond):
