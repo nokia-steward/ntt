@@ -394,13 +394,15 @@ func execVerdict(trees []*ttcn3.Tree, tcName string, profile runtime.SemanticsPr
 		// is cancelled on timeout instead of leaking a spinning
 		// goroutine after we return "timeout" below. Strict runs use the
 		// deterministic clock so real-time timers fire instantly (no 5s
-		// waits, no timeout artifacts in the differential); approximate
-		// runs keep the historical real-clock behaviour.
+		// waits, no timeout artifacts in the differential), and the
+		// cooperative discrete-event scheduler so concurrent components
+		// interleave deterministically; approximate runs keep the
+		// historical real-clock, no-scheduler behaviour.
 		v, r, err := interpreter.RunTestcaseWith(trees, tcName,
 			interpreter.TestcaseOptions{
 				Profile:                profile,
 				DeterministicClock:     profile == runtime.ProfileStrict,
-				DeterministicScheduler: false, // coop gated off: lifecycle correct (+18 strict), pending proc-comm-under-coop (GetcallOp_003 + broadcast)
+				DeterministicScheduler: profile == runtime.ProfileStrict,
 				Context:                ctx,
 			})
 		ch <- out{v: v, reason: r, err: err}

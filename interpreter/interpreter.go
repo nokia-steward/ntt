@@ -2483,7 +2483,7 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 							// is honoured implicitly by the loopback
 							// name-collision routing.
 							return evalProcedurePortOp(name.String(), portName, info.call, env)
-						case "receive", "trigger", "getreply", "catch":
+						case "receive", "trigger", "getreply", "catch", "getcall":
 							return evalPortReceiveInfo(portName, info, env, true)
 						case "check":
 							return evalPortReceiveInfo(portName, info, env, false)
