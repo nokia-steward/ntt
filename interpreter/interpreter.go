@@ -6921,6 +6921,61 @@ func startBodyIsDeferredResponder(body syntax.Node, env runtime.Scope) bool {
 //
 // If the function reference can't be resolved we conservatively
 // return false (keep the synchronous path).
+// startBodyDoesPortComm reports whether a started PTC body performs ANY
+// port communication — a message send/receive/trigger/check, or a
+// procedure call/getcall/getreply/reply/raise/catch (including a blocking
+// `call { ... }` block) — resolving through called functions. Under the
+// cooperative scheduler such a body must run on its own participant
+// goroutine so senders AND receivers interleave deterministically; running
+// a receiver inline would block the single-runner token on traffic a peer
+// has not produced yet. A purely computational body (no port comm) has no
+// peer interaction and stays inline. Broader than startBodyBlocksOnComm
+// (getcall only), which is the deliberately narrow non-scheduler predicate.
+func startBodyDoesPortComm(body syntax.Node, env runtime.Scope) bool {
+	root := startBodyRoot(body, env)
+	ops := map[string]bool{
+		"send": true, "receive": true, "trigger": true, "check": true,
+		"call": true, "getcall": true, "getreply": true,
+		"reply": true, "raise": true, "catch": true,
+	}
+	found := false
+	visited := map[syntax.Node]bool{}
+	var scan func(n syntax.Node)
+	scan = func(rootNode syntax.Node) {
+		if rootNode == nil || visited[rootNode] {
+			return
+		}
+		visited[rootNode] = true
+		syntax.Inspect(rootNode, func(n syntax.Node) bool {
+			if n == nil || found {
+				return false
+			}
+			if _, ok := n.(*syntax.CallStmt); ok { // blocking call { ... }
+				found = true
+				return false
+			}
+			if sel, ok := n.(*syntax.SelectorExpr); ok {
+				if id, ok := sel.Sel.(*syntax.Ident); ok && ops[id.String()] {
+					found = true
+					return false
+				}
+			}
+			if ce, ok := n.(*syntax.CallExpr); ok {
+				if id, ok := ce.Fun.(*syntax.Ident); ok {
+					if v, ok := env.Get(id.String()); ok {
+						if fn, ok := v.(*runtime.Function); ok && fn.Body != nil {
+							scan(fn.Body)
+						}
+					}
+				}
+			}
+			return true
+		})
+	}
+	scan(root)
+	return found
+}
+
 // startBodyHasBlockingCall reports whether a started PTC body issues a
 // blocking `call { ... }` (a CallStmt), i.e. it is a caller/client rather
 // than a responder. Such a body always forks under strict — it produces a
@@ -7233,8 +7288,22 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		// timer prematurely. Gated on schedulerEnabled so the default
 		// (approximate) path is untouched.
 		forkStrict := false
-		if skip && op == "start" && ref != nil && !ref.AliveModifier &&
-			schedulerEnabled(env) && startBodyBlocksOnComm(body, env) {
+		// Decide whether this started PTC body must run concurrently.
+		// Under the cooperative scheduler ANY port-comm body forks (senders
+		// and receivers both — running a receiver inline would block the
+		// single-runner token; leaving a sender inline starves a forked
+		// receiver). The non-scheduler strict path keeps the deliberately
+		// narrow getcall-only predicate, and only when the body would
+		// otherwise be skipped.
+		forkComm := false
+		if op == "start" && ref != nil && !ref.AliveModifier && schedulerEnabled(env) {
+			if deterministicSchedulerEnabled(env) {
+				forkComm = startBodyDoesPortComm(body, env)
+			} else if skip {
+				forkComm = startBodyBlocksOnComm(body, env)
+			}
+		}
+		if forkComm {
 			// A CLIENT (a body that issues a blocking `call{}`) always
 			// forks: it PRODUCES a call, so another component's pending
 			// call is irrelevant. A RESPONDER (getcall/getreply with no
@@ -10603,12 +10672,39 @@ func portReceiveMatches(head runtime.Object, n *syntax.CallExpr, env runtime.Sco
 	}
 	// `receive(MyType: <template>)` is the type-prefixed value
 	// notation - strip the type prefix and match against the RHS.
+	var typeExpr syntax.Expr
 	if v, ok := first.(*syntax.BinaryExpr); ok && v.Op != nil && v.Op.Kind() == syntax.COLON {
+		typeExpr = v.X
 		first = v.Y
 	}
 	tmpl := eval(first, env)
 	if runtime.IsError(tmpl) || tmpl == nil {
 		return true
+	}
+	// Coerce a POSITIONAL record/set template to its declared named fields.
+	// A runtime.Record is an unordered map, so matching a positional list
+	// template against it would depend on fragile map-iteration order
+	// (Sem_13_declaring_msg_003). coerceToDeclaredStruct names the fields by
+	// the type's declaration order; it is a no-op for `?`/omit, non-struct
+	// types, and already-named values.
+	if typeExpr != nil {
+		tmpl = coerceToDeclaredStruct(tmpl, typeExpr, first, env)
+		// coerceToDeclaredStruct names a positional record template but
+		// leaves it as a *List with FieldNames, while a message payload
+		// record is a map-based *Record. Reconcile them into a *Record so
+		// the match is by field NAME (order-independent) — a *Record's map
+		// has no field order, so a positional-list match would depend on
+		// fragile iteration order (Sem_13_declaring_msg_003).
+		if _, headIsRec := head.(*runtime.Record); headIsRec {
+			if lst, ok := tmpl.(*runtime.List); ok && len(lst.FieldNames) > 0 &&
+				len(lst.FieldNames) == len(lst.Elements) {
+				fields := make(map[string]runtime.Object, len(lst.FieldNames))
+				for i, nm := range lst.FieldNames {
+					fields[nm] = lst.Elements[i]
+				}
+				tmpl = &runtime.Record{Fields: fields}
+			}
+		}
 	}
 	if tmpl == runtime.Any || tmpl == runtime.AnyOrNone {
 		return true

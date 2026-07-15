@@ -10,6 +10,47 @@ import (
 	"github.com/nokia/ntt/ttcn3"
 )
 
+// TestStrictSched_ForkMessagePeers covers the coop fork model: a sender
+// PTC and a receiver PTC (message comm) must BOTH fork so they interleave
+// under the scheduler — running either inline would block the single-runner
+// turn. It also exercises positional record-template matching against the
+// map-based payload record (the template is coerced to named fields so the
+// match is order-independent). Mirrors Sem_13_declaring_msg_003 / SendOp.
+func TestStrictSched_ForkMessagePeers(t *testing.T) {
+	src := `module M {
+		type record R { integer i, charstring s }
+		type port P message { inout R }
+		type component C { port P p }
+		function snd() runs on C { p.send(R:{1, "hi"}); }
+		function rcv() runs on C {
+			timer t := 3.0;
+			t.start;
+			alt {
+				[] p.receive(R:{1, "hi"}) { setverdict(pass); }
+				[] t.timeout { setverdict(fail, "receiver got no message"); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C a := C.create, b := C.create;
+			connect(a:p, b:p);
+			a.start(snd());
+			b.start(rcv());
+			a.done;
+			b.done;
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (both peers must fork and the record template match)", v, reason)
+	}
+}
+
 // TestStrictSched_CompDoneParks covers the cooperative scheduler: a
 // standalone `comp.done` must PARK the MTC (release the single-runner token)
 // so the forked PTC is granted a turn and runs to completion. Without the
