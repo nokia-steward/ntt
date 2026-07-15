@@ -10,6 +10,36 @@ import (
 	"github.com/nokia/ntt/ttcn3"
 )
 
+// TestStrictSched_CompDoneParks covers the cooperative scheduler: a
+// standalone `comp.done` must PARK the MTC (release the single-runner token)
+// so the forked PTC is granted a turn and runs to completion. Without the
+// park the MTC races to the end holding the token, the PTC never runs
+// (starves), and the run deadlocks. The PTC is `create alive` so it forks
+// under the scheduler; its body sets pass, which the testcase verdict
+// inherits once it is done.
+func TestStrictSched_CompDoneParks(t *testing.T) {
+	src := `module M {
+		type component C {}
+		function f() runs on C { setverdict(pass); }
+		testcase tc() runs on C system C {
+			var C ptc := C.create alive;
+			ptc.start(f());
+			ptc.done;
+			if (ptc.running) { setverdict(fail, "ptc still running after done"); }
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (comp.done must park so the PTC runs)", v, reason)
+	}
+}
+
 // TestStrictComp_ModeledDoneUsesVirtualClock covers a skipped finite-timer
 // PTC's `.done` state under the deterministic clock: the MTC's observation
 // window (`g.timeout`) advances VIRTUAL time, so completion of the modelled

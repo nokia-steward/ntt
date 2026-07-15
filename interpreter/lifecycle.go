@@ -179,6 +179,39 @@ func componentCompleted(ref *runtime.ComponentRef, env runtime.Scope) bool {
 	return elapsed >= time.Duration(ref.ModeledDuration*float64(time.Second))
 }
 
+// blockUntilComponentState blocks the running participant until `ref`
+// reaches the done / killed state (ETSI ES 201 873-1 §21.3.7/21.3.8: the
+// standalone `comp.done` / `comp.killed` statements are blocking). Under
+// the cooperative scheduler it PARKS — releasing the single-runner token —
+// so the target PTC is granted the token and can actually run to
+// completion; a non-parking check would let the MTC race ahead and starve
+// the PTC (deadlock). A forked PTC is woken by its own goDone (no
+// deadline); a modelled (skipped, non-forked) PTC parks on its virtual
+// completion deadline so the clock advances to it. Returns Undefined once
+// the state holds or this participant is stopped.
+func blockUntilComponentState(ref *runtime.ComponentRef, op string, env runtime.Scope) runtime.Object {
+	pred := compDone
+	if op == "killed" {
+		pred = compKilled
+	}
+	exec := runtime.FindTestcaseExec(env)
+	if exec == nil || ref == nil {
+		return runtime.NewBool(pred(ref, env))
+	}
+	stop := currentStopChan(exec)
+	for !pred(ref, env) {
+		deadline, hasTimer := 0.0, false
+		if ref.ModeledDuration > 0 {
+			deadline, hasTimer = ref.StartedAtVirtual+ref.ModeledDuration, true
+		}
+		re, stopped := exec.SchedPark(currentCompID(exec), deadline, hasTimer, stop)
+		if stopped || !re {
+			break
+		}
+	}
+	return runtime.Undefined
+}
+
 // compAlive / compRunning / compDone / compKilled are the single source
 // of truth for the four component-state predicates. They take env so the
 // modelled-completion window can consult the active clock (see

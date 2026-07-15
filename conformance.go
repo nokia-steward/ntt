@@ -400,7 +400,7 @@ func execVerdict(trees []*ttcn3.Tree, tcName string, profile runtime.SemanticsPr
 			interpreter.TestcaseOptions{
 				Profile:                profile,
 				DeterministicClock:     profile == runtime.ProfileStrict,
-				DeterministicScheduler: false, // Level-2 coop scheduler gated off pending proc-comm fixtures (catch-timeout ordering, nowait, any-port)
+				DeterministicScheduler: false, // coop gated off: lifecycle correct (+18 strict), pending proc-comm-under-coop (GetcallOp_003 + broadcast)
 				Context:                ctx,
 			})
 		ch <- out{v: v, reason: r, err: err}

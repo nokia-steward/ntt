@@ -44,7 +44,7 @@ func TestCoop_TokenHandoff(t *testing.T) {
 	c.goLive(2)
 	ptcRan := make(chan struct{})
 	go func() {
-		c.acquireToken(2) // waits for the token
+		c.acquireToken(2, nil) // waits for the token
 		close(ptcRan)
 		c.goDone(2)
 	}()
@@ -67,7 +67,7 @@ func TestCoop_SoonestTimerWins(t *testing.T) {
 	c.goLive(2)
 	got := make(chan float64, 2)
 	go func() {
-		c.acquireToken(2)
+		c.acquireToken(2, nil)
 		c.park(2, 5, true, nil)
 		got <- c.now()
 		c.goDone(2)
@@ -95,7 +95,7 @@ func TestCoop_Deadlock(t *testing.T) {
 	c.goLive(2)
 	res := make(chan [2]bool, 2)
 	go func() {
-		c.acquireToken(2)
+		c.acquireToken(2, nil)
 		re, st := c.park(2, 0, false, nil)
 		res <- [2]bool{re, st}
 	}()
@@ -138,6 +138,28 @@ func TestCoop_Stop(t *testing.T) {
 	}
 }
 
+// TestCoop_AcquireTokenStop: a participant that was registered (goLive) but
+// never granted — the MTC finished without ever parking — must unblock on
+// its stop channel and report stopped, so testcase teardown never hangs on
+// a starved PTC waiting for a turn it will never get.
+func TestCoop_AcquireTokenStop(t *testing.T) {
+	c := newCoopScheduler(1) // MTC (id 1) holds the token and never parks
+	c.goLive(2)
+	stop := make(chan struct{})
+	res := make(chan bool, 1)
+	go func() { res <- c.acquireToken(2, stop) }()
+	time.Sleep(20 * time.Millisecond) // 2 is ready but can't run (MTC holds token)
+	close(stop)
+	select {
+	case stopped := <-res:
+		if !stopped {
+			t.Fatal("acquireToken(stop) => stopped=false, want true when stop fires before any grant")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("acquireToken did not unblock on stop (teardown would hang)")
+	}
+}
+
 // TestCoop_MutualExclusion stresses the single-runner invariant: several
 // participants repeatedly take the token and enter a critical section;
 // the shared counter must never exceed 1 (only the token holder runs).
@@ -155,7 +177,7 @@ func TestCoop_MutualExclusion(t *testing.T) {
 
 	worker := func(id int64, isMTC bool) {
 		if !isMTC {
-			c.acquireToken(id)
+			c.acquireToken(id, nil)
 		}
 		for r := 0; r < rounds; r++ {
 			// Critical section: only the token holder should be here.

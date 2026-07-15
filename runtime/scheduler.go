@@ -1,5 +1,7 @@
 package runtime
 
+import "sync"
+
 // coopScheduler is a deterministic cooperative scheduler for the strict
 // interpreter. It replaces the broadcast quiescence barrier with a
 // single-runner "token": exactly one component participant executes at a
@@ -28,8 +30,6 @@ package runtime
 // deadline — same clock discipline as before, but now interleaving is
 // deterministic too. Self-contained and unit-tested in isolation before
 // wiring into TestcaseExec.
-
-import "sync"
 
 type parkEntry struct {
 	deadline float64 // virtual-seconds deadline of the soonest timer, if any
@@ -98,9 +98,13 @@ func (c *coopScheduler) goLive(id int64) {
 }
 
 // acquireToken blocks the calling (freshly forked) participant until it is
-// granted the token. handoff sets running=id before granting, so on
-// return the caller holds the token.
-func (c *coopScheduler) acquireToken(id int64) {
+// granted the token. handoff sets running=id before granting, so on a
+// false return the caller holds the token. `stop` (typically the PTC's
+// stop channel, closed at teardown) unblocks a participant that was started
+// but never scheduled — the MTC finished without ever parking, so this PTC
+// was never granted a turn — returning true so the caller exits WITHOUT
+// running its body. A nil stop channel never fires (blocks until granted).
+func (c *coopScheduler) acquireToken(id int64, stop <-chan struct{}) (stopped bool) {
 	c.mu.Lock()
 	c.live[id] = true
 	c.ready[id] = true
@@ -109,7 +113,27 @@ func (c *coopScheduler) acquireToken(id int64) {
 		c.handoffLocked()
 	}
 	c.mu.Unlock()
-	<-w
+	select {
+	case <-w:
+		return false
+	case <-stop:
+		c.mu.Lock()
+		delete(c.live, id)
+		delete(c.ready, id)
+		delete(c.blocked, id)
+		// If a concurrent handoff granted us the token, drain it and pass
+		// it on so the system doesn't stall on a participant giving up.
+		select {
+		case <-w:
+		default:
+		}
+		if c.running == id {
+			c.running = 0
+			c.handoffLocked()
+		}
+		c.mu.Unlock()
+		return true
+	}
 }
 
 // goDone deregisters a finished participant (it held the token) and hands

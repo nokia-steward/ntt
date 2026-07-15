@@ -1777,11 +1777,14 @@ func (t *TestcaseExec) SchedGoLive(id int64) {
 
 // SchedAcquireToken blocks a freshly forked component goroutine until the
 // scheduler grants it the token. Call at the very start of the goroutine
-// body. No-op when the scheduler is off.
-func (t *TestcaseExec) SchedAcquireToken(id int64) {
+// body. Returns true if `stop` fired first (the PTC was never scheduled and
+// is being torn down) so the caller must exit without running its body.
+// No-op returning false when the scheduler is off.
+func (t *TestcaseExec) SchedAcquireToken(id int64, stop <-chan struct{}) bool {
 	if t.sched != nil {
-		t.sched.acquireToken(id)
+		return t.sched.acquireToken(id, stop)
 	}
+	return false
 }
 
 // SchedGoDone deregisters a finished component (by ref id), handing the

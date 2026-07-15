@@ -770,8 +770,18 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			case "running":
 				return runtime.NewBool(compRunning(ref, env))
 			case "done":
+				// Standalone `comp.done` is blocking (§21.3.7). Under the
+				// cooperative scheduler it must park so the target PTC is
+				// granted the token; inside an alt guard it stays a
+				// non-blocking snapshot check (the alt owns the blocking).
+				if deterministicSchedulerEnabled(env) && !altCtx.active() {
+					return blockUntilComponentState(ref, "done", env)
+				}
 				return runtime.NewBool(compDone(ref, env))
 			case "killed":
+				if deterministicSchedulerEnabled(env) && !altCtx.active() {
+					return blockUntilComponentState(ref, "killed", env)
+				}
 				return runtime.NewBool(compKilled(ref, env))
 			case "create":
 				return newComponentRef(ref.TypeName, "", env)
@@ -7377,8 +7387,17 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				go func() {
 					defer exec.FinishPTC(ref.ID)
 					// Wait for the scheduler to grant this PTC the token so
-					// only one component runs at a time (no-op when off).
-					exec.SchedAcquireToken(ref.ID)
+					// only one component runs at a time (no-op when off). If
+					// the testcase is torn down before this PTC was ever
+					// scheduled (the MTC finished without parking), stop
+					// fires and we exit without running the body.
+					var stopCh <-chan struct{}
+					if exit != nil {
+						stopCh = exit.StopChan
+					}
+					if exec.SchedAcquireToken(ref.ID, stopCh) {
+						return
+					}
 					exec.PushComponent(ref)
 					defer exec.PopComponent()
 					if fn != nil {
