@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/nokia/ntt/interpreter"
 	"github.com/nokia/ntt/runtime"
@@ -20,10 +21,17 @@ import (
 )
 
 var (
-	execCfgPath  string
-	execFormat   string
-	execOutDir   string
-	execPatterns []string
+	execCfgPath       string
+	execFormat        string
+	execOutDir        string
+	execPatterns      []string
+	execDeterministic bool
+	execTimeout       time.Duration
+
+	// deterministicSafetyTimeout bounds a testcase under --deterministic
+	// when the user gave no --timeout, so an experimental strict path that
+	// blocks (a case the scheduler doesn't yet model) can't wedge the suite.
+	deterministicSafetyTimeout = 60 * time.Second
 
 	// ExecCommand is the single-process executor entry point. It walks
 	// a project, finds testcases (either explicitly via --pattern or
@@ -44,11 +52,16 @@ Testcases can be selected three ways, in priority order:
 
 If none of those produce a list, exec runs every discovered testcase.
 
-NOTE: M4 ships a static-analysis driver that catches testcases via
-their syntax declaration and reports them as Pass when the analyzer is
-happy or Error when it isn't. The real interpreter rewire that lets
-exec actually execute testcase bodies is the next iteration; this CLI
-is the harness that will then need zero changes.`,
+Execution model:
+  default          the conformance-tuned approximate engine (real clock).
+  --deterministic  EXPERIMENTAL: the strict operational-semantics engine —
+                   a deterministic discrete-event scheduler (one component
+                   runs at a time; virtual time advances only at quiescence)
+                   plus a virtual clock. Concurrent components interleave
+                   deterministically and timers fire virtually, so verdicts
+                   are reproducible and free of real-clock races. Some
+                   procedure-based-communication and timer patterns are not
+                   modelled yet; pair it with --timeout to bound them.`,
 		RunE: runExec,
 	}
 )
@@ -59,6 +72,15 @@ func init() {
 	ExecCommand.Flags().StringVar(&execFormat, "format", "text", "report format: text|json|junit|tap|html")
 	ExecCommand.Flags().StringVar(&execOutDir, "out", "", "directory to write the report file (default: stdout)")
 	ExecCommand.Flags().StringSliceVar(&execPatterns, "pattern", nil, "testcase patterns to run (glob)")
+	ExecCommand.Flags().BoolVar(&execDeterministic, "deterministic", false,
+		"EXPERIMENTAL: run testcases on the deterministic discrete-event scheduler "+
+			"(strict semantics profile + virtual clock). Concurrent components interleave "+
+			"deterministically and timers fire on a virtual clock, so verdicts are reproducible "+
+			"and free of real-clock races. Some procedure-based-communication and timer patterns "+
+			"are not yet modelled; use --timeout to bound them.")
+	ExecCommand.Flags().DurationVar(&execTimeout, "timeout", 0,
+		"per-testcase wall-clock limit (0 = none). Under --deterministic a 60s safety "+
+			"default applies when unset.")
 }
 
 func runExec(cmd *cobra.Command, args []string) error {
@@ -70,6 +92,8 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 	files := collectTTCN3Files(args)
 	driver := newStaticDriver(files)
+	driver.deterministic = execDeterministic
+	driver.timeout = execTimeout
 
 	var cfgFile *cfg.File
 	if execCfgPath != "" {
@@ -150,6 +174,9 @@ type staticDriver struct {
 	owner    map[string]string      // testcase name -> file path
 	trees    map[string]*ttcn3.Tree // file path -> parsed tree, kept so Run can reuse them
 	modParam map[string]string      // last cfg's [MODULE_PARAMETERS], threaded into RunTestcaseWith
+
+	deterministic bool          // --deterministic: strict profile + discrete-event scheduler
+	timeout       time.Duration // --timeout: per-testcase wall-clock bound (0 = none)
 }
 
 // SetModuleParameters records the [MODULE_PARAMETERS] map produced
@@ -211,7 +238,6 @@ func newStaticDriver(files []string) *staticDriver {
 }
 
 func (d *staticDriver) Run(ctx context.Context, name string) (rreport.Verdict, string, error) {
-	_ = ctx
 	path := d.owner[name]
 	if path == "" {
 		return rreport.Error, "testcase not found", nil
@@ -246,6 +272,28 @@ func (d *staticDriver) Run(ctx context.Context, name string) (rreport.Verdict, s
 		ModuleParamWarning: func(msg string) {
 			fmt.Fprintf(os.Stderr, "module parameter: %s\n", msg)
 		},
+	}
+	// --deterministic selects the strict operational-semantics engine: a
+	// deterministic discrete-event scheduler (single-runner token, virtual
+	// time advancing only at quiescence) plus the virtual clock, so
+	// concurrent components interleave deterministically and verdicts are
+	// reproducible. A per-testcase deadline bounds a body the strict path
+	// does not yet model (see the experimental caveat in the flag help).
+	if d.deterministic {
+		opts.Profile = runtime.ProfileStrict
+		opts.DeterministicClock = true
+		opts.DeterministicScheduler = true
+		timeout := d.timeout
+		if timeout <= 0 {
+			timeout = deterministicSafetyTimeout
+		}
+		runCtx, cancel := context.WithTimeout(ctx, timeout)
+		defer cancel()
+		opts.Context = runCtx
+	} else if d.timeout > 0 {
+		runCtx, cancel := context.WithTimeout(ctx, d.timeout)
+		defer cancel()
+		opts.Context = runCtx
 	}
 	v, reason, err := interpreter.RunTestcaseWith(trees, name, opts)
 	if err != nil {
