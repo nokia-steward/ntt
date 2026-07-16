@@ -10310,7 +10310,16 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 	for {
 		head, ok := exec.PeekKind(port, kind)
 		if !ok {
-			prePopulateRedirectExpr(info.redirect, exec, env)
+			// Approximate-path heuristic only: bind a `-> sender v` target
+			// to the latest PTC ref so fixtures whose PTC body was skipped
+			// still see a meaningful sender. Under the cooperative scheduler
+			// PTCs run for real and the sender binds from the ACTUAL matched
+			// message, so pre-populating here would wrongly bind the target
+			// on a no-match and corrupt a `[v == null]` clause guard that
+			// gates re-acceptance (Sem_220303_ReplyOperation_001).
+			if !deterministicSchedulerEnabled(env) {
+				prePopulateRedirectExpr(info.redirect, exec, env)
+			}
 			if !altCtx.active() && exec.CurrentComponent() != nil {
 				return &runtime.ReturnValue{Value: runtime.Undefined}
 			}

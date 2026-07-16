@@ -10,6 +10,49 @@ import (
 	"github.com/nokia/ntt/ttcn3"
 )
 
+// TestStrictSched_GetcallSenderGuardNotCorrupted covers C1: a server whose
+// getcall is gated on a `[v == null]` boolean guard and binds the caller via
+// `-> sender v` must still accept the call under the scheduler. The
+// approximate pre-populate heuristic used to bind `v` to the latest PTC ref
+// on the round-0 no-match, flipping the guard false so the server could
+// never accept — the server then timed out (Sem_220303_ReplyOperation_001).
+// Under the coop scheduler that heuristic is suppressed, so `v` binds only
+// from the real matched call.
+func TestStrictSched_GetcallSenderGuardNotCorrupted(t *testing.T) {
+	src := `module m {
+		signature Sig(in integer x);
+		type port P procedure { inout Sig }
+		type component C { port P p; var C v_client := null }
+		function srv() runs on C {
+			timer t := 10.0;
+			t.start;
+			alt {
+				[v_client == null] p.getcall(Sig:?) -> sender v_client { setverdict(pass); }
+				[] t.timeout { setverdict(fail, "server never accepted: [v==null] guard corrupted"); }
+			}
+		}
+		function cli() runs on C { p.call(Sig:{x:=1}, nowait); }
+		testcase tc() runs on C system C {
+			var C server := C.create;
+			var C client := C.create;
+			connect(server:p, client:p);
+			server.start(srv());
+			client.start(cli());
+			all component.done;
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (getcall sender-guard must not be corrupted)", v, reason)
+	}
+}
+
 // TestStrictSched_ForkMessagePeers covers the coop fork model: a sender
 // PTC and a receiver PTC (message comm) must BOTH fork so they interleave
 // under the scheduler — running either inline would block the single-runner
