@@ -10377,6 +10377,20 @@ func evalPortReceive(port string, n *syntax.CallExpr, env runtime.Scope, consume
 	return evalPortReceiveInfo(port, commOpInfo{call: n}, env, consume)
 }
 
+// isUndefinedResult reports whether a comm-op evaluation result is a
+// no-match sentinel — bare Undefined, or the ReturnValue{Undefined} wrapper
+// a blocking receive returns outside an alt. The any-port fan-out uses it to
+// tell "this port had no match, try the next" from a real match.
+func isUndefinedResult(res runtime.Object) bool {
+	if res == runtime.Undefined {
+		return true
+	}
+	if rv, ok := res.(*runtime.ReturnValue); ok && rv != nil && rv.Value == runtime.Undefined {
+		return true
+	}
+	return false
+}
+
 // evalPortReceiveInfo is evalPortReceive with the wrapping from/to/
 // redirect clauses already extracted by extractCommOp. When the
 // inner call is `trigger(...)` we honour TTCN-3 22.2.3 - non-
@@ -10385,6 +10399,32 @@ func evalPortReceive(port string, n *syntax.CallExpr, env runtime.Scope, consume
 func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consume bool) runtime.Object {
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil {
+		return runtime.Undefined
+	}
+	// `any port.<op>(tmpl) -> redirect`: fan out across every known port,
+	// applying the full template match AND redirect binding per port, and
+	// take the first that matches (TTCN-3 22.5). The parser routes the
+	// redirect form here (with the literal port key "any port"), whereas
+	// the non-redirect form is handled by evalAnyPortOp; without this the
+	// redirect form matched no queue so `any port.getcall(...) -> param`
+	// never bound its params (Sem_220302_GetcallOperation_005). The scan
+	// runs before ReceiveLock so the per-port recursion takes the lock
+	// itself; PortNames is sorted, so the choice is deterministic.
+	if port == "any port" {
+		// Fan out over the current component's own ports as BARE names, so
+		// the per-port recursion re-qualifies each back to its storage key
+		// (passing the already-qualified PortNames() key would double-
+		// qualify and never match). Only this component's ports are
+		// considered, per TTCN-3 22.5.
+		for _, p := range exec.CurrentComponentPortNames() {
+			res := evalPortReceiveInfo(p, info, env, consume)
+			if !isUndefinedResult(res) {
+				return res
+			}
+		}
+		if !altCtx.active() && exec.CurrentComponent() != nil {
+			return &runtime.ReturnValue{Value: runtime.Undefined}
+		}
 		return runtime.Undefined
 	}
 	port = exec.PortKey(port) // real-scheduler: per-PTC port identity (no-op by default)

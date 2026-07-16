@@ -1852,6 +1852,27 @@ func (t *TestcaseExec) PortKey(name string) string {
 	return portQualPrefix + strconv.FormatInt(cur.ID, 10) + "/" + name
 }
 
+// CurrentComponentPortNames returns the bare (unqualified) port-instance
+// names whose live queues belong to the calling goroutine's component —
+// the set an `any port` operation on that component must consider (TTCN-3
+// 22.5). Each returned name re-qualifies through PortKey (on this same
+// goroutine) back to its storage key, so a caller can pass it straight to
+// a per-port receive without double-qualifying. Ports owned by other
+// components (a different qualifier) are excluded. The result is sorted
+// (PortNames is), so any-port selection is deterministic. Must be called
+// on the component's own goroutine, where CurrentComponent() is that
+// component — exactly where receive ops run.
+func (t *TestcaseExec) CurrentComponentPortNames() []string {
+	var out []string
+	for _, k := range t.PortNames() {
+		bare := barePortName(k)
+		if t.PortKey(bare) == k {
+			out = append(out, bare)
+		}
+	}
+	return out
+}
+
 // barePortName strips the qualifier PortKey added, returning the
 // original TTCN-3 port-instance name; it is the identity for an
 // unqualified name. Used where a bare-name lookup is still correct

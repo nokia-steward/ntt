@@ -143,6 +143,56 @@ func TestStrictSched_CallReplyBeatsTimeout(t *testing.T) {
 	}
 }
 
+// TestStrictSched_AnyPortGetcallBindsRedirect covers `any port.getcall(tmpl)
+// -> param(...)` under the scheduler: the redirect form fans out over the
+// CURRENT component's own ports (as bare names, so the per-port receive
+// re-qualifies back to the component-private storage key rather than double-
+// qualifying), matches the queued call, and binds the `-> param` targets so
+// the reply computed from them carries the right value. Regression guard for
+// the per-component port-qualification bug that made
+// Sem_220302_GetcallOperation_005 time out under strict.
+func TestStrictSched_AnyPortGetcallBindsRedirect(t *testing.T) {
+	src := `module m {
+		signature Sig(in integer x, out integer y, inout integer z) return integer;
+		type port P procedure { inout Sig }
+		type component C { port P p }
+		function srv() runs on C {
+			var integer a; var integer c;
+			timer t := 10.0; t.start;
+			alt {
+				[] any port.getcall(Sig:{x:=?,y:=?,z:=?}) -> param(a, -, c) {
+					p.reply(Sig:{x:=-,y:=a+c,z:=a+c+1} value a);
+				}
+				[] t.timeout { setverdict(fail, "server never accepted via any port"); }
+			}
+		}
+		function cli() runs on C {
+			p.call(Sig:{x:=1,y:=-,z:=3}, 5.0) {
+				[] p.getreply(Sig:{x:=-,y:=4,z:=5} value 1) { setverdict(pass); }
+				[] p.catch(timeout) { setverdict(fail, "no reply via any port"); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C server := C.create;
+			var C client := C.create;
+			connect(server:p, client:p);
+			server.start(srv());
+			client.start(cli());
+			all component.done;
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (any port.getcall must bind its redirect)", v, reason)
+	}
+}
+
 // TestStrictSched_ForkMessagePeers covers the coop fork model: a sender
 // PTC and a receiver PTC (message comm) must BOTH fork so they interleave
 // under the scheduler — running either inline would block the single-runner
