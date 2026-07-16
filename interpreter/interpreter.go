@@ -183,7 +183,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// schedule the response block like an alt. The call's signature
 		// qualifies the block's unqualified getreply / catch guards
 		// (ETSI 22.3.1 h).
-		var restoreCallSig func()
+		var restoreCallSig, restoreCallTimeout func()
 		if es, ok := n.Stmt.(*syntax.ExprStmt); ok {
 			if ce, ok := es.Expr.(*syntax.CallExpr); ok {
 				if sel, ok := ce.Fun.(*syntax.SelectorExpr); ok {
@@ -191,6 +191,14 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 						if pname, ok := portExprName(sel.X, env); ok {
 							_ = evalProcedurePortOp("call", pname, ce, env)
 							restoreCallSig = pushCallSignature(ce, env)
+							// The call's timeout duration becomes a virtual
+							// timer the strict response-block alt parks on so
+							// `catch(timeout)` can fire (ETSI 22.3.1). Only the
+							// scheduler path evaluates it; the approximate path
+							// keeps its historical catch handling untouched.
+							if schedulerEnabled(env) {
+								restoreCallTimeout = pushCallTimeout(ce, env)
+							}
 						}
 					}
 				}
@@ -198,6 +206,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		}
 		if restoreCallSig != nil {
 			defer restoreCallSig()
+		}
+		if restoreCallTimeout != nil {
+			defer restoreCallTimeout()
 		}
 		if n.Body != nil {
 			if schedulerEnabled(env) {
@@ -9488,6 +9499,101 @@ func currentCallSignature(env runtime.Scope) string {
 		}
 	}
 	return ""
+}
+
+// pushCallTimeout registers the blocking call's timeout duration D — the
+// second argument of `p.call(S, D){ ... }` — as a synthetic virtual timer
+// stashed under procCallTimeoutKey, so a `catch(timeout)` guard in the
+// response block fires when D elapses (ETSI ES 201 873-4, 22.3.1). It
+// returns a restorer that removes it (supporting nested call blocks), or
+// nil when there is no duration argument (`p.call(S, nowait)` or a
+// duration-less blocking call). Only the strict scheduler path calls this;
+// the timer drives nextAltTimerVirtualDeadline so the call-body alt parks
+// on the deadline, and callTimeoutTimer / catch(timeout) matching read it.
+func pushCallTimeout(ce *syntax.CallExpr, env runtime.Scope) func() {
+	if ce == nil || ce.Args == nil || len(ce.Args.List) < 2 {
+		return nil
+	}
+	// `p.call(S, nowait)` is non-blocking: no timeout timer.
+	if id, ok := ce.Args.List[1].(*syntax.Ident); ok && id.String() == "nowait" {
+		return nil
+	}
+	d, ok := floatSeconds(eval(ce.Args.List[1], env))
+	if !ok || d < 0 {
+		return nil
+	}
+	th := &runtime.TimerHandle{Running: true, Duration: d, StartedAt: time.Now()}
+	if exec := runtime.FindTestcaseExec(env); exec != nil {
+		th.StartedAtVirtual = exec.VirtualClock()
+	}
+	prev, had := env.Get(procCallTimeoutKey)
+	env.Set(procCallTimeoutKey, th)
+	return func() {
+		if had {
+			env.Set(procCallTimeoutKey, prev)
+		} else {
+			env.Set(procCallTimeoutKey, runtime.Undefined)
+		}
+	}
+}
+
+// callTimeoutTimer returns the enclosing blocking call block's synthetic
+// timeout timer, or nil when there is none (no call block, a `nowait`
+// call, or the approximate path, which never sets it).
+func callTimeoutTimer(env runtime.Scope) *runtime.TimerHandle {
+	if v, ok := env.Get(procCallTimeoutKey); ok {
+		if th, ok := v.(*runtime.TimerHandle); ok && th.Running {
+			return th
+		}
+	}
+	return nil
+}
+
+// isCatchTimeoutGuard reports whether an alt clause guard is the
+// call-block timeout form `[] p.catch(timeout)` (a `catch` op with the
+// single `timeout` keyword argument) — as opposed to an exception catch
+// `catch(Sig, template)`. Only the former is satisfied by the call
+// timeout timer rather than a queued MsgException. A `-> redirect` /
+// `from` / `to` wrapper is peeled first for robustness.
+func isCatchTimeoutGuard(g syntax.Node) bool {
+	es, ok := g.(*syntax.ExprStmt)
+	if !ok {
+		return false
+	}
+	expr := es.Expr
+	for {
+		switch e := expr.(type) {
+		case *syntax.RedirectExpr:
+			if e == nil || e.X == nil {
+				return false
+			}
+			expr = e.X
+			continue
+		case *syntax.BinaryExpr:
+			if e.Op != nil && (e.Op.Kind() == syntax.FROM || e.Op.Kind() == syntax.TO) && e.X != nil {
+				expr = e.X
+				continue
+			}
+		}
+		break
+	}
+	ce, ok := expr.(*syntax.CallExpr)
+	if !ok {
+		return false
+	}
+	sel, ok := ce.Fun.(*syntax.SelectorExpr)
+	if !ok {
+		return false
+	}
+	op, ok := sel.Sel.(*syntax.Ident)
+	if !ok || op.String() != "catch" {
+		return false
+	}
+	if ce.Args == nil || len(ce.Args.List) != 1 {
+		return false
+	}
+	id, ok := ce.Args.List[0].(*syntax.Ident)
+	return ok && id.String() == "timeout"
 }
 
 // procReceiveIsUnqualified reports whether a getreply / catch receive

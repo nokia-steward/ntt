@@ -53,6 +53,96 @@ func TestStrictSched_GetcallSenderGuardNotCorrupted(t *testing.T) {
 	}
 }
 
+// TestStrictSched_CallTimeoutCatchFires covers C3: the timeout duration D of
+// a blocking `p.call(S, D){ ... }` is a virtual timer, so a `catch(timeout)`
+// guard in the response block fires when D elapses with no matching reply.
+// The server never replies, so the call-body alt parks on D's deadline, the
+// deterministic clock advances to it, and catch(timeout) wins. Without the
+// synthetic timer catch(timeout) could never match (it probed for a
+// MsgException that never arrives) and the call block hung. Mirrors
+// Sem_220302_GetcallOperation_004 (a client whose call is never answered).
+func TestStrictSched_CallTimeoutCatchFires(t *testing.T) {
+	src := `module m {
+		signature Sig(in integer x) return integer;
+		type port P procedure { inout Sig }
+		type component C { port P p }
+		function srv() runs on C {
+			timer t := 10.0; t.start;
+			alt { [] t.timeout {} }
+		}
+		function cli() runs on C {
+			p.call(Sig:{x:=1}, 1.0) {
+				[] p.getreply { setverdict(fail, "unexpected reply"); }
+				[] p.catch(timeout) { setverdict(pass); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C server := C.create;
+			var C client := C.create;
+			connect(server:p, client:p);
+			server.start(srv());
+			client.start(cli());
+			all component.done;
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (catch(timeout) must fire when the call is unanswered)", v, reason)
+	}
+}
+
+// TestStrictSched_CallReplyBeatsTimeout is C3's ordering guard: when a
+// matching reply IS produced, the getreply clause must win over
+// catch(timeout) — the timeout must not fire prematurely. The server accepts
+// the call and replies with return value 42; the client's getreply(value 42)
+// matches on the first snapshot, before the virtual clock ever advances to
+// the call's 5.0 timeout. Mirrors Sem_220302_GetcallOperation_005 (the reply
+// arrives and the value-qualified getreply wins).
+func TestStrictSched_CallReplyBeatsTimeout(t *testing.T) {
+	src := `module m {
+		signature Sig(in integer x) return integer;
+		type port P procedure { inout Sig }
+		type component C { port P p }
+		function srv() runs on C {
+			timer t := 10.0; t.start;
+			alt {
+				[] p.getcall(Sig:?) { p.reply(Sig:{x:=1} value 42); }
+				[] t.timeout {}
+			}
+		}
+		function cli() runs on C {
+			p.call(Sig:{x:=1}, 5.0) {
+				[] p.getreply(Sig:{x:=1} value 42) { setverdict(pass); }
+				[] p.catch(timeout) { setverdict(fail, "timed out despite a matching reply"); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C server := C.create;
+			var C client := C.create;
+			connect(server:p, client:p);
+			server.start(srv());
+			client.start(cli());
+			all component.done;
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (a matching reply must beat catch(timeout))", v, reason)
+	}
+}
+
 // TestStrictSched_ForkMessagePeers covers the coop fork model: a sender
 // PTC and a receiver PTC (message comm) must BOTH fork so they interleave
 // under the scheduler — running either inline would block the single-runner

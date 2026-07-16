@@ -2352,6 +2352,13 @@ func nextAltTimerVirtualDeadline(n *syntax.AltStmt, env runtime.Scope) (float64,
 	// which reaches component-scope timers (the common case).
 	var considerComm func(comm syntax.Node, depth int)
 	considerComm = func(comm syntax.Node, depth int) {
+		// `[] p.catch(timeout)` contributes the enclosing call block's
+		// timeout deadline, so the block-step advances the virtual clock to
+		// it when no getreply arrives and the catch(timeout) then fires.
+		if isCatchTimeoutGuard(comm) {
+			consider(callTimeoutTimer(env))
+			return
+		}
 		es, ok := comm.(*syntax.ExprStmt)
 		if !ok {
 			return
@@ -2830,6 +2837,24 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 					}
 				}
 			}
+		}
+	}
+	// `[] p.catch(timeout)` inside a blocking `call(S, D){ ... }` block is
+	// satisfied by the call's timeout timer (D elapsed), not by a queued
+	// MsgException. Match only once the synthetic timer has expired; while
+	// it is still running the clause is not ready (the alt block step
+	// advances the virtual clock to the deadline via
+	// nextAltTimerVirtualDeadline, then re-snapshots). When there is no
+	// call-timeout timer (the approximate path never sets one, and a
+	// catch(timeout) outside any call block has no timer) fall through to
+	// the legacy eval below so existing behaviour is unchanged.
+	if isCatchTimeoutGuard(g) {
+		if th := callTimeoutTimer(env); th != nil {
+			if timerExpired(th, env) {
+				th.Running = false
+				return true
+			}
+			return false
 		}
 	}
 	v := eval(g, env)
