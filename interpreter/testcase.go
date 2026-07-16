@@ -1896,6 +1896,7 @@ func evalAltStmtBestEffort(n *syntax.AltStmt, env runtime.Scope) runtime.Object 
 			}
 			if commGuardMatches(cc.Comm, env) {
 				matched = true
+				defaultBranchFire() // no-op unless inside a runDefaults sweep
 				if cc.Body != nil {
 					if res := evalAltClauseBody(cc.Body, env); res == runtime.Repeat {
 						break
@@ -2106,6 +2107,7 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			}
 			if commGuardMatches(cc.Comm, env) {
 				matched = true
+				defaultBranchFire() // no-op unless inside a runDefaults sweep
 				if cc.Body != nil {
 					if res := evalAltClauseBody(cc.Body, env); res == runtime.Repeat {
 						break

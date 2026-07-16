@@ -8686,6 +8686,7 @@ func runDefaults(env runtime.Scope) bool {
 	defer defaultCtx.leave()
 	defs := exec.Defaults()
 	pre := exec.GetVerdict()
+	sched := deterministicSchedulerEnabled(env)
 	for i := len(defs) - 1; i >= 0; i-- {
 		d := defs[i]
 		ast, ok := d.Body.(*astNode)
@@ -8701,7 +8702,23 @@ func runDefaults(env runtime.Scope) bool {
 		if isTimerOnlyDefault(ast.n, d.Env) {
 			continue
 		}
+		// Under the scheduler, also detect a fired default by whether it
+		// actually TAKES an alternative, not only by a verdict change. The
+		// change heuristic misses a default that re-asserts an already-set
+		// verdict — e.g. a PTC sets pass, then a standalone `check` that
+		// correctly does NOT match invokes the default, whose guard matches
+		// and re-sets pass (Sem_2204_the_check_operation_059/060/083/084).
+		// eval() still runs the whole altstep (so `repeat`, parameters and
+		// scoping behave exactly as before); defaultBranchFire, armed only
+		// for this eval, flips the flag when a real guard match fires a
+		// branch. The verdict-change test below is kept as a superset.
+		if sched {
+			defaultBranchArm()
+		}
 		_ = eval(ast.n, d.Env)
+		if sched && defaultBranchTook() {
+			return true
+		}
 		if exec.GetVerdict() != pre {
 			return true
 		}

@@ -143,6 +143,88 @@ func TestStrictSched_CallReplyBeatsTimeout(t *testing.T) {
 	}
 }
 
+// TestStrictSched_StandaloneCheckInvokesDefault covers a standalone
+// `p.check(...)` that must NOT match: it honours the inner `from self` filter
+// (the reply is from the PTC, not self), so on no-match it invokes the
+// activated default, whose getreply matches and re-asserts pass then stops —
+// the trailing `setverdict(fail)` must never run. The crux is that
+// runDefaults detects the fired default by an actual guard MATCH, not a
+// verdict change: the PTC already set pass, so the default re-asserting pass
+// changes nothing (the old verdict-change heuristic missed it and the fail
+// line ran). Mirrors Sem_2204_the_check_operation_059.
+func TestStrictSched_StandaloneCheckInvokesDefault(t *testing.T) {
+	src := `module m {
+		signature S(out integer p_par1) return integer;
+		type port P procedure { inout S }
+		type component C { port P p }
+		function f() runs on C {
+			p.getcall;
+			setverdict(pass, "Call received");
+			p.reply(S:{ p_par1 := 1} value 5);
+		}
+		altstep a() runs on C {
+			[] p.getreply {
+				setverdict(pass, "default matched: check correctly did not match");
+				stop;
+			}
+		}
+		testcase tc() runs on C system C {
+			var C v_ptc := C.create;
+			activate(a());
+			connect(self:p, v_ptc:p);
+			p.call(S:{ p_par1 := - }, nowait);
+			v_ptc.start(f());
+			p.check(getreply(S:? value ?) from self);
+			setverdict(fail, "check matched a reply that is not from self");
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (standalone check must invoke the default on no-match)", v, reason)
+	}
+}
+
+// TestStrictSched_RepeatingDefaultStillLoops guards the runDefaults change
+// against the default-mechanism regression: a default that `repeat`s must
+// still run its whole altstep loop (consuming every queued message), not a
+// single branch. Two messages are sent; the default counts each and repeats,
+// so the counter reaches 2. Mirrors Sem_200501_the_default_mechanism_006.
+func TestStrictSched_RepeatingDefaultStillLoops(t *testing.T) {
+	src := `module m {
+		type port P message { inout integer }
+		type component C { var integer vc := 0; port P p }
+		altstep a() runs on C {
+			[] p.receive(integer:?) { vc := vc + 1; repeat; }
+		}
+		testcase tc() runs on C system C {
+			activate(a());
+			p.send(integer:5);
+			p.send(integer:1);
+			alt {
+				[] p.receive(integer:1) { vc := vc + 1; setverdict(pass); }
+			}
+			if (vc == 2) { setverdict(pass); }
+			else { setverdict(fail, "repeating default did not consume both messages"); }
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (repeating default must loop over both messages)", v, reason)
+	}
+}
+
 // TestStrictSched_AnyPortGetcallBindsRedirect covers `any port.getcall(tmpl)
 // -> param(...)` under the scheduler: the redirect form fans out over the
 // CURRENT component's own ports (as bare names, so the per-port receive

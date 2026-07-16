@@ -47,6 +47,42 @@ var altBodyCtx altContext
 // guard ever matches.
 var defaultCtx altContext
 
+// defaultBranchState tracks, per goroutine, whether an alt guard actually
+// matched while runDefaults was evaluating an activated default. runDefaults
+// arms it before eval-ing each default and reads it after; the alt evaluator
+// flips it to "fired" when a real guard match takes a branch. This detects a
+// default that fired but re-asserted an already-set verdict — which the
+// verdict-change heuristic cannot see (Sem_2204_the_check_operation_059..084).
+// State per gid: 0/absent = unarmed, 1 = armed-not-fired, 2 = armed-fired.
+var defaultBranchState sync.Map // map[uint64]*int64
+
+func defaultBranchArm() {
+	v, _ := defaultBranchState.LoadOrStore(goroutineID(), new(int64))
+	atomic.StoreInt64(v.(*int64), 1)
+}
+
+// defaultBranchFire records a real guard match on this goroutine, but only
+// while armed (inside a runDefaults default eval); a no-op otherwise, so it
+// is safe to call from the shared alt evaluator on every branch selection.
+func defaultBranchFire() {
+	if v, ok := defaultBranchState.Load(goroutineID()); ok {
+		atomic.CompareAndSwapInt64(v.(*int64), 1, 2)
+	}
+}
+
+// defaultBranchTook reports whether a branch fired since the last arm and
+// disarms the tracker for this goroutine.
+func defaultBranchTook() bool {
+	gid := goroutineID()
+	v, ok := defaultBranchState.Load(gid)
+	if !ok {
+		return false
+	}
+	took := atomic.LoadInt64(v.(*int64)) == 2
+	defaultBranchState.Delete(gid)
+	return took
+}
+
 func (a *altContext) counter(gid uint64) *int64 {
 	if v, ok := a.counters.Load(gid); ok {
 		return v.(*int64)
