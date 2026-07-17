@@ -12,11 +12,19 @@
 //   - `raise(Sig, expr)` -> the exception value must be specific
 //     (handled in port_ops.go's wildcard rule, not here).
 //
-// We rely on the syntactic shape of the actual: either the
-// inline form `Sig:{...}` or a reference to a `template Sig t :=
-// {...}` declaration. Anything outside those two shapes (e.g. a
-// formal parameter passed in from a caller) is left alone - the
-// rule trades completeness for zero false positives.
+// We rely on the syntactic shape of the actual: either the inline form
+// `Sig:{...}` or a reference to a `template Sig t := {...}` declaration (the
+// `Sig:tmplRef` COLON form resolves the named template's body too, so a
+// call-safe template with `out := -` used in a reply is caught — ETSI 15.3
+// restriction e, NegSem_1503_GlobalAndLocalTemplates_007). Anything outside
+// those shapes (e.g. a formal parameter passed in from a caller) is left
+// alone - the rule trades completeness for zero false positives.
+//
+// NOTE: the mirror `out := <value>` used in a `call` (the 15.3 case
+// NegSem_..._008) is deliberately NOT flagged: the suite contradicts itself
+// there (Sem_220304_getreply_operation_006 uses the same `call(S:{out:=v})`
+// construct and expects accept), so a static rule cannot reject one without
+// wrongly rejecting the other.
 package semantic
 
 import (
@@ -63,7 +71,10 @@ func (a *Analyzer) checkSignatureTemplateRules(mod *syntax.Module) []Diagnostic 
 		if !ok || len(params) == 0 {
 			return true
 		}
-		// For `call` -> in/inout. For `reply` -> out/inout.
+		// Matching-mechanism restriction (22.3): the slots that must be
+		// SPECIFIC — `call` -> in/inout, `reply` -> out/inout. (Resolving
+		// the named-template body above lets this also catch a call-safe
+		// template — out := `-` — used in a reply: ETSI 15.3 restriction e.)
 		var forbid map[syntax.Kind]bool
 		switch op {
 		case "call":
@@ -182,7 +193,15 @@ func resolveSignatureTemplate(actual syntax.Expr, tmplTypes map[string]string, t
 	}
 	if be, ok := actual.(*syntax.BinaryExpr); ok && be.Op != nil && be.Op.Kind() == syntax.COLON {
 		if id, ok := be.X.(*syntax.Ident); ok && id != nil && id.Tok != nil {
-			return id.String(), be.Y
+			body := be.Y
+			// `Sig:tmplRef` — resolve a named template reference to its
+			// composite body so the field-level rules see the actuals.
+			if ref, ok := be.Y.(*syntax.Ident); ok && ref != nil && ref.Tok != nil {
+				if b, has := tmplBodies[ref.String()]; has {
+					body = b
+				}
+			}
+			return id.String(), body
 		}
 		return "", nil
 	}
