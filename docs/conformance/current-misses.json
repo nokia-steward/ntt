@@ -1,9 +1,9 @@
 {
- "summary": "ran 4948 files: 4790 matched, 23 skipped (97.26% match rate)",
- "source": "/tmp/full_now.json",
- "miss_count": 158,
+ "summary": "ran 4948 files: 4792 matched, 23 skipped (97.30% match rate)",
+ "source": "/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b00a-12bcd47feab7/scratchpad/full_final.json",
+ "miss_count": 156,
  "outcomes": {
-  "reject->pass": 106,
+  "reject->pass": 104,
   "->": 23,
   "pass->fail": 21,
   "error->pass": 2,
@@ -40,9 +40,9 @@
   },
   {
    "chapter": "core_language/15_templates",
-   "misses": 20,
+   "misses": 19,
    "outcomes": {
-    "reject->pass": 16,
+    "reject->pass": 15,
     "->": 2,
     "pass->fail": 2
    }
@@ -83,18 +83,18 @@
    }
   },
   {
-   "chapter": "core_language/B_matching_incoming_values",
-   "misses": 4,
-   "outcomes": {
-    "reject->pass": 4
-   }
-  },
-  {
    "chapter": "core_language/08_modules",
    "misses": 3,
    "outcomes": {
     "->": 2,
     "pass->fail": 1
+   }
+  },
+  {
+   "chapter": "core_language/B_matching_incoming_values",
+   "misses": 3,
+   "outcomes": {
+    "reject->pass": 3
    }
   },
   {
@@ -746,14 +746,6 @@
    "expected": "reject",
    "actual": "pass",
    "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1503_global_and_local_templates/NegSem_1503_GlobalAndLocalTemplates_007.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
    "relpath": "core_language/15_templates/1503_global_and_local_templates/NegSem_1503_GlobalAndLocalTemplates_008.ttcn",
    "message": ""
   },
@@ -1363,14 +1355,6 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0102_matching_mechanisms/B010201_value_list/NegSem_B010201_value_list_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/B_matching_incoming_values",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0103_matching_inside_values/B010303_permutation/NegSem_B010303_permutation_001.ttcn",
    "message": ""
   },
   {

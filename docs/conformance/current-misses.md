@@ -1,13 +1,13 @@
 # Current Conformance Misses
 
-Generated from `/tmp/full_now.json` using the current workspace runner.
+Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b00a-12bcd47feab7/scratchpad/full_final.json` using the current workspace runner.
 
-- Summary: `ran 4948 files: 4790 matched, 23 skipped (97.26% match rate)`
-- Misses: `158`
+- Summary: `ran 4948 files: 4792 matched, 23 skipped (97.30% match rate)`
+- Misses: `156`
 
 ## Misses By Outcome
 
-- `reject->pass`: `106`
+- `reject->pass`: `104`
 - `->`: `23`
 - `pass->fail`: `21`
 - `error->pass`: `2`
@@ -21,13 +21,13 @@ Generated from `/tmp/full_now.json` using the current workspace runner.
 - `core_language/06_types_and_values`: `38` (`->`=9, `pass->fail`=4, `reject->pass`=25)
 - `core_language/22_communication_operations`: `26` (`pass->fail`=4, `reject->pass`=22)
 - `core_language/05_basic_language_elements`: `20` (`->`=3, `reject->pass`=17)
-- `core_language/15_templates`: `20` (`->`=2, `pass->fail`=2, `reject->pass`=16)
+- `core_language/15_templates`: `19` (`->`=2, `pass->fail`=2, `reject->pass`=15)
 - `core_language/16_functions_altsteps_testcases`: `10` (`->`=1, `pass->fail`=4, `reject->pass`=5)
 - `core_language/26_module_control`: `9` (`->`=3, `error->pass`=2, `error->timeout`=1, `fail->pass`=2, `pass->fail`=1)
 - `core_language/09_test_configurations`: `7` (`reject->pass`=7)
 - `core_language/20_statement_and_operations_for_alt`: `7` (`pass->fail`=3, `reject->pass`=4)
-- `core_language/B_matching_incoming_values`: `4` (`reject->pass`=4)
 - `core_language/08_modules`: `3` (`->`=2, `pass->fail`=1)
+- `core_language/B_matching_incoming_values`: `3` (`reject->pass`=3)
 - `oo/501_classes_and_objects`: `3` (`pass->fail`=1, `pass->parse-error`=2)
 - `core_language/07_expressions`: `2` (`reject->pass`=2)
 - `core_language/11_variables`: `2` (`->`=2)
@@ -112,7 +112,6 @@ Generated from `/tmp/full_now.json` using the current workspace runner.
 
 ### `core_language/15_templates`
 
-- `core_language/15_templates/1503_global_and_local_templates/NegSem_1503_GlobalAndLocalTemplates_007.ttcn`: `reject -> pass`
 - `core_language/15_templates/1503_global_and_local_templates/NegSem_1503_GlobalAndLocalTemplates_008.ttcn`: `reject -> pass`
 - `core_language/15_templates/1503_global_and_local_templates/NegSyn_1503_GlobalAndLocalTemplates_006.ttcn`: ` -> `
 - `core_language/15_templates/1503_global_and_local_templates/Sem_1503_GlobalAndLocalTemplates_010.ttcn`: `reject -> pass`
