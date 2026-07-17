@@ -2488,6 +2488,15 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 						switch name.String() {
 						case "send":
 							return evalPortSendTo(portName, info.call, env, info.to)
+						case "call":
+							// `p.call(S:{...}) to (targets)` — a non-blocking
+							// (noblock signature / nowait) call addressed to
+							// specific components: multicast to ONLY those.
+							// Strict-only; the approximate path keeps its
+							// legacy broadcast (fall through to eval(n.X)).
+							if deterministicSchedulerEnabled(env) {
+								return evalProcedureCallTo(portName, info.call, info.to, env)
+							}
 						case "reply", "raise":
 							// Procedure replies/exceptions enqueue a
 							// kind-tagged envelope; the `to <addr>`
@@ -6908,6 +6917,40 @@ func startBodyIsDeferredResponder(body syntax.Node, env runtime.Scope) bool {
 	return hasGetcall && hasResponse && !hasWhileTrue
 }
 
+// startBodyIsBareResponder reports whether a skipped PTC body is a
+// STRAIGHT-LINE one-shot procedure server: getcall + reply/raise with no
+// alt, no timer.timeout, and no loop — nothing that must run on its own
+// scheduled goroutine. Only such a body is safe to run INLINE via a deferred
+// replay (RunDeferredResponders): a responder that waits inside an `alt` (or
+// on a timer) must be forked instead so its guard can park and the scheduler
+// can hand off, or running it inline on the caller's goroutine would deadlock
+// (Sem_220301_CallOperation_001). CallOp_015's `getcall; reply` server IS
+// bare, so it defers; a `alt { [] getcall ... }` server is not.
+func startBodyIsBareResponder(body syntax.Node, env runtime.Scope) bool {
+	if !startBodyIsDeferredResponder(body, env) {
+		return false
+	}
+	root := startBodyRoot(body, env)
+	bare := true
+	syntax.Inspect(root, func(n syntax.Node) bool {
+		if n == nil || !bare {
+			return false
+		}
+		switch x := n.(type) {
+		case *syntax.AltStmt:
+			bare = false
+			return false
+		case *syntax.SelectorExpr:
+			if id, ok := x.Sel.(*syntax.Ident); ok && id != nil && id.String() == "timeout" {
+				bare = false
+				return false
+			}
+		}
+		return true
+	})
+	return bare
+}
+
 // startBodyBlocksOnPortReceive reports whether the body of
 // `comp.start(call)` would block forever inside an alt whose only
 // guards are `port.receive(...)` / `.check(...)` / `.trigger(...)`
@@ -7330,7 +7373,20 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 			if exec := runtime.FindTestcaseExec(env); exec != nil {
 				pending = exec.HasPendingCalls()
 			}
-			if startBodyHasBlockingCall(body, env) || !pending {
+			// A BARE finite responder (straight-line `getcall; reply`, no
+			// alt/timer/loop and no blocking call of its own) is NOT forked:
+			// it takes the skip+register path so it is replayed inline
+			// on-demand only for the call actually addressed to it
+			// (RunDeferredResponders peeks its queue). Forking it instead
+			// makes its non-blocking getcall fall through on an empty queue
+			// and reply spuriously, which multicast `call to (...)` fixtures
+			// mis-attribute to the wrong sender (Sem_220301_CallOperation_015).
+			// An alt-based responder (`alt { [] getcall ... }`) MUST still
+			// fork: its guard has to park on its own scheduled goroutine, so
+			// running it inline via a deferred replay would deadlock.
+			hasBlockingCall := startBodyHasBlockingCall(body, env)
+			bareResponder := startBodyIsBareResponder(body, env) && !hasBlockingCall
+			if !bareResponder && (hasBlockingCall || !pending) {
 				skip = false
 				forkStrict = true
 			}
@@ -7407,7 +7463,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				if op == "start" && startBodyIsDeferredResponder(body, env) {
 					if exec := runtime.FindTestcaseExec(env); exec != nil {
 						fn, snapArgs, callArgExprs := snapshotPTCArgs(body, env)
-						exec.RegisterDeferredResponder(func() {
+						exec.RegisterDeferredResponder(ref.ID, func() {
 							runEnv := componentExecutionEnv(ref, env)
 							runEnv.Set("self", ref)
 							exec.PushComponent(ref)
@@ -9338,6 +9394,80 @@ func portExprName(e syntax.Expr, env runtime.Scope) (string, bool) {
 // already enqueued, so getcall/getreply/catch are non-blocking
 // dequeues and `call` returns immediately whether or not `nowait` was
 // given.
+// evalProcedureCallTo delivers a non-blocking `p.call(S:{...}) to (targets)`
+// to ONLY the addressed components' connected ports — multicast, not the
+// broadcast-to-all-peers routing of a plain `p.call` (ETSI 22.3.1). Each
+// target's connected peer endpoint is resolved through the connect graph so a
+// differently-named peer port still routes. Falls back to the default
+// broadcast when the target set can't be resolved. Strict-only (the caller
+// gates it on the scheduler).
+func evalProcedureCallTo(port string, call *syntax.CallExpr, toExpr syntax.Expr, env runtime.Scope) runtime.Object {
+	exec := runtime.FindTestcaseExec(env)
+	if exec == nil || call == nil {
+		return runtime.Undefined
+	}
+	var params runtime.Object
+	var sig string
+	if call.Args != nil && len(call.Args.List) > 0 {
+		params, _ = procSignatureArg(call.Args.List[0], env)
+		sig = procSignatureName(call.Args.List[0])
+	}
+	msg := runtime.PortMessage{
+		Kind:      runtime.MsgCall,
+		Sender:    exec.CurrentComponent(),
+		Payload:   params,
+		Signature: sig,
+	}
+	targets := callTargetComponentIDs(toExpr, env)
+	if targets == nil {
+		// Unresolved target set: fall back to the default broadcast routing.
+		enqueueEnvelopeRouted(exec, exec.PortKey(port), port, msg)
+		exec.RunDeferredResponders()
+		return runtime.Undefined
+	}
+	var curID int64 = -1
+	if cur := exec.CurrentComponent(); cur != nil {
+		curID = cur.ID
+	}
+	delivered := false
+	for _, peer := range exec.ConnectedPeers(runtime.PortEndpoint{Comp: curID, Port: port}) {
+		if !targets[peer.Comp] {
+			continue
+		}
+		exec.EnqueueEnvelope(exec.PortKeyFor(peer.Comp, peer.Port), msg)
+		delivered = true
+	}
+	if !delivered {
+		enqueueEnvelopeRouted(exec, exec.PortKey(port), port, msg)
+	}
+	exec.RunDeferredResponders()
+	return runtime.Undefined
+}
+
+// callTargetComponentIDs resolves a `to (a, b, ...)` / `to a` target list to
+// the set of addressed component IDs, or nil when it can't (the caller then
+// broadcasts). A parenthesised list addresses several components (multicast);
+// a bare expression addresses one.
+func callTargetComponentIDs(toExpr syntax.Expr, env runtime.Scope) map[int64]bool {
+	if toExpr == nil {
+		return nil
+	}
+	exprs := []syntax.Expr{toExpr}
+	if pe, ok := toExpr.(*syntax.ParenExpr); ok && len(pe.List) > 0 {
+		exprs = pe.List
+	}
+	ids := map[int64]bool{}
+	for _, e := range exprs {
+		if r, ok := eval(e, env).(*runtime.ComponentRef); ok && r != nil {
+			ids[r.ID] = true
+		}
+	}
+	if len(ids) == 0 {
+		return nil
+	}
+	return ids
+}
+
 func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil {

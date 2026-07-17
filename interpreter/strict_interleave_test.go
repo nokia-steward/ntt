@@ -143,6 +143,53 @@ func TestStrictSched_CallReplyBeatsTimeout(t *testing.T) {
 	}
 }
 
+// TestStrictSched_MulticastCallTargetsOnly covers non-blocking multicast
+// `p.call(S:{}) to (a, c)`: the call must reach ONLY the addressed
+// components, and an UNaddressed bare `getcall; reply` responder must NOT
+// reply spuriously. Three servers are started; the call targets two of them,
+// so exactly two replies arrive, both from an addressed component. Regression
+// guard for Sem_220301_CallOperation_015: the fix routes the multicast to the
+// targeted peers (A1) and replays a bare responder only when a call is
+// actually queued on its own ports (A2 selective deferred replay), rather
+// than forking it and letting its non-blocking getcall fall through to a
+// spurious reply.
+func TestStrictSched_MulticastCallTargetsOnly(t *testing.T) {
+	src := `module m {
+		signature S() noblock;
+		type port P procedure { inout S }
+		type component C { port P p }
+		function srv() runs on C { p.getcall(S:?); p.reply(S:{}); }
+		testcase tc() runs on C system C {
+			var C c1 := C.create, c2 := C.create, c3 := C.create, v_from;
+			var integer n := 0;
+			connect(self:p, c1:p); connect(self:p, c2:p); connect(self:p, c3:p);
+			c1.start(srv()); c2.start(srv()); c3.start(srv());
+			p.call(S:{}) to (c1, c3);
+			timer g := 10.0; g.start;
+			alt {
+				[] p.getreply(S:?) -> sender v_from {
+					if (v_from == c1 or v_from == c3) {
+						n := n + 1;
+						if (n < 2) { repeat; }
+						else { setverdict(pass); }
+					} else { setverdict(fail, "reply from an unaddressed component"); }
+				}
+				[] g.timeout { setverdict(fail, "did not receive both addressed replies"); }
+			}
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (multicast must target only c1/c3, no spurious reply)", v, reason)
+	}
+}
+
 // TestStrictSched_TimerRunningUsesVirtualClock covers `T.running` under the
 // virtual clock: three timers start at 1.0/2.0/3.0 and `t_medium.timeout`
 // advances the clock to 2.0. At that point t_short (1.0) must read NOT

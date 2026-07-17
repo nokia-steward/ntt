@@ -85,8 +85,11 @@ type TestcaseExec struct {
 
 	// deferredResponders are skipped PTC bodies that are waiting for a
 	// procedure call to appear. The interpreter registers callbacks
-	// here so runtime stays independent from the syntax package.
-	deferredResponders []func()
+	// here so runtime stays independent from the syntax package. Each
+	// carries the responder component's ID so the strict scheduler can
+	// replay only the responder(s) actually addressed by a call
+	// (selective replay); the approximate path replays them all.
+	deferredResponders []deferredResponder
 
 	// portTypes maps a port-instance name (e.g. "cli") to its
 	// declared port-type name (e.g. "MyClient_PT"). Populated
@@ -1292,28 +1295,81 @@ func (t *TestcaseExec) EnqueueEnvelope(port string, msg PortMessage) {
 	t.signalMessageReady()
 }
 
+// deferredResponder is one skipped PTC responder body plus the component it
+// runs on, so RunDeferredResponders can (under the strict scheduler) replay
+// only the responder addressed by a queued call.
+type deferredResponder struct {
+	compID int64
+	fn     func()
+}
+
 // RegisterDeferredResponder records a skipped PTC procedure responder
-// that should be given another chance once an MTC call is queued.
-func (t *TestcaseExec) RegisterDeferredResponder(fn func()) {
+// (running on component compID) that should be given another chance once a
+// procedure call is queued.
+func (t *TestcaseExec) RegisterDeferredResponder(compID int64, fn func()) {
 	if fn == nil {
 		return
 	}
 	t.mu.Lock()
-	t.deferredResponders = append(t.deferredResponders, fn)
+	t.deferredResponders = append(t.deferredResponders, deferredResponder{compID: compID, fn: fn})
 	t.mu.Unlock()
 }
 
 // RunDeferredResponders drains and invokes responders registered by
-// RegisterDeferredResponder. Callbacks run outside the exec mutex
-// because they evaluate TTCN-3 code and may enqueue/dequeue messages.
+// RegisterDeferredResponder. Callbacks run outside the exec mutex because
+// they evaluate TTCN-3 code and may enqueue/dequeue messages.
+//
+// Under the strict scheduler a responder is invoked ONLY when a call is
+// actually queued on its component's ports — so a multicast `call to (...)`
+// that addressed other components does not make this responder reply
+// spuriously (Sem_220301_CallOperation_015). Un-addressed responders are
+// re-registered for a later call. The approximate path keeps the historical
+// unconditional replay (its ports are unqualified, and its looser sender
+// matching tolerates the extra replies the conformance gate is tuned to).
 func (t *TestcaseExec) RunDeferredResponders() {
 	t.mu.Lock()
-	callbacks := append([]func(){}, t.deferredResponders...)
+	drained := append([]deferredResponder{}, t.deferredResponders...)
 	t.deferredResponders = nil
+	strict := t.profile == ProfileStrict
 	t.mu.Unlock()
-	for _, fn := range callbacks {
-		fn()
+
+	var keep []deferredResponder
+	for _, d := range drained {
+		if strict {
+			t.mu.Lock()
+			addressed := t.hasPendingCallForCompLocked(d.compID)
+			t.mu.Unlock()
+			if !addressed {
+				keep = append(keep, d)
+				continue
+			}
+		}
+		d.fn()
 	}
+	if len(keep) > 0 {
+		t.mu.Lock()
+		t.deferredResponders = append(keep, t.deferredResponders...)
+		t.mu.Unlock()
+	}
+}
+
+// hasPendingCallForCompLocked reports whether any port queue belonging to
+// component compID holds a queued MsgCall. Under the strict scheduler a
+// non-MTC PTC's ports are qualified "\x00c<id>/<name>" (see PortKey), so we
+// match that prefix. Caller holds t.mu.
+func (t *TestcaseExec) hasPendingCallForCompLocked(compID int64) bool {
+	prefix := portQualPrefix + strconv.FormatInt(compID, 10) + "/"
+	for key, q := range t.ports {
+		if !strings.HasPrefix(key, prefix) {
+			continue
+		}
+		for _, m := range q {
+			if m.Kind == MsgCall {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // ReceiveLock acquires the receive critical-section mutex. The
