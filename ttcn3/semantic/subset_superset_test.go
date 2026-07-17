@@ -98,6 +98,42 @@ func TestSubsetDirectOnSubtypedSetOfAccepted(t *testing.T) {
 	}
 }
 
+func TestPermutationOnSetOfFieldRejected(t *testing.T) {
+	// ETSI B.1.3.3: permutation(...) is an ordered-list mechanism valid
+	// only on a `record of` / array target; using it inside a `set of`
+	// field's value list is illegal. NegSem_B010303_permutation_001.
+	tree := parse(t, `module M {
+		type record MessageType {
+			set of integer field1
+		}
+		type component C {}
+		testcase tc() runs on C {
+			template MessageType mw := { field1 := {permutation(1, 2, 3), 5} };
+		}
+	}`)
+	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree)
+	if !containsCode(diags, "permutation-on-setof") {
+		t.Fatalf("expected permutation-on-setof, got %v", codes(diags))
+	}
+}
+
+func TestPermutationOnRecordOfFieldAccepted(t *testing.T) {
+	// permutation on a `record of` field is legal — must NOT be flagged.
+	tree := parse(t, `module M {
+		type record MessageType {
+			record of integer field1
+		}
+		type component C {}
+		testcase tc() runs on C {
+			template MessageType mw := { field1 := {permutation(1, 2, 3), 5} };
+		}
+	}`)
+	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree)
+	if containsCode(diags, "permutation-on-setof") {
+		t.Fatalf("did not expect permutation-on-setof on record-of field, got %v", codes(diags))
+	}
+}
+
 func TestSupersetOnRecordOfRejected(t *testing.T) {
 	tree := parse(t, `module M {
 		type record of integer RoI;

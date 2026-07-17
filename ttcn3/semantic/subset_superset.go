@@ -1,11 +1,14 @@
 // subset_superset.go enforces ETSI ES 201 873-1 clauses B.1.2.6
-// (SubSet) and B.1.2.7 (SuperSet) on the *applicability* of those
-// template matching mechanisms: both are only valid when the
-// matched target is a `set of` type.
+// (SubSet), B.1.2.7 (SuperSet) and B.1.3.3 (Permutation) on the
+// *applicability* of those template matching mechanisms:
 //
 //   - subset-on-non-setof: emitted when `subset(...)` is used on a
 //     target whose declared type is anything other than `set of T`.
 //   - superset-on-non-setof: same rule for `superset(...)`.
+//   - permutation-on-setof: emitted when `permutation(...)` appears as
+//     an element of a `set of` / `set` value list. permutation is an
+//     ordered-list mechanism valid only for `record of` / array
+//     targets; on the unordered `set of` it is illegal.
 //
 // The check is purely syntactic: we collect every named type's
 // "category" (set-of / record-of / array / record / set / union /
@@ -100,6 +103,11 @@ func (a *Analyzer) checkSubsetSupersetRules(mod *syntax.Module) []Diagnostic {
 		// subset / superset.
 		diags = append(diags, checkSubsetCall(
 			td.Value, typeName, "", typeCats)...)
+		// `template SoT name := { permutation(...), ... }` — permutation
+		// as a direct element of a `set of` template value.
+		diags = append(diags, checkPermutationOnSetOf(
+			td.Value, typeCats[typeName],
+			fmt.Sprintf("template type %q", typeName))...)
 
 		// Composite-literal shape:
 		// `template T name := { field := subset(...) }`.
@@ -122,6 +130,11 @@ func (a *Analyzer) checkSubsetSupersetRules(mod *syntax.Module) []Diagnostic {
 				}
 				diags = append(diags, checkSubsetCallWithSpec(
 					be.Y, spec, fieldName, typeCats)...)
+				// `field := { permutation(...), ... }` — permutation as an
+				// element of a `set of` field's value list.
+				diags = append(diags, checkPermutationOnSetOf(
+					be.Y, specCategory(spec, typeCats),
+					fmt.Sprintf("field %q of template type %q", fieldName, typeName))...)
 			}
 		}
 		return true
@@ -168,6 +181,51 @@ func checkSubsetCallWithSpec(
 		Node: ce,
 		Span: syntax.SpanOf(ce),
 	}}
+}
+
+// specCategory resolves a fieldSpec to a concrete typeCategory: its inline
+// category if set, else the category of its named type.
+func specCategory(spec fieldSpec, typeCats map[string]typeCategory) typeCategory {
+	if spec.category != typeCategoryOther {
+		return spec.category
+	}
+	if spec.typeName != "" {
+		return typeCats[spec.typeName]
+	}
+	return typeCategoryOther
+}
+
+// checkPermutationOnSetOf flags a `permutation(...)` element used inside a
+// `set of` / `set` value list. permutation is an ordered-list matching
+// mechanism valid only for `record of` / array targets (ETSI B.1.3.3); the
+// unordered `set of` makes element position meaningless, so it is illegal
+// (NegSem_B010303_permutation_001). `val` is the container value (the field's
+// or template's `{ ... }` list); `cat` is that container's type category.
+func checkPermutationOnSetOf(val syntax.Expr, cat typeCategory, where string) []Diagnostic {
+	if cat != typeCategorySetOf && cat != typeCategorySet {
+		return nil
+	}
+	cl, ok := stripTemplateAttrs(val).(*syntax.CompositeLiteral)
+	if !ok {
+		return nil
+	}
+	var diags []Diagnostic
+	for _, el := range cl.List {
+		ce, ok := stripTemplateAttrs(el).(*syntax.CallExpr)
+		if !ok || identName(ce.Fun) != "permutation" {
+			continue
+		}
+		diags = append(diags, Diagnostic{
+			Code:     "permutation-on-setof",
+			Severity: SeverityError,
+			Message: fmt.Sprintf(
+				"permutation(...) requires a `record of` target; %s has category %s",
+				where, cat.String()),
+			Node: ce,
+			Span: syntax.SpanOf(ce),
+		})
+	}
+	return diags
 }
 
 // checkSubsetCall returns the diagnostics produced when `val` is a
