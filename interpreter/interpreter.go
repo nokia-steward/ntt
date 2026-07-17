@@ -685,7 +685,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		if th, ok := left.(*runtime.TimerHandle); ok {
 			switch syntax.Name(n.Sel) {
 			case "running":
-				return runtime.NewBool(tickTimer(th))
+				return runtime.NewBool(timerStillRunning(th, env))
 			case "read":
 				return timerReadVirtual(th, env)
 			case "timeout":
@@ -6445,7 +6445,7 @@ func evalTimerMethod(th *runtime.TimerHandle, sel syntax.Expr, n *syntax.CallExp
 		th.StartedAt = time.Time{}
 		return runtime.Undefined
 	case "running":
-		return runtime.NewBool(tickTimer(th))
+		return runtime.NewBool(timerStillRunning(th, env))
 	case "read":
 		return timerReadVirtual(th, env)
 	case "timeout":
@@ -7662,6 +7662,26 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		return newComponentRef(ref.TypeName, name, env), true
 	}
 	return nil, false
+}
+
+// timerStillRunning answers `T.running`. Under the virtual clock a timer
+// stops running once its deadline has passed in VIRTUAL time — a sibling
+// `T.timeout` may have advanced the clock beyond this timer's expiry, and
+// tickTimer's wall-clock check never fires because no real time elapses, so
+// it would wrongly report the timer as still running (Sem_2306_007). When the
+// timer is not yet virtually expired we fall through to tickTimer, preserving
+// the tick-counter fallback that lets a `while (t.running) {}` busy-wait (no
+// clock advance) terminate.
+func timerStillRunning(th *runtime.TimerHandle, env runtime.Scope) bool {
+	if th == nil {
+		return false
+	}
+	if useVirtualClock(env) && th.Running && timerExpired(th, env) {
+		th.Running = false
+		th.Ticks = th.MaxTicks
+		return false
+	}
+	return tickTimer(th)
 }
 
 // tickTimer advances the timer's virtual clock by one and reports the

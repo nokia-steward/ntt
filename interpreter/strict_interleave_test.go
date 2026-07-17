@@ -143,6 +143,38 @@ func TestStrictSched_CallReplyBeatsTimeout(t *testing.T) {
 	}
 }
 
+// TestStrictSched_TimerRunningUsesVirtualClock covers `T.running` under the
+// virtual clock: three timers start at 1.0/2.0/3.0 and `t_medium.timeout`
+// advances the clock to 2.0. At that point t_short (1.0) must read NOT
+// running (its deadline passed in virtual time) and t_long (3.0) must read
+// still running. tickTimer only checks the wall clock — which never advances
+// here — so it wrongly reported t_short as still running. Mirrors
+// Sem_2306_timer_timeout_007 (timeouts fire shortest-to-longest).
+func TestStrictSched_TimerRunningUsesVirtualClock(t *testing.T) {
+	src := `module m {
+		type component C { timer t_short, t_medium, t_long }
+		testcase tc() runs on C system C {
+			t_long.start(3.0);
+			t_medium.start(2.0);
+			t_short.start(1.0);
+			t_medium.timeout;
+			if (t_short.running) { setverdict(fail, "short timer still running at t=2.0"); stop; }
+			if (not t_long.running) { setverdict(fail, "long timer already expired at t=2.0"); stop; }
+			setverdict(pass);
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (T.running must track the virtual clock)", v, reason)
+	}
+}
+
 // TestStrictSched_StandaloneCheckInvokesDefault covers a standalone
 // `p.check(...)` that must NOT match: it honours the inner `from self` filter
 // (the reply is from the PTC, not self), so on no-match it invokes the
