@@ -65,19 +65,19 @@ func init() {
 		"per-testcase execution budget")
 	ConformanceCommand.Flags().IntVar(&conformanceJobs, "jobs", 8,
 		"number of files to run in parallel")
-	ConformanceCommand.Flags().StringVar(&conformanceProfile, "profile", "approximate",
-		"execution semantics profile: approximate (default gate) or strict")
+	ConformanceCommand.Flags().StringVar(&conformanceProfile, "profile", "strict",
+		"execution semantics profile: strict (default — the discrete-event scheduler + virtual clock) or approximate (the legacy engine, being retired)")
 	ConformanceCommand.Flags().BoolVar(&conformanceDifferential, "differential", false,
-		"also run each executed testcase under the strict profile and report verdict divergences (diagnostic; not part of the gate)")
+		"also run each executed testcase under both profiles and report verdict divergences (diagnostic; not part of the gate)")
 }
 
 // runProfile parses the --profile flag into a SemanticsProfile. Unknown
 // values fall back to approximate so the gate never silently switches.
 func runProfile() runtime.SemanticsProfile {
-	if strings.EqualFold(conformanceProfile, "strict") {
-		return runtime.ProfileStrict
+	if strings.EqualFold(conformanceProfile, "approximate") {
+		return runtime.ProfileApproximate
 	}
-	return runtime.ProfileApproximate
+	return runtime.ProfileStrict
 }
 
 // ConformanceResult is the per-file outcome of a conformance run. The
@@ -104,10 +104,13 @@ type ConformanceResult struct {
 	//                   testcase): parse+analyze succeeded.
 	//   "runtime-error"/"timeout" - the interpreter errored/timed out.
 	Provenance string `json:"provenance,omitempty"`
-	// StrictActual / Diverged are populated only in --differential mode
-	// for executed files: the verdict under ProfileStrict and whether it
-	// differs from the (approximate) Actual. Divergences are the Phase-1
-	// work-list — they show where the strict semantics change behaviour.
+	// ApproxActual / StrictActual / Diverged are populated only in
+	// --differential mode for executed files: the verdict under each
+	// profile and whether they differ. Divergences show where the strict
+	// and approximate semantics disagree — the migration work-list. Filled
+	// regardless of which profile is the default, so the diagnostic keeps
+	// working after strict became the default gate profile.
+	ApproxActual string `json:"approx_actual,omitempty"`
 	StrictActual string `json:"strict_actual,omitempty"`
 	Diverged     bool   `json:"diverged,omitempty"`
 }
@@ -169,7 +172,7 @@ func runConformance(cmd *cobra.Command, args []string) error {
 				for _, r := range summary.Results {
 					if r.Diverged {
 						fmt.Printf("  DIVERGE %s  approximate=%s strict=%s\n",
-							r.Path, r.Actual, r.StrictActual)
+							r.Path, r.ApproxActual, r.StrictActual)
 					}
 				}
 			}
@@ -361,16 +364,22 @@ func runOneConformance(path string) ConformanceResult {
 	r.Actual, r.Reason = execVerdict(trees, tcName, prof)
 	classifyExecution(&r, expected)
 
-	// Differential diagnostic (not part of the gate): re-run under the
-	// strict profile and record any verdict divergence from the primary
-	// (approximate) run. This is the Phase-1 work-list — it surfaces
-	// exactly where strict operational semantics change behaviour.
-	if conformanceDifferential && prof != runtime.ProfileStrict {
-		strictActual, _ := execVerdict(trees, tcName, runtime.ProfileStrict)
-		if strictActual != r.Actual {
-			r.Diverged = true
-			r.StrictActual = strictActual
+	// Differential diagnostic (not part of the gate): report the verdict
+	// under BOTH profiles and whether they diverge. The primary run above
+	// already produced one of them (r.Actual under prof); run only the
+	// other. Works regardless of which profile is the default.
+	if conformanceDifferential {
+		var approxActual, strictActual string
+		if prof == runtime.ProfileStrict {
+			strictActual = r.Actual
+			approxActual, _ = execVerdict(trees, tcName, runtime.ProfileApproximate)
+		} else {
+			approxActual = r.Actual
+			strictActual, _ = execVerdict(trees, tcName, runtime.ProfileStrict)
 		}
+		r.ApproxActual = approxActual
+		r.StrictActual = strictActual
+		r.Diverged = approxActual != strictActual
 	}
 	return r
 }

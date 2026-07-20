@@ -21,16 +21,16 @@ import (
 )
 
 var (
-	execCfgPath       string
-	execFormat        string
-	execOutDir        string
-	execPatterns      []string
-	execDeterministic bool
-	execTimeout       time.Duration
+	execCfgPath     string
+	execFormat      string
+	execOutDir      string
+	execPatterns    []string
+	execApproximate bool
+	execTimeout     time.Duration
 
-	// deterministicSafetyTimeout bounds a testcase under --deterministic
-	// when the user gave no --timeout, so an experimental strict path that
-	// blocks (a case the scheduler doesn't yet model) can't wedge the suite.
+	// deterministicSafetyTimeout bounds a testcase on the default strict
+	// engine when the user gave no --timeout, so a body the scheduler does
+	// not yet fully model can't wedge the suite.
 	deterministicSafetyTimeout = 60 * time.Second
 
 	// ExecCommand is the single-process executor entry point. It walks
@@ -53,15 +53,15 @@ Testcases can be selected three ways, in priority order:
 If none of those produce a list, exec runs every discovered testcase.
 
 Execution model:
-  default          the conformance-tuned approximate engine (real clock).
-  --deterministic  EXPERIMENTAL: the strict operational-semantics engine —
-                   a deterministic discrete-event scheduler (one component
-                   runs at a time; virtual time advances only at quiescence)
-                   plus a virtual clock. Concurrent components interleave
-                   deterministically and timers fire virtually, so verdicts
-                   are reproducible and free of real-clock races. Some
-                   procedure-based-communication and timer patterns are not
-                   modelled yet; pair it with --timeout to bound them.`,
+  default          the strict operational-semantics engine — a deterministic
+                   discrete-event scheduler (one component runs at a time;
+                   virtual time advances only at quiescence) plus a virtual
+                   clock. Concurrent components interleave deterministically
+                   and timers fire virtually, so verdicts are reproducible and
+                   free of real-clock races. A 60s per-testcase safety timeout
+                   applies when --timeout is unset.
+  --approximate    the legacy real-clock engine (being retired). Only for
+                   comparison / bisecting a strict-engine change.`,
 		RunE: runExec,
 	}
 )
@@ -72,15 +72,13 @@ func init() {
 	ExecCommand.Flags().StringVar(&execFormat, "format", "text", "report format: text|json|junit|tap|html")
 	ExecCommand.Flags().StringVar(&execOutDir, "out", "", "directory to write the report file (default: stdout)")
 	ExecCommand.Flags().StringSliceVar(&execPatterns, "pattern", nil, "testcase patterns to run (glob)")
-	ExecCommand.Flags().BoolVar(&execDeterministic, "deterministic", false,
-		"EXPERIMENTAL: run testcases on the deterministic discrete-event scheduler "+
-			"(strict semantics profile + virtual clock). Concurrent components interleave "+
-			"deterministically and timers fire on a virtual clock, so verdicts are reproducible "+
-			"and free of real-clock races. Some procedure-based-communication and timer patterns "+
-			"are not yet modelled; use --timeout to bound them.")
+	ExecCommand.Flags().BoolVar(&execApproximate, "approximate", false,
+		"run testcases on the legacy real-clock approximate engine instead of the "+
+			"default strict discrete-event scheduler. Being retired; use only to "+
+			"compare against or bisect a strict-engine change.")
 	ExecCommand.Flags().DurationVar(&execTimeout, "timeout", 0,
-		"per-testcase wall-clock limit (0 = none). Under --deterministic a 60s safety "+
-			"default applies when unset.")
+		"per-testcase wall-clock limit (0 = none). On the default strict engine a "+
+			"60s safety default applies when unset.")
 }
 
 func runExec(cmd *cobra.Command, args []string) error {
@@ -92,7 +90,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 	files := collectTTCN3Files(args)
 	driver := newStaticDriver(files)
-	driver.deterministic = execDeterministic
+	driver.deterministic = !execApproximate
 	driver.timeout = execTimeout
 
 	var cfgFile *cfg.File
@@ -175,7 +173,7 @@ type staticDriver struct {
 	trees    map[string]*ttcn3.Tree // file path -> parsed tree, kept so Run can reuse them
 	modParam map[string]string      // last cfg's [MODULE_PARAMETERS], threaded into RunTestcaseWith
 
-	deterministic bool          // --deterministic: strict profile + discrete-event scheduler
+	deterministic bool          // strict profile + discrete-event scheduler (default; --approximate turns it off)
 	timeout       time.Duration // --timeout: per-testcase wall-clock bound (0 = none)
 }
 
@@ -273,12 +271,12 @@ func (d *staticDriver) Run(ctx context.Context, name string) (rreport.Verdict, s
 			fmt.Fprintf(os.Stderr, "module parameter: %s\n", msg)
 		},
 	}
-	// --deterministic selects the strict operational-semantics engine: a
-	// deterministic discrete-event scheduler (single-runner token, virtual
-	// time advancing only at quiescence) plus the virtual clock, so
-	// concurrent components interleave deterministically and verdicts are
-	// reproducible. A per-testcase deadline bounds a body the strict path
-	// does not yet model (see the experimental caveat in the flag help).
+	// The default strict operational-semantics engine: a deterministic
+	// discrete-event scheduler (single-runner token, virtual time advancing
+	// only at quiescence) plus the virtual clock, so concurrent components
+	// interleave deterministically and verdicts are reproducible. A
+	// per-testcase deadline bounds a body the strict path does not yet model.
+	// (--approximate turns this off and runs the legacy real-clock engine.)
 	if d.deterministic {
 		opts.Profile = runtime.ProfileStrict
 		opts.DeterministicClock = true

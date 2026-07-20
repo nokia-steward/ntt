@@ -1,15 +1,15 @@
 # Current Conformance Misses
 
-Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b00a-12bcd47feab7/scratchpad/full_final.json` using the current workspace runner.
+Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b00a-12bcd47feab7/scratchpad/strict_default.json` using the current workspace runner.
 
-- Summary: `ran 4948 files: 4792 matched, 23 skipped (97.30% match rate)`
-- Misses: `156`
+- Summary: `ran 4948 files: 4798 matched, 23 skipped (97.42% match rate)`
+- Misses: `150`
 
 ## Misses By Outcome
 
-- `reject->pass`: `104`
+- `reject->pass`: `107`
 - `->`: `23`
-- `pass->fail`: `21`
+- `pass->fail`: `12`
 - `error->pass`: `2`
 - `fail->pass`: `2`
 - `pass->parse-error`: `2`
@@ -18,14 +18,14 @@ Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b0
 
 ## Misses By Chapter
 
-- `core_language/06_types_and_values`: `38` (`->`=9, `pass->fail`=4, `reject->pass`=25)
-- `core_language/22_communication_operations`: `26` (`pass->fail`=4, `reject->pass`=22)
+- `core_language/06_types_and_values`: `36` (`->`=9, `pass->fail`=2, `reject->pass`=25)
+- `core_language/22_communication_operations`: `22` (`reject->pass`=22)
 - `core_language/05_basic_language_elements`: `20` (`->`=3, `reject->pass`=17)
-- `core_language/15_templates`: `19` (`->`=2, `pass->fail`=2, `reject->pass`=15)
+- `core_language/15_templates`: `18` (`->`=2, `pass->fail`=2, `reject->pass`=14)
 - `core_language/16_functions_altsteps_testcases`: `10` (`->`=1, `pass->fail`=4, `reject->pass`=5)
+- `core_language/20_statement_and_operations_for_alt`: `9` (`pass->fail`=1, `reject->pass`=8)
 - `core_language/26_module_control`: `9` (`->`=3, `error->pass`=2, `error->timeout`=1, `fail->pass`=2, `pass->fail`=1)
 - `core_language/09_test_configurations`: `7` (`reject->pass`=7)
-- `core_language/20_statement_and_operations_for_alt`: `7` (`pass->fail`=3, `reject->pass`=4)
 - `core_language/08_modules`: `3` (`->`=2, `pass->fail`=1)
 - `core_language/B_matching_incoming_values`: `3` (`reject->pass`=3)
 - `oo/501_classes_and_objects`: `3` (`pass->fail`=1, `pass->parse-error`=2)
@@ -33,7 +33,6 @@ Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b0
 - `core_language/11_variables`: `2` (`->`=2)
 - `core_language/21_configuration_operations`: `2` (`reject->pass`=2)
 - `core_language/27_specifying_attributes`: `2` (`->`=1, `reject->pass`=1)
-- `core_language/14_procedure_signatures`: `1` (`pass->fail`=1)
 - `core_language/23_timer_operations`: `1` (`none->pass`=1)
 - `core_language/D_preprocessing_macros`: `1` (`reject->pass`=1)
 
@@ -60,8 +59,8 @@ Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b0
 - `core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSem_060207_arrays_027.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSem_060207_arrays_028.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSyn_060207_arrays_004.ttcn`: ` -> `
-- `core_language/06_types_and_values/0602_structured_types_and_values/060210_component_types/06021002_reuse_component_type/Sem_060210_ReuseofComponentTypes_002.ttcn`: `pass -> fail` - "Unexpected result"
-- ... `18` more in `current-misses.json`
+- `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_002.ttcn`: `reject -> pass`
+- ... `16` more in `current-misses.json`
 
 ### `core_language/22_communication_operations`
 
@@ -75,8 +74,6 @@ Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b0
 - `core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_020.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_012.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_017.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_020.ttcn`: `pass -> fail`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_021.ttcn`: `pass -> fail`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220303_reply_operation/NegSem_220303_ReplyOperation_008.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220303_reply_operation/NegSem_220303_ReplyOperation_010.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_009.ttcn`: `reject -> pass`
@@ -85,7 +82,9 @@ Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b0
 - `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_020.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/NegSem_220305_raise_operation_004.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/NegSem_220305_raise_operation_009.ttcn`: `reject -> pass`
-- ... `6` more in `current-misses.json`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220306_catch_operation/NegSem_220306_catch_operation_009.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220306_catch_operation/NegSem_220306_catch_operation_014.ttcn`: `reject -> pass`
+- ... `2` more in `current-misses.json`
 
 ### `core_language/05_basic_language_elements`
 
@@ -112,7 +111,6 @@ Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b0
 
 ### `core_language/15_templates`
 
-- `core_language/15_templates/1503_global_and_local_templates/NegSem_1503_GlobalAndLocalTemplates_008.ttcn`: `reject -> pass`
 - `core_language/15_templates/1503_global_and_local_templates/NegSyn_1503_GlobalAndLocalTemplates_006.ttcn`: ` -> `
 - `core_language/15_templates/1503_global_and_local_templates/Sem_1503_GlobalAndLocalTemplates_010.ttcn`: `reject -> pass`
 - `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_010.ttcn`: `reject -> pass`

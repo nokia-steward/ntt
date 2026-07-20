@@ -1,11 +1,11 @@
 {
- "summary": "ran 4948 files: 4792 matched, 23 skipped (97.30% match rate)",
- "source": "/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b00a-12bcd47feab7/scratchpad/full_final.json",
- "miss_count": 156,
+ "summary": "ran 4948 files: 4798 matched, 23 skipped (97.42% match rate)",
+ "source": "/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b00a-12bcd47feab7/scratchpad/strict_default.json",
+ "miss_count": 150,
  "outcomes": {
-  "reject->pass": 104,
+  "reject->pass": 107,
   "->": 23,
-  "pass->fail": 21,
+  "pass->fail": 12,
   "error->pass": 2,
   "fail->pass": 2,
   "pass->parse-error": 2,
@@ -15,19 +15,18 @@
  "chapters": [
   {
    "chapter": "core_language/06_types_and_values",
-   "misses": 38,
+   "misses": 36,
    "outcomes": {
     "->": 9,
     "reject->pass": 25,
-    "pass->fail": 4
+    "pass->fail": 2
    }
   },
   {
    "chapter": "core_language/22_communication_operations",
-   "misses": 26,
+   "misses": 22,
    "outcomes": {
-    "reject->pass": 22,
-    "pass->fail": 4
+    "reject->pass": 22
    }
   },
   {
@@ -40,10 +39,10 @@
   },
   {
    "chapter": "core_language/15_templates",
-   "misses": 19,
+   "misses": 18,
    "outcomes": {
-    "reject->pass": 15,
     "->": 2,
+    "reject->pass": 14,
     "pass->fail": 2
    }
   },
@@ -54,6 +53,14 @@
     "reject->pass": 5,
     "pass->fail": 4,
     "->": 1
+   }
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "misses": 9,
+   "outcomes": {
+    "reject->pass": 8,
+    "pass->fail": 1
    }
   },
   {
@@ -72,14 +79,6 @@
    "misses": 7,
    "outcomes": {
     "reject->pass": 7
-   }
-  },
-  {
-   "chapter": "core_language/20_statement_and_operations_for_alt",
-   "misses": 7,
-   "outcomes": {
-    "reject->pass": 4,
-    "pass->fail": 3
    }
   },
   {
@@ -132,13 +131,6 @@
    "outcomes": {
     "->": 1,
     "reject->pass": 1
-   }
-  },
-  {
-   "chapter": "core_language/14_procedure_signatures",
-   "misses": 1,
-   "outcomes": {
-    "pass->fail": 1
    }
   },
   {
@@ -471,22 +463,6 @@
   },
   {
    "chapter": "core_language/06_types_and_values",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060210_component_types/06021002_reuse_component_type/Sem_060210_ReuseofComponentTypes_002.ttcn",
-   "message": "\"Unexpected result\""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060210_component_types/06021002_reuse_component_type/Sem_060210_ReuseofComponentTypes_003.ttcn",
-   "message": "\"Unexpected result\""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
    "expected": "reject",
    "actual": "pass",
    "outcome": "reject->pass",
@@ -734,22 +710,6 @@
    "message": ""
   },
   {
-   "chapter": "core_language/14_procedure_signatures",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/14_procedure_signatures/Sem_1400_procedure_signatures_004.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1503_global_and_local_templates/NegSem_1503_GlobalAndLocalTemplates_008.ttcn",
-   "message": ""
-  },
-  {
    "chapter": "core_language/15_templates",
    "expected": "",
    "actual": "",
@@ -983,19 +943,11 @@
   },
   {
    "chapter": "core_language/20_statement_and_operations_for_alt",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/20_statement_and_operations_for_alt/2004_the_interleave_statement/Sem_2004_InterleaveStatement_002.ttcn",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2005_default_handling/200501_the_default_mechanism/NegSem_200501_the_default_mechanism_001.ttcn",
    "message": ""
-  },
-  {
-   "chapter": "core_language/20_statement_and_operations_for_alt",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/20_statement_and_operations_for_alt/2004_the_interleave_statement/Sem_2004_InterleaveStatement_013.ttcn",
-   "message": "\"altstep a() invocated.\""
   },
   {
    "chapter": "core_language/20_statement_and_operations_for_alt",
@@ -1027,6 +979,30 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/20_statement_and_operations_for_alt/2005_default_handling/200502_the_activate_operation/NegSem_200502_the_activate_operation_007.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2005_default_handling/200503_the_deactivate_operation/NegSem_200503_the_deactivate_operation_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2005_default_handling/200503_the_deactivate_operation/NegSem_200503_the_deactivate_operation_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2005_default_handling/200503_the_deactivate_operation/NegSem_200503_the_deactivate_operation_003.ttcn",
    "message": ""
   },
   {
@@ -1127,22 +1103,6 @@
   },
   {
    "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_020.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_021.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
    "expected": "reject",
    "actual": "pass",
    "outcome": "reject->pass",
@@ -1236,22 +1196,6 @@
    "outcome": "reject->pass",
    "relpath": "core_language/22_communication_operations/2204_the_check_operation/NegSem_2204_the_check_operation_005.ttcn",
    "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_090.ttcn",
-   "message": "\"Incorrect exception value\""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_094.ttcn",
-   "message": "\"Incorrect exception value\""
   },
   {
    "chapter": "core_language/23_timer_operations",
