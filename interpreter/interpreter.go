@@ -761,6 +761,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				// Bare `T.start;` restores the declared
 				// default duration; see ETSI 23.2.
 				th.Duration = th.DefaultDuration
+				registerStartedTimer(th, env)
 				return runtime.Undefined
 			case "stop":
 				th.Running = false
@@ -5795,6 +5796,17 @@ func evalAltstepBody(body *syntax.BlockStmt, env runtime.Scope) runtime.Object {
 		return nil
 	}
 	alt := &syntax.AltStmt{Body: &syntax.BlockStmt{Stmts: clauseStmts}}
+	// A DIRECT altstep call blocks like `alt { [] a() }` (ETSI 20.5.2), so
+	// under the cooperative scheduler route it through the strict evaluator —
+	// real snapshot + blocking, not the verdict-preferring heuristic. An
+	// activated default's invocation (defaultCtx active) stays on the
+	// non-blocking best-effort pass: runDefaults detects a fired default via
+	// the branch flag, and blocking there would wedge the single-runner
+	// token. (`any timer` inside the altstep resolves the caller component's
+	// running timers via the exec-based dynamic registry — see C4(c).)
+	if deterministicSchedulerEnabled(env) && !defaultCtx.active() {
+		return evalAltStmtStrict(alt, env)
+	}
 	return evalAltStmtBestEffort(alt, env)
 }
 
@@ -6306,10 +6318,42 @@ func trimBinaryLiteral(s string) string {
 // on all timers in the current component / control part.
 func collectScopeTimers(env runtime.Scope) []*runtime.TimerHandle {
 	var timers []*runtime.TimerHandle
+	seen := map[*runtime.TimerHandle]bool{}
+	add := func(th *runtime.TimerHandle) {
+		if th != nil && !seen[th] {
+			seen[th] = true
+			timers = append(timers, th)
+		}
+	}
 	if e, ok := env.(*runtime.Env); ok {
-		e.CollectTimers(&timers, map[string]bool{})
+		var lexical []*runtime.TimerHandle
+		e.CollectTimers(&lexical, map[string]bool{})
+		for _, th := range lexical {
+			add(th)
+		}
+	}
+	// `any timer` / `all timer` name the running timers of the CURRENT test
+	// component (ETSI 23.7) — a DYNAMIC notion. Union in the component's
+	// started timers so a query from inside a `runs on` altstep (whose
+	// lexical env can't reach a caller/testcase-body timer) still sees them.
+	// Deduped by handle pointer against the lexical set.
+	if exec := runtime.FindTestcaseExec(env); exec != nil {
+		for _, th := range exec.CurrentComponentTimers() {
+			add(th)
+		}
 	}
 	return timers
+}
+
+// registerStartedTimer records a just-started timer with the current test
+// component so `any timer` / `all timer` can resolve it dynamically from any
+// scope (see collectScopeTimers, ETSI 23.7).
+func registerStartedTimer(th *runtime.TimerHandle, env runtime.Scope) {
+	if exec := runtime.FindTestcaseExec(env); exec != nil {
+		if cur := exec.CurrentComponent(); cur != nil {
+			exec.RegisterComponentTimer(cur.ID, th)
+		}
+	}
 }
 
 // evalTimerAggregate implements the `any timer.<op>` / `all timer.<op>`
@@ -6448,6 +6492,7 @@ func evalTimerMethod(th *runtime.TimerHandle, sel syntax.Expr, n *syntax.CallExp
 				th.Duration = ff
 			}
 		}
+		registerStartedTimer(th, env)
 		return runtime.Undefined
 	case "stop":
 		th.Running = false

@@ -190,6 +190,42 @@ func TestStrictSched_MulticastCallTargetsOnly(t *testing.T) {
 	}
 }
 
+// TestStrictSched_AnyTimerInAltstepResolvesCallerTimer covers C4(c): a
+// directly-called `runs on` altstep runs on the strict evaluator (C4(b)), and
+// `any timer.timeout` inside it must resolve the CALLER component's running
+// timer — a testcase-body-local timer the altstep's lexical scope cannot
+// reach (ETSI 23.7). The exec/component timer registry makes it visible, so
+// the timer fires (virtual 0.1s), the altstep sets its out-param, and the
+// write-back reaches the caller variable. Mirrors
+// Sem_050402_actual_parameters_212. A per-goroutine mechanism was unsound
+// under the scheduler (goroutine-id reuse); this uses the exec registry.
+func TestStrictSched_AnyTimerInAltstepResolvesCallerTimer(t *testing.T) {
+	src := `module m {
+		type component C {}
+		altstep a(out integer p_val) {
+			[] any timer.timeout { p_val := 9; }
+		}
+		testcase tc() runs on C system C {
+			var integer v_val := 5;
+			timer t := 0.1;
+			t.start;
+			a(v_val);
+			if (v_val == 9) { setverdict(pass); }
+			else { setverdict(fail, "any timer.timeout did not resolve the caller-scope timer"); }
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (any timer in a direct altstep must see the caller's timer)", v, reason)
+	}
+}
+
 // TestStrictSched_TimerRunningUsesVirtualClock covers `T.running` under the
 // virtual clock: three timers start at 1.0/2.0/3.0 and `t_medium.timeout`
 // advances the clock to 2.0. At that point t_short (1.0) must read NOT

@@ -83,6 +83,15 @@ type TestcaseExec struct {
 	// testcase itself echoing values back to itself.
 	ports map[string][]PortMessage
 
+	// componentTimers records every timer started on each component so
+	// `any timer` / `all timer` (ETSI 23.7) can resolve the CURRENT
+	// component's running timers DYNAMICALLY — a timer started in a testcase
+	// body is visible to `any timer` inside a `runs on` altstep, which the
+	// altstep's lexical env (chained to its module-level definition scope)
+	// cannot reach. Keyed by component id; deduped by handle pointer. This is
+	// the timer analogue of the exec-based dynamic port resolution.
+	componentTimers map[int64][]*TimerHandle
+
 	// deferredResponders are skipped PTC bodies that are waiting for a
 	// procedure call to appear. The interpreter registers callbacks
 	// here so runtime stays independent from the syntax package. Each
@@ -1301,6 +1310,46 @@ func (t *TestcaseExec) EnqueueEnvelope(port string, msg PortMessage) {
 type deferredResponder struct {
 	compID int64
 	fn     func()
+}
+
+// RegisterComponentTimer records that timer th was started on component
+// compID, so `any timer` / `all timer` can later resolve the running timers
+// of that component regardless of the lexical scope they are queried from
+// (ETSI 23.7). Idempotent per handle pointer.
+func (t *TestcaseExec) RegisterComponentTimer(compID int64, th *TimerHandle) {
+	if th == nil {
+		return
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if t.componentTimers == nil {
+		t.componentTimers = map[int64][]*TimerHandle{}
+	}
+	for _, x := range t.componentTimers[compID] {
+		if x == th {
+			return
+		}
+	}
+	t.componentTimers[compID] = append(t.componentTimers[compID], th)
+}
+
+// CurrentComponentTimers returns the timers started on the calling
+// goroutine's current component — the dynamic set `any timer` / `all timer`
+// must consider. Empty when no component is current or none were started.
+func (t *TestcaseExec) CurrentComponentTimers() []*TimerHandle {
+	cur := t.CurrentComponent()
+	if cur == nil {
+		return nil
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	ts := t.componentTimers[cur.ID]
+	if len(ts) == 0 {
+		return nil
+	}
+	out := make([]*TimerHandle, len(ts))
+	copy(out, ts)
+	return out
 }
 
 // RegisterDeferredResponder records a skipped PTC procedure responder
