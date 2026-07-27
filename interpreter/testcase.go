@@ -2133,7 +2133,11 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		if runDefaults(env) {
 			return nil
 		}
-		if defaultCtx.active() && altHasRealPortGuard(n) {
+		// An activated default's own altstep is a single NON-blocking pass:
+		// when this strict alt IS a default body (defaultCtx active) and no
+		// clause matched, conclude without parking (the default simply did
+		// not fire) rather than block the single-runner token.
+		if defaultCtx.active() {
 			return nil
 		}
 
@@ -2202,6 +2206,7 @@ func interleaveBodyMayBlock(body syntax.Node) bool {
 //     doesn't change the verdict — a distinction runDefaults (which reports
 //     by verdict change) cannot make. So an interleave WITHOUT `@nodefault`
 //     while defaults are active also falls back.
+//
 // The remaining subset (`@nodefault`, or no active defaults, and only
 // non-blocking bodies) is exactly what the snapshot models correctly.
 func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {

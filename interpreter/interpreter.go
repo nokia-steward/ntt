@@ -5796,15 +5796,15 @@ func evalAltstepBody(body *syntax.BlockStmt, env runtime.Scope) runtime.Object {
 		return nil
 	}
 	alt := &syntax.AltStmt{Body: &syntax.BlockStmt{Stmts: clauseStmts}}
-	// A DIRECT altstep call blocks like `alt { [] a() }` (ETSI 20.5.2), so
-	// under the cooperative scheduler route it through the strict evaluator —
-	// real snapshot + blocking, not the verdict-preferring heuristic. An
-	// activated default's invocation (defaultCtx active) stays on the
-	// non-blocking best-effort pass: runDefaults detects a fired default via
-	// the branch flag, and blocking there would wedge the single-runner
-	// token. (`any timer` inside the altstep resolves the caller component's
-	// running timers via the exec-based dynamic registry — see C4(c).)
-	if deterministicSchedulerEnabled(env) && !defaultCtx.active() {
+	// Under the cooperative scheduler route the altstep body through the
+	// strict evaluator — real snapshot semantics, not the verdict-preferring
+	// heuristic. A DIRECT altstep call blocks like `alt { [] a() }` (ETSI
+	// 20.5.2); an activated default's invocation (defaultCtx active) is a
+	// single NON-blocking pass — evalAltStmtStrict returns instead of parking
+	// while defaultCtx is active, and runDefaults detects a fired default via
+	// the branch flag. (`any timer` inside the altstep resolves the caller
+	// component's running timers via the exec dynamic registry — see C4(c).)
+	if deterministicSchedulerEnabled(env) {
 		return evalAltStmtStrict(alt, env)
 	}
 	return evalAltStmtBestEffort(alt, env)
