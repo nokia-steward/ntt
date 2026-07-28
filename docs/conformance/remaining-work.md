@@ -1,19 +1,39 @@
 # Remaining Conformance Work
 
-State as of 2026-07-06: **4790 / 4948 matched (97.26%)**, 23 skipped
-(inconclusive / no-verdict), **135 real misses** (was 4788 / 97.22% on
-2026-06-17; +2 from procedure signature qualification, see 1a below).
-Baseline and the full miss inventory live in
+State as of 2026-07-28: **4798 / 4948 matched (97.42%)**, 23 skipped
+(inconclusive / no-verdict), **127 real misses** (was 4790 / 97.26% on
+2026-07-06 and 4788 / 97.22% on 2026-06-17). The gate now measures the
+**strict** engine — see "Strict engine" below. Baseline and the full miss
+inventory live in
 [`testdata/conformance-baseline.json`](../../testdata/conformance-baseline.json)
 and [`current-misses.json`](current-misses.json); regenerate with
 [`refresh_artifacts.py`](refresh_artifacts.py).
 
-The incremental "one clean fix per slice" phase is essentially complete:
-the easy positive-test bugs have been closed. What remains does **not**
-yield isolated low-risk commits. It falls into three buckets below.
+The incremental "one clean fix per slice" phase is complete: the easy
+positive-test bugs have been closed. What remains does **not** yield
+isolated low-risk commits. It falls into three buckets below.
 Every change must still pass the full conformance run (`--regress 0.5`,
 0 per-file regressions) and an external test-port smoke suite
 (17 pass / 0 fail / 2 expected inconc).
+
+## Strict engine (2026-07-28)
+
+Execution now defaults to the **strict** engine: a cooperative
+discrete-event scheduler with a virtual clock, replacing the legacy
+"approximate" evaluator's verdict-preferring heuristic. The legacy engine
+remains available via `--approximate` and is scheduled for deletion.
+
+This closed the two features that this document previously listed as the
+main path forward — **1a** (strict procedure-payload matching) and **1b**
+(async multi-PTC echo) — because concurrent PTCs now genuinely fork,
+interleave deterministically and block on real matches instead of being
+modelled. Both sections are marked DONE below.
+
+The suite match rate is only part of the picture: the harness also
+reports a **real-execution** rate (files whose verdict came from actually
+executing the testcase rather than from a parse/semantic rejection),
+currently **2498 files, 50.72%**. Growing that number, not the match
+rate, is the meaningful measure of remaining dynamic-semantics work.
 
 ## Execution triage 2026-06-17 — the `reject->pass` bulk is NOT low-hanging
 
@@ -56,10 +76,15 @@ contradictory/runtime clusters alone. See buckets + slice notes below.
 These are worth doing; each is a multi-hour focused slice with real
 regression risk on a load-bearing path. Listed by ROI.
 
-### 1a. Strict procedure-payload matching (recommended first)
-**~6 tests left.** `Sem_220302_getcall_operation_020/021`,
-`Sem_2204_the_check_operation_090/094`, plus part of the
-`220304_getreply` / `220306_catch` reject clusters.
+### 1a. Strict procedure-payload matching — DONE
+**Closed 2026-07-28.** The previously listed fixtures
+(`Sem_220302_getcall_operation_020/021`,
+`Sem_2204_the_check_operation_090/094`) all match now: procedure receives
+honour the signature parameter and value/exception template under the
+strict engine instead of firing on "an envelope of this kind arrived".
+Chapter 22 retains 22 misses, but every one is a `reject->pass` negative
+fixture (a static-rejection question, Bucket 3), not a payload-matching
+failure. The history below is kept for context.
 
 **DONE 2026-07-06 (+2): signature qualification.** `call`/`reply`/`raise`
 now record `PortMessage.Signature` (the signature identifier peeled from
@@ -101,7 +126,15 @@ The signature is now recorded on every `call`/`reply`/`raise` envelope
 flipping the lenient `payloadOk` for the `check`/getcall paths without
 regressing the 119 `Sem_2204` fixtures.
 
-### 1b. Async multi-PTC message echo — attempted, blocked on the alt core
+### 1b. Async multi-PTC message echo — DONE
+**Closed 2026-07-28** by path (a) below: the strict cooperative scheduler
+forks every port-communicating PTC and parks alts on real port traffic,
+so an MTC↔PTC round-trip completes. `Sem_060210_ReuseofComponentTypes_002/003`,
+`Sem_2004_InterleaveStatement_002/013` and
+`Sem_1400_procedure_signatures_004` all match now;
+`Sem_200501_the_default_mechanism_008` is the one fixture from this
+cluster still missing. Original analysis retained below.
+
 **~6 tests**, and **not one mechanism**: `Sem_060210_ReuseofComponentTypes_002/003`
 is a server-PTC echo (`while(true){alt{receive->send}}`); `Sem_2004_InterleaveStatement_002/013`
 is interleave + self-loop; `Sem_200501_the_default_mechanism_008` is default
@@ -245,20 +278,25 @@ carefully-gated analysis pass, not a blanket "error on Undefined".
 
 ## Suggested order
 
-The cheap single-mechanism seam is now exhausted: **1c is essentially
-done** (184 / 001 / 002 landed; only the external-function-blocked
-`060302_010` remains), **1d** was investigated and yields no safe commit
-(gaming / codec-specific / matching-core regression — see above), and a
-scoped **1a** attempt regressed 8 check tests. What remains all carries
-real risk or real scope:
+**1a** and **1b** are done (strict engine). **1c** is done apart from the
+external-function-blocked `060302_010`. **1d** was investigated and still
+yields no safe commit (gaming / codec-specific / matching-core
+regression — see above). What remains:
 
-1. **1b — async multi-PTC echo** (6 tests, larger infra): the most
-   self-contained *feature* left, but needs a real MTC↔PTC message
-   responder.
+1. **Engine convergence** — remove `interleave`'s fallback to the legacy
+   evaluator, make the library default strict, then delete the
+   approximate engine, the `SemanticsProfile` toggle and the
+   `--approximate` / `--profile` flags, and rebaseline. This is cleanup
+   of transitional scaffolding, not new coverage, and it is the
+   prerequisite for having a single engine.
 2. **Bucket 3 clusters**, one precise, narrowly-scoped analysis pass at a
-   time — accept these are no longer quick wins (cf. the 150605 attempt
-   in 1d: matching-core changes regress easily).
-3. **1a — strict procedure matching** only if the coupled from-filter /
-   match-gated redirect / standalone-check-default work is done together
-   (a dedicated slice, not a single fix).
+   time. `reject->pass` is now 107 of the 150 unmatched files, so this is
+   where the remaining match-rate lives — but see the 2026-06-17 triage
+   above: none of it is low-hanging, and matching-core changes regress
+   easily (cf. the 150605 attempt in 1d).
+3. **Real-execution depth over match rate** — cross-module symbol
+   resolution with `ttcn3/types`, wiring `runtime/codec`, executing
+   `control {}` as a program, and a host binding for external functions.
+   These grow the 50.72% real-execution rate and unblock 1c/1d leftovers;
+   several barely move the match rate.
 4. Leave **Bucket 2** as-is unless the suite revision is reconciled.
