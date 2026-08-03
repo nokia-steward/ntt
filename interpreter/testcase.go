@@ -37,19 +37,11 @@ type TestcaseOptions struct {
 	// see typos in their cfg without a hard failure.
 	ModuleParamWarning func(msg string)
 
-	// Profile selects the execution semantics. The zero value is
-	// runtime.ProfileStrict, the faithful path; runtime.ProfileApproximate
-	// selects the legacy engine that is being retired. It is the coherent
-	// successor to the RealScheduler bool; RealScheduler is kept as a shim
-	// (see below).
-	Profile runtime.SemanticsProfile
-
 	// DeterministicClock, when true, makes timers advance the
 	// per-testcase virtual clock (firing at their deadline instantly)
 	// instead of sleeping real wall-clock time — reproducible, fast, no
-	// real 5s waits. Intended for the conformance harness's strict runs;
-	// a real load driver leaves it off so timers pace real I/O.
-	// Orthogonal to Profile (only takes effect under ProfileStrict).
+	// real 5s waits. Intended for the conformance harness; a real load
+	// driver leaves it off so timers pace real I/O.
 	DeterministicClock bool
 
 	// DeterministicScheduler, when true, enables the discrete-event
@@ -59,30 +51,17 @@ type TestcaseOptions struct {
 	// at the current instant. This makes concurrent timer-driven
 	// execution fast, sound, and deterministic — superseding
 	// DeterministicClock (which is only sound single-threaded). Intended
-	// for the conformance harness's strict runs; a real load driver
-	// leaves it off. Takes effect under ProfileStrict.
+	// for the conformance harness; a real load driver leaves it off.
 	DeterministicScheduler bool
 
 	// Context, when non-nil, bounds the run: on ctx cancellation the
 	// executor is asked to stop (exec.Stop), which unwinds a blocked alt
-	// / timer wait promptly. Essential for the strict profile, whose
-	// honest blocking can otherwise wait indefinitely on a genuinely
-	// stuck alt — the caller (e.g. the conformance harness's per-testcase
-	// timeout) supplies a deadline context so the goroutine terminates
-	// instead of leaking. Nil = unbounded (unchanged default).
+	// / timer wait promptly. The evaluator blocks honestly, so it can
+	// otherwise wait indefinitely on a genuinely stuck alt — the caller
+	// (e.g. the conformance harness's per-testcase timeout) supplies a
+	// deadline context so the goroutine terminates instead of leaking.
+	// Nil = unbounded.
 	Context context.Context
-
-	// RealScheduler opts a testcase into real concurrent PTC execution:
-	// started `alive` PTC bodies (including
-	// `while(true){ send; alt{receive|timer}; pace }` load workers) run
-	// on real goroutines instead of the default skip/virtual model, and
-	// each PTC gets a component-private port instance so a Go test port's
-	// Inject routes replies back to the specific worker. It is the first
-	// domain of ProfileStrict, so setting it true selects Strict.
-	// Default false keeps the conformance-safe behaviour (the skip
-	// heuristic exists to satisfy ETSI 21.3.x); only callers that want
-	// TTCN-3-side concurrency (e.g. an external load driver) set it.
-	RealScheduler bool
 }
 
 // RunTestcase is the canonical entry point the executor uses to
@@ -307,19 +286,12 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 	}
 
 	exec := runtime.NewTestcaseExec(qname)
-	// Effective profile: opts.Profile, upgraded to Strict when the
-	// RealScheduler back-compat flag is set.
-	profile := opts.Profile
-	if opts.RealScheduler {
-		profile = runtime.ProfileStrict
-	}
-	exec.SetProfile(profile)
 	exec.SetDeterministicClock(opts.DeterministicClock)
 	// The cooperative scheduler is engaged after SetMTCID below (it needs
 	// the MTC's component id as the root participant).
 	// Cancellation: when the caller supplies a context, stop the
-	// executor on cancellation so a blocked (strict) alt / timer wait
-	// unwinds instead of leaking a goroutine. The watcher is bounded by
+	// executor on cancellation so a blocked alt / timer wait unwinds
+	// instead of leaking a goroutine. The watcher is bounded by
 	// `cancelled`, closed on return, so it never outlives the run.
 	if opts.Context != nil {
 		cancelled := make(chan struct{})
@@ -397,8 +369,8 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 	mtcRef := newComponentRef(mtcTypeName, "", tcEnv)
 	exec.SetMTCID(mtcRef.ID)
 	// Engage the cooperative scheduler now that the MTC id is known (it is
-	// the root participant that holds the token first). Strict profile only.
-	if opts.DeterministicScheduler && profile == runtime.ProfileStrict {
+	// the root participant that holds the token first).
+	if opts.DeterministicScheduler {
 		exec.SetDeterministicScheduler(true)
 	}
 	env.Set("mtc", mtcRef)
@@ -884,15 +856,13 @@ func evalAllComponentAction(kind string, sel syntax.Expr, env runtime.Scope) (ru
 		if op == "kill" || !r.AliveModifier {
 			r.SetAlive(false)
 		}
-		// Real-scheduler mode: `all component.stop` must actually
-		// cancel the forked worker goroutines (the default path only
-		// flips the flags above). Mirror the single `comp.stop` path:
-		// close the PTC's StopChan (which also wakes a parked alt /
-		// blocking timer via signalMessageReady) and unmap its ports.
-		if exec.RealScheduler() {
-			exec.StopPTC(r.ID)
-			drainComponentPortMaps(exec, r.ID)
-		}
+		// `all component.stop` must actually cancel the forked worker
+		// goroutines, not just flip the flags above. Mirror the single
+		// `comp.stop` path: close the PTC's StopChan (which also wakes a
+		// parked alt / blocking timer via signalMessageReady) and unmap
+		// its ports.
+		exec.StopPTC(r.ID)
+		drainComponentPortMaps(exec, r.ID)
 	}
 	return runtime.Undefined, true
 }
@@ -1830,17 +1800,15 @@ func chosenUnionAlt(tag runtime.Object) string {
 	return ""
 }
 
-// evalAltStmtStrict is the ProfileStrict alt evaluator (ES 201 873-4
-// clause 20). It reuses the *correct* part of the best-effort path —
+// evalAltStmtStrict is the alt evaluator (ES 201 873-4 clause 20):
 // source-order, first-match-wins guard evaluation via commGuardMatches
-// (which consumes only the selected, matching event), [else], repeat,
-// and activated defaults — but REPLACES the verdict-preferring heuristic
-// with honest snapshot semantics: when no guard matches and there is no
-// [else], it blocks on the alt's event sources (port traffic, the
-// soonest timer deadline, a component transition, or this PTC's stop)
-// and re-snapshots. It never fabricates a verdict for a branch whose
-// guard did not fire. Reached only under ProfileStrict, so the default
-// (approximate) behaviour is byte-identical.
+// (which consumes only the selected, matching event), plus [else],
+// repeat and activated defaults. Snapshot semantics are honest — when no
+// guard matches and there is no [else] it blocks on the alt's event
+// sources (port traffic, the soonest timer deadline, a component
+// transition, or this PTC's stop) and re-snapshots. It never fabricates
+// a verdict for a branch whose guard did not fire, which is what the
+// retired verdict-preferring evaluator did.
 func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 	if n.Body == nil {
 		return nil

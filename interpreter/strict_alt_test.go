@@ -13,7 +13,7 @@ import (
 func runStrict(t *testing.T, qname, src string) (runtime.Verdict, string) {
 	t.Helper()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, qname,
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict})
+		interpreter.TestcaseOptions{})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith(%s): %v", qname, err)
 	}
@@ -96,7 +96,7 @@ func TestStrictAlt_ContextCancelsBlockedAlt(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		_, _, _ = interpreter.RunTestcaseWith([]*ttcn3.Tree{tree}, "M.tc",
-			interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, Context: ctx})
+			interpreter.TestcaseOptions{Context: ctx})
 		close(done)
 	}()
 
@@ -128,7 +128,7 @@ func TestStrictAlt_DeterministicClockFiresTimerInstantly(t *testing.T) {
 	}`
 	start := time.Now()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicClock: true})
+		interpreter.TestcaseOptions{DeterministicClock: true})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -159,7 +159,7 @@ func TestStrictAlt_DeterministicClockSoonestTimerWins(t *testing.T) {
 		}
 	}`
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicClock: true})
+		interpreter.TestcaseOptions{DeterministicClock: true})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}

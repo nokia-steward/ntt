@@ -106,7 +106,7 @@ func TestRealScheduler_SingleWorkerLoopRuns(t *testing.T) {
 
 	start := time.Now()
 	_, _, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
-		interpreter.TestcaseOptions{RealScheduler: true})
+		interpreter.TestcaseOptions{})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -177,7 +177,7 @@ func TestRealScheduler_FourWorkersOwnReplies(t *testing.T) {
 	}`
 
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
-		interpreter.TestcaseOptions{RealScheduler: true})
+		interpreter.TestcaseOptions{})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestRealScheduler_CrossTestcaseInstanceIsolation(t *testing.T) {
 
 	run := func() {
 		_, _, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{tree}, "M.tc",
-			interpreter.TestcaseOptions{RealScheduler: true})
+			interpreter.TestcaseOptions{})
 		if err != nil {
 			t.Fatalf("RunTestcaseWith: %v", err)
 		}

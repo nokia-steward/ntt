@@ -2476,8 +2476,9 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 							// `p.call(S:{...}) to (targets)` — a non-blocking
 							// (noblock signature / nowait) call addressed to
 							// specific components: multicast to ONLY those.
-							// Strict-only; the approximate path keeps its
-							// legacy broadcast (fall through to eval(n.X)).
+							// Needs the scheduler's per-component port
+							// routing; without it fall through to the
+							// loopback broadcast (eval(n.X)).
 							if deterministicSchedulerEnabled(env) {
 								return evalProcedureCallTo(portName, info.call, info.to, env)
 							}
@@ -3901,11 +3902,10 @@ func evalBlockStmts(stmts []syntax.Stmt, env runtime.Scope) runtime.Object {
 	var result runtime.Object
 	for i := 0; i < len(stmts); i++ {
 		if exec := runtime.FindTestcaseExec(env); exec != nil {
-			// Whole-testcase stop, or (real-scheduler mode) this PTC
-			// was individually stopped — the latter breaks a
-			// while(true) load worker out of its loop.
-			if exec.Stopped() ||
-				(exec.RealScheduler() && componentStopRequested(exec)) {
+			// Whole-testcase stop, or this PTC was individually
+			// stopped — the latter breaks a while(true) load worker
+			// out of its loop.
+			if exec.Stopped() || componentStopRequested(exec) {
 				return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
 			}
 		}
@@ -6606,7 +6606,7 @@ func waitForTimerTimeout(th *runtime.TimerHandle, env runtime.Scope) {
 			// closes this PTC's StopChan and fires signalMessageReady,
 			// so break the pacing wait promptly instead of sleeping
 			// out the remaining duration.
-			if exec.RealScheduler() && componentStopRequested(exec) {
+			if componentStopRequested(exec) {
 				return
 			}
 			// Stale wake from an unrelated enqueue; loop.
@@ -6663,19 +6663,9 @@ func functionWithEnv(fn *runtime.Function, env runtime.Scope) *runtime.Function 
 	return &cp
 }
 
-// schedulerEnabled reports whether the current testcase runs in
-// real-scheduler mode (interpreter.TestcaseOptions.RealScheduler). When
-// off, every real-scheduler branch is bypassed and behaviour is
-// byte-identical to the default skip/virtual-clock model.
-func schedulerEnabled(env runtime.Scope) bool {
-	exec := runtime.FindTestcaseExec(env)
-	return exec != nil && exec.RealScheduler()
-}
-
 // deterministicClockEnabled reports whether timers should advance the
 // per-testcase virtual clock (firing instantly at their deadline)
-// instead of sleeping real wall-clock time. Only effective under the
-// strict profile.
+// instead of sleeping real wall-clock time.
 //
 // It deliberately falls back to the REAL clock while concurrent PTC
 // goroutines are live (HasLivePTCs): the virtual clock is only sound in
@@ -6688,8 +6678,7 @@ func schedulerEnabled(env runtime.Scope) bool {
 // wall time (rare in the suite; bounded by the harness timeout).
 func deterministicClockEnabled(env runtime.Scope) bool {
 	exec := runtime.FindTestcaseExec(env)
-	return exec != nil && exec.Profile() == runtime.ProfileStrict &&
-		exec.DeterministicClock() && !exec.HasLivePTCs()
+	return exec != nil && exec.DeterministicClock() && !exec.HasLivePTCs()
 }
 
 // deterministicSchedulerEnabled reports whether the discrete-event
@@ -6711,8 +6700,7 @@ func useVirtualClock(env runtime.Scope) bool {
 	if exec.SchedulerActive() {
 		return true
 	}
-	return exec.Profile() == runtime.ProfileStrict &&
-		exec.DeterministicClock() && !exec.HasLivePTCs()
+	return exec.DeterministicClock() && !exec.HasLivePTCs()
 }
 
 // currentStopChan returns the stop channel of the component running on the
@@ -6745,12 +6733,10 @@ func currentCompID(exec *runtime.TestcaseExec) int64 {
 
 // componentStopRequested reports whether the current PTC has been asked
 // to stop via `comp.stop` / `all component.stop` (both close the PTC's
-// PTCExit.StopChan in real-scheduler mode). It is the per-PTC analogue
-// of exec.Stopped() and lets a while(true) worker and its blocking
-// timer waits unwind. Only consulted when RealScheduler is on, so the
-// conformance hot path is untouched. Uses the StopChan close (a
-// happens-before-safe signal) rather than reading ComponentRef flags
-// across goroutines.
+// PTCExit.StopChan). It is the per-PTC analogue of exec.Stopped() and
+// lets a while(true) worker and its blocking timer waits unwind. Uses
+// the StopChan close (a happens-before-safe signal) rather than reading
+// ComponentRef flags across goroutines.
 func componentStopRequested(exec *runtime.TestcaseExec) bool {
 	if exec == nil {
 		return false
@@ -7144,12 +7130,12 @@ func startBodyBlocksOnComm(body syntax.Node, env runtime.Scope) bool {
 				found = true
 			}
 			// `@decoded` redirect assignment depends on codec decoding
-			// that the strict path does not yet implement (Phase 3). Such
-			// a body, if forked, would run and its getcall param redirect
-			// would fail to decode — so leave it on the skip path (where
-			// approximate never runs it) until decoding lands. Treating it
-			// as "does not block on comm" keeps forkStrict from stealing
-			// it. Guards Sem_220302_getcall_operation_014..019.
+			// that is not implemented yet (Phase 3). Such a body, if
+			// forked, would run and its getcall param redirect would fail
+			// to decode — so leave it on the skip path until decoding
+			// lands. Treating it as "does not block on comm" keeps
+			// forkStrict from stealing it. Guards
+			// Sem_220302_getcall_operation_014..019.
 			if _, ok := n.(*syntax.DecodedExpr); ok {
 				noFork = true
 			}
@@ -7343,37 +7329,34 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		// on the old "PTC body is a no-op" path). We still tag the
 		// ref as alive so `comp.alive`/`comp.done` answer correctly.
 		skip := startBodyShouldSkip(body, env)
-		// Real-scheduler mode: an `alive` PTC body (including a
-		// while(true) send/receive load worker) runs on a real
-		// goroutine instead of the skip/virtual-clock model, so never
-		// send it to the skip branch. Gated on RealScheduler so the
-		// default path is byte-identical.
-		if op == "start" && ref != nil && ref.AliveModifier && schedulerEnabled(env) {
+		// An `alive` PTC body (including a while(true) send/receive load
+		// worker) runs on a real goroutine instead of the
+		// skip/virtual-clock model, so never send it to the skip branch.
+		if op == "start" && ref != nil && ref.AliveModifier {
 			skip = false
 		}
-		// Strict profile: a non-alive PTC started with a body that
-		// blocks on inter-component communication (a server blocked in
-		// `getcall`, or a client issuing a blocking `call`) must run
-		// concurrently — TTCN-3 `start` runs the body regardless of the
-		// `alive` modifier (ES 201 873-1 §21.3.2). The synchronous model
-		// skips such bodies (they'd dead-end), so two-PTC call/reply
-		// fixtures (Sem_220301/220302) never execute. Under strict we
-		// fork them onto a real goroutine; the deterministic clock
-		// automatically falls back to the real clock while these PTCs are
-		// live (deterministicClockEnabled), so inter-PTC events race in
-		// real time instead of a virtual-clock advance firing a safety
-		// timer prematurely. Gated on schedulerEnabled so the default
-		// (approximate) path is untouched.
+		// A non-alive PTC started with a body that blocks on
+		// inter-component communication (a server blocked in `getcall`,
+		// or a client issuing a blocking `call`) must run concurrently —
+		// TTCN-3 `start` runs the body regardless of the `alive` modifier
+		// (ES 201 873-1 §21.3.2). The synchronous model skips such bodies
+		// (they'd dead-end), so two-PTC call/reply fixtures
+		// (Sem_220301/220302) never execute. We fork them onto a real
+		// goroutine; the deterministic clock automatically falls back to
+		// the real clock while these PTCs are live
+		// (deterministicClockEnabled), so inter-PTC events race in real
+		// time instead of a virtual-clock advance firing a safety timer
+		// prematurely.
 		forkStrict := false
 		// Decide whether this started PTC body must run concurrently.
 		// Under the cooperative scheduler ANY port-comm body forks (senders
 		// and receivers both — running a receiver inline would block the
 		// single-runner token; leaving a sender inline starves a forked
-		// receiver). The non-scheduler strict path keeps the deliberately
+		// receiver). Without the scheduler we keep the deliberately
 		// narrow getcall-only predicate, and only when the body would
 		// otherwise be skipped.
 		forkComm := false
-		if op == "start" && ref != nil && !ref.AliveModifier && schedulerEnabled(env) {
+		if op == "start" && ref != nil && !ref.AliveModifier {
 			if deterministicSchedulerEnabled(env) {
 				forkComm = startBodyDoesPortComm(body, env)
 			} else if skip {
@@ -7428,13 +7411,12 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				skip = false
 			}
 		}
-		// Strict profile: single-port finite responders (getcall +
-		// reply/raise, no infinite loop) also run at start when a call is
-		// already queued. The approximate exception above only covers
-		// indexed-port responders, so a single-port `getcall; reply`
-		// server stayed skipped and its caller's getreply/catch never
-		// matched under strict (220304/220306).
-		if skip && schedulerEnabled(env) && startBodyIsDeferredResponder(body, env) {
+		// Single-port finite responders (getcall + reply/raise, no
+		// infinite loop) also run at start when a call is already queued.
+		// The exception above only covers indexed-port responders, so a
+		// single-port `getcall; reply` server would stay skipped and its
+		// caller's getreply/catch never match (220304/220306).
+		if skip && startBodyIsDeferredResponder(body, env) {
 			if exec := runtime.FindTestcaseExec(env); exec != nil && exec.HasPendingCalls() {
 				skip = false
 			}
@@ -7511,21 +7493,10 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		// `comp.start(f)` on an alive component whose body
 		// would otherwise park forever inside a `port.receive`
 		// alt is async per TTCN-3 21.3.2: the MTC continues
-		// immediately while f runs concurrently. The loopback
-		// model can't represent full concurrency, so we
-		// restrict the goroutine fork to the bodies that
-		// actually need it (the daemon-style
-		// shape: a `repeat` alt with only port-receive guards
-		// and no `[else]` / timer guard). Every other shape
-		// stays synchronous so the conformance suite's
-		// sequential `.start; .done; .start` fixtures keep
-		// their pre-existing behaviour.
-		// In real-scheduler mode every `alive` start forks onto a real
-		// goroutine (the whole point of the mode) — a while(true)
-		// send/receive worker would hang the MTC if run inline. When
-		// off, this reduces to the daemon-receive predicate exactly.
-		if op == "start" && ref != nil &&
-			((ref.AliveModifier && (schedulerEnabled(env) || startBodyBlocksOnPortReceive(body, env))) || forkStrict) {
+		// immediately while f runs concurrently. Every `alive` start
+		// forks onto a real goroutine — a while(true) send/receive
+		// worker would hang the MTC if run inline.
+		if op == "start" && ref != nil && (ref.AliveModifier || forkStrict) {
 			exec := runtime.FindTestcaseExec(env)
 			if exec != nil {
 				// Eagerly snapshot the call arguments in the
@@ -9728,8 +9699,8 @@ func pushCallTimeout(ce *syntax.CallExpr, env runtime.Scope) func() {
 }
 
 // callTimeoutTimer returns the enclosing blocking call block's synthetic
-// timeout timer, or nil when there is none (no call block, a `nowait`
-// call, or the approximate path, which never sets it).
+// timeout timer, or nil when there is none (no call block, or a `nowait`
+// call).
 func callTimeoutTimer(env runtime.Scope) *runtime.TimerHandle {
 	if v, ok := env.Get(procCallTimeoutKey); ok {
 		if th, ok := v.(*runtime.TimerHandle); ok && th.Running {
@@ -10309,16 +10280,13 @@ func portMapArgName(e syntax.Expr) string {
 }
 
 // strictConnectedTargets returns the component-qualified queue keys a
-// strict-profile send / call / reply / raise on bareName (from the
-// current component) must be delivered to: the connected peer(s) via the
-// connect graph. Returns nil when not strict, no current component, or
-// the port has no peer — the caller then self-delivers on its own key
-// (loopback-to-self / self-connect). bareName is the pre-qualification
-// instance name (the connect graph keys on bare names per component).
+// send / call / reply / raise on bareName (from the current component)
+// must be delivered to: the connected peer(s) via the connect graph.
+// Returns nil when there is no current component or the port has no peer
+// — the caller then self-delivers on its own key (loopback-to-self /
+// self-connect). bareName is the pre-qualification instance name (the
+// connect graph keys on bare names per component).
 func strictConnectedTargets(exec *runtime.TestcaseExec, bareName string) []string {
-	if exec.Profile() != runtime.ProfileStrict {
-		return nil
-	}
 	cur := exec.CurrentComponent()
 	if cur == nil {
 		return nil
@@ -10424,12 +10392,10 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 		}
 		return runtime.Undefined
 	}
-	// Strict profile: a send on a CONNECTED port is delivered to the
-	// connected peer(s)' queue(s) via the connect graph, not the
-	// sender's own queue, and tagged with the actual sending component
-	// so the receiver's `from` matches. (Approximate mode routes by
-	// shared port-name, so it keeps the historical self-queue enqueue
-	// below.) Falls through to self-delivery when the port has no peer
+	// A send on a CONNECTED port is delivered to the connected peer(s)'
+	// queue(s) via the connect graph, not the sender's own queue, and
+	// tagged with the actual sending component so the receiver's `from`
+	// matches. Falls through to self-delivery when the port has no peer
 	// (loopback-to-self / self-connect handled by ConnectedPeers).
 	if targets := strictConnectedTargets(exec, bareName); targets != nil {
 		for _, key := range targets {
@@ -10646,9 +10612,9 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 	for {
 		head, ok := exec.PeekKind(port, kind)
 		if !ok {
-			// Approximate-path heuristic only: bind a `-> sender v` target
-			// to the latest PTC ref so fixtures whose PTC body was skipped
-			// still see a meaningful sender. Under the cooperative scheduler
+			// Without the cooperative scheduler, bind a `-> sender v`
+			// target to the latest PTC ref so fixtures whose PTC body was
+			// skipped still see a meaningful sender. Under the scheduler
 			// PTCs run for real and the sender binds from the ACTUAL matched
 			// message, so pre-populating here would wrongly bind the target
 			// on a no-match and corrupt a `[v == null]` clause guard that
@@ -10676,13 +10642,13 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 		// 22.3 honours it for procedure ops too (e.g.
 		// `p.getcall(S:?) from v_ptc`), so always evaluate it.
 		payloadOk := isProc || info.call == nil || portReceiveMatches(head.Payload, info.call, env)
-		// Strict profile: honour the procedure signature template
-		// (parameter record + `value`/exception) rather than the lenient
-		// "any envelope of this kind" match above, so e.g.
+		// Honour the procedure signature template (parameter record +
+		// `value`/exception) rather than the lenient "any envelope of
+		// this kind" match above, so e.g.
 		// `check(getreply(S:{p:=(100..200)} value ?))` does NOT match a
 		// reply whose p is out of range (2204 check fixtures). The `from`
 		// filter below still applies independently.
-		if isProc && info.call != nil && schedulerEnabled(env) {
+		if isProc && info.call != nil {
 			payloadOk = procReceiveMatches(procReceiveOpName(info.call), info.call, head, env)
 		}
 		// ETSI 22.3.1 h: an *unqualified* getreply / catch inside a

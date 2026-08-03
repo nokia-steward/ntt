@@ -44,7 +44,7 @@ func TestStrictSched_GetcallSenderGuardNotCorrupted(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -88,7 +88,7 @@ func TestStrictSched_CallTimeoutCatchFires(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -134,7 +134,7 @@ func TestStrictSched_CallReplyBeatsTimeout(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -181,7 +181,7 @@ func TestStrictSched_MulticastCallTargetsOnly(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -217,7 +217,7 @@ func TestStrictSched_AnyTimerInAltstepResolvesCallerTimer(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestStrictSched_TimerRunningUsesVirtualClock(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -296,7 +296,7 @@ func TestStrictSched_StandaloneCheckInvokesDefault(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -331,7 +331,7 @@ func TestStrictSched_RepeatingDefaultStillLoops(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -381,7 +381,7 @@ func TestStrictSched_AnyPortGetcallBindsRedirect(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -422,7 +422,7 @@ func TestStrictSched_ForkMessagePeers(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -452,7 +452,7 @@ func TestStrictSched_CompDoneParks(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicScheduler: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -484,7 +484,7 @@ func TestStrictComp_ModeledDoneUsesVirtualClock(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicClock: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicClock: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -517,7 +517,7 @@ func TestStrictAlt_AltstepGuardTimerConcludes(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicClock: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicClock: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -583,7 +583,7 @@ func TestStrictInterleave_BlockingBodyRunsOnSnapshotEvaluator(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -658,7 +658,7 @@ func TestStrictInterleave_FiredDefaultLeavesInterleave(t *testing.T) {
 	defer cancel()
 	start := time.Now()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -696,7 +696,7 @@ func TestStrictAlt_NoDefaultSuppressesDefaults(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
 	defer cancel()
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicClock: true, Context: ctx})
+		interpreter.TestcaseOptions{DeterministicClock: true, Context: ctx})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
@@ -729,7 +729,7 @@ func TestStrictInterleave_NoDefaultSuppressesDefaults(t *testing.T) {
 		}
 	}`
 	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
-		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicClock: true})
+		interpreter.TestcaseOptions{DeterministicClock: true})
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}

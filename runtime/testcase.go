@@ -30,17 +30,10 @@ type TestcaseExec struct {
 	log     []string
 	stopped bool
 
-	// profile selects the execution semantics: ProfileApproximate
-	// (default; the conformance-tuned model) or ProfileStrict (faithful
-	// operational semantics, being wired in domain by domain — real
-	// concurrent PTCs, snapshot alt, ...). Written once before any PTC
-	// forks and read-only afterwards; the accessors take mu so the race
-	// detector is satisfied under the forked goroutines that read it.
 	// mtcID is the component ID of the MTC, used by PortKey to keep the
-	// MTC's ports on bare (unqualified) names so the default single-MTC
-	// path is byte-identical.
-	profile SemanticsProfile
-	mtcID   int64
+	// MTC's ports on bare (unqualified) names so the single-MTC path is
+	// byte-identical.
+	mtcID int64
 
 	// deterministicClock, when set, makes strict execution advance the
 	// per-testcase virtual clock to a timer's deadline (firing it
@@ -1031,10 +1024,9 @@ func (t *TestcaseExec) PortKeyFor(compID int64, name string) string {
 		return name
 	}
 	t.mu.Lock()
-	strict := t.profile == ProfileStrict
 	mtc := t.mtcID
 	t.mu.Unlock()
-	if !strict || compID == mtc {
+	if compID == mtc {
 		return name
 	}
 	return portQualPrefix + strconv.FormatInt(compID, 10) + "/" + name
@@ -1372,26 +1364,21 @@ func (t *TestcaseExec) RegisterDeferredResponder(compID int64, fn func()) {
 // actually queued on its component's ports — so a multicast `call to (...)`
 // that addressed other components does not make this responder reply
 // spuriously (Sem_220301_CallOperation_015). Un-addressed responders are
-// re-registered for a later call. The approximate path keeps the historical
-// unconditional replay (its ports are unqualified, and its looser sender
-// matching tolerates the extra replies the conformance gate is tuned to).
+// re-registered for a later call.
 func (t *TestcaseExec) RunDeferredResponders() {
 	t.mu.Lock()
 	drained := append([]deferredResponder{}, t.deferredResponders...)
 	t.deferredResponders = nil
-	strict := t.profile == ProfileStrict
 	t.mu.Unlock()
 
 	var keep []deferredResponder
 	for _, d := range drained {
-		if strict {
-			t.mu.Lock()
-			addressed := t.hasPendingCallForCompLocked(d.compID)
-			t.mu.Unlock()
-			if !addressed {
-				keep = append(keep, d)
-				continue
-			}
+		t.mu.Lock()
+		addressed := t.hasPendingCallForCompLocked(d.compID)
+		t.mu.Unlock()
+		if !addressed {
+			keep = append(keep, d)
+			continue
 		}
 		d.fn()
 	}
@@ -1771,57 +1758,6 @@ func (t *TestcaseExec) Stopped() bool {
 	return t.stopped
 }
 
-// SemanticsProfile selects how faithfully the engine executes TTCN-3.
-// It is the single coherent carrier the semantic-correctness roadmap
-// converges on: strict paths land behind ProfileStrict, are
-// differential-tested against ProfileApproximate, then become the
-// default. Transitional per-domain opt-ins (e.g. RealScheduler) fold
-// into it.
-type SemanticsProfile int
-
-const (
-	// ProfileStrict is the faithful operational-semantics path and the
-	// default: real concurrent PTC execution, per-component port routing
-	// and snapshot alt semantics. It is the zero value, so a caller that
-	// does not choose gets the correct engine.
-	ProfileStrict SemanticsProfile = iota
-	// ProfileApproximate is the legacy conformance-tuned model (skip
-	// heuristic, best-effort alt, loopback ports). Retained only for the
-	// CLI opt-out while the engine is retired.
-	ProfileApproximate
-)
-
-// SetProfile selects the execution semantics. Call once, before any PTC
-// is started.
-func (t *TestcaseExec) SetProfile(p SemanticsProfile) {
-	t.mu.Lock()
-	t.profile = p
-	t.mu.Unlock()
-}
-
-// Profile reports the active execution-semantics profile.
-func (t *TestcaseExec) Profile() SemanticsProfile {
-	t.mu.Lock()
-	defer t.mu.Unlock()
-	return t.profile
-}
-
-// SetRealScheduler is a back-compat shim: real concurrent PTC execution
-// is the first domain of ProfileStrict, so enabling it selects Strict.
-func (t *TestcaseExec) SetRealScheduler(b bool) {
-	p := ProfileApproximate
-	if b {
-		p = ProfileStrict
-	}
-	t.SetProfile(p)
-}
-
-// RealScheduler reports whether real concurrent PTC execution is on,
-// i.e. whether the strict profile is active.
-func (t *TestcaseExec) RealScheduler() bool {
-	return t.Profile() == ProfileStrict
-}
-
 // SetMTCID records the MTC's component ID so PortKey can leave the
 // MTC's ports unqualified. Call once, right after the MTC ref exists.
 func (t *TestcaseExec) SetMTCID(id int64) {
@@ -1945,12 +1881,8 @@ func (t *TestcaseExec) PortKey(name string) string {
 		return name
 	}
 	t.mu.Lock()
-	strict := t.profile == ProfileStrict
 	mtc := t.mtcID
 	t.mu.Unlock()
-	if !strict {
-		return name
-	}
 	cur := t.CurrentComponent()
 	if cur == nil || cur.ID == mtc {
 		return name
