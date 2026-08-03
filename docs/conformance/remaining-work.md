@@ -1,9 +1,8 @@
 # Remaining Conformance Work
 
-State as of 2026-07-28: **4798 / 4948 matched (97.42%)**, 23 skipped
+State as of 2026-08-03: **4798 / 4948 matched (97.42%)**, 23 skipped
 (inconclusive / no-verdict), **127 real misses** (was 4790 / 97.26% on
-2026-07-06 and 4788 / 97.22% on 2026-06-17). The gate now measures the
-**strict** engine — see "Strict engine" below. Baseline and the full miss
+2026-07-06 and 4788 / 97.22% on 2026-06-17). Baseline and the full miss
 inventory live in
 [`testdata/conformance-baseline.json`](../../testdata/conformance-baseline.json)
 and [`current-misses.json`](current-misses.json); regenerate with
@@ -16,12 +15,15 @@ Every change must still pass the full conformance run (`--regress 0.5`,
 0 per-file regressions) and an external test-port smoke suite
 (17 pass / 0 fail / 2 expected inconc).
 
-## Strict engine (2026-07-28)
+## One engine (2026-08-03)
 
-Execution now defaults to the **strict** engine: a cooperative
-discrete-event scheduler with a virtual clock, replacing the legacy
-"approximate" evaluator's verdict-preferring heuristic. The legacy engine
-remains available via `--approximate` and is scheduled for deletion.
+There is now a single evaluator: a cooperative discrete-event scheduler
+with a virtual clock. The legacy "approximate" evaluator and its
+verdict-preferring heuristic are deleted, along with the
+`SemanticsProfile` toggle and the `--approximate`, `--profile` and
+`--differential` flags. `DeterministicClock` and `DeterministicScheduler`
+remain as options, because a driver running real suites wants timers to
+pace real I/O; that is the only axis left.
 
 This closed the two features that this document previously listed as the
 main path forward — **1a** (strict procedure-payload matching) and **1b**
@@ -29,11 +31,40 @@ main path forward — **1a** (strict procedure-payload matching) and **1b**
 interleave deterministically and block on real matches instead of being
 modelled. Both sections are marked DONE below.
 
+Losing `--differential` removes the built-in way to compare two engines.
+The replacement is [`diff_runs.py`](diff_runs.py), which diffs two
+`--json` reports file by file and reports per-file provenance moves the
+pass-rate gate cannot see. It compares two commits rather than two
+engines.
+
+### Match rate versus real execution
+
 The suite match rate is only part of the picture: the harness also
 reports a **real-execution** rate (files whose verdict came from actually
 executing the testcase rather than from a parse/semantic rejection),
-currently **2498 files, 50.72%**. Growing that number, not the match
-rate, is the meaningful measure of remaining dynamic-semantics work.
+currently **2498 files, 50.72%**.
+
+That number cannot approach 100%, and it is worth being precise about why
+before treating it as a target. A file annotated `@verdict pass reject`
+expects a rejection, and a completed run always yields a TTCN-3 verdict
+(`pass`/`fail`/`inconc`/`none`/`error`) — never the string `reject`. Such
+a file can therefore never be counted as `executed` and matching; the best
+it reaches is `exec-reject`, which is deliberately excluded from the
+real-execution rate. 2200 of the 4925 considered files expect `reject`,
+so the ceiling is **2725 / 4925 = 55.33%**.
+
+Total headroom is thus 227 files (+4.61 points), not the ~49 points the
+raw figure suggests. Of those 227, 143 have neither a testcase nor a
+control part — nothing exists to execute — and a further 40 carry an
+explicit ETSI `noexecution` directive. The honestly addressable set is
+about 84 files (+1.71 points), most of them reachable only by executing
+`control {}` parts.
+
+One related caveat: the 23 "skipped" files are not inconclusive tests.
+They all carry `@verdict pass reject`, parsed and analyzed cleanly, had no
+testcase, and were demoted out of the denominator rather than counted as
+misses. They are negative tests the analyzer fails to catch. Fixing that
+would *lower* the reported match rate by moving them into the denominator.
 
 ## Execution triage 2026-06-17 — the `reject->pass` bulk is NOT low-hanging
 
@@ -133,7 +164,10 @@ so an MTC↔PTC round-trip completes. `Sem_060210_ReuseofComponentTypes_002/003`
 `Sem_2004_InterleaveStatement_002/013` and
 `Sem_1400_procedure_signatures_004` all match now;
 `Sem_200501_the_default_mechanism_008` is the one fixture from this
-cluster still missing. Original analysis retained below.
+cluster still missing. Original analysis retained below — note that it
+names `evalAltStmtBestEffort`, `waitForAltPortTraffic` and
+`altHasExternalPortGuard`, all deleted on 2026-08-03 with the approximate
+engine, so it is history rather than a map of the current code.
 
 **~6 tests**, and **not one mechanism**: `Sem_060210_ReuseofComponentTypes_002/003`
 is a server-PTC echo (`while(true){alt{receive->send}}`); `Sem_2004_InterleaveStatement_002/013`
@@ -283,31 +317,45 @@ external-function-blocked `060302_010`. **1d** was investigated and still
 yields no safe commit (gaming / codec-specific / matching-core
 regression — see above). What remains:
 
-1. **Engine convergence** — make the library default strict, then delete
-   the approximate engine, the `SemanticsProfile` toggle and the
-   `--approximate` / `--profile` flags, and rebaseline. This is cleanup
-   of transitional scaffolding, not new coverage, and it is the
-   prerequisite for having a single engine.
+**Engine convergence is done** (2026-08-03) — see "One engine" above.
+Both interleave fallbacks and the second, mis-gated altstep fallback are
+closed, the approximate engine and the profile toggle are deleted, and
+the corpus never moved: every step held 4798 / 4948 with zero per-file
+changes. Deleting the blocking-body fallback needed no branch-suspension
+machinery, because measurement showed that fallback changed no verdict.
 
-   *Partly done.* `interleave` no longer falls back to the legacy
-   evaluator merely because defaults are active: `runDefaults` reports a
-   default that actually took a branch, which is the signal needed to
-   leave the interleave (20.5), so the snapshot evaluator now handles
-   that case directly. `@nodefault` is honoured on a plain `alt` too,
-   which the strict evaluator previously ignored. The one remaining
-   fallback is an interleave branch body that may itself block: taking it
-   needs cooperative suspension at the blocking point and resumption of a
-   sibling, which the snapshot evaluator does not model. Closing that is
-   what removes the last caller of `evalAltStmtBestEffort` from the
-   strict path.
+What remains:
+
+1. **Execute `control {}` as a program.** Measured as the largest of the
+   real-execution levers by a wide margin: 4625 of 4948 corpus files have
+   a control part, it accounts for 76 of the 227 addressable-gap files,
+   and the evaluator already handles the node (`case *syntax.ControlPart`
+   in `interpreter/interpreter.go`) — module init just skips it and the
+   harness only ever runs the first testcase. The clean first slice is the
+   24 files whose control part is the *only* executable thing in them; the
+   second is running every `execute(...)` in sequence with proper verdict
+   aggregation, which is what the six `26_module_control` misses need.
 2. **Bucket 3 clusters**, one precise, narrowly-scoped analysis pass at a
    time. `reject->pass` is now 107 of the 150 unmatched files, so this is
    where the remaining match-rate lives — but see the 2026-06-17 triage
-   above: none of it is low-hanging, and matching-core changes regress
-   easily (cf. the 150605 attempt in 1d).
-3. **Real-execution depth over match rate** — cross-module symbol
-   resolution with `ttcn3/types`, wiring `runtime/codec`, executing
-   `control {}` as a program, and a host binding for external functions.
-   These grow the 50.72% real-execution rate and unblock 1c/1d leftovers;
-   several barely move the match rate.
-4. Leave **Bucket 2** as-is unless the suite revision is reconciled.
+   above: none of it is low-hanging, spread across 23 clusters, and
+   matching-core changes regress easily (cf. the 150605 attempt in 1d).
+3. **Wire `runtime/codec`.** Filed here rather than under real execution:
+   it is worth only ~2 real-execution conversions but up to 15 match-rate
+   fixes, 13 of them the `22_communication_operations` `reject->pass`
+   cluster that needs decoding to actually *fail* on malformed input,
+   which the current placeholder cache can never do. The codecs exist and
+   are tested; the work is the bridge, and the risk is that a real codec
+   produces different bytes than the placeholder for the 233 files that
+   currently match through it.
+4. **A host binding for external functions** — smallest payoff (3 real
+   executions, 3-5 match fixes) but also the smallest possible slice, if
+   scoped to a name-to-closure registry alongside the existing `matchFile`
+   interception rather than a real FFI.
+5. **Do not** pursue cross-module symbol resolution via `ttcn3/types` as a
+   conformance lever. `TypeOf` handles literals and operators only, so
+   this means writing a symbol table from scratch, while the existing
+   flat-directory hack in `conformance.go` already gets 454 of the 555
+   nominally-unresolvable files executing and matching. Measured return:
+   one file.
+6. Leave **Bucket 2** as-is unless the suite revision is reconciled.
