@@ -161,6 +161,9 @@ func (d *Driver) Run(ctx context.Context, name string) (report.Verdict, string, 
 		}
 		trees = append(trees, t)
 	}
+	// Deliberately leaves DeterministicClock and DeterministicScheduler
+	// off: this driver executes real test suites, so timers must pace real
+	// I/O rather than jump a virtual clock. Semantics default to strict.
 	opts := interpreter.TestcaseOptions{
 		ModuleParameters: d.modParam,
 		ModuleParamWarning: func(msg string) {

@@ -1780,14 +1780,15 @@ func (t *TestcaseExec) Stopped() bool {
 type SemanticsProfile int
 
 const (
-	// ProfileApproximate is the default conformance-tuned model
-	// (skip heuristic, best-effort alt, virtual clock, loopback ports).
-	ProfileApproximate SemanticsProfile = iota
-	// ProfileStrict is the faithful operational-semantics path, wired in
-	// domain by domain. Currently it enables real concurrent PTC
-	// execution + per-component port routing; further domains (snapshot
-	// alt, real codecs, ...) attach here as they land.
-	ProfileStrict
+	// ProfileStrict is the faithful operational-semantics path and the
+	// default: real concurrent PTC execution, per-component port routing
+	// and snapshot alt semantics. It is the zero value, so a caller that
+	// does not choose gets the correct engine.
+	ProfileStrict SemanticsProfile = iota
+	// ProfileApproximate is the legacy conformance-tuned model (skip
+	// heuristic, best-effort alt, loopback ports). Retained only for the
+	// CLI opt-out while the engine is retired.
+	ProfileApproximate
 )
 
 // SetProfile selects the execution semantics. Call once, before any PTC

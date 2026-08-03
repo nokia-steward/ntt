@@ -129,48 +129,6 @@ func TestRealScheduler_SingleWorkerLoopRuns(t *testing.T) {
 	}
 }
 
-// TestRealScheduler_DefaultOffSkipsWorker pins the conformance-safe
-// default: without RealScheduler the same worker body is skipped (no real
-// scheduler), so the Go port observes zero sends. This guards the opt-in
-// boundary.
-func TestRealScheduler_DefaultOffSkipsWorker(t *testing.T) {
-	c := newSendCounter()
-	goport.Register("P", func(inst string) api.TestPort { return &asyncEchoPort{inst: inst, c: c} })
-	t.Cleanup(goport.Reset)
-
-	src := `module M {
-		type port P message { inout integer }
-		type component C { port P p }
-		function f_worker() runs on C {
-			timer t_guard := 5.0;
-			map(self:p, system:p);
-			while (true) {
-				p.send(1);
-				t_guard.start;
-				alt {
-					[] p.receive(integer:?) { }
-					[] t_guard.timeout { stop; }
-				}
-			}
-		}
-		testcase tc() runs on C system C {
-			var C w := C.create alive;
-			w.start(f_worker());
-			timer t_run := 0.05;
-			t_run.start; t_run.timeout;
-			all component.stop;
-		}
-	}`
-
-	_, _, err := interpreter.RunTestcase([]*ttcn3.Tree{parse(t, src)}, "M.tc")
-	if err != nil {
-		t.Fatalf("RunTestcase: %v", err)
-	}
-	if got := c.get("p"); got != 0 {
-		t.Fatalf("default-off worker sent %d requests, want 0 (body must stay skipped)", got)
-	}
-}
-
 // TestRealScheduler_FourWorkersOwnReplies is the full-acceptance proof:
 // 4 `alive` PTCs, all with `port P p`, each run the load loop. Each
 // worker sends its OWN id and asserts every reply equals that id — so a

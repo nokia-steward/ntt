@@ -37,10 +37,11 @@ type TestcaseOptions struct {
 	// see typos in their cfg without a hard failure.
 	ModuleParamWarning func(msg string)
 
-	// Profile selects the execution semantics (runtime.ProfileApproximate
-	// default, or runtime.ProfileStrict for the faithful path). It is the
-	// coherent successor to the RealScheduler bool; RealScheduler is kept
-	// as a shim (see below).
+	// Profile selects the execution semantics. The zero value is
+	// runtime.ProfileStrict, the faithful path; runtime.ProfileApproximate
+	// selects the legacy engine that is being retired. It is the coherent
+	// successor to the RealScheduler bool; RealScheduler is kept as a shim
+	// (see below).
 	Profile runtime.SemanticsProfile
 
 	// DeterministicClock, when true, makes timers advance the

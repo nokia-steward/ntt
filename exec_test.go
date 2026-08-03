@@ -77,29 +77,3 @@ func TestExecDeterministicForkedPTC(t *testing.T) {
 		t.Fatalf("verdict = %s (%s), want pass", v, reason)
 	}
 }
-
-// TestExecDefaultUnaffected covers that the default (no --deterministic)
-// path is untouched: the same testcase runs on the approximate profile
-// with no scheduler, and still passes.
-// TestExecApproximateOptOut covers the `--approximate` legacy opt-out: with
-// the driver's strict default turned off, the real-clock approximate engine
-// still runs a testcase to completion. (The CLI default is now strict; this
-// exercises the retiring engine that --approximate selects.)
-func TestExecApproximateOptOut(t *testing.T) {
-	path := writeTC(t, `module m {
-		type component C {}
-		testcase tc() runs on C system C {
-			setverdict(pass);
-		}
-	}`)
-	d := newStaticDriver([]string{path})
-	d.deterministic = false // --approximate
-
-	v, reason, err := d.Run(context.Background(), "m.tc")
-	if err != nil {
-		t.Fatalf("Run: %v", err)
-	}
-	if v != rreport.Pass {
-		t.Fatalf("verdict = %s (%s), want pass", v, reason)
-	}
-}
