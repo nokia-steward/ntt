@@ -2156,40 +2156,6 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 	return nil
 }
 
-// interleaveBodyMayBlock reports whether an interleave clause body contains
-// a statement that could itself block — a nested alt/interleave, a blocking
-// `call{}` block, or a receiving operation. Correctly running such a body
-// requires cooperatively SUSPENDING it at the blocking point and resuming a
-// sibling branch (ETSI ES 201 873-1 §20.4), which the snapshot evaluator
-// below does not model; those interleaves fall back to the best-effort path.
-func interleaveBodyMayBlock(body syntax.Node) bool {
-	if body == nil {
-		return false
-	}
-	blocks := false
-	body.Inspect(func(n syntax.Node) bool {
-		if n == nil || blocks {
-			return false
-		}
-		switch v := n.(type) {
-		case *syntax.AltStmt, *syntax.CallStmt:
-			blocks = true
-			return false
-		case *syntax.SelectorExpr:
-			if id, ok := v.Sel.(*syntax.Ident); ok && id != nil && id.Tok != nil {
-				switch id.String() {
-				case "receive", "trigger", "check",
-					"getcall", "getreply", "catch":
-					blocks = true
-					return false
-				}
-			}
-		}
-		return true
-	})
-	return blocks
-}
-
 // evalInterleaveStmtStrict evaluates `interleave { ... }` under the strict
 // profile (ETSI ES 201 873-1 §20.4): every alternative is taken EXACTLY
 // ONCE, in whatever interleaved order its guard becomes ready. Each round
@@ -2199,12 +2165,17 @@ func interleaveBodyMayBlock(body syntax.Node) bool {
 // replaces running interleave as a plain best-effort alt (which took only
 // ONE alternative).
 //
-// One case still defers to the historical best-effort evaluator: a branch
-// body that may block (interleaveBodyMayBlock) needs cooperative suspension
-// at the blocking point and resumption of a sibling, which the snapshot
-// evaluator does not model.
+// A branch body that itself blocks needs no special handling. A nested alt
+// inside a body parks on its own event sources and, finding nothing that can
+// ever fire, concludes without matching; the interleave then re-snapshots and
+// takes the sibling whose guard the first body just enabled, and a later round
+// re-offers the branch whose blocking read is now satisfiable. Interleaves
+// with blocking bodies used to defer to the best-effort evaluator on the
+// assumption that they needed cooperative suspend/resume at the blocking
+// point; measured against the full ETSI corpus that fallback changed no
+// verdict, so the snapshot evaluator carries them directly.
 //
-// Activated defaults no longer force a fallback. They are appended after the
+// Activated defaults are likewise handled here. They are appended after the
 // remaining alternatives (20.5) and one that fires leaves the interleave —
 // runDefaults reports a default that actually took a branch, not merely one
 // that changed the verdict, which is the signal this needs.
@@ -2218,12 +2189,6 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 			clauses = append(clauses, cc)
 		}
 	}
-	for _, cc := range clauses {
-		if interleaveBodyMayBlock(cc.Body) {
-			return evalAltStmtBestEffort(n, env)
-		}
-	}
-
 	taken := make([]bool, len(clauses))
 	remaining := len(clauses)
 	const maxRounds = 1 << 20

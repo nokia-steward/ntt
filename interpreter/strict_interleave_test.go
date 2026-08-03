@@ -553,6 +553,45 @@ func TestStrictInterleave_TakesEachBranchOnce(t *testing.T) {
 	}
 }
 
+// TestStrictInterleave_BlockingBodyRunsOnSnapshotEvaluator covers a branch
+// body that itself blocks, which used to be handed to the legacy best-effort
+// evaluator on the assumption that it needed cooperative suspend/resume.
+// Mirrors Sem_2004_InterleaveStatement_001: branch 1's body sends the message
+// that enables branch 2's guard and then blocks in a nested alt waiting for
+// the message branch 2's body sends, so the two branches are mutually
+// dependent. The snapshot evaluator must still take both branches and reach
+// the nested alt's verdict.
+func TestStrictInterleave_BlockingBodyRunsOnSnapshotEvaluator(t *testing.T) {
+	src := `module M {
+		type port P message { inout integer }
+		type component C { port P p1, p2 }
+		testcase tc() runs on C system C {
+			p1.send(integer:1);
+			interleave {
+				[] p1.receive(integer:1) {
+					p2.send(integer:2);
+					alt {
+						[] p1.receive(integer:3) { setverdict(pass); }
+					}
+				}
+				[] p2.receive(integer:2) {
+					p1.send(integer:3);
+				}
+			}
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (a blocking branch body must still reach its nested alt)", v, reason)
+	}
+}
+
 // TestStrictInterleave_ActiveDefaultsStillTakeEachBranch covers an
 // interleave that has activated defaults but no `@nodefault`. That
 // combination used to fall back to the best-effort evaluator, which takes
