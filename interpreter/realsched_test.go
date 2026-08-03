@@ -66,13 +66,12 @@ func (e *asyncEchoPort) Send(_ context.Context, env *port.Envelope) error {
 	return nil
 }
 
-// TestRealScheduler_SingleWorkerLoopRuns is the Phase-A proof: with
-// RealScheduler on, an `alive` PTC running
+// TestRealScheduler_SingleWorkerLoopRuns is the Phase-A proof: an
+// `alive` PTC running
 // `while(true){ send; alt{receive|t_guard.timeout}; pace }` actually runs
 // on a real goroutine, issues many requests, and each receive is woken by
 // the port's async Inject (not the guard timer). `all component.stop`
-// then terminates the loop promptly. Today (default model) this worker is
-// skipped and issues zero requests — see the default-off test below.
+// then terminates the loop promptly.
 func TestRealScheduler_SingleWorkerLoopRuns(t *testing.T) {
 	c := newSendCounter()
 	goport.Register("P", func(inst string) api.TestPort { return &asyncEchoPort{inst: inst, c: c} })
