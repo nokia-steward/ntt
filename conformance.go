@@ -22,12 +22,10 @@ import (
 )
 
 var (
-	conformanceBaseline     string
-	conformanceRegress      float64
-	conformanceTimeout      time.Duration
-	conformanceJobs         int
-	conformanceProfile      string
-	conformanceDifferential bool
+	conformanceBaseline string
+	conformanceRegress  float64
+	conformanceTimeout  time.Duration
+	conformanceJobs     int
 
 	// ConformanceCommand walks the ETSI conformance suite and reports
 	// the fraction of files whose actual outcome (interpreter verdict
@@ -65,19 +63,6 @@ func init() {
 		"per-testcase execution budget")
 	ConformanceCommand.Flags().IntVar(&conformanceJobs, "jobs", 8,
 		"number of files to run in parallel")
-	ConformanceCommand.Flags().StringVar(&conformanceProfile, "profile", "strict",
-		"execution semantics profile: strict (default — the discrete-event scheduler + virtual clock) or approximate (the legacy engine, being retired)")
-	ConformanceCommand.Flags().BoolVar(&conformanceDifferential, "differential", false,
-		"also run each executed testcase under both profiles and report verdict divergences (diagnostic; not part of the gate)")
-}
-
-// runProfile parses the --profile flag into a SemanticsProfile. Unknown
-// values fall back to approximate so the gate never silently switches.
-func runProfile() runtime.SemanticsProfile {
-	if strings.EqualFold(conformanceProfile, "approximate") {
-		return runtime.ProfileApproximate
-	}
-	return runtime.ProfileStrict
 }
 
 // ConformanceResult is the per-file outcome of a conformance run. The
@@ -104,15 +89,6 @@ type ConformanceResult struct {
 	//                   testcase): parse+analyze succeeded.
 	//   "runtime-error"/"timeout" - the interpreter errored/timed out.
 	Provenance string `json:"provenance,omitempty"`
-	// ApproxActual / StrictActual / Diverged are populated only in
-	// --differential mode for executed files: the verdict under each
-	// profile and whether they differ. Divergences show where the strict
-	// and approximate semantics disagree — the migration work-list. Filled
-	// regardless of which profile is the default, so the diagnostic keeps
-	// working after strict became the default gate profile.
-	ApproxActual string `json:"approx_actual,omitempty"`
-	StrictActual string `json:"strict_actual,omitempty"`
-	Diverged     bool   `json:"diverged,omitempty"`
 }
 
 // ConformanceSummary is the suite-wide aggregate.
@@ -130,11 +106,8 @@ type ConformanceSummary struct {
 	// execution ("executed"), i.e. the interpreter ran the testcase and
 	// produced the expected verdict. Expected to sit below PassRate
 	// until the strict operational-semantics paths land.
-	RealExecRate float64 `json:"real_exec_rate"`
-	// Diverged counts executed files whose ProfileStrict verdict differed
-	// from ProfileApproximate (only populated in --differential mode).
-	Diverged int                 `json:"diverged,omitempty"`
-	Results  []ConformanceResult `json:"results,omitempty"`
+	RealExecRate float64             `json:"real_exec_rate"`
+	Results      []ConformanceResult `json:"results,omitempty"`
 }
 
 func runConformance(cmd *cobra.Command, args []string) error {
@@ -165,17 +138,6 @@ func runConformance(cmd *cobra.Command, args []string) error {
 				fmt.Printf(" %s=%d", k, summary.Provenance[k])
 			}
 			fmt.Println()
-		}
-		if conformanceDifferential {
-			fmt.Printf("  strict-vs-approximate divergences: %d\n", summary.Diverged)
-			if verbose > 0 {
-				for _, r := range summary.Results {
-					if r.Diverged {
-						fmt.Printf("  DIVERGE %s  approximate=%s strict=%s\n",
-							r.Path, r.ApproxActual, r.StrictActual)
-					}
-				}
-			}
 		}
 		if verbose > 0 {
 			for _, r := range summary.Results {
@@ -239,13 +201,9 @@ func runConformanceFiles(files []string) ConformanceSummary {
 	// real-execution rate (matches obtained by actually running the
 	// testcase and getting the expected verdict).
 	prov := map[string]int{}
-	diverged := 0
 	for _, r := range results {
 		if r.Match && r.Provenance != "" {
 			prov[r.Provenance]++
-		}
-		if r.Diverged {
-			diverged++
 		}
 	}
 	realRate := 0.0
@@ -259,7 +217,6 @@ func runConformanceFiles(files []string) ConformanceSummary {
 		PassRate:     rate,
 		Provenance:   prov,
 		RealExecRate: realRate,
-		Diverged:     diverged,
 		Results:      results,
 	}
 }
@@ -356,40 +313,18 @@ func runOneConformance(path string) ConformanceResult {
 		trees = append(trees, siblings...)
 	}
 
-	// Primary run under the selected profile (approximate = the gate).
 	// A negative test is satisfied at runtime via the relaxation in
 	// classifyExecution (Titan-style static tools catch these at compile
 	// time; an interpreter-first tool catches them at runtime).
-	prof := runProfile()
-	r.Actual, r.Reason = execVerdict(trees, tcName, prof)
+	r.Actual, r.Reason = execVerdict(trees, tcName)
 	classifyExecution(&r, expected)
-
-	// Differential diagnostic (not part of the gate): report the verdict
-	// under BOTH profiles and whether they diverge. The primary run above
-	// already produced one of them (r.Actual under prof); run only the
-	// other. Works regardless of which profile is the default.
-	if conformanceDifferential {
-		var approxActual, strictActual string
-		if prof == runtime.ProfileStrict {
-			strictActual = r.Actual
-			approxActual, _ = execVerdict(trees, tcName, runtime.ProfileApproximate)
-		} else {
-			approxActual = r.Actual
-			strictActual, _ = execVerdict(trees, tcName, runtime.ProfileStrict)
-		}
-		r.ApproxActual = approxActual
-		r.StrictActual = strictActual
-		r.Diverged = approxActual != strictActual
-	}
 	return r
 }
 
-// execVerdict runs tcName under the given semantics profile with the
-// per-case timeout and returns the raw outcome — a verdict string
-// ("pass"/"fail"/"inconc"/"error"), or "runtime-error"/"timeout" — plus
-// an explanatory reason. Profile lets the same path serve the gate
-// (approximate), a `--profile=strict` run, and the differential harness.
-func execVerdict(trees []*ttcn3.Tree, tcName string, profile runtime.SemanticsProfile) (actual, reason string) {
+// execVerdict runs tcName with the per-case timeout and returns the raw
+// outcome — a verdict string ("pass"/"fail"/"inconc"/"error"), or
+// "runtime-error"/"timeout" — plus an explanatory reason.
+func execVerdict(trees []*ttcn3.Tree, tcName string) (actual, reason string) {
 	ctx, cancel := context.WithTimeout(context.Background(), conformanceTimeout)
 	defer cancel()
 	type out struct {
@@ -399,19 +334,16 @@ func execVerdict(trees []*ttcn3.Tree, tcName string, profile runtime.SemanticsPr
 	}
 	ch := make(chan out, 1)
 	go func() {
-		// Pass ctx so a strict run that blocks (honest alt/timer waits)
-		// is cancelled on timeout instead of leaking a spinning
-		// goroutine after we return "timeout" below. Strict runs use the
-		// deterministic clock so real-time timers fire instantly (no 5s
-		// waits, no timeout artifacts in the differential), and the
-		// cooperative discrete-event scheduler so concurrent components
-		// interleave deterministically; approximate runs keep the
-		// historical real-clock, no-scheduler behaviour.
+		// Pass ctx so a run that blocks (honest alt/timer waits) is
+		// cancelled on timeout instead of leaking a spinning goroutine
+		// after we return "timeout" below. The deterministic clock makes
+		// real-time timers fire instantly (no 5s waits) and the
+		// cooperative discrete-event scheduler makes concurrent
+		// components interleave deterministically.
 		v, r, err := interpreter.RunTestcaseWith(trees, tcName,
 			interpreter.TestcaseOptions{
-				Profile:                profile,
-				DeterministicClock:     profile == runtime.ProfileStrict,
-				DeterministicScheduler: profile == runtime.ProfileStrict,
+				DeterministicClock:     true,
+				DeterministicScheduler: true,
 				Context:                ctx,
 			})
 		ch <- out{v: v, reason: r, err: err}

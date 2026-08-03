@@ -36,7 +36,6 @@ func TestExecDeterministic(t *testing.T) {
 		}
 	}`)
 	d := newStaticDriver([]string{path})
-	d.deterministic = true
 
 	start := time.Now()
 	v, reason, err := d.Run(context.Background(), "m.tc")
@@ -53,8 +52,8 @@ func TestExecDeterministic(t *testing.T) {
 
 // TestExecDeterministicForkedPTC covers concurrent execution under the
 // scheduler: an alive PTC forks, runs, and the MTC's blocking comp.done
-// parks so the PTC is scheduled — a case the default (approximate) path
-// models only by skipping the body.
+// parks so the PTC is scheduled — a case the retired approximate engine
+// modelled only by skipping the body.
 func TestExecDeterministicForkedPTC(t *testing.T) {
 	path := writeTC(t, `module m {
 		type component C {}
@@ -67,7 +66,6 @@ func TestExecDeterministicForkedPTC(t *testing.T) {
 		}
 	}`)
 	d := newStaticDriver([]string{path})
-	d.deterministic = true
 
 	v, reason, err := d.Run(context.Background(), "m.tc")
 	if err != nil {
