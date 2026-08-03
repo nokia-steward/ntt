@@ -1,19 +1,17 @@
 # Current Conformance Misses
 
-Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b00a-12bcd47feab7/scratchpad/strict_default.json` using the current workspace runner.
+Generated from `/tmp/ntt-final-control.json` using the current workspace runner.
 
-- Summary: `ran 4948 files: 4798 matched, 23 skipped (97.42% match rate)`
-- Misses: `150`
+- Summary: `ran 4948 files: 4803 matched, 23 skipped (97.52% match rate)`
+- Misses: `145`
 
 ## Misses By Outcome
 
 - `reject->pass`: `107`
 - `->`: `23`
-- `pass->fail`: `12`
-- `error->pass`: `2`
-- `fail->pass`: `2`
+- `pass->fail`: `11`
 - `pass->parse-error`: `2`
-- `error->timeout`: `1`
+- `error->pass`: `1`
 - `none->pass`: `1`
 
 ## Misses By Chapter
@@ -24,8 +22,8 @@ Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b0
 - `core_language/15_templates`: `18` (`->`=2, `pass->fail`=2, `reject->pass`=14)
 - `core_language/16_functions_altsteps_testcases`: `10` (`->`=1, `pass->fail`=4, `reject->pass`=5)
 - `core_language/20_statement_and_operations_for_alt`: `9` (`pass->fail`=1, `reject->pass`=8)
-- `core_language/26_module_control`: `9` (`->`=3, `error->pass`=2, `error->timeout`=1, `fail->pass`=2, `pass->fail`=1)
 - `core_language/09_test_configurations`: `7` (`reject->pass`=7)
+- `core_language/26_module_control`: `4` (`->`=3, `error->pass`=1)
 - `core_language/08_modules`: `3` (`->`=2, `pass->fail`=1)
 - `core_language/B_matching_incoming_values`: `3` (`reject->pass`=3)
 - `oo/501_classes_and_objects`: `3` (`pass->fail`=1, `pass->parse-error`=2)

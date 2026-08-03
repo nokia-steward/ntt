@@ -26,9 +26,12 @@ type TestcaseExec struct {
 
 	mu      sync.Mutex
 	verdict Verdict
-	reason  string
-	log     []string
-	stopped bool
+	// verdictSet records that setverdict was called, so an explicit
+	// `setverdict(none)` is distinguishable from never having set one.
+	verdictSet bool
+	reason     string
+	log        []string
+	stopped    bool
 
 	// mtcID is the component ID of the MTC, used by PortKey to keep the
 	// MTC's ports on bare (unqualified) names so the single-MTC path is
@@ -1696,12 +1699,23 @@ func RunExecTeardownHooks() {
 func (t *TestcaseExec) SetVerdict(v Verdict, reason string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
+	t.verdictSet = true
 	if verdictRank(v) > verdictRank(t.verdict) {
 		t.verdict = v
 		if reason != "" && (v == FailVerdict || v == ErrorVerdict) {
 			t.reason = reason
 		}
 	}
+}
+
+// VerdictWasSet reports whether setverdict was called at all, which is
+// not the same as the verdict being non-none: `setverdict(none)` is a
+// declared verdict and must survive, while a testcase that never calls
+// setverdict resolves to pass (ETSI ES 201 873-1 clause 22.4.1).
+func (t *TestcaseExec) VerdictWasSet() bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.verdictSet
 }
 
 // GetVerdict returns the current verdict.

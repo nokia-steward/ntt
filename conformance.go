@@ -316,9 +316,30 @@ func runOneConformance(path string) ConformanceResult {
 	// A negative test is satisfied at runtime via the relaxation in
 	// classifyExecution (Titan-style static tools catch these at compile
 	// time; an interpreter-first tool catches them at runtime).
-	r.Actual, r.Reason = execVerdict(trees, tcName)
+	//
+	// Drive the module through its `control` part when that part decides
+	// something running the first testcase alone cannot reproduce (ETSI
+	// 26): several testcases selected and ordered by control flow, an
+	// argument threaded from one verdict to the next, or an execute()
+	// bounded by a timeout or pinned to a host. A plain
+	// `control { execute(TheOnlyTestcase()); }` keeps the direct path,
+	// which is equivalent and far better exercised.
+	if module, ok := moduleOfTestcase(tcName); ok && interpreter.ControlPartIsLoadBearing(trees, module) {
+		r.Actual, r.Reason = controlVerdict(trees, module)
+	} else {
+		r.Actual, r.Reason = execVerdict(trees, tcName)
+	}
 	classifyExecution(&r, expected)
 	return r
+}
+
+// moduleOfTestcase splits "Module.testcase" into its module part.
+func moduleOfTestcase(qname string) (string, bool) {
+	i := strings.LastIndex(qname, ".")
+	if i <= 0 {
+		return "", false
+	}
+	return qname[:i], true
 }
 
 // execVerdict runs tcName with the per-case timeout and returns the raw
@@ -356,6 +377,43 @@ func execVerdict(trees []*ttcn3.Tree, tcName string) (actual, reason string) {
 		return string(o.v), o.reason
 	case <-ctx.Done():
 		return "timeout", "execution exceeded " + conformanceTimeout.String()
+	}
+}
+
+// controlVerdict runs a module's control part with the per-case timeout
+// and returns the aggregate verdict over the testcases it executed, in
+// the same raw form as execVerdict.
+//
+// The budget here covers the whole control part rather than one
+// testcase, so a module that executes several gets the same wall-clock
+// allowance as one that executes a single case. That is deliberate: the
+// per-execute() bound is the one the source asked for.
+func controlVerdict(trees []*ttcn3.Tree, module string) (actual, reason string) {
+	ctx, cancel := context.WithTimeout(context.Background(), conformanceTimeout)
+	defer cancel()
+	type out struct {
+		v      runtime.Verdict
+		reason string
+		err    error
+	}
+	ch := make(chan out, 1)
+	go func() {
+		v, r, err := interpreter.RunControlWith(trees, module,
+			interpreter.TestcaseOptions{
+				DeterministicClock:     true,
+				DeterministicScheduler: true,
+				Context:                ctx,
+			})
+		ch <- out{v: v, reason: r, err: err}
+	}()
+	select {
+	case o := <-ch:
+		if o.err != nil {
+			return "runtime-error", o.err.Error()
+		}
+		return string(o.v), o.reason
+	case <-ctx.Done():
+		return "timeout", "control execution exceeded " + conformanceTimeout.String()
 	}
 }
 

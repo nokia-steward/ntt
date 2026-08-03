@@ -1,15 +1,13 @@
 {
- "summary": "ran 4948 files: 4798 matched, 23 skipped (97.42% match rate)",
- "source": "/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b00a-12bcd47feab7/scratchpad/strict_default.json",
- "miss_count": 150,
+ "summary": "ran 4948 files: 4803 matched, 23 skipped (97.52% match rate)",
+ "source": "/tmp/ntt-final-control.json",
+ "miss_count": 145,
  "outcomes": {
   "reject->pass": 107,
   "->": 23,
-  "pass->fail": 12,
-  "error->pass": 2,
-  "fail->pass": 2,
+  "pass->fail": 11,
   "pass->parse-error": 2,
-  "error->timeout": 1,
+  "error->pass": 1,
   "none->pass": 1
  },
  "chapters": [
@@ -64,21 +62,18 @@
    }
   },
   {
-   "chapter": "core_language/26_module_control",
-   "misses": 9,
-   "outcomes": {
-    "error->pass": 2,
-    "fail->pass": 2,
-    "error->timeout": 1,
-    "->": 3,
-    "pass->fail": 1
-   }
-  },
-  {
    "chapter": "core_language/09_test_configurations",
    "misses": 7,
    "outcomes": {
     "reject->pass": 7
+   }
+  },
+  {
+   "chapter": "core_language/26_module_control",
+   "misses": 4,
+   "outcomes": {
+    "error->pass": 1,
+    "->": 3
    }
   },
   {
@@ -1215,30 +1210,6 @@
   },
   {
    "chapter": "core_language/26_module_control",
-   "expected": "fail",
-   "actual": "pass",
-   "outcome": "fail->pass",
-   "relpath": "core_language/26_module_control/2601_execute_statement/Sem_2601_ExecuteStatement_005.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/26_module_control",
-   "expected": "error",
-   "actual": "timeout",
-   "outcome": "error->timeout",
-   "relpath": "core_language/26_module_control/2601_execute_statement/Sem_2601_ExecuteStatement_007.ttcn",
-   "message": "execution exceeded 4s"
-  },
-  {
-   "chapter": "core_language/26_module_control",
-   "expected": "error",
-   "actual": "pass",
-   "outcome": "error->pass",
-   "relpath": "core_language/26_module_control/2601_execute_statement/Sem_2601_ExecuteStatement_009.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/26_module_control",
    "expected": "",
    "actual": "",
    "outcome": "->",
@@ -1259,22 +1230,6 @@
    "actual": "",
    "outcome": "->",
    "relpath": "core_language/26_module_control/2602_the_control_part/NegSem_2602_TheControlPart_030.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/26_module_control",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/26_module_control/2602_the_control_part/Sem_2602_TheControlPart_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/26_module_control",
-   "expected": "fail",
-   "actual": "pass",
-   "outcome": "fail->pass",
-   "relpath": "core_language/26_module_control/2602_the_control_part/Sem_2602_TheControlPart_003.ttcn",
    "message": ""
   },
   {

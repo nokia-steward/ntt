@@ -62,6 +62,12 @@ type TestcaseOptions struct {
 	// deadline context so the goroutine terminates instead of leaking.
 	// Nil = unbounded.
 	Context context.Context
+
+	// actualArgs carries actual parameters already evaluated by a
+	// control part's execute(). Nil means "mine them from the control
+	// part statically", which is what a directly-executed testcase does.
+	// Unexported: it is an internal hand-off, not a caller knob.
+	actualArgs []runtime.Object
 }
 
 // RunTestcase is the canonical entry point the executor uses to
@@ -151,6 +157,21 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 		return runtime.ErrorVerdict, "", fmt.Errorf("testcase %q not found in %q", fnName, module)
 	}
 
+	env, initErr := newModuleEnv(trees, modNode, module, opts)
+	if initErr != "" {
+		return runtime.ErrorVerdict, initErr, nil
+	}
+
+	exec := runtime.NewTestcaseExec(qname)
+	return runTestcaseIn(env, exec, trees, modNode, module, fnName, tcNode, opts)
+}
+
+// newModuleEnv builds the module-level scope a testcase or control part
+// runs in: verdict constants, every sibling module flattened in, the
+// target module's own definitions, `import ... with` attributes and any
+// [MODULE_PARAMETERS] overrides. Returns a non-empty reason string when
+// module initialisation failed.
+func newModuleEnv(trees []*ttcn3.Tree, modNode *syntax.Module, module string, opts TestcaseOptions) (runtime.Scope, string) {
 	env := runtime.NewEnv(nil)
 	bindVerdictConstants(env)
 	env.Set(runtime.ModuleNameKey, runtime.NewCharstring(module))
@@ -243,7 +264,7 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 					bindDeclNameScoped(env, d, fd.scopes)
 					continue
 				}
-				return runtime.ErrorVerdict, fmt.Sprintf("module init: %s", err.Inspect()), nil
+				return nil, fmt.Sprintf("module init: %s", err.Inspect())
 			}
 			// Even on successful evaluation, attach the type-
 			// descriptor binding so attribute lookups like
@@ -284,8 +305,15 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 			}
 		}
 	}
+	return env, ""
+}
 
-	exec := runtime.NewTestcaseExec(qname)
+// runTestcaseIn evaluates one testcase body in an already-initialised
+// module scope, against a fresh TestcaseExec. Split out of
+// RunTestcaseWith so a control part's execute() can run a testcase with
+// arguments evaluated at control-flow time (opts.actualArgs) rather than
+// mined statically from the source.
+func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3.Tree, modNode *syntax.Module, module, fnName string, tcNode *syntax.FuncDecl, opts TestcaseOptions) (verdict runtime.Verdict, reason string, err error) {
 	exec.SetDeterministicClock(opts.DeterministicClock)
 	// The cooperative scheduler is engaged after SetMTCID below (it needs
 	// the MTC's component id as the root participant).
@@ -385,9 +413,17 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 	// default (if any), `?` for templates, or Undefined. The control
 	// scope is a child of the module scope so local var/const decls
 	// preceding the execute(...) call are visible.
-	ctrlEnv := runtime.NewEnv(env)
-	actualArgs := findExecuteArgs(modNode, fnName, ctrlEnv)
-	bindTestcaseParamsWithArgs(tcEnv, tcNode, actualArgs, ctrlEnv)
+	// A control part's execute() supplies arguments already evaluated in
+	// control-flow order, which static mining cannot do — the actual may
+	// be a control-local variable (`execute(TC(v_result))`) whose value
+	// only exists once the control part has run.
+	if opts.actualArgs != nil {
+		bindTestcaseParamsWithValues(tcEnv, tcNode, opts.actualArgs)
+	} else {
+		ctrlEnv := runtime.NewEnv(env)
+		actualArgs := findExecuteArgs(modNode, fnName, ctrlEnv)
+		bindTestcaseParamsWithArgs(tcEnv, tcNode, actualArgs, ctrlEnv)
+	}
 	r := eval(tcNode.Body, tcEnv)
 	if len(tcNode.Catch) > 0 || tcNode.Finally != nil {
 		r = runExceptionHandlers(r, tcNode.Catch, tcNode.Finally, tcEnv)
@@ -419,10 +455,12 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 	drainAllPortMaps(exec)
 
 	v := exec.GetVerdict()
-	// A testcase that completes without setting a verdict ends with
-	// `pass`. This matches TTCN-3 v4.11.1 clause 22.4.1 default-verdict
-	// rules: an undeclared verdict resolves to pass.
-	if v == runtime.NoneVerdict {
+	// A testcase that never calls setverdict ends with `pass` (ETSI ES
+	// 201 873-1 clause 22.4.1: an undeclared verdict resolves to pass).
+	// The test is "was one declared", not "is it none" — a body that
+	// explicitly sets none must keep it, because a control part's
+	// execute() can branch on the value (Sem_2601_ExecuteStatement_004).
+	if !exec.VerdictWasSet() {
 		v = runtime.PassVerdict
 	}
 	return v, exec.Reason(), nil
@@ -442,6 +480,37 @@ func bindTestcaseParams(env runtime.Scope, tc *syntax.FuncDecl) {
 // `execute(tc(...))` call). Each positional arg is evaluated in the
 // argEnv scope and bound to the matching formal; the `-` shorthand
 // (DASH token, kept as Undefined here) keeps the formal's default.
+// bindTestcaseParamsWithValues binds formal parameters from actuals that
+// are already runtime values. A nil entry means the actual was `-`, so
+// the formal's default (or the template wildcard) applies, matching
+// bindTestcaseParamsWithArgs' treatment of the `-` identifier.
+func bindTestcaseParamsWithValues(env runtime.Scope, tc *syntax.FuncDecl, args []runtime.Object) {
+	if tc == nil || tc.Params == nil {
+		return
+	}
+	for i, fp := range tc.Params.List {
+		if fp == nil || fp.Name == nil {
+			continue
+		}
+		var val runtime.Object = runtime.Undefined
+		used := false
+		if i < len(args) && args[i] != nil {
+			val = args[i]
+			used = true
+		}
+		if !used && fp.Value != nil {
+			if v := eval(fp.Value, env); !runtime.IsError(v) && v != nil {
+				val = v
+				used = true
+			}
+		}
+		if !used && fp.TemplateRestriction != nil {
+			val = runtime.Any
+		}
+		env.Set(fp.Name.String(), val)
+	}
+}
+
 func bindTestcaseParamsWithArgs(env runtime.Scope, tc *syntax.FuncDecl, args []syntax.Expr, argEnv runtime.Scope) {
 	if tc == nil || tc.Params == nil {
 		return

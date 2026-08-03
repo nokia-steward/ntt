@@ -1,9 +1,9 @@
 # Remaining Conformance Work
 
-State as of 2026-08-03: **4798 / 4948 matched (97.42%)**, 23 skipped
-(inconclusive / no-verdict), **127 real misses** (was 4790 / 97.26% on
-2026-07-06 and 4788 / 97.22% on 2026-06-17). Baseline and the full miss
-inventory live in
+State as of 2026-08-03: **4803 / 4948 matched (97.52%)**, 23 skipped
+(inconclusive / no-verdict), **122 real misses** (was 4798 / 97.42%
+earlier the same day, 4790 / 97.26% on 2026-07-06 and 4788 / 97.22% on
+2026-06-17). Baseline and the full miss inventory live in
 [`testdata/conformance-baseline.json`](../../testdata/conformance-baseline.json)
 and [`current-misses.json`](current-misses.json); regenerate with
 [`refresh_artifacts.py`](refresh_artifacts.py).
@@ -54,11 +54,12 @@ real-execution rate. 2200 of the 4925 considered files expect `reject`,
 so the ceiling is **2725 / 4925 = 55.33%**.
 
 Total headroom is thus 227 files (+4.61 points), not the ~49 points the
-raw figure suggests. Of those 227, 143 have neither a testcase nor a
-control part — nothing exists to execute — and a further 40 carry an
-explicit ETSI `noexecution` directive. The honestly addressable set is
-about 84 files (+1.71 points), most of them reachable only by executing
-`control {}` parts.
+raw figure suggests — and almost none of it is honestly reachable. 206 of
+the 207 `parse-only` files carry an explicit ETSI `noexecution`
+directive, including all 24 whose control part is the only executable
+thing in them, so executing them would mean overriding an instruction not
+to. What is genuinely left is the handful of files that fail for real
+reasons, which is a match-rate question rather than a real-execution one.
 
 One related caveat: the 23 "skipped" files are not inconclusive tests.
 They all carry `@verdict pass reject`, parsed and analyzed cleanly, had no
@@ -326,15 +327,38 @@ machinery, because measurement showed that fallback changed no verdict.
 
 What remains:
 
-1. **Execute `control {}` as a program.** Measured as the largest of the
-   real-execution levers by a wide margin: 4625 of 4948 corpus files have
-   a control part, it accounts for 76 of the 227 addressable-gap files,
-   and the evaluator already handles the node (`case *syntax.ControlPart`
-   in `interpreter/interpreter.go`) — module init just skips it and the
-   harness only ever runs the first testcase. The clean first slice is the
-   24 files whose control part is the *only* executable thing in them; the
-   second is running every `execute(...)` in sequence with proper verdict
-   aggregation, which is what the six `26_module_control` misses need.
+1. **Execute `control {}` as a program — largely DONE (2026-08-03).**
+   `RunControlWith` runs a module's control part, `execute(TC(args))`
+   runs a testcase and yields its verdict, and the module's verdict is
+   the worst over the testcases the control part actually ran (ETSI 26.2).
+   The harness routes a module through its control part only when that
+   part decides something a single-testcase run cannot reproduce —
+   several executes, or one carrying a timeout or host operand — so the
+   overwhelmingly common `control { execute(TheOnlyTestcase()); }` keeps
+   the direct path. +5 fixtures, 0 regressions.
+
+   Two corrections to the scoping this item was originally written from.
+   The "24 files whose control part is the only executable thing" are
+   **not** a clean slice: every one of them carries an ETSI `noexecution`
+   directive, as does all but one of the 207 `parse-only` files. Executing
+   them would override an explicit instruction not to, so the
+   real-execution rate is effectively not growable through this lever at
+   all — the gain here is match rate.
+
+   What is left in this area:
+   - **Control-level timers, alts and defaults.** A control part can
+     start timers and activate defaults that call `execute`
+     (Sem_2601_ExecuteStatement_010); the control scope has no
+     TestcaseExec, so those do nothing today.
+   - **A blocked testcase under an execute timeout.**
+     Sem_2601_ExecuteStatement_003 expects `error` from a testcase whose
+     alt blocks forever. Our scheduler concludes a deadlocked alt instead
+     of blocking, so the body runs on to `setverdict(pass)`. Fixing it
+     means deciding what a provably-deadlocked alt should do, which is a
+     semantics question well beyond the control part.
+   - Module-qualified identifiers in a control body
+     (Sem_08020305_ImportingAllDefinitionsOfAModule_004) and
+     `testcasename()` returning empty under the control path.
 2. **Bucket 3 clusters**, one precise, narrowly-scoped analysis pass at a
    time. `reject->pass` is now 107 of the 150 unmatched files, so this is
    where the remaining match-rate lives — but see the 2026-06-17 triage

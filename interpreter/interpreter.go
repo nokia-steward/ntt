@@ -1291,6 +1291,8 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				return evalEncValue(name.String(), n, env)
 			case "matchFile":
 				return evalMatchFile(n, env)
+			case "execute":
+				return evalExecute(n, env)
 			case "activate":
 				return evalActivate(n, env)
 			case "deactivate":
@@ -1649,6 +1651,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 
 	case *syntax.WhileStmt:
 		for {
+			if r := loopStopped(env); r != nil {
+				return r
+			}
 			cond, err := evalBoolExpr(n.Cond, env)
 			if runtime.IsError(err) {
 				return err
@@ -1689,6 +1694,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 
 	case *syntax.DoWhileStmt:
 		for {
+			if r := loopStopped(env); r != nil {
+				return r
+			}
 			result := eval(n.Body, env)
 			switch {
 			case runtime.IsError(result):
@@ -1723,6 +1731,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		}
 
 		for {
+			if r := loopStopped(env); r != nil {
+				return r
+			}
 			cond, err := evalBoolExpr(n.Cond, env)
 			if runtime.IsError(err) {
 				return err
@@ -6729,6 +6740,23 @@ func currentCompID(exec *runtime.TestcaseExec) int64 {
 		return cur.ID
 	}
 	return exec.MTCID()
+}
+
+// loopStopped reports a stop request at the top of a loop iteration, as
+// the Stopped ReturnValue the caller should bubble, or nil to keep
+// looping. evalBlockStmts makes the same check per statement, but a body
+// with no statements — `while(true){}`, which the conformance suite uses
+// deliberately (Sem_2601_ExecuteStatement_007) — never reaches it, so
+// without this the loop ignores its context and spins forever.
+func loopStopped(env runtime.Scope) runtime.Object {
+	exec := runtime.FindTestcaseExec(env)
+	if exec == nil {
+		return nil
+	}
+	if exec.Stopped() || componentStopRequested(exec) {
+		return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
+	}
+	return nil
 }
 
 // componentStopRequested reports whether the current PTC has been asked
