@@ -27,11 +27,10 @@ import (
 )
 
 // fakeServerDriver is the bare-minimum PortDriver the async PTC
-// smoke needs so altHasExternalPortGuard fires on the daemon's
-// `srv.receive(...)` clause. The driver does nothing on Send /
-// Map; the test never expects the daemon to actually receive a
-// message (the point is to assert the alt body did NOT fire on an
-// empty queue).
+// smoke needs so the daemon's `srv.receive(...)` clause counts as an
+// external-port guard. The driver does nothing on Send / Map; the
+// test never expects the daemon to actually receive a message (the
+// point is to assert the alt body did NOT fire on an empty queue).
 type fakeServerDriver struct{}
 
 func (fakeServerDriver) Send(payload runtime.Object, sender runtime.Object) error { return nil }
@@ -45,7 +44,7 @@ func (fakeServerDriver) Unmap(local, remote string) error                       
 // body's setverdict(pass) lands, and `d.stop` joins cleanly.
 //
 // The test installs the same fake driver as the empty-queue
-// smoke so altHasExternalPortGuard fires on `srv.receive(...)`,
+// smoke so `srv.receive(...)` counts as an external-port guard,
 // then spawns a tiny producer goroutine that pushes one
 // SrvRequest into srv's queue after a short delay (i.e. after the
 // PTC has had time to park).
@@ -89,7 +88,7 @@ func TestAsyncPTC_InjectWakesAltAndBodyRuns(t *testing.T) {
     }`)
 
 	// Spawn the producer after a short delay so the PTC is
-	// already parked in waitForAltPortTraffic. Using the global
+	// already parked on its alt. Using the global
 	// runtime.CurrentExec() handle is how the cabi/cgo bridge
 	// dispatches inject() in production - we mimic that here so
 	// the test exercises the same code path.
@@ -131,9 +130,9 @@ func TestAsyncPTC_InjectWakesAltAndBodyRuns(t *testing.T) {
 func TestAsyncPTC_AltOnEmptyQueueDoesNotFireBody(t *testing.T) {
 	// The alt's "park on MessageReady" path only fires when the
 	// receive port has an external driver bound. Register a noop
-	// driver for MyServer_PT so altHasExternalPortGuard()
-	// returns true for `srv.receive(...)`. Restore the previous
-	// provider on exit so the rest of the suite isn't poisoned.
+	// driver for MyServer_PT so `srv.receive(...)` counts as an
+	// external-port guard. Restore the previous provider on exit
+	// so the rest of the suite isn't poisoned.
 	prev := runtime.SetPortDriverProvider(func(typeName, instName string) runtime.PortDriver {
 		if typeName == "MyServer_PT" {
 			return fakeServerDriver{}

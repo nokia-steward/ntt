@@ -147,22 +147,13 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return nil
 
 	case *syntax.AltStmt:
-		// Strict profile: real snapshot semantics — first-match-wins
-		// over a snapshot, honest blocking, no verdict-preferring
-		// heuristic (evalAltStmtStrict). Interleave has its own snapshot
-		// evaluator for the subset it models correctly (take-each-branch-
-		// once); the rest falls back to best-effort inside it.
-		if schedulerEnabled(env) {
-			if n.Tok != nil && n.Tok.Kind() == syntax.INTERLEAVE {
-				return evalInterleaveStmtStrict(n, env)
-			}
-			return evalAltStmtStrict(n, env)
+		// Real snapshot semantics: first-match-wins over a snapshot with
+		// honest blocking. `interleave` has its own snapshot evaluator
+		// (take-each-branch-once, ETSI 20.4).
+		if n.Tok != nil && n.Tok.Kind() == syntax.INTERLEAVE {
+			return evalInterleaveStmtStrict(n, env)
 		}
-		// Approximate profile (default): a stand-in scheduler that walks
-		// alternatives and, absent port traffic, falls back to a
-		// verdict-preferring heuristic. Conformance-tuned; retired once
-		// the strict path reaches parity.
-		return evalAltStmtBestEffort(n, env)
+		return evalAltStmtStrict(n, env)
 
 	case *syntax.CommClause:
 		// CommClause is one branch of an `alt`; reaching it outside
@@ -192,13 +183,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 							_ = evalProcedurePortOp("call", pname, ce, env)
 							restoreCallSig = pushCallSignature(ce, env)
 							// The call's timeout duration becomes a virtual
-							// timer the strict response-block alt parks on so
-							// `catch(timeout)` can fire (ETSI 22.3.1). Only the
-							// scheduler path evaluates it; the approximate path
-							// keeps its historical catch handling untouched.
-							if schedulerEnabled(env) {
-								restoreCallTimeout = pushCallTimeout(ce, env)
-							}
+							// timer the response-block alt parks on so
+							// `catch(timeout)` can fire (ETSI 22.3.1).
+							restoreCallTimeout = pushCallTimeout(ce, env)
 						}
 					}
 				}
@@ -211,10 +198,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			defer restoreCallTimeout()
 		}
 		if n.Body != nil {
-			if schedulerEnabled(env) {
-				return evalAltStmtStrict(&syntax.AltStmt{Body: n.Body}, env)
-			}
-			return evalAltStmtBestEffort(&syntax.AltStmt{Body: n.Body}, env)
+			return evalAltStmtStrict(&syntax.AltStmt{Body: n.Body}, env)
 		}
 		return nil
 
@@ -817,9 +801,8 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 					}
 					// Async PTC: signal the goroutine the
 					// alive-component `.start` forked so its
-					// alt scheduler unwinds out of any
-					// waitForAltPortTraffic park. Non-blocking
-					// per TTCN-3 21.3.3.
+					// alt scheduler unwinds out of any park.
+					// Non-blocking per TTCN-3 21.3.3.
 					if ref != nil {
 						exec.StopPTC(ref.ID)
 						// Explicit `comp.stop` (the bare
@@ -5796,21 +5779,13 @@ func evalAltstepBody(body *syntax.BlockStmt, env runtime.Scope) runtime.Object {
 		return nil
 	}
 	alt := &syntax.AltStmt{Body: &syntax.BlockStmt{Stmts: clauseStmts}}
-	// Under the strict profile route the altstep body through the strict
-	// evaluator — real snapshot semantics, not the verdict-preferring
-	// heuristic. The gate is the PROFILE, not whether the discrete-event
-	// scheduler happens to be engaged: a strict run without the scheduler
-	// still owes callers strict altstep semantics.
 	// A DIRECT altstep call blocks like `alt { [] a() }` (ETSI
 	// 20.5.2); an activated default's invocation (defaultCtx active) is a
 	// single NON-blocking pass — evalAltStmtStrict returns instead of parking
 	// while defaultCtx is active, and runDefaults detects a fired default via
 	// the branch flag. (`any timer` inside the altstep resolves the caller
 	// component's running timers via the exec dynamic registry — see C4(c).)
-	if schedulerEnabled(env) {
-		return evalAltStmtStrict(alt, env)
-	}
-	return evalAltStmtBestEffort(alt, env)
+	return evalAltStmtStrict(alt, env)
 }
 
 // evalLengthBounds extracts the (min, max) ints from a `length(...)`
@@ -6395,10 +6370,10 @@ func evalTimerAggregate(kind string, sel syntax.Expr, env runtime.Scope) (runtim
 		return runtime.Undefined, true
 	case "timeout":
 		// `any/all timer.timeout` only makes sense as an alt guard: it
-		// must not block here (the alt scheduler parks via
-		// nextAltTimerDeadline and re-enters). Report whether the
-		// timeout list is satisfied right now, consuming the matched
-		// timer(s) (ETSI 23.6/23.7).
+		// must not block here (the alt scheduler parks on the soonest
+		// deadline and re-enters). Report whether the timeout list is
+		// satisfied right now, consuming the matched timer(s) (ETSI
+		// 23.6/23.7).
 		if !altCtx.active() {
 			return runtime.NewBool(false), true
 		}
@@ -10649,8 +10624,8 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 	// receiver peeks, matches and dequeues the same message under one
 	// lock so it can never bind its redirect to a message a sibling
 	// already claimed. Non-blocking section, so the lock is released
-	// promptly; the alt scheduler parks (waitForAltPortTraffic)
-	// outside this call, never while holding recvMu.
+	// promptly; the alt scheduler parks outside this call, never while
+	// holding recvMu.
 	exec.ReceiveLock()
 	defer exec.ReceiveUnlock()
 	isTrigger := false

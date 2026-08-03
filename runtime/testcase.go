@@ -373,9 +373,9 @@ func (t *TestcaseExec) PTCExit(refID int64) *PTCExit {
 }
 
 // StopPTC closes the matching PTCExit.StopChan and delivers a
-// wake-up on MessageReady so a PTC goroutine parked in
-// waitForAltPortTraffic() sees the cancel and unwinds. No-op when
-// the id is unknown or has already been stopped.
+// wake-up on MessageReady so a PTC goroutine parked in a blocked alt
+// sees the cancel and unwinds. No-op when the id is unknown or has
+// already been stopped.
 func (t *TestcaseExec) StopPTC(refID int64) {
 	t.ptcMu.Lock()
 	p := t.ptcExits[refID]
