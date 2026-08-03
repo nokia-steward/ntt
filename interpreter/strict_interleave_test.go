@@ -553,6 +553,119 @@ func TestStrictInterleave_TakesEachBranchOnce(t *testing.T) {
 	}
 }
 
+// TestStrictInterleave_ActiveDefaultsStillTakeEachBranch covers an
+// interleave that has activated defaults but no `@nodefault`. That
+// combination used to fall back to the best-effort evaluator, which takes
+// only ONE alternative; the strict snapshot must take each branch exactly
+// once regardless of whether defaults are active. Both messages are queued
+// before the interleave, so no branch ever has to block and the default
+// never gets a chance to fire — the counter must reach 11, not 1 or 10.
+func TestStrictInterleave_ActiveDefaultsStillTakeEachBranch(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		type port P message { inout integer }
+		type component C { port P p }
+		altstep a() runs on C {
+			[] p.receive(integer:99) { setverdict(fail, "default consumed a branch message"); }
+		}
+		testcase tc() runs on C system C {
+			var integer c := 0;
+			activate(a());
+			p.send(integer:1);
+			p.send(integer:2);
+			interleave {
+				[] p.receive(integer:1) { c := c + 1; }
+				[] p.receive(integer:2) { c := c + 10; }
+			}
+			if (c == 11) { setverdict(pass); }
+			else { setverdict(fail, "interleave with active defaults did not take both branches"); }
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (active defaults must not reduce interleave to one branch)", v, reason)
+	}
+}
+
+// TestStrictInterleave_FiredDefaultLeavesInterleave covers the other half of
+// the same removal: with no `@nodefault`, an activated default is appended
+// after the remaining alternatives (ETSI 20.5) and one that FIRES leaves the
+// interleave. The first branch matches the queued message; the second can
+// never match, so the interleave would otherwise block forever. The default
+// matches instead, sets pass and stops. The signal that makes this work is
+// runDefaults reporting a default that actually took a branch rather than
+// one that changed the verdict — a signal only available under the
+// deterministic scheduler, which is the default engine configuration. The
+// default here deliberately sets no verdict, so the older verdict-change
+// heuristic cannot see it fire and the interleave would block instead.
+func TestStrictInterleave_FiredDefaultLeavesInterleave(t *testing.T) {
+	src := `module M {
+		type port P message { inout integer }
+		type component C { var integer vc := 0; port P p }
+		altstep a() runs on C {
+			[] p.receive(integer:7) { vc := vc + 1; }
+		}
+		testcase tc() runs on C system C {
+			activate(a());
+			p.send(integer:1);
+			p.send(integer:7);
+			interleave {
+				[] p.receive(integer:1) { }
+				[] p.receive(integer:5) { setverdict(fail, "matched a message that was never sent"); }
+			}
+			if (vc == 1) { setverdict(pass); }
+			else { setverdict(fail, "the activated default did not fire to leave the interleave"); }
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	start := time.Now()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (a fired default must leave the interleave)", v, reason)
+	}
+	if d := time.Since(start); d > 2*time.Second {
+		t.Fatalf("took %s: the interleave blocked instead of leaving when the default fired", d)
+	}
+}
+
+// TestStrictAlt_NoDefaultSuppressesDefaults covers `alt @nodefault`, which
+// the strict alt evaluator previously ignored: it ran the activated defaults
+// unconditionally. The alt's own alternative cannot match, so a default that
+// is wrongly consulted sets fail; with @nodefault honoured the timer guard
+// fires instead.
+func TestStrictAlt_NoDefaultSuppressesDefaults(t *testing.T) {
+	src := `module M {
+		type port P message { inout integer }
+		type component C { port P p }
+		altstep a() runs on C {
+			[] p.receive(integer:?) { setverdict(fail, "default invoked despite @nodefault"); }
+		}
+		testcase tc() runs on C system C {
+			timer t := 3.0;
+			activate(a());
+			t.start;
+			p.send(integer:1);
+			alt @nodefault {
+				[] p.receive(integer:5) { setverdict(fail, "matched a message that was never sent"); }
+				[] t.timeout { setverdict(pass); }
+			}
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
+		interpreter.TestcaseOptions{Profile: runtime.ProfileStrict, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (@nodefault must suppress defaults on a plain alt)", v, reason)
+	}
+}
+
 // TestStrictInterleave_NoDefaultSuppressesDefaults covers `interleave
 // @nodefault`: an activated default must NOT be invoked while the interleave
 // blocks, so the timer alternative fires instead of the default's fail.

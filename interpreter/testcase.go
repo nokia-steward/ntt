@@ -2129,8 +2129,9 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			return res
 		}
 
-		// Activated defaults are appended after the alternatives (20.5).
-		if runDefaults(env) {
+		// Activated defaults are appended after the alternatives (20.5),
+		// unless the alt is marked `@nodefault`.
+		if n.NoDefault == nil && runDefaults(env) {
 			return nil
 		}
 		// An activated default's own altstep is a single NON-blocking pass:
@@ -2198,17 +2199,15 @@ func interleaveBodyMayBlock(body syntax.Node) bool {
 // replaces running interleave as a plain best-effort alt (which took only
 // ONE alternative).
 //
-// It deliberately handles only the SAFE subset and otherwise defers to the
-// historical best-effort evaluator, so nothing outside that subset changes:
-//   - a branch body that may block (interleaveBodyMayBlock) needs
-//     cooperative suspension we do not model yet; and
-//   - an activated default that fires must LEAVE the interleave even when it
-//     doesn't change the verdict — a distinction runDefaults (which reports
-//     by verdict change) cannot make. So an interleave WITHOUT `@nodefault`
-//     while defaults are active also falls back.
+// One case still defers to the historical best-effort evaluator: a branch
+// body that may block (interleaveBodyMayBlock) needs cooperative suspension
+// at the blocking point and resumption of a sibling, which the snapshot
+// evaluator does not model.
 //
-// The remaining subset (`@nodefault`, or no active defaults, and only
-// non-blocking bodies) is exactly what the snapshot models correctly.
+// Activated defaults no longer force a fallback. They are appended after the
+// remaining alternatives (20.5) and one that fires leaves the interleave —
+// runDefaults reports a default that actually took a branch, not merely one
+// that changed the verdict, which is the signal this needs.
 func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 	if n.Body == nil {
 		return nil
@@ -2219,19 +2218,10 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 			clauses = append(clauses, cc)
 		}
 	}
-	exec := runtime.FindTestcaseExec(env)
-	activeDefaults := exec != nil && len(exec.Defaults()) > 0
-	safe := n.NoDefault != nil || !activeDefaults
-	if safe {
-		for _, cc := range clauses {
-			if interleaveBodyMayBlock(cc.Body) {
-				safe = false
-				break
-			}
+	for _, cc := range clauses {
+		if interleaveBodyMayBlock(cc.Body) {
+			return evalAltStmtBestEffort(n, env)
 		}
-	}
-	if !safe {
-		return evalAltStmtBestEffort(n, env)
 	}
 
 	taken := make([]bool, len(clauses))
@@ -2262,6 +2252,7 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 				taken[i] = true
 				remaining--
 				matched = true
+				defaultBranchFire() // no-op unless inside a runDefaults sweep
 				if cc.Body != nil {
 					res := evalAltClauseBody(cc.Body, env)
 					// `repeat` is not permitted in interleave (20.4); ignore
@@ -2277,9 +2268,17 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 		if matched {
 			continue
 		}
-		// No alternative matched. `safe` guarantees there is nothing to run
-		// here (no active defaults, or @nodefault): block on the remaining
-		// branch event sources and re-snapshot.
+		// No alternative matched. Activated defaults are appended after the
+		// remaining alternatives (20.5); one that fires leaves the interleave.
+		if n.NoDefault == nil && runDefaults(env) {
+			return nil
+		}
+		// This interleave IS the body of an activated default: a default is a
+		// single non-blocking pass, so conclude instead of parking the token.
+		if defaultCtx.active() {
+			return nil
+		}
+		// Block on the remaining branch event sources and re-snapshot.
 		if !blockForAltEvents(n, env) {
 			return nil
 		}

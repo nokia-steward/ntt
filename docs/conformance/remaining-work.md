@@ -283,12 +283,23 @@ external-function-blocked `060302_010`. **1d** was investigated and still
 yields no safe commit (gaming / codec-specific / matching-core
 regression — see above). What remains:
 
-1. **Engine convergence** — remove `interleave`'s fallback to the legacy
-   evaluator, make the library default strict, then delete the
-   approximate engine, the `SemanticsProfile` toggle and the
+1. **Engine convergence** — make the library default strict, then delete
+   the approximate engine, the `SemanticsProfile` toggle and the
    `--approximate` / `--profile` flags, and rebaseline. This is cleanup
    of transitional scaffolding, not new coverage, and it is the
    prerequisite for having a single engine.
+
+   *Partly done.* `interleave` no longer falls back to the legacy
+   evaluator merely because defaults are active: `runDefaults` reports a
+   default that actually took a branch, which is the signal needed to
+   leave the interleave (20.5), so the snapshot evaluator now handles
+   that case directly. `@nodefault` is honoured on a plain `alt` too,
+   which the strict evaluator previously ignored. The one remaining
+   fallback is an interleave branch body that may itself block: taking it
+   needs cooperative suspension at the blocking point and resumption of a
+   sibling, which the snapshot evaluator does not model. Closing that is
+   what removes the last caller of `evalAltStmtBestEffort` from the
+   strict path.
 2. **Bucket 3 clusters**, one precise, narrowly-scoped analysis pass at a
    time. `reject->pass` is now 107 of the 150 unmatched files, so this is
    where the remaining match-rate lives — but see the 2026-06-17 triage
