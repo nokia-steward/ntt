@@ -1272,12 +1272,24 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return &runtime.RaisedValue{Value: val, TypeName: predefName(val)}
 
 	case *syntax.FuncDecl:
-		// `external function ...;` and altsteps without a body
-		// declare a callable but don't supply one. Binding the
-		// identifier to Undefined makes the call site fall through
-		// to the Undefined-receiver branch in apply(), which
-		// returns Undefined without panicking on `eval(nil)`.
 		if n.Body == nil {
+			// An `external function` has its body supplied by the SUT
+			// adapter (ETSI 16.1.3), so bind a callable that resolves
+			// against the external-function registry when it is called.
+			if n.External != nil && n.Name != nil {
+				env.Set(n.Name.String(), &runtime.Function{
+					Env:        env,
+					Params:     n.Params,
+					IsExternal: true,
+					Name:       n.Name.String(),
+				})
+				return nil
+			}
+			// An altstep without a body declares a callable but supplies
+			// nothing at all. Binding the identifier to Undefined makes
+			// the call site fall through to the Undefined-receiver
+			// branch in apply(), which returns Undefined without
+			// panicking on `eval(nil)`.
 			env.Set(n.Name.String(), runtime.Undefined)
 			return nil
 		}
@@ -5813,12 +5825,38 @@ func clearDashArgs(args []runtime.Object, callArgs []syntax.Expr) []runtime.Obje
 	return out
 }
 
+// applyExternalFunction runs the body an adapter bound for an `external
+// function` declaration (ETSI 16.1.3). The module it is resolved against
+// is the running one, which is where the declaration lives in every
+// fixture that uses this.
+//
+// An UNBOUND external function keeps yielding Undefined rather than
+// raising: 472 conformance fixtures declare one, nearly all of them
+// negative tests that never consume its result, and erroring at the call
+// would fail them for a reason that has nothing to do with what they
+// test.
+func applyExternalFunction(fn *runtime.Function, args []runtime.Object) (runtime.Object, runtime.Scope, bool) {
+	fenv := runtime.NewEnv(fn.Env)
+	impl, ok := runtime.LookupExternalFunc(moduleNameFromEnv(fn.Env), fn.Name)
+	if !ok {
+		return runtime.Undefined, fenv, false
+	}
+	res := impl(args)
+	if res == nil {
+		res = runtime.Undefined
+	}
+	return unwrap(res), fenv, false
+}
+
 // applyFunctionStopped is applyFunction plus a boolean reporting
 // whether the body unwound via `stop` / `self.stop` / `self.kill`.
 // Callers that care about TTCN-3 21.3.10 (out/inout writeback only
 // happens after *complete* execution) read the third return value to
 // decide whether to propagate parameter mutations to the call-site.
 func applyFunctionStopped(fn *runtime.Function, args []runtime.Object) (runtime.Object, runtime.Scope, bool) {
+	if fn.IsExternal {
+		return applyExternalFunction(fn, args)
+	}
 	fenv := runtime.NewEnv(fn.Env)
 	if fn.Params != nil {
 		for i, param := range fn.Params.List {

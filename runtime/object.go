@@ -1368,6 +1368,12 @@ type Function struct {
 	// in that case.
 	IsTemplate bool
 
+	// IsExternal marks an `external function` declaration (ETSI
+	// 16.1.3): it has no Body, and Name identifies the binding the
+	// call path looks up in the external-function registry.
+	IsExternal bool
+	Name       string
+
 	// Catch and Finally carry the object-oriented exception handlers
 	// declared after the body (ETSI 5.2): `... } catch (T e) { ... }
 	// finally { ... }`. They are run by the call path once the body

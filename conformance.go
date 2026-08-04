@@ -158,6 +158,9 @@ func runConformance(cmd *cobra.Command, args []string) error {
 }
 
 func runConformanceFiles(files []string) ConformanceSummary {
+	// The harness stands in for the SUT adapter the suite's
+	// `@configuration external_functions` fixtures expect.
+	bindConformanceExternalFuncs()
 	jobs := make(chan string)
 	results := make([]ConformanceResult, 0, len(files))
 	var (
