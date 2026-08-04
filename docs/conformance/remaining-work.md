@@ -1,9 +1,9 @@
 # Remaining Conformance Work
 
-State as of 2026-08-03: **4803 / 4948 matched (97.52%)**, 23 skipped
-(inconclusive / no-verdict), **122 real misses** (was 4798 / 97.42%
-earlier the same day, 4790 / 97.26% on 2026-07-06 and 4788 / 97.22% on
-2026-06-17). Baseline and the full miss inventory live in
+State as of 2026-08-04: **4813 / 4948 matched (97.73%)**, 23 skipped
+(inconclusive / no-verdict), **112 real misses** (was 4803 / 97.52% on
+2026-08-03, 4790 / 97.26% on 2026-07-06 and 4788 / 97.22% on 2026-06-17).
+Baseline and the full miss inventory live in
 [`testdata/conformance-baseline.json`](../../testdata/conformance-baseline.json)
 and [`current-misses.json`](current-misses.json); regenerate with
 [`refresh_artifacts.py`](refresh_artifacts.py).
@@ -14,6 +14,23 @@ isolated low-risk commits. It falls into three buckets below.
 Every change must still pass the full conformance run (`--regress 0.5`,
 0 per-file regressions) and an external test-port smoke suite
 (17 pass / 0 fail / 2 expected inconc).
+
+## This branch is the product
+
+This work is a fork, not a queue of upstream contributions, and the
+document is written from that position. The engine is judged on whether
+it implements TTCN-3 correctly for the people running it here; the ETSI
+suite is the instrument for measuring that, not the goal.
+
+That distinction decides what gets kept. A change that raises the match
+rate while making the semantics less defensible is not worth taking, and
+a change that is clearly right but flat on the corpus is (both happened
+on 2026-08-04, below). Conversely, the 108 `reject`-expected misses are
+the largest remaining block and stay out of scope until there is a
+reason beyond the number to go after them. Of the 112 real misses, 108
+are exactly those (`Sem_5010205_OfOperator_001`, mislabelled, among them);
+the other four are the two files described under "The executed-but-wrong
+slice" and two parse errors.
 
 ## One engine (2026-08-03)
 
@@ -42,7 +59,7 @@ engines.
 The suite match rate is only part of the picture: the harness also
 reports a **real-execution** rate (files whose verdict came from actually
 executing the testcase rather than from a parse/semantic rejection),
-currently **2498 files, 50.72%**.
+currently **2514 files, 51.05%**.
 
 That number cannot approach 100%, and it is worth being precise about why
 before treating it as a target. A file annotated `@verdict pass reject`
@@ -66,6 +83,66 @@ They all carry `@verdict pass reject`, parsed and analyzed cleanly, had no
 testcase, and were demoted out of the denominator rather than counted as
 misses. They are negative tests the analyzer fails to catch. Fixing that
 would *lower* the reported match rate by moving them into the denominator.
+
+## The executed-but-wrong slice (2026-08-04)
+
+Thirteen files executed cleanly and produced a semantically wrong
+verdict — the most damning category in the suite, because each one is the
+engine confidently getting TTCN-3 wrong. Eleven are fixed; the corpus
+moved 4803 → 4813 (the eleventh is offset by `Sem_5010205_OfOperator_001`,
+the mislabelled fixture Bucket 2 predicted would flip).
+
+Landed, each its own commit with zero per-file regressions:
+
+- **Assignment notation on a record** leaves unmentioned fields alone
+  (ETSI 6.2), **union alternative access under `?`** yields `?`, and
+  **template concatenation** expands a `? length(n)` run to n units.
+- **An enumerated value beats a clashing local definition** in a
+  comparison (ETSI 8.2.3.1).
+- **The object cast `=>` and the `of` type test** (ETSI 5.1.2.5/5.1.2.6).
+- **A default that stops the component, or breaks, unwinds its caller**
+  (ETSI 20.5.1): `runDefaults` discarded the altstep result, so the
+  statements after the alt ran anyway.
+- **External functions bind through a registry** (see 1d below).
+- **`encvalue_o` / `decvalue_o` for bitstrings, records and short input**
+  (see 1d below).
+
+Two did not land, and both stopped at the same wall: the engine has
+scaffolding that hides broken semantics, and removing the scaffolding
+fails dozens of files at once.
+
+- **`Sem_2303_timer_stop_004`** expects `none`. ETSI 22.4.1 says an
+  undeclared verdict stays `none`, and the engine coerces it to `pass`
+  ([`interpreter/testcase.go`](../../interpreter/testcase.go), the
+  comment above the coercion). Removing the coercion costs **64 files** —
+  and only 4 of them lack `setverdict` altogether. The other 60 *call*
+  `setverdict` on a branch that never executes, so the coercion is
+  fabricating the verdict their broken control flow never reached.
+  Prerequisite: fix why those branches do not run.
+- **`Sem_2601_ExecuteStatement_003`** expects `error` from a testcase
+  whose `alt { [] any port.receive { repeat; } }` blocks forever. Leaving
+  the scheduler's deadlocked participants parked - which is what the
+  standard asks for, since an alt with no match and no `[else]` blocks
+  rather than concludes - does produce that `error`. It also turns **51
+  other files into timeouts**: their alts cannot fire for reasons of our
+  own, and the deadlock release is what lets them fall through to a
+  verdict. Recorded at the release in
+  [`runtime/scheduler.go`](../../runtime/scheduler.go).
+
+Both are the same finding from two directions, and it is the most useful
+thing this slice produced: **the deadlock release and the verdict
+coercion are load-bearing for ~115 files between them**, which is a
+measurement of how much of the alt / event-delivery model is still
+missing. Neither should be removed alone. The order is: make those alts
+fire for real, then drop the release, then drop the coercion.
+
+One incidental finding worth its own line: a PTC started with
+`comp.start(f)` runs **inline on the parent's goroutine** unless the
+deterministic scheduler is on or a narrow syntactic predicate
+(`startBodyDoesPortComm` and friends in
+[`interpreter/interpreter.go`](../../interpreter/interpreter.go)) decides
+to fork it. Under the plain path an MTC cannot feed a PTC that blocks on
+`receive`, which is one concrete source of the 51 files above.
 
 ## Execution triage 2026-06-17 — the `reject->pass` bulk is NOT low-hanging
 
@@ -163,9 +240,11 @@ regressing the 119 `Sem_2204` fixtures.
 forks every port-communicating PTC and parks alts on real port traffic,
 so an MTC↔PTC round-trip completes. `Sem_060210_ReuseofComponentTypes_002/003`,
 `Sem_2004_InterleaveStatement_002/013` and
-`Sem_1400_procedure_signatures_004` all match now;
-`Sem_200501_the_default_mechanism_008` is the one fixture from this
-cluster still missing. Original analysis retained below — note that it
+`Sem_1400_procedure_signatures_004` all match now.
+`Sem_200501_the_default_mechanism_008`, the last fixture from this
+cluster, was fixed on 2026-08-04 — not by scheduling at all, but because
+a `stop` in an activated default was being discarded (see "The
+executed-but-wrong slice"). Original analysis retained below — note that it
 names `evalAltStmtBestEffort`, `waitForAltPortTraffic` and
 `altHasExternalPortGuard`, all deleted on 2026-08-03 with the approximate
 engine, so it is history rather than a map of the current code.
@@ -225,43 +304,42 @@ differently-named or differently-indexed layouts only.
 Each item below was scoped against the live fixtures; none yields a
 safe, generalisable commit. Captured here so they are not re-attempted.
 
-- **External functions** (`Sem_160103_external_functions_001/002`):
-  **gaming — do not implement.** 003/004/005 pass because they only
-  *declare* the function and `setverdict(pass)`; 001 calls
-  `xf_…_001()` and asserts `== 1`, 002 asserts `xf_…_002(5) == 6`
-  (input+1). Those returns are host-defined and not derivable from the
-  signature, so passing them means hard-coding magic values keyed to the
-  test name (the bodyless `external function` binds to Undefined at
-  `interpreter.go` FuncDecl). The only legitimately special-cased
-  external function is `matchFile` (a real utility). This also blocks
-  `Sem_060302_structured_types_010` (1c), which calls an external
-  function. Leave unless a real host-function plugin mechanism lands.
-- **RAW `encvalue_o` length** (`Sem_160102_predefined_functions_107/110`):
-  implementation-specific codec bytes. `110` asserts the exact octets
-  `'0300000060'O` (a 4-byte little-endian length prefix + the
-  left-aligned `'011'B`); `107` needs `decvalue_o` to return the
-  failure code `2` for a truncated octet. The loopback model has no real
-  RAW codec (it round-trips via `encodeCache`), so matching a specific
-  encoder's byte layout is fragile / gaming-adjacent. Needs a real RAW
-  codec, not a placeholder.
-- **Template field building / union alt access**
+- **External functions — DONE 2026-08-04** (`Sem_160103_external_functions_001/002`,
+  `Sem_060302_structured_types_010`). This entry previously read "gaming —
+  do not implement", on the grounds that the return values are
+  host-defined. They are, and that is the point: an `external function`
+  has no TTCN-3 body because a deployment's SUT adapter supplies one
+  (ETSI 16.1.3), so the engine's job is to make that binding possible, not
+  to guess. [`runtime/extfunc.go`](../../runtime/extfunc.go) is the
+  registry; the harness binds the three fixtures that document their own
+  contract in a doc comment, in
+  [`conformance_extfuncs.go`](../../conformance_extfuncs.go), so nothing
+  fixture-specific sits in the engine. An unbound external function still
+  yields Undefined — 472 fixtures declare one, and erroring at the call
+  would fail them for an unrelated reason.
+- **RAW `encvalue_o` / `decvalue_o` — DONE 2026-08-04**
+  (`Sem_160102_predefined_functions_107/110`). A bitstring is
+  left-aligned into whole octets behind a 32-bit little-endian bit count,
+  so `encvalue_o('011'B)` is `'0300000060'O`; a record encodes its fields
+  in order, giving `'74657374546578740005000000'O` for `{"testText", 5}`
+  exactly as 107 documents; and `decvalue_o` returns 2 when the input is
+  shorter than the output slot's declared field width. Everything else
+  keeps the round-trip placeholder rather than an invented encoding, so
+  this is still **not** a real RAW codec — item 3 under "Suggested order"
+  stands.
+- **Template field building / union alt access — DONE 2026-08-04**
   (`Sem_150605_Referencing_union_alternatives_002`,
-  `Sem_1511_ConcatenatingTemplatesOfStringAndListTypes_013`): the one
-  legitimate feature here, but the fix sits on the load-bearing matching
-  core. `150605_002` reduces to a single mechanism — member /
-  union-alternative access on a `?` wildcard should propagate the
-  wildcard (`(? : My_Union).u1` is `?`), so `ispresent(m.b.u1)` is true.
-  Implementing it (mirror the existing IndexExpr `left == Any` rule into
-  the SelectorExpr path) fixed the target **but regressed 6**
-  (`Sem_07010802_ischosen_operator_001`,
+  `Sem_1511_ConcatenatingTemplatesOfStringAndListTypes_013`). The 2026-06
+  attempt described below regressed 6 files because it propagated the
+  wildcard blanketly from `left == runtime.Any`, where the type is gone.
+  What worked was resolving it where the type is still in hand: the
+  selector path returns `AnyOrNone` for an optional field and `Any` for a
+  mandatory one, *after* the attribute-access branches, so `ischosen` and
+  ordinary field referencing are untouched. History of the failed attempt:
+  mirroring the IndexExpr `left == Any` rule into the SelectorExpr path
+  fixed the target but broke `Sem_07010802_ischosen_operator_001`,
   `Sem_150602_ReferencingRecordAndSetFields_003/004`,
-  `Sem_160102_predefined_functions_022`, `Sem_27010200_general_015`) for
-  +1, net -5 — reverted. Root cause: at `left == runtime.Any` the type
-  is gone, so a union-alternative access can't be told apart from a
-  record-field access, and member-access-on-wildcard returning Undefined
-  is load-bearing for `ischosen` and field referencing. A safe fix needs
-  static type context (is the receiver a union?) at the SelectorExpr,
-  not a blanket wildcard-propagation.
+  `Sem_160102_predefined_functions_022` and `Sem_27010200_general_015`.
 - **Control-part conditional selection** (`Sem_2602_TheControlPart_001`):
   the harness runs the first testcase; this file's control part only
   `execute()`s the second under `if(true)`. Honouring control-part
@@ -283,9 +361,12 @@ reading; "fixing" the negative would just flip which side fails (a wash).
   `Sem_05040101_026/027/030/031` (identical construct). V5 allows them; we
   allow them. The rule is already coded-but-disabled in
   `ttcn3/semantic/parametrization.go` (`checkParamList`, `_ = dirKind`).
-- **`Sem_5010206_Casting_001` vs `OfOperator_001`**: implementing the
-  `=>` / `of` class operators correctly makes `OfOperator_001` (mislabeled
-  `@verdict pass reject` on a valid positive body) fail. Wash.
+- **`Sem_5010206_Casting_001` vs `OfOperator_001`**: as predicted here,
+  implementing the `=>` / `of` class operators correctly (2026-08-04)
+  fixed `Casting_001` and broke `Sem_5010205_OfOperator_001`, which is
+  mislabelled `@verdict pass reject` over a valid positive body and was
+  only matching because `of` used to error. A wash on the corpus, kept
+  because the operators are now right.
 - **`NegSem_2707_OptionalAttributes_002`**: ETSI's own comment says it is
   not actually forbidden.
 
@@ -313,10 +394,10 @@ carefully-gated analysis pass, not a blanket "error on Undefined".
 
 ## Suggested order
 
-**1a** and **1b** are done (strict engine). **1c** is done apart from the
-external-function-blocked `060302_010`. **1d** was investigated and still
-yields no safe commit (gaming / codec-specific / matching-core
-regression — see above). What remains:
+**1a**, **1b** and **1c** are done (`060302_010`, the file 1c was waiting
+on, landed with the external-function registry). **1d** is done too: all
+four items it listed as unsafe were closed on 2026-08-04, three of them by
+rejecting the framing rather than the feature. What remains:
 
 **Engine convergence is done** (2026-08-03) — see "One engine" above.
 Both interleave fallbacks and the second, mis-gated altstep fallback are
@@ -351,31 +432,36 @@ What remains:
      (Sem_2601_ExecuteStatement_010); the control scope has no
      TestcaseExec, so those do nothing today.
    - **A blocked testcase under an execute timeout.**
-     Sem_2601_ExecuteStatement_003 expects `error` from a testcase whose
-     alt blocks forever. Our scheduler concludes a deadlocked alt instead
-     of blocking, so the body runs on to `setverdict(pass)`. Fixing it
-     means deciding what a provably-deadlocked alt should do, which is a
-     semantics question well beyond the control part.
+     Sem_2601_ExecuteStatement_003. Measured on 2026-08-04: blocking the
+     alt is correct and does produce the expected `error`, but 51 other
+     files depend on the deadlock release to reach a verdict at all. See
+     "The executed-but-wrong slice" for the order this has to be
+     unpicked in.
    - Module-qualified identifiers in a control body
      (Sem_08020305_ImportingAllDefinitionsOfAModule_004) and
      `testcasename()` returning empty under the control path.
-2. **Bucket 3 clusters**, one precise, narrowly-scoped analysis pass at a
-   time. `reject->pass` is now 107 of the 150 unmatched files, so this is
+2. **Make blocked alts fire for real**, then drop the deadlock release,
+   then drop the undeclared-verdict coercion — in that order, for the
+   reasons measured in "The executed-but-wrong slice". This is now the
+   highest-value item in the document: it is worth ~2 fixtures directly
+   and gates ~115 files' worth of masked semantics, including whatever
+   real defects the coercion is currently papering over. Start with the
+   inline-PTC-start finding, which is a concrete, bounded piece of it.
+3. **Bucket 3 clusters**, one precise, narrowly-scoped analysis pass at a
+   time. `reject->pass` is 108 of the 112 real misses, so this is
    where the remaining match-rate lives — but see the 2026-06-17 triage
    above: none of it is low-hanging, spread across 23 clusters, and
-   matching-core changes regress easily (cf. the 150605 attempt in 1d).
-3. **Wire `runtime/codec`.** Filed here rather than under real execution:
-   it is worth only ~2 real-execution conversions but up to 15 match-rate
-   fixes, 13 of them the `22_communication_operations` `reject->pass`
+   matching-core changes regress easily.
+4. **Wire `runtime/codec`.** Filed here rather than under real execution:
+   it is worth only ~2 real-execution conversions but up to 13 match-rate
+   fixes, all of them the `22_communication_operations` `reject->pass`
    cluster that needs decoding to actually *fail* on malformed input,
    which the current placeholder cache can never do. The codecs exist and
    are tested; the work is the bridge, and the risk is that a real codec
-   produces different bytes than the placeholder for the 233 files that
-   currently match through it.
-4. **A host binding for external functions** — smallest payoff (3 real
-   executions, 3-5 match fixes) but also the smallest possible slice, if
-   scoped to a name-to-closure registry alongside the existing `matchFile`
-   interception rather than a real FFI.
+   produces different bytes than the placeholder for the files that
+   currently match through it. Note that `encvalue_o` / `decvalue_o` now
+   produce real bytes for bitstrings and records (1d) — that is a handful
+   of shapes, not the bridge.
 5. **Do not** pursue cross-module symbol resolution via `ttcn3/types` as a
    conformance lever. `TypeOf` handles literals and operators only, so
    this means writing a symbol table from scratch, while the existing

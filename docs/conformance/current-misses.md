@@ -1,33 +1,32 @@
 # Current Conformance Misses
 
-Generated from `/tmp/ntt-final-control.json` using the current workspace runner.
+Generated from `/tmp/conf-c6d.json` using the current workspace runner.
 
-- Summary: `ran 4948 files: 4803 matched, 23 skipped (97.52% match rate)`
-- Misses: `145`
+- Summary: `ran 4948 files: 4813 matched, 23 skipped (97.73% match rate)`
+- Misses: `135`
 
 ## Misses By Outcome
 
-- `reject->pass`: `107`
+- `reject->pass`: `108`
 - `->`: `23`
-- `pass->fail`: `11`
 - `pass->parse-error`: `2`
 - `error->pass`: `1`
 - `none->pass`: `1`
 
 ## Misses By Chapter
 
-- `core_language/06_types_and_values`: `36` (`->`=9, `pass->fail`=2, `reject->pass`=25)
+- `core_language/06_types_and_values`: `34` (`->`=9, `reject->pass`=25)
 - `core_language/22_communication_operations`: `22` (`reject->pass`=22)
 - `core_language/05_basic_language_elements`: `20` (`->`=3, `reject->pass`=17)
-- `core_language/15_templates`: `18` (`->`=2, `pass->fail`=2, `reject->pass`=14)
-- `core_language/16_functions_altsteps_testcases`: `10` (`->`=1, `pass->fail`=4, `reject->pass`=5)
-- `core_language/20_statement_and_operations_for_alt`: `9` (`pass->fail`=1, `reject->pass`=8)
+- `core_language/15_templates`: `16` (`->`=2, `reject->pass`=14)
+- `core_language/20_statement_and_operations_for_alt`: `8` (`reject->pass`=8)
 - `core_language/09_test_configurations`: `7` (`reject->pass`=7)
+- `core_language/16_functions_altsteps_testcases`: `6` (`->`=1, `reject->pass`=5)
 - `core_language/26_module_control`: `4` (`->`=3, `error->pass`=1)
-- `core_language/08_modules`: `3` (`->`=2, `pass->fail`=1)
 - `core_language/B_matching_incoming_values`: `3` (`reject->pass`=3)
-- `oo/501_classes_and_objects`: `3` (`pass->fail`=1, `pass->parse-error`=2)
+- `oo/501_classes_and_objects`: `3` (`pass->parse-error`=2, `reject->pass`=1)
 - `core_language/07_expressions`: `2` (`reject->pass`=2)
+- `core_language/08_modules`: `2` (`->`=2)
 - `core_language/11_variables`: `2` (`->`=2)
 - `core_language/21_configuration_operations`: `2` (`reject->pass`=2)
 - `core_language/27_specifying_attributes`: `2` (`->`=1, `reject->pass`=1)
@@ -58,7 +57,7 @@ Generated from `/tmp/ntt-final-control.json` using the current workspace runner.
 - `core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSem_060207_arrays_028.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSyn_060207_arrays_004.ttcn`: ` -> `
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_002.ttcn`: `reject -> pass`
-- ... `16` more in `current-misses.json`
+- ... `14` more in `current-misses.json`
 
 ### `core_language/22_communication_operations`
 
@@ -116,7 +115,6 @@ Generated from `/tmp/ntt-final-control.json` using the current workspace runner.
 - `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_012.ttcn`: `reject -> pass`
 - `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_013.ttcn`: `reject -> pass`
 - `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_015.ttcn`: `reject -> pass`
-- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150605_Referencing_union_alternatives/Sem_150605_Referencing_union_alternatives_002.ttcn`: `pass -> fail` - undefined value
 - `core_language/15_templates/1508_template_restrictions/NegSem_1508_TemplateRestrictions_055.ttcn`: `reject -> pass`
 - `core_language/15_templates/1508_template_restrictions/NegSem_1508_TemplateRestrictions_056.ttcn`: `reject -> pass`
 - `core_language/15_templates/1508_template_restrictions/NegSem_1508_TemplateRestrictions_057.ttcn`: `reject -> pass`
@@ -125,18 +123,4 @@ Generated from `/tmp/ntt-final-control.json` using the current workspace runner.
 - `core_language/15_templates/1508_template_restrictions/NegSem_1508_TemplateRestrictions_060.ttcn`: `reject -> pass`
 - `core_language/15_templates/1508_template_restrictions/NegSem_1508_TemplateRestrictions_061.ttcn`: `reject -> pass`
 - `core_language/15_templates/1511_concatenating_templates_of_string_and_list_types/NegSem_1511_ConcatenatingTemplatesOfStringAndListTypes_004.ttcn`: `reject -> pass`
-- `core_language/15_templates/1511_concatenating_templates_of_string_and_list_types/Sem_1511_ConcatenatingTemplatesOfStringAndListTypes_013.ttcn`: `pass -> fail`
 - `core_language/15_templates/15_toplevel/NegSyn_15_TopLevel_001.ttcn`: ` -> `
-
-### `core_language/16_functions_altsteps_testcases`
-
-- `core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/NegSem_160102_predefined_functions_009.ttcn`: `reject -> pass`
-- `core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/NegSem_160102_predefined_functions_039.ttcn`: `reject -> pass`
-- `core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/Sem_160102_predefined_functions_107.ttcn`: `pass -> fail` - 1 undefined value
-- `core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/Sem_160102_predefined_functions_110.ttcn`: `pass -> fail` - '00'O
-- `core_language/16_functions_altsteps_testcases/1601_functions/160103_external_functions/NegSem_160103_external_functions_001.ttcn`: `reject -> pass`
-- `core_language/16_functions_altsteps_testcases/1601_functions/160103_external_functions/Sem_160103_external_functions_001.ttcn`: `pass -> fail`
-- `core_language/16_functions_altsteps_testcases/1601_functions/160103_external_functions/Sem_160103_external_functions_002.ttcn`: `pass -> fail`
-- `core_language/16_functions_altsteps_testcases/1601_functions/160105_explicit_control_functions/NegSem_160105_explicit_control_functions_009.ttcn`: `reject -> pass`
-- `core_language/16_functions_altsteps_testcases/1601_functions/1601_toplevel/NegSem_1601_toplevel_001.ttcn`: `reject -> pass`
-- `core_language/16_functions_altsteps_testcases/1602_altsteps/160201_invoking_altsteps/NegSyn_160201_invoking_altsteps_001.ttcn`: ` -> `
