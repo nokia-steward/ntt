@@ -86,6 +86,40 @@ func TestIschosen_WildcardTemplateChoosesNothing(t *testing.T) {
 	}`)
 }
 
+// In the context of an enumerated type an imported enumerated value
+// takes precedence over a same-named definition in the importing module
+// (ETSI 8.2.3.1, Sem_08020301_GeneralFormatOfImport_004): `enumX` means
+// the enum member, not the local integer variable.
+func TestEnumPrecedence_MemberBeatsLocalDefinition(t *testing.T) {
+	runPass(t, "M.tc", `module M {
+		type component C {}
+		type enumerated EnumType { enumX, enumY, enumZ }
+		const EnumType c_enumVal := enumY;
+		testcase tc() runs on C {
+			var integer enumY := 1;
+			if (c_enumVal == enumY) { setverdict(pass); }
+			else { setverdict(fail, enumY); }
+		}
+	}`)
+}
+
+// Precedence only applies to a name the enumerated type actually
+// declares: an ordinary variable compared against an enum value keeps
+// its own binding.
+func TestEnumPrecedence_LeavesOrdinaryNamesAlone(t *testing.T) {
+	runPass(t, "M.tc", `module M {
+		type component C {}
+		type enumerated EnumType { enumX, enumY, enumZ }
+		testcase tc() runs on C {
+			var EnumType v_other := enumZ;
+			var EnumType v_same := enumX;
+			if (v_same == enumX and not (v_other == enumX) and v_other == enumZ) {
+				setverdict(pass);
+			} else { setverdict(fail, v_other); }
+		}
+	}`)
+}
+
 // Concatenating a fixed-length wildcard onto a binary string
 // contributes that many unknown units, so `'ABCD'O & ? length(2)`
 // spans four octets (ETSI 15.11,

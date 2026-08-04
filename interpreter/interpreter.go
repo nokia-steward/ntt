@@ -2535,6 +2535,25 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 		return y
 	}
 
+	// ETSI 8.2.3.1: in the context of an enumerated type an imported
+	// enumerated value takes precedence over a same-named definition
+	// in the importing module, which then has to be referenced by its
+	// qualified name. Only a bare identifier can clash this way, and
+	// it is the enum-typed operand that establishes the context.
+	switch op {
+	case syntax.EQ, syntax.NE, syntax.LT, syntax.LE, syntax.GT, syntax.GE:
+		if ev, ok := x.(*runtime.EnumValue); ok {
+			if member, ok := enumMemberNamed(ev, n.Y); ok {
+				y = member
+			}
+		}
+		if ev, ok := y.(*runtime.EnumValue); ok {
+			if member, ok := enumMemberNamed(ev, n.X); ok {
+				x = member
+			}
+		}
+	}
+
 	// Implicit-default-usage for unions carrying a @default
 	// alternative (ETSI 6.3.2.4): in an arithmetic / relational
 	// context a union value stands in for the value of its default
@@ -5062,6 +5081,22 @@ func lookupTypeDesc(name string, env runtime.Scope) *runtime.TypeDesc {
 		}
 	}
 	return nil
+}
+
+// enumMemberNamed resolves a bare identifier to the like-named member
+// of the enumerated type ev belongs to. It reports false when the
+// expression is not an identifier or names no member of that type, in
+// which case the caller keeps whatever the identifier evaluated to.
+func enumMemberNamed(ev *runtime.EnumValue, expr syntax.Expr) (*runtime.EnumValue, bool) {
+	id, ok := expr.(*syntax.Ident)
+	if !ok {
+		return nil, false
+	}
+	member := ev.WithMatchRanges(nil)
+	if err := member.SetValueByKey(id.String()); err != nil {
+		return nil, false
+	}
+	return member, true
 }
 
 // isOptionalStructField reports whether the named field of a record /
