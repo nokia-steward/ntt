@@ -148,6 +148,47 @@ func instanceIsA(inst *runtime.ClassInstance, name string) bool {
 	return false
 }
 
+// namesClassType reports whether expr names a class type in scope.
+func namesClassType(expr syntax.Expr, env runtime.Scope) bool {
+	name := syntax.Name(expr)
+	if name == "" || env == nil {
+		return false
+	}
+	v, ok := env.Get(name)
+	if !ok {
+		return false
+	}
+	_, isClass := forceThunk(v).(*runtime.ClassDesc)
+	return isClass
+}
+
+// castObjectReference implements `objRef => ClassType` (ETSI 5.1.2.6):
+// the reference is re-typed to the named class when the object actually
+// is one, which covers both a downcast to its own class or a subclass of
+// the static type and an upcast to a base class. A cast the object does
+// not satisfy is a dynamic error rather than a silent null, so the
+// testcase reports it instead of failing an unrelated assertion later.
+//
+// The object itself is unchanged: TTCN-3 object references are handles,
+// and the cast only changes the type through which one is viewed.
+func castObjectReference(inst *runtime.ClassInstance, target syntax.Expr, env runtime.Scope) runtime.Object {
+	name := syntax.Name(target)
+	if name == "" {
+		return runtime.Errorf("cast: target is not a class type")
+	}
+	if instanceIsA(inst, name) {
+		return inst
+	}
+	// Casting to a class the object's own class derives from is the
+	// upcast direction, which instanceIsA already covers. Anything left
+	// is unrelated.
+	have := ""
+	if inst.Class != nil {
+		have = inst.Class.Name
+	}
+	return runtime.Errorf("cast: object of class %s is not a %s", have, name)
+}
+
 // constructClassInstance builds a fresh object of class cd: it
 // default-initialises every field along the inheritance chain
 // (base-first) and then runs the constructor.

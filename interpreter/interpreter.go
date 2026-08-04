@@ -2476,11 +2476,36 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 		if runtime.IsError(x) {
 			return x
 		}
+		// `objRef => ClassType` is the cast operator (ETSI 5.1.2.6),
+		// which shares `=>` with the decoded field reference. An object
+		// reference on the left says which one this is.
+		if inst, ok := x.(*runtime.ClassInstance); ok {
+			return castObjectReference(inst, n.Y, env)
+		}
+		if x == runtime.Null && namesClassType(n.Y, env) {
+			return runtime.Errorf("cast: cannot cast a null object reference to %s", syntax.Name(n.Y))
+		}
 		dec := decodeCachedFor(env, x)
 		if dec == nil {
 			return runtime.Undefined
 		}
 		return projectDecodedField(dec, n.Y)
+	}
+
+	// `objRef of ClassType` tests whether the object's runtime class is
+	// that class or one derived from it (ETSI 5.1.2.5).
+	if op == syntax.OF {
+		x := eval(n.X, env)
+		if runtime.IsError(x) {
+			return x
+		}
+		if inst, ok := x.(*runtime.ClassInstance); ok {
+			return runtime.NewBool(instanceIsA(inst, syntax.Name(n.Y)))
+		}
+		// A null reference is of no class at all.
+		if x == runtime.Null {
+			return runtime.NewBool(false)
+		}
 	}
 
 	// `p.send(...) to addr` and `p.receive(...) from addr` (plus
