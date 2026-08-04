@@ -1,6 +1,7 @@
 package interpreter
 
 import (
+	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
 	"fmt"
@@ -4641,6 +4642,7 @@ func evalValueDecl(vd *syntax.ValueDecl, env runtime.Scope) runtime.Object {
 			return result
 		}
 		recordDeclaredType(env, syntax.Name(decl.Name), vd.Type)
+		recordDeclaredVariants(env, syntax.Name(decl.Name), vd.With)
 	}
 	return result
 }
@@ -5099,6 +5101,44 @@ func recordDeclaredType(env runtime.Scope, name string, typ syntax.Expr) {
 	if tn := syntax.Name(typ); tn != "" {
 		env.Set(declaredTypeKey(name), runtime.NewCharstring(tn))
 	}
+}
+
+// declaredVariantKey names the env binding recording the `variant`
+// attributes a value declaration carries in its OWN `with { ... }`
+// clause, e.g. `var integer v with { variant "32 bit" }`. Those never
+// reach a TypeDesc, because the declared type (plain `integer` here) is
+// shared with every other declaration of it.
+func declaredVariantKey(name string) string { return "\x00declvariant:" + name }
+
+// recordDeclaredVariants remembers a value declaration's own variant
+// attributes so decoding can honour a field width declared on the
+// variable rather than on its type.
+func recordDeclaredVariants(env runtime.Scope, name string, ws *syntax.WithSpec) {
+	if env == nil || name == "" || ws == nil {
+		return
+	}
+	attrs := map[string][]string{}
+	collectWithAttrs(ws, attrs, nil, nil)
+	if v := attrs["variant"]; len(v) > 0 {
+		env.Set(declaredVariantKey(name), runtime.NewCharstring(strings.Join(v, "\x00")))
+	}
+}
+
+// declaredVariants returns the variant attributes recorded for a value
+// identifier's own `with` clause, or nil when it declared none.
+func declaredVariants(env runtime.Scope, name string) []string {
+	if env == nil || name == "" {
+		return nil
+	}
+	v, ok := env.Get(declaredVariantKey(name))
+	if !ok {
+		return nil
+	}
+	s, ok := forceThunk(v).(*runtime.String)
+	if !ok {
+		return nil
+	}
+	return strings.Split(string(s.Value), "\x00")
 }
 
 // declaredTypeName returns the declared type name recorded for a value
@@ -8434,6 +8474,13 @@ func decodeRawInteger(n *syntax.CallExpr, enc runtime.Object, env runtime.Scope)
 	if !ok || len(text) == 0 {
 		return nil, false
 	}
+	// Too few octets for the slot's declared field width: decoding
+	// cannot be completed, which is return code 2 (ETSI Annex C.5.6,
+	// Sem_160102_predefined_functions_107). Both slots stay untouched so
+	// the output remains unbound.
+	if w := intDecodeWidthBits(n.Args.List[1], env); w > 0 && len(text)*8 < w {
+		return runtime.NewInt(2), true
+	}
 	val := big.NewInt(0)
 	for i := len(text) - 1; i >= 0; i-- {
 		val.Lsh(val, 8)
@@ -8481,12 +8528,24 @@ func intDecodeWidthBits(arg syntax.Expr, env runtime.Scope) int {
 	if !ok || id == nil {
 		return 0
 	}
-	tn := declaredTypeName(env, id.String())
-	td := lookupTypeDesc(tn, env)
+	// The declaration's own attribute wins over its type's: `var
+	// integer v with { variant "32 bit" }` is the shape
+	// Sem_160102_predefined_functions_107 uses, and plain `integer`
+	// could not carry that width for it.
+	if w := variantWidthBits(declaredVariants(env, id.String())); w > 0 {
+		return w
+	}
+	td := lookupTypeDesc(declaredTypeName(env, id.String()), env)
 	if td == nil {
 		return 0
 	}
 	variants, _ := td.Lookup("variant")
+	return variantWidthBits(variants)
+}
+
+// variantWidthBits returns the field width a `variant "N bit"` attribute
+// declares, or 0 when none of the given attributes declares one.
+func variantWidthBits(variants []string) int {
 	for _, v := range variants {
 		f := strings.Fields(strings.TrimSpace(v))
 		if len(f) == 2 && strings.EqualFold(f[1], "bit") {
@@ -8711,6 +8770,25 @@ func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) runtime.Obje
 		rememberEncodedString(env, s, v)
 		return s
 	case "encvalue_o":
+		// A bitstring whose length is not a multiple of 8 is
+		// left-aligned in the result, and the low (8 - len mod 8) bits
+		// of the last octet are 0 (ETSI Annex C.5.5). The bit length
+		// leads, as a 32-bit little-endian count - the same shape this
+		// engine already emulates for an encoded integer
+		// (`encvalue_o(10)` -> '0A000000'O), so `encvalue_o('011'B)`
+		// gives '0300000060'O (Sem_160102_predefined_functions_110).
+		if bits, ok := v.(*runtime.Binarystring); ok && bits.Unit == runtime.Bit {
+			if bs, ok := encodeBitstringToOctetstring(bits); ok {
+				rememberEncoded(env, bs, v)
+				return bs
+			}
+		}
+		if rec, ok := v.(*runtime.List); ok && len(rec.FieldNames) > 0 {
+			if bs, ok := encodeRecordToOctetstring(rec); ok {
+				rememberEncoded(env, bs, v)
+				return bs
+			}
+		}
 		bs := &runtime.Binarystring{
 			Unit:   runtime.Octet,
 			Value:  big.NewInt(0),
@@ -8727,6 +8805,77 @@ func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) runtime.Obje
 		rememberEncoded(env, bs, v)
 		return bs
 	}
+}
+
+// encodeBitstringToOctetstring renders a bitstring as the octetstring
+// `encvalue_o` returns for it: a 32-bit little-endian bit count followed
+// by the bits left-aligned into whole octets, the low bits of the last
+// octet zero-filled. Declines on a template literal, which carries its
+// wildcards in String and a negative Value instead of a byte value.
+func encodeBitstringToOctetstring(bits *runtime.Binarystring) (*runtime.Binarystring, bool) {
+	if bits == nil || bits.Length <= 0 || bits.Value == nil || bits.Value.Sign() < 0 {
+		return nil, false
+	}
+	payload := (bits.Length + 7) / 8
+	// Shift the bits up so the first bit of the value lands in the top
+	// bit of the first payload octet.
+	aligned := new(big.Int).Lsh(bits.Value, uint(payload*8-bits.Length))
+	buf := make([]byte, payload)
+	aligned.FillBytes(buf)
+	n := uint32(bits.Length)
+	out := []byte{byte(n), byte(n >> 8), byte(n >> 16), byte(n >> 24)}
+	return octetstringFromBytes(append(out, buf...))
+}
+
+// encodeRecordToOctetstring renders a record value held positionally as
+// the octetstring `encvalue_o` returns for it: its fields back to back,
+// each in the shape this engine already uses for that type - an integer
+// as a 32-bit little-endian word (`encvalue_o(10)` -> '0A000000'O), a
+// charstring as its characters followed by a terminating 0x00, an
+// octetstring verbatim. So `{"testText", 5}` gives
+// '74657374546578740005000000'O, the value
+// Sem_160102_predefined_functions_107 records for it. Declines on any
+// other field type rather than inventing an encoding, leaving the
+// round-trip placeholder in place.
+func encodeRecordToOctetstring(rec *runtime.List) (*runtime.Binarystring, bool) {
+	var out []byte
+	for _, f := range rec.Elements {
+		switch fv := f.(type) {
+		case runtime.Int:
+			if fv.Int == nil || !fv.IsInt64() {
+				return nil, false
+			}
+			w := uint32(fv.Int64())
+			out = append(out, byte(w), byte(w>>8), byte(w>>16), byte(w>>24))
+		case *runtime.String:
+			out = append(out, []byte(string(fv.Value))...)
+			out = append(out, 0x00)
+		case *runtime.Binarystring:
+			if fv.Unit != runtime.Octet || fv.Value == nil || fv.Value.Sign() < 0 {
+				return nil, false
+			}
+			buf := make([]byte, fv.Length)
+			fv.Value.FillBytes(buf)
+			out = append(out, buf...)
+		default:
+			return nil, false
+		}
+	}
+	if len(out) == 0 {
+		return nil, false
+	}
+	return octetstringFromBytes(out)
+}
+
+// octetstringFromBytes builds an octetstring value from raw bytes,
+// going through the literal parser so String, Value and Length keep the
+// invariants the rest of the engine relies on.
+func octetstringFromBytes(b []byte) (*runtime.Binarystring, bool) {
+	bs, err := runtime.NewBinarystring("'" + hex.EncodeToString(b) + "'O")
+	if err != nil {
+		return nil, false
+	}
+	return bs, true
 }
 
 func xmlHeaderControlArg(n *syntax.CallExpr, env runtime.Scope) (string, bool) {
