@@ -1964,9 +1964,13 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		}
 
 		// Activated defaults are appended after the alternatives (20.5),
-		// unless the alt is marked `@nodefault`.
-		if n.NoDefault == nil && runDefaults(env) {
-			return nil
+		// unless the alt is marked `@nodefault`. A default that stopped the
+		// component hands back its unwinding result, which has to travel
+		// past this alt statement.
+		if n.NoDefault == nil {
+			if ctl, fired := runDefaults(env); fired {
+				return ctl
+			}
 		}
 		// An activated default's own altstep is a single NON-blocking pass:
 		// when this strict alt IS a default body (defaultCtx active) and no
@@ -2069,8 +2073,10 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 		}
 		// No alternative matched. Activated defaults are appended after the
 		// remaining alternatives (20.5); one that fires leaves the interleave.
-		if n.NoDefault == nil && runDefaults(env) {
-			return nil
+		if n.NoDefault == nil {
+			if ctl, fired := runDefaults(env); fired {
+				return ctl
+			}
 		}
 		// This interleave IS the body of an activated default: a default is a
 		// single non-blocking pass, so conclude instead of parking the token.
@@ -2092,7 +2098,14 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 // MessageReady signal. Returns true to re-snapshot, false when there is
 // nothing to wait for or the PTC was stopped.
 func blockForAltEvents(n *syntax.AltStmt, env runtime.Scope) bool {
-	if exec := runtime.FindTestcaseExec(env); exec != nil && exec.SchedulerActive() {
+	exec := runtime.FindTestcaseExec(env)
+	// A stopped executor - the testcase was stopped, or its context (the
+	// harness budget, or an execute() timeout) was cancelled - unwinds a
+	// blocking alt instead of waiting for an event that will never come.
+	if exec != nil && exec.Stopped() {
+		return false
+	}
+	if exec != nil && exec.SchedulerActive() {
 		// Discrete-event quiescence scheduler owns timing: park this
 		// component until a comm/component event arrives or the virtual
 		// clock advances to fire a timer guard. No real sleep, no polling
@@ -2110,7 +2123,7 @@ func blockForAltEvents(n *syntax.AltStmt, env runtime.Scope) bool {
 		// deadline ordering preserved. (A queued message would already
 		// have matched in the snapshot pass before we got here.)
 		if vd, ok := nextAltTimerVirtualDeadline(n, env); ok {
-			if exec := runtime.FindTestcaseExec(env); exec != nil {
+			if exec != nil {
 				exec.AdvanceVirtualClock(vd)
 			}
 			return true

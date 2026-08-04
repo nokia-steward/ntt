@@ -158,6 +158,10 @@ func (c *coopScheduler) goDone(id int64) {
 func (c *coopScheduler) signal() {
 	c.mu.Lock()
 	c.wakeAllBlockedLocked()
+	// When every participant was parked there is no one holding the token
+	// to hand it on, so the wake-up would go unnoticed. This is how a
+	// stop reaches participants parked on an alt that can never fire.
+	c.handoffLocked()
 	c.mu.Unlock()
 }
 
@@ -241,6 +245,14 @@ func (c *coopScheduler) handoffLocked() {
 	}
 	// Nothing can ever fire: deadlock. Release all parked participants so
 	// their blocked alts conclude without matching.
+	//
+	// A TTCN-3 alt with no matching alternative and no [else] should
+	// block, not conclude - that is what Sem_2601_ExecuteStatement_003
+	// asks for, and leaving the participants parked does produce the
+	// `error` it expects. It also turns 51 other files into timeouts,
+	// because their alts cannot fire for reasons of our own: this release
+	// is what lets them fall through to a verdict. See
+	// docs/conformance/remaining-work.md.
 	if len(c.blocked) > 0 {
 		c.deadlock = true
 		for id := range c.blocked {

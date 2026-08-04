@@ -1196,6 +1196,24 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// writeback). The Stopped flag tells callers to skip any
 		// inout / out propagation.
 		if id, ok := n.Expr.(*syntax.Ident); ok && id.Tok != nil && id.String() == "stop" {
+			// Terminating the behaviour also ends the component
+			// (ETSI 21.3.3), and when that component is the MTC it ends
+			// the testcase - so a `stop` in an altstep body reached as a
+			// default must not let the code after the alt statement run
+			// (Sem_200501_the_default_mechanism_008). Unlike `kill`, a
+			// component created with the `alive` modifier survives and
+			// stays reusable.
+			if exec := runtime.FindTestcaseExec(env); exec != nil {
+				if cur := exec.CurrentComponent(); cur != nil {
+					cur.SetDone(true)
+					if !cur.AliveModifier {
+						cur.SetAlive(false)
+					}
+					if stack := exec.AllComponents(); len(stack) > 0 && cur == stack[0] {
+						exec.Stop()
+					}
+				}
+			}
 			return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
 		}
 		if id, ok := n.Expr.(*syntax.Ident); ok && id.Tok != nil && id.String() == "unmap" {
@@ -1530,8 +1548,10 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 					// identifier, so we recognise it here.
 					if name == "any port" {
 						res := evalAnyPortOp(op.String(), n, env)
-						if res == runtime.Undefined && !altCtx.active() && runDefaults(env) {
-							return &runtime.ReturnValue{Value: runtime.Undefined}
+						if res == runtime.Undefined && !altCtx.active() {
+							if r, fired := defaultsFired(env); fired {
+								return r
+							}
 						}
 						return res
 					}
@@ -1552,8 +1572,10 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 						return evalPortSend(name, n, env)
 					case "receive":
 						res := evalPortReceive(name, n, env, true)
-						if res == runtime.Undefined && !altCtx.active() && runDefaults(env) {
-							return &runtime.ReturnValue{Value: runtime.Undefined}
+						if res == runtime.Undefined && !altCtx.active() {
+							if r, fired := defaultsFired(env); fired {
+								return r
+							}
 						}
 						return res
 					case "trigger":
@@ -1564,8 +1586,10 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 						// failed so the alt picks something
 						// else (per TTCN-3 v4.11.1 22.2.3).
 						res := evalPortTrigger(name, n, env)
-						if res == runtime.Undefined && !altCtx.active() && runDefaults(env) {
-							return &runtime.ReturnValue{Value: runtime.Undefined}
+						if res == runtime.Undefined && !altCtx.active() {
+							if r, fired := defaultsFired(env); fired {
+								return r
+							}
 						}
 						return res
 					case "check":
@@ -1574,8 +1598,10 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 						// matching against the head without
 						// removing the message.
 						res := evalPortCheck(name, n, env)
-						if res == runtime.Undefined && !altCtx.active() && runDefaults(env) {
-							return &runtime.ReturnValue{Value: runtime.Undefined}
+						if res == runtime.Undefined && !altCtx.active() {
+							if r, fired := defaultsFired(env); fired {
+								return r
+							}
 						}
 						return res
 					}
@@ -5834,6 +5860,14 @@ func applyFunctionStopped(fn *runtime.Function, args []runtime.Object) (runtime.
 	var raw runtime.Object
 	if fn.IsAltstep && fn.Body != nil {
 		raw = evalAltstepBody(fn.Body, fenv)
+		// `break` in an altstep terminates the altstep and the alt
+		// statement that invoked it, and control continues right after
+		// that alt (ETSI 20.5.1,
+		// Sem_200501_the_default_mechanism_007). It is not the loop
+		// `break` unwrap() rejects below.
+		if raw == runtime.Break {
+			raw = runtime.Undefined
+		}
 	} else {
 		raw = eval(fn.Body, fenv)
 	}
@@ -8935,20 +8969,24 @@ func (a *astNode) Inspect() string             { return "<ast>" }
 func (a *astNode) Equal(o runtime.Object) bool { return a == o }
 
 // runDefaults walks the activated-default stack and evaluates each in
-// the scope it was activated in. Returns true if any default
-// changed the verdict (i.e. fired and produced a result) so the
-// caller can decide whether to stop the current statement chain.
+// the scope it was activated in. The bool reports whether a default
+// fired (changed the verdict, or took a branch under the scheduler) so
+// the caller can decide whether to stop the current statement chain.
+// The object is a control-flow result the fired default produced - a
+// `stop` or an error - which the caller must propagate instead of
+// resuming after the alt; it is nil when the default fired without
+// altering control flow.
 // Defaults are tried in reverse activation order (LIFO) as TTCN-3
 // 20.5 specifies. A re-entry guard prevents an altstep that
 // re-enters the alt scheduler from triggering its own defaults
 // recursively (which would spin forever on a non-matching queue).
-func runDefaults(env runtime.Scope) bool {
+func runDefaults(env runtime.Scope) (runtime.Object, bool) {
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil {
-		return false
+		return nil, false
 	}
 	if defaultCtx.active() {
-		return false
+		return nil, false
 	}
 	defaultCtx.enter()
 	defer defaultCtx.leave()
@@ -8983,15 +9021,54 @@ func runDefaults(env runtime.Scope) bool {
 		if sched {
 			defaultBranchArm()
 		}
-		_ = eval(ast.n, d.Env)
+		res := eval(ast.n, d.Env)
+		// A default that stops the component, or errors, terminates the
+		// behaviour that invoked it: the statements after the enclosing
+		// alt must not run (ETSI 20.5.1,
+		// Sem_200501_the_default_mechanism_008). Discarding res here let
+		// them run.
+		if ctl := defaultUnwind(res); ctl != nil {
+			return ctl, true
+		}
 		if sched && defaultBranchTook() {
-			return true
+			return nil, true
 		}
 		if exec.GetVerdict() != pre {
-			return true
+			return nil, true
 		}
 	}
-	return false
+	return nil, false
+}
+
+// defaultUnwind returns the control-flow object a default body produced
+// that has to unwind past the alt statement, or nil when its result is
+// ordinary. A `return` is deliberately NOT propagated: it terminates the
+// altstep and its alt statement only (ETSI 20.5.2).
+func defaultUnwind(res runtime.Object) runtime.Object {
+	switch v := res.(type) {
+	case *runtime.Error:
+		return v
+	case *runtime.ReturnValue:
+		if v.Stopped {
+			return v
+		}
+	}
+	return nil
+}
+
+// defaultsFired runs the activated defaults on behalf of a STANDALONE
+// receiving operation that did not match. When one fires, the operation
+// yields either the default's own unwinding result or a bare return, both
+// of which end the current statement chain.
+func defaultsFired(env runtime.Scope) (runtime.Object, bool) {
+	ctl, fired := runDefaults(env)
+	if !fired {
+		return nil, false
+	}
+	if ctl != nil {
+		return ctl, true
+	}
+	return &runtime.ReturnValue{Value: runtime.Undefined}, true
 }
 
 // isTimerOnlyDefault reports whether the call expression `n`
