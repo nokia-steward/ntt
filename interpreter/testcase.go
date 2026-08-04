@@ -460,6 +460,11 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 	// The test is "was one declared", not "is it none" — a body that
 	// explicitly sets none must keep it, because a control part's
 	// execute() can branch on the value (Sem_2601_ExecuteStatement_004).
+	//
+	// This also papers over 64 files whose body does call setverdict but
+	// never reaches it: see docs/conformance/remaining-work.md. Removing
+	// the coercion is a prerequisite for Sem_2303_timer_stop_004 and has
+	// to come after those are fixed, not before.
 	if !exec.VerdictWasSet() {
 		v = runtime.PassVerdict
 	}
@@ -869,6 +874,12 @@ func evalComponentQuery(kind string, sel syntax.Expr, env runtime.Scope) (runtim
 	if predicate == nil {
 		return nil, false
 	}
+	// A standalone `all component.done` / `.killed` ought to block like
+	// its singular counterpart (ETSI 21.3.7/21.3.8) rather than answer a
+	// snapshot the statement context discards. Making it park costs two
+	// files today because it lets PTC bodies reach branches that expose a
+	// `send ... to <component>` routing defect - see
+	// docs/conformance/remaining-work.md.
 	switch kind {
 	case "all component":
 		if len(ptcs) == 0 {
