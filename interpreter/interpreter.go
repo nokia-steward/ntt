@@ -1014,6 +1014,21 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 					return annexEAttrList(selName, nil)
 				}
 			}
+			// Referencing a field or union alternative of a template
+			// to which AnyValue / AnyValueOrNone is assigned yields
+			// that wildcard again (ETSI 15.6.5 restriction b),
+			// mirroring how indexing into `?` yields `?`. An
+			// OPTIONAL field admits absence, so it yields `*`
+			// instead (Sem_150602_ReferencingRecordAndSetFields_003).
+			// This sits below the Annex E branches so
+			// `mw_msg.encode` still resolves the attribute of a
+			// wildcard template's type.
+			if left == runtime.Any || left == runtime.AnyOrNone {
+				if isOptionalStructField(lvalueTypeDesc(n.X, env), syntax.Name(n.Sel)) {
+					return runtime.AnyOrNone
+				}
+				return left
+			}
 			// Selector on a non-scope value: the receiver is either
 			// Undefined (soft-skipped decl) or a primitive that the
 			// runtime models as a value, not a namespace - e.g. a
@@ -2597,6 +2612,18 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 	// both sides is rarely interesting for the conformance tests
 	// (they only assert the structural concat works).
 	if op == syntax.CONCAT {
+		// A fixed-length wildcard against a binary string is the one
+		// case where the restriction carries structure worth keeping:
+		// it says how many unknown units the operand contributes.
+		if bs, ok := x.(*runtime.Binarystring); ok {
+			if y2, ok := wildcardRunAsBinarystring(y, bs.Unit); ok {
+				y = y2
+			}
+		} else if bs, ok := y.(*runtime.Binarystring); ok {
+			if x2, ok := wildcardRunAsBinarystring(x, bs.Unit); ok {
+				x = x2
+			}
+		}
 		if lr, ok := x.(*runtime.LengthRestricted); ok && lr.Inner != nil {
 			x = lr.Inner
 		}
@@ -3278,6 +3305,41 @@ func mergeIndexedReassignment(existing, fresh runtime.Object) (runtime.Object, b
 	return nil, false
 }
 
+// mergeFieldReassignment merges a fresh assignment-notation record
+// literal into the value the variable already held. Per ETSI 6.2, a
+// field that the notation does not refer to - or refers to with the
+// not-used symbol `-` - keeps its previous value, so
+// `v := {field1 := 3, field3 := 2.0}` over `{5, "hi", 3.14}` leaves
+// field2 as "hi" (Sem_0602_TopLevel_015).
+//
+// A union is excluded: it carries exactly one active alternative, so
+// re-assigning it selects a new alternative rather than merging into
+// the old one.
+func mergeFieldReassignment(existing, fresh runtime.Object, lhs syntax.Expr, env runtime.Scope) (runtime.Object, bool) {
+	old, ok := forceThunk(existing).(*runtime.Record)
+	if !ok {
+		return nil, false
+	}
+	next, ok := fresh.(*runtime.Record)
+	if !ok {
+		return nil, false
+	}
+	if st := structDeclOf(lvalueTypeDesc(lhs, env)); st != nil && st.KindTok.Kind() == syntax.UNION {
+		return nil, false
+	}
+	out := runtime.NewRecord()
+	for name, val := range old.Fields {
+		out.Set(name, val)
+	}
+	for name, val := range next.Fields {
+		if val == runtime.Undefined {
+			continue
+		}
+		out.Set(name, val)
+	}
+	return out, true
+}
+
 // mergeMapReassignment merges a fresh `{[k] := v, ...}` literal into
 // the existing map per ETSI 6.2.15.2: keys explicitly mentioned in
 // the fresh literal overwrite the existing entry; keys not mentioned
@@ -3592,6 +3654,12 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) runtime.Obj
 			// merging the new value into the existing list
 			// instead of overwriting it wholesale.
 			if merged, ok := mergeIndexedReassignment(existing, val); ok {
+				val = merged
+			}
+			// The same holds for assignment notation over named
+			// fields (ETSI 6.2): an unmentioned field keeps the
+			// value it already had.
+			if merged, ok := mergeFieldReassignment(existing, val, l, env); ok {
 				val = merged
 			}
 			// If the name lives in an enclosing scope (e.g. a
@@ -4996,6 +5064,22 @@ func lookupTypeDesc(name string, env runtime.Scope) *runtime.TypeDesc {
 	return nil
 }
 
+// isOptionalStructField reports whether the named field of a record /
+// set type is declared `optional`.
+func isOptionalStructField(td *runtime.TypeDesc, field string) bool {
+	st := structDeclOf(td)
+	if st == nil || field == "" {
+		return false
+	}
+	for _, f := range st.Fields {
+		if f == nil || f.Name == nil || f.Name.String() != field {
+			continue
+		}
+		return f.Optional != nil
+	}
+	return false
+}
+
 // structFieldTypeName returns the declared type name of a named field
 // of a record/set type, or "" when no such field exists.
 func structFieldTypeName(st *syntax.StructTypeDecl, field string) string {
@@ -5716,6 +5800,32 @@ func wildcardAsBinarystring(o runtime.Object, unit runtime.Unit) (*runtime.Binar
 		tok = "?"
 	}
 	bs, err := runtime.NewBinarystringWithWildcards("'"+tok+"'"+unit.String(), unit)
+	if err != nil {
+		return nil, false
+	}
+	return bs, true
+}
+
+// wildcardRunAsBinarystring lifts a fixed-length wildcard template
+// (`? length(n)`) into a binary string of n unknown units, so that
+// concatenating it contributes n units rather than the single `?` the
+// bare-wildcard path would produce: `'ABCD'O & ? length(2)` yields
+// `'ABCD??'O` and so spans four octets, not three (ETSI 15.11,
+// Sem_1511_ConcatenatingTemplatesOfStringAndListTypes_013). A `?`
+// inside a binary string stands for one unit of that string's type -
+// a whole octet for an octetstring - so one per unit is right.
+func wildcardRunAsBinarystring(o runtime.Object, unit runtime.Unit) (*runtime.Binarystring, bool) {
+	lr, ok := o.(*runtime.LengthRestricted)
+	if !ok {
+		return nil, false
+	}
+	if lr.Inner != runtime.Any && lr.Inner != runtime.AnyOrNone {
+		return nil, false
+	}
+	if lr.Min != lr.Max || lr.Min <= 0 {
+		return nil, false
+	}
+	bs, err := runtime.NewBinarystringWithWildcards("'"+strings.Repeat("?", lr.Min)+"'"+unit.String(), unit)
 	if err != nil {
 		return nil, false
 	}
@@ -10175,6 +10285,19 @@ func evalPresencePred(name string, n *syntax.CallExpr, env runtime.Scope) runtim
 	if n.Args == nil || len(n.Args.List) == 0 {
 		return runtime.NewBool(false)
 	}
+	// `ischosen(u.alt)` asks whether `alt` is the alternative the
+	// union actually carries. That is a property of the receiver
+	// rather than of the value the reference yields: `{f2 := ?}` has
+	// f2 chosen even though its value is a wildcard, while a union
+	// template that is itself `?` has chosen nothing at all
+	// (ETSI 16.1.2).
+	if name == "ischosen" {
+		if sel, ok := n.Args.List[0].(*syntax.SelectorExpr); ok {
+			if chosen, ok := unionAlternativeChosen(sel, env); ok {
+				return runtime.NewBool(chosen)
+			}
+		}
+	}
 	val := eval(n.Args.List[0], env)
 	if runtime.IsError(val) {
 		// Most conformance tests treat a lookup error as
@@ -10215,6 +10338,40 @@ func evalPresencePred(name string, n *syntax.CallExpr, env runtime.Scope) runtim
 		present = present && isConcreteValue(val)
 	}
 	return runtime.NewBool(present)
+}
+
+// unionAlternativeChosen reports whether the alternative named by the
+// selector is the one its union receiver carries. The second result is
+// false when the receiver is not a shape we can answer from, leaving
+// the caller on its generic "is the value bound" path.
+func unionAlternativeChosen(sel *syntax.SelectorExpr, env runtime.Scope) (bool, bool) {
+	name := syntax.Name(sel.Sel)
+	if name == "" {
+		return false, false
+	}
+	recv := eval(sel.X, env)
+	if runtime.IsError(recv) {
+		return false, false
+	}
+	recv = forceThunk(recv)
+	// A union template that is itself a wildcard selects no
+	// particular alternative.
+	if recv == runtime.Any || recv == runtime.AnyOrNone {
+		return false, true
+	}
+	switch recv := recv.(type) {
+	case *runtime.Record:
+		v, ok := recv.Get(name)
+		return ok && v != runtime.Undefined, true
+	case *runtime.List:
+		for i, fn := range recv.FieldNames {
+			if fn != name {
+				continue
+			}
+			return i < len(recv.Elements) && recv.Elements[i] != runtime.Undefined, true
+		}
+	}
+	return false, false
 }
 
 // isConcreteValue reports whether o is a fully-initialised concrete
