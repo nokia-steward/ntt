@@ -7079,8 +7079,6 @@ func componentStopRequested(exec *runtime.TestcaseExec) bool {
 func startBodyShouldSkip(body syntax.Node, env runtime.Scope) bool {
 	root := startBodyRoot(body, env)
 	procOps := map[string]bool{
-		"call": true, "getcall": true, "reply": true,
-		"raise": true, "catch": true, "getreply": true,
 		// `timer.timeout` is a blocking operation in the
 		// TTCN-3 model (clause 23.4): the PTC suspends until
 		// the timer fires. Our toy interpreter has no real
@@ -7639,6 +7637,20 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		// on the old "PTC body is a no-op" path). We still tag the
 		// ref as alive so `comp.alive`/`comp.done` answer correctly.
 		skip := startBodyShouldSkip(body, env)
+		// One procedure shape still must not run at start: a BARE finite
+		// responder (straight-line `getcall; reply`, no alt, no loop, no
+		// blocking call of its own) started before any call is queued. Its
+		// getcall is non-blocking, so it would fall through on the empty
+		// queue and reply to nobody - which a multicast `call to (...)`
+		// fixture then mis-attributes to the wrong sender
+		// (Sem_220301_CallOperation_015). It is replayed on demand
+		// instead, by RunDeferredResponders, for the call actually
+		// addressed to it.
+		if op == "start" && ref != nil && !ref.AliveModifier && startBodyIsBareResponder(body, env) {
+			if exec := runtime.FindTestcaseExec(env); exec == nil || !exec.HasPendingCalls() {
+				skip = true
+			}
+		}
 		// An `alive` PTC body (including a while(true) send/receive load
 		// worker) runs on a real goroutine instead of the
 		// skip/virtual-clock model, so never send it to the skip branch.

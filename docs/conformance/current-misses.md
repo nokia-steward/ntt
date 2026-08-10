@@ -1,22 +1,24 @@
 # Current Conformance Misses
 
-Generated from `/tmp/p2c.json` using the current workspace runner.
+Generated from `/tmp/p4b.json` using the current workspace runner.
 
-- Summary: `ran 4948 files: 4744 matched, 23 skipped (96.32% match rate)`
-- Misses: `204`
+- Summary: `ran 4948 files: 4747 matched, 23 skipped (96.39% match rate)`
+- Misses: `201`
 
 ## Misses By Outcome
 
 - `reject->pass`: `75`
-- `pass->error`: `51`
+- `pass->none`: `38`
 - `reject->none`: `27`
-- `pass->none`: `26`
 - `->`: `23`
+- `pass->timeout`: `18`
+- `pass->error`: `13`
+- `pass->fail`: `5`
 - `pass->parse-error`: `2`
 
 ## Misses By Chapter
 
-- `core_language/22_communication_operations`: `71` (`pass->error`=45, `pass->none`=5, `reject->none`=2, `reject->pass`=19)
+- `core_language/22_communication_operations`: `68` (`pass->error`=7, `pass->fail`=5, `pass->none`=17, `pass->timeout`=18, `reject->none`=2, `reject->pass`=19)
 - `core_language/06_types_and_values`: `34` (`->`=9, `reject->none`=12, `reject->pass`=13)
 - `core_language/05_basic_language_elements`: `20` (`->`=3, `reject->none`=1, `reject->pass`=16)
 - `core_language/15_templates`: `16` (`->`=2, `reject->none`=3, `reject->pass`=11)
@@ -54,12 +56,12 @@ Generated from `/tmp/p2c.json` using the current workspace runner.
 - `core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/Sem_220301_CallOperation_016.ttcn`: `pass -> error` - test system deadlocked: every component is blocked and no timer can fire
 - `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_012.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_017.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_007.ttcn`: `pass -> error` - test system deadlocked: every component is blocked and no timer can fire
-- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_008.ttcn`: `pass -> error` - test system deadlocked: every component is blocked and no timer can fire
-- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_009.ttcn`: `pass -> error` - test system deadlocked: every component is blocked and no timer can fire
-- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_010.ttcn`: `pass -> error` - test system deadlocked: every component is blocked and no timer can fire
-- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_011.ttcn`: `pass -> error` - test system deadlocked: every component is blocked and no timer can fire
-- ... `51` more in `current-misses.json`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_007.ttcn`: `pass -> fail` - "The any from getcall operation didn't match for some reason"
+- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_010.ttcn`: `pass -> fail` - "The any from getcall operation didn't match for some reason"
+- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_011.ttcn`: `pass -> fail` - "The any from getcall operation didn't match for some reason"
+- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_012.ttcn`: `pass -> fail` - "The any from getcall didn't match for some reason"
+- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_013.ttcn`: `pass -> fail` - "The any from getcall didn't match for some reason"
+- ... `48` more in `current-misses.json`
 
 ### `core_language/06_types_and_values`
 
