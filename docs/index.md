@@ -27,6 +27,9 @@ canonical reference for the project.
   and what's currently in flight.
 - [Conformance dashboard](conformance/index.html) - ETSI conformance
   pass-rate per push, gated by CI.
+- [How far can this engine be trusted?](engine-trust.md) - what the
+  conformance numbers do and do not evidence, which areas are dependable,
+  and the 2026-08-10 correction that cost 1.34 points on purpose.
 
 ## Per-milestone references
 

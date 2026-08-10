@@ -1,19 +1,26 @@
 # Remaining Conformance Work
 
-State as of 2026-08-04: **4813 / 4948 matched (97.73%)**, 23 skipped
-(inconclusive / no-verdict), **112 real misses** (was 4803 / 97.52% on
-2026-08-03, 4790 / 97.26% on 2026-07-06 and 4788 / 97.22% on 2026-06-17).
+State as of 2026-08-10: **4747 / 4948 matched (96.39%)**, 23 skipped
+(inconclusive / no-verdict), **178 real misses**.
+
+The rate went **down** on purpose. It read 4813 / 97.73% on 2026-08-04,
+and part of that was fiction: two mechanisms in the engine existed to make
+fixtures pass, 74 files rested on them, and some of those files tested
+nothing at all. Both are gone. See "The correction" below - that section is
+the most useful thing in this document.
+
 Baseline and the full miss inventory live in
 [`testdata/conformance-baseline.json`](../../testdata/conformance-baseline.json)
 and [`current-misses.json`](current-misses.json); regenerate with
-[`refresh_artifacts.py`](refresh_artifacts.py).
+[`refresh_artifacts.py`](refresh_artifacts.py). The baseline records the
+last measurement and may move down; the ratchet is `--regress` on the
+conformance command, enforced per commit by CI.
 
 The incremental "one clean fix per slice" phase is complete: the easy
 positive-test bugs have been closed. What remains does **not** yield
-isolated low-risk commits. It falls into three buckets below.
-Every change must still pass the full conformance run (`--regress 0.5`,
-0 per-file regressions) and an external test-port smoke suite
-(17 pass / 0 fail / 2 expected inconc).
+isolated low-risk commits. Every change must still pass the full
+conformance run (`--regress 0.5`, 0 per-file regressions) and `go test
+-race ./...`, which is where the external test-port coverage lives.
 
 ## This branch is the product
 
@@ -23,14 +30,16 @@ it implements TTCN-3 correctly for the people running it here; the ETSI
 suite is the instrument for measuring that, not the goal.
 
 That distinction decides what gets kept. A change that raises the match
-rate while making the semantics less defensible is not worth taking, and
-a change that is clearly right but flat on the corpus is (both happened
-on 2026-08-04, below). Conversely, the 108 `reject`-expected misses are
-the largest remaining block and stay out of scope until there is a
-reason beyond the number to go after them. Of the 112 real misses, 108
-are exactly those (`Sem_5010205_OfOperator_001`, mislabelled, among them);
-the other four are the two files described under "The executed-but-wrong
-slice" and two parse errors.
+rate while making the semantics less defensible is not worth taking, and a
+change that is clearly right but flat on the corpus is. Taken to its
+conclusion on 2026-08-10: engine behaviour that existed only to make
+fixtures pass was deleted even though it cost 1.34 points, because a number
+produced that way is not evidence of anything.
+
+Of the 178 real misses, **102 expect `reject`** (75 reach `pass`, 27 reach
+`none`). That is still the largest block and stays out of scope until there
+is a reason beyond the number to go after it. Most of the rest are the 74
+files the correction stopped fabricating verdicts for.
 
 ## One engine (2026-08-03)
 
@@ -59,7 +68,7 @@ engines.
 The suite match rate is only part of the picture: the harness also
 reports a **real-execution** rate (files whose verdict came from actually
 executing the testcase rather than from a parse/semantic rejection),
-currently **2514 files, 51.05%**.
+currently **2442 files, 49.58%**.
 
 That number cannot approach 100%, and it is worth being precise about why
 before treating it as a target. A file annotated `@verdict pass reject`
@@ -83,6 +92,100 @@ They all carry `@verdict pass reject`, parsed and analyzed cleanly, had no
 testcase, and were demoted out of the denominator rather than counted as
 misses. They are negative tests the analyzer fails to catch. Fixing that
 would *lower* the reported match rate by moving them into the denominator.
+
+## The correction (2026-08-10)
+
+Two mechanisms in the engine existed so that fixtures would pass. Both are
+gone, in that order, each with its own commit and baseline update.
+
+**A deadlock is an error.** When every component was parked and no timer
+could advance the clock, the scheduler released everyone so their blocked
+alts concluded as though nothing had matched. Quiescence is a *provable*
+deadlock in the loopback model - there is no outside, so nothing can ever
+arrive - and it now produces an `error` verdict naming it. Guarded on no
+external port driver being bound, where a real peer may still send and the
+inference fails. Measured: **-51, +7** (4813 -> 4769). Six of the seven
+gains are `NegSem` fixtures that expect a rejection and now get one.
+
+**An undeclared verdict stays `none`.** ETSI 22.4.1 says the verdict starts
+at `none` and setverdict moves it; the engine coerced it to `pass`, which
+made a testcase that does nothing look successful. Measured: **-28, +1**
+(4769 -> 4744). 26 of the 28 explicitly assert `ttcn3verdict:pass`, so they
+are real defects now failing honestly.
+
+The harness was also over-reading the annotation: a bare `@verdict pass
+accept` with no `ttcn3verdict:` tag and no `setverdict` in the source
+asserts only that the run is acceptable, so `none` satisfies it. Correcting
+that recovered exactly 2 files. Applying it to `reject` fixtures as well
+would have handed a match to 21 negative files we genuinely fail, which
+measurement caught before it landed.
+
+### What the fixtures were actually doing
+
+Some of the 74 files were passing **vacuously** - not "passing for the
+wrong reason" but not testing their subject at all.
+`Sem_2204_the_check_operation_025` sets `pass` after its alt whether or not
+`check(getcall)` matched, so 35 `Sem_2204_*` files were reporting on a
+`check` operation that never ran.
+
+The same was true of the Go suite, which matters more, because those tests
+were the reason to believe the engine worked. Six were vacuous:
+
+- Four `TestStrictSched_*` procedure tests in which **the PTC bodies never
+  ran at all** - not the server's `getcall`, not its safety timer, not the
+  client's `call`. Nothing they describe was exercised.
+- `TestStrictInterleave_BlockingBodyRunsOnSnapshotEvaluator`, whose nested
+  alt never matched.
+- `TestAsyncPTC_InjectWakesAltAndBodyRuns`, which hid a **user-facing** bug
+  (below).
+
+All six are kept, pointed at what the engine really does, each naming what
+must be restored when the gap closes. A green test that asserts nothing is
+worse than a red one.
+
+### Where the 74 files went
+
+47 chapter 22 (procedure-based communication and `check`), 14 chapter 21
+(configuration operations), 13 spread thinly. Progress since:
+
+- **Procedure responder bodies now run for real** (+3, 4744 -> 4747). The
+  syntactic predicate that declared a body containing any procedure
+  operation unrunnable predates the scheduler, which can now run and park
+  it. One shape stays carved out and the carve-out is measured: a bare
+  finite responder started before any call is queued would fall through its
+  non-blocking `getcall` and reply to nobody.
+- Running the bodies is **necessary but not sufficient**. The four
+  `TestStrictSched_*` tripwires still report no verdict, so a client/server
+  pair still cannot complete a call/reply round trip. The next layer is
+  matching and routing, not scheduling.
+
+### Newly found, not yet fixed
+
+- **An injected message never reaches a driver-bound PTC.** The path a real
+  C/C++ test port uses. Diagnosed precisely: the daemon body runs, the
+  message lands in the queue under exactly the key its receive reads, it is
+  still there unconsumed at the end, the alt re-polls every 2ms for the
+  full 500ms, and neither a typed nor a bare `srv.receive` observes it. Not
+  a lost wake-up, not a template mismatch - guard evaluation for a
+  driver-bound port. Tripwire:
+  `TestAsyncPTC_InjectDoesNotReachADriverBoundPTC`.
+- **A stopped `alive` component cannot be restarted** (ETSI 21.3.3), which
+  is `Sem_210303_Stop_test_component_005..010`. Two layers: `start` does
+  not clear the component's `done` flag, so the following `comp.done` is
+  satisfied by the previous run and the MTC leaves before the new body is
+  scheduled; and with that cleared, the re-forked PTC goroutine still never
+  gets scheduled. Tripwire:
+  `TestRestartAfterStop_DoesNotRunTheNewBehaviour`.
+- **Interleave does not suspend a blocked branch.**
+  `Sem_2004_InterleaveStatement_001` needs branch 2 to run while branch 1's
+  body is blocked in a nested alt - coroutine-style interleaving inside one
+  component. Note the suite treats a nested alt in an interleave body as
+  legal: `NegSem_2004_InterleaveStatement_001` has the same construct and
+  blames its `for` loop.
+- **Timer-only PTC bodies still do not run.** Dropping `timeout` from the
+  skip predicate is now possible in principle (the virtual clock removed
+  the original excuse) but measured **-7 / +0**, so it is out. Reverted
+  rather than absorbed.
 
 ## The executed-but-wrong slice (2026-08-04)
 
@@ -431,28 +534,27 @@ What remains:
      start timers and activate defaults that call `execute`
      (Sem_2601_ExecuteStatement_010); the control scope has no
      TestcaseExec, so those do nothing today.
-   - **A blocked testcase under an execute timeout.**
-     Sem_2601_ExecuteStatement_003. Measured on 2026-08-04: blocking the
-     alt is correct and does produce the expected `error`, but 51 other
-     files depend on the deadlock release to reach a verdict at all. See
-     "The executed-but-wrong slice" for the order this has to be
-     unpicked in.
    - Module-qualified identifiers in a control body
      (Sem_08020305_ImportingAllDefinitionsOfAModule_004) and
      `testcasename()` returning empty under the control path.
-2. **Make blocked alts fire for real**, then drop the deadlock release,
-   then drop the undeclared-verdict coercion — in that order, for the
-   reasons measured in "The executed-but-wrong slice". This is now the
-   highest-value item in the document: it is worth ~2 fixtures directly
-   and gates ~115 files' worth of masked semantics, including whatever
-   real defects the coercion is currently papering over. Start with the
-   inline-PTC-start finding, which is a concrete, bounded piece of it.
-3. **Bucket 3 clusters**, one precise, narrowly-scoped analysis pass at a
-   time. `reject->pass` is 108 of the 112 real misses, so this is
-   where the remaining match-rate lives — but see the 2026-06-17 triage
-   above: none of it is low-hanging, spread across 23 clusters, and
-   matching-core changes regress easily.
-4. **Wire `runtime/codec`.** Filed here rather than under real execution:
+   - `Sem_2601_ExecuteStatement_003` is **done**: a deadlock now reports
+     itself as `error`, which is what the fixture asked for.
+2. **Finish the procedure-communication round trip.** 47 of the 74 files
+   the correction exposed, and the four `TestStrictSched_*` tripwires. The
+   bodies now run; what still fails is a client/server pair completing a
+   call/reply, which is matching and routing. This is the largest single
+   block of honest misses in the suite and the highest-value item here.
+3. **The three newly-found defects** under "The correction", each with a
+   tripwire test carrying its diagnosis: the injected message that never
+   reaches a driver-bound PTC (user-facing, the C/C++ test-port path, so
+   arguably ahead of item 2), the stopped `alive` component that cannot be
+   restarted, and interleave not suspending a blocked branch.
+4. **Bucket 3 clusters**, one precise, narrowly-scoped analysis pass at a
+   time. 102 of the 178 real misses expect `reject`, so the remaining
+   match-rate does live here — but see the 2026-06-17 triage above: none of
+   it is low-hanging, spread across 23 clusters, and matching-core changes
+   regress easily.
+5. **Wire `runtime/codec`.** Filed here rather than under real execution:
    it is worth only ~2 real-execution conversions but up to 13 match-rate
    fixes, all of them the `22_communication_operations` `reject->pass`
    cluster that needs decoding to actually *fail* on malformed input,
@@ -462,10 +564,10 @@ What remains:
    currently match through it. Note that `encvalue_o` / `decvalue_o` now
    produce real bytes for bitstrings and records (1d) — that is a handful
    of shapes, not the bridge.
-5. **Do not** pursue cross-module symbol resolution via `ttcn3/types` as a
+6. **Do not** pursue cross-module symbol resolution via `ttcn3/types` as a
    conformance lever. `TypeOf` handles literals and operators only, so
    this means writing a symbol table from scratch, while the existing
    flat-directory hack in `conformance.go` already gets 454 of the 555
    nominally-unresolvable files executing and matching. Measured return:
    one file.
-6. Leave **Bucket 2** as-is unless the suite revision is reconciled.
+7. Leave **Bucket 2** as-is unless the suite revision is reconciled.
