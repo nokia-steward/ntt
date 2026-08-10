@@ -13,8 +13,12 @@ Updates, relative to the repository root:
   - docs/conformance/current-misses.md   (human-readable summary)
   - docs/conformance/history.json        (one entry per day, replaced on re-run)
 
-Only run this after a full-suite execution with NO regression: the
-baseline note chain documents monotonic progress, slice by slice.
+The baseline records the LAST MEASUREMENT, not a high-water mark. It can
+move down: removing engine behaviour that existed only to make fixtures
+pass lowers it on purpose, and the note chain says so. The ratchet that
+actually prevents an accidental regression is `--regress` on the
+conformance command, enforced per commit by CI - that is where a drop
+has to be justified, not here.
 """
 
 import argparse
@@ -138,14 +142,11 @@ def update_baseline(report, note):
     old_rate = baseline["pass_rate"]
     old_matched = baseline["matched"]
     new_rate = round(report["pass_rate"], 2)
-    if report["matched"] < old_matched:
-        sys.exit(f"refusing to lower the baseline: report has "
-                 f"{report['matched']} matched, baseline {old_matched}")
     if report["matched"] == old_matched:
         print(f"baseline unchanged ({old_matched} matched); note not added")
         return
     delta = report["matched"] - old_matched
-    entry = (f"{old_rate:.2f}% -> {new_rate:.2f}% (+{delta} matched, {note}). "
+    entry = (f"{old_rate:.2f}% -> {new_rate:.2f}% ({delta:+d} matched, {note}). "
              f"PRIOR: {baseline['note']}")
     baseline["matched"] = report["matched"]
     baseline["skipped"] = report["skipped"]
