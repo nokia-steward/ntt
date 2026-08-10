@@ -1,20 +1,23 @@
 {
- "summary": "ran 4948 files: 4769 matched, 23 skipped (96.83% match rate)",
- "source": "/tmp/p1.json",
- "miss_count": 179,
+ "summary": "ran 4948 files: 4744 matched, 23 skipped (96.32% match rate)",
+ "source": "/tmp/p2c.json",
+ "miss_count": 204,
  "outcomes": {
-  "reject->pass": 102,
+  "reject->pass": 75,
   "pass->error": 51,
+  "reject->none": 27,
+  "pass->none": 26,
   "->": 23,
-  "pass->parse-error": 2,
-  "none->pass": 1
+  "pass->parse-error": 2
  },
  "chapters": [
   {
    "chapter": "core_language/22_communication_operations",
-   "misses": 66,
+   "misses": 71,
    "outcomes": {
-    "reject->pass": 21,
+    "reject->pass": 19,
+    "pass->none": 5,
+    "reject->none": 2,
     "pass->error": 45
    }
   },
@@ -23,15 +26,17 @@
    "misses": 34,
    "outcomes": {
     "->": 9,
-    "reject->pass": 25
+    "reject->pass": 13,
+    "reject->none": 12
    }
   },
   {
    "chapter": "core_language/05_basic_language_elements",
    "misses": 20,
    "outcomes": {
-    "reject->pass": 17,
-    "->": 3
+    "reject->pass": 16,
+    "->": 3,
+    "reject->none": 1
    }
   },
   {
@@ -39,30 +44,43 @@
    "misses": 16,
    "outcomes": {
     "->": 2,
-    "reject->pass": 14
+    "reject->pass": 11,
+    "reject->none": 3
+   }
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "misses": 16,
+   "outcomes": {
+    "reject->pass": 2,
+    "pass->none": 14
+   }
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "misses": 9,
+   "outcomes": {
+    "reject->none": 1,
+    "reject->pass": 4,
+    "pass->none": 2,
+    "->": 1,
+    "pass->error": 1
    }
   },
   {
    "chapter": "core_language/09_test_configurations",
    "misses": 8,
    "outcomes": {
-    "reject->pass": 7,
-    "pass->error": 1
-   }
-  },
-  {
-   "chapter": "core_language/16_functions_altsteps_testcases",
-   "misses": 7,
-   "outcomes": {
-    "reject->pass": 5,
-    "->": 1,
+    "reject->none": 4,
+    "reject->pass": 3,
     "pass->error": 1
    }
   },
   {
    "chapter": "core_language/20_statement_and_operations_for_alt",
-   "misses": 5,
+   "misses": 8,
    "outcomes": {
+    "pass->none": 3,
     "pass->error": 2,
     "reject->pass": 3
    }
@@ -86,7 +104,8 @@
    "chapter": "core_language/B_matching_incoming_values",
    "misses": 3,
    "outcomes": {
-    "reject->pass": 3
+    "reject->pass": 1,
+    "reject->none": 2
    }
   },
   {
@@ -112,32 +131,32 @@
    }
   },
   {
-   "chapter": "core_language/21_configuration_operations",
-   "misses": 2,
-   "outcomes": {
-    "reject->pass": 2
-   }
-  },
-  {
    "chapter": "core_language/27_specifying_attributes",
    "misses": 2,
    "outcomes": {
     "->": 1,
-    "reject->pass": 1
+    "reject->none": 1
    }
   },
   {
-   "chapter": "core_language/23_timer_operations",
+   "chapter": "core_language/19_basic_program_statements",
    "misses": 1,
    "outcomes": {
-    "none->pass": 1
+    "pass->none": 1
+   }
+  },
+  {
+   "chapter": "core_language/C_predefined_functions",
+   "misses": 1,
+   "outcomes": {
+    "pass->none": 1
    }
   },
   {
    "chapter": "core_language/D_preprocessing_macros",
    "misses": 1,
    "outcomes": {
-    "reject->pass": 1
+    "reject->none": 1
    }
   }
  ],
@@ -281,8 +300,8 @@
   {
    "chapter": "core_language/05_basic_language_elements",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/05_basic_language_elements/0504_parametrization/0504_toplevel/NegSyn_0504_forbidden_parametrization_001.ttcn",
    "message": ""
   },
@@ -329,56 +348,56 @@
   {
    "chapter": "core_language/06_types_and_values",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/06_types_and_values/0601_basic_types_and_values/060102_subtyping_of_basic_types/06010205_pattern_subtyping_of_character_string_types/NegSyn_06010205_StringPattern_002.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060201_record_type_and_values/06020101_referencing_fields_of_record_type/NegSem_06020101_ReferencingRecordFields_001.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060201_record_type_and_values/060201_toplevel/NegSem_060201_RecordTypeValues_001.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060202_set_type_and_values/NegSem_060202_SetTypeValues_001.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060202_set_type_and_values/NegSem_060202_SetTypeValues_002.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060203_records_and_sets_of_single_types/NegSem_060203_records_and_sets_of_single_types_001.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060203_records_and_sets_of_single_types/NegSem_060203_records_and_sets_of_single_types_002.ttcn",
    "message": ""
   },
@@ -457,16 +476,16 @@
   {
    "chapter": "core_language/06_types_and_values",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_002.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_003.ttcn",
    "message": ""
   },
@@ -537,24 +556,24 @@
   {
    "chapter": "core_language/06_types_and_values",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/06_types_and_values/0603_type_compatibility/060301_non-structured_types/NegSem_060301_non_structured_types_005.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/06_types_and_values/0603_type_compatibility/060301_non-structured_types/NegSem_060301_non_structured_types_006.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/06_types_and_values/0603_type_compatibility/060301_non-structured_types/NegSem_060301_non_structured_types_010.ttcn",
    "message": ""
   },
@@ -609,24 +628,24 @@
   {
    "chapter": "core_language/09_test_configurations",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/09_test_configurations/0901_communication_ports/NegSem_0901_Communication_ports_001.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/09_test_configurations",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/09_test_configurations/0901_communication_ports/NegSem_0901_Communication_ports_002.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/09_test_configurations",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/09_test_configurations/0901_communication_ports/NegSem_0901_Communication_ports_003.ttcn",
    "message": ""
   },
@@ -665,8 +684,8 @@
   {
    "chapter": "core_language/09_test_configurations",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/09_test_configurations/0902_test_system_interface/NegSem_0902_Communication_ports_001.ttcn",
    "message": ""
   },
@@ -729,24 +748,24 @@
   {
    "chapter": "core_language/15_templates",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_011.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/15_templates",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_012.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/15_templates",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_013.ttcn",
    "message": ""
   },
@@ -833,8 +852,8 @@
   {
    "chapter": "core_language/16_functions_altsteps_testcases",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/NegSem_160102_predefined_functions_009.ttcn",
    "message": ""
   },
@@ -844,6 +863,14 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/NegSem_160102_predefined_functions_039.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/Sem_160102_predefined_functions_091.ttcn",
    "message": ""
   },
   {
@@ -885,6 +912,46 @@
    "outcome": "pass->error",
    "relpath": "core_language/16_functions_altsteps_testcases/1602_altsteps/160201_invoking_altsteps/Sem_160201_invoking_altsteps_004.ttcn",
    "message": "test system deadlocked: every component is blocked and no timer can fire"
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/16_functions_altsteps_testcases/1602_altsteps/1602_toplevel/Sem_1602_toplevel_004.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/19_basic_program_statements",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/19_basic_program_statements/1909_stop_statement/Sem_1909_stop_statement_004.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2003_the_repeat_statement/Sem_2003_the_repeat_statement_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2003_the_repeat_statement/Sem_2003_the_repeat_statement_003.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2003_the_repeat_statement/Sem_2003_the_repeat_statement_004.ttcn",
+   "message": ""
   },
   {
    "chapter": "core_language/20_statement_and_operations_for_alt",
@@ -943,6 +1010,118 @@
    "message": ""
   },
   {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/Sem_210101_connect_and_map_operations_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/Sem_210101_connect_and_map_operations_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/Sem_210101_connect_and_map_operations_003.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/Sem_210101_connect_and_map_operations_004.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210102_disconnect_and_unmap_operations/Sem_210102_disconnect_and_unmap_operations_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210102_disconnect_and_unmap_operations/Sem_210102_disconnect_and_unmap_operations_002.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210102_disconnect_and_unmap_operations/Sem_210102_disconnect_and_unmap_operations_003.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210102_disconnect_and_unmap_operations/Sem_210102_disconnect_operation_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/21_configuration_operations/2103_test_component_operations/210303_stop_test_component/Sem_210303_Stop_test_component_005.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/21_configuration_operations/2103_test_component_operations/210303_stop_test_component/Sem_210303_Stop_test_component_006.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/21_configuration_operations/2103_test_component_operations/210303_stop_test_component/Sem_210303_Stop_test_component_007.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/21_configuration_operations/2103_test_component_operations/210303_stop_test_component/Sem_210303_Stop_test_component_008.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/21_configuration_operations/2103_test_component_operations/210303_stop_test_component/Sem_210303_Stop_test_component_009.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/21_configuration_operations/2103_test_component_operations/210303_stop_test_component/Sem_210303_Stop_test_component_010.ttcn",
+   "message": ""
+  },
+  {
    "chapter": "core_language/22_communication_operations",
    "expected": "reject",
    "actual": "pass",
@@ -976,6 +1155,14 @@
   },
   {
    "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/22_communication_operations/2202_message_based_communication/220202_receive_operation/Sem_220202_ReceiveOperation_031.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
    "expected": "reject",
    "actual": "pass",
    "outcome": "reject->pass",
@@ -992,6 +1179,14 @@
   },
   {
    "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/22_communication_operations/2202_message_based_communication/220203_trigger_operation/Sem_220203_TriggerOperation_029.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
    "expected": "reject",
    "actual": "pass",
    "outcome": "reject->pass",
@@ -1001,9 +1196,25 @@
   {
    "chapter": "core_language/22_communication_operations",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_020.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/Sem_220301_CallOperation_011.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/Sem_220301_CallOperation_013.ttcn",
    "message": ""
   },
   {
@@ -1169,8 +1380,8 @@
   {
    "chapter": "core_language/22_communication_operations",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220306_catch_operation/NegSyn_220306_catch_operation_003.ttcn",
    "message": ""
   },
@@ -1471,11 +1682,11 @@
    "message": "test system deadlocked: every component is blocked and no timer can fire"
   },
   {
-   "chapter": "core_language/23_timer_operations",
-   "expected": "none",
-   "actual": "pass",
-   "outcome": "none->pass",
-   "relpath": "core_language/23_timer_operations/2303_the_stop_timer_operation/Sem_2303_timer_stop_004.ttcn",
+   "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_121.ttcn",
    "message": ""
   },
   {
@@ -1513,8 +1724,8 @@
   {
    "chapter": "core_language/27_specifying_attributes",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/27_specifying_attributes/2707_optional_attributes/NegSem_2707_OptionalAttributes_002.ttcn",
    "message": ""
   },
@@ -1529,24 +1740,32 @@
   {
    "chapter": "core_language/B_matching_incoming_values",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0104_matching_attributes_of_values/B010402_ifPresent_indicator/NegSem_B010402_ifPresent_indicator_001.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/B_matching_incoming_values",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0105_matching_character_pattern/B010504_match_referenced_characters/NegSem_B010504_match_referenced_characters_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/C_predefined_functions",
+   "expected": "pass",
+   "actual": "none",
+   "outcome": "pass->none",
+   "relpath": "core_language/C_predefined_functions/C06_Other_functions/C0602_The_testcasename_function/Sem_C0602_The_testcasename_function_001.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/D_preprocessing_macros",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
+   "actual": "none",
+   "outcome": "reject->none",
    "relpath": "core_language/D_preprocessing_macros/D05_macro_scope/NegSem_D05_macro_scope_001.ttcn",
    "message": ""
   },

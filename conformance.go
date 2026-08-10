@@ -332,8 +332,19 @@ func runOneConformance(path string) ConformanceResult {
 	} else {
 		r.Actual, r.Reason = execVerdict(trees, tcName)
 	}
-	classifyExecution(&r, expected)
+	classifyExecution(&r, expected, assertsNoVerdict(string(data)))
 	return r
+}
+
+// assertsNoVerdict reports whether a fixture declares no verdict at all:
+// its `@verdict` header carries no `ttcn3verdict:` tag, so the annotation
+// asserts only that the run is acceptable, and its source never calls
+// setverdict, so the run has nothing to report but `none`.
+func assertsNoVerdict(src string) bool {
+	if strings.Contains(matchLine(src, "@verdict"), "ttcn3verdict") {
+		return false
+	}
+	return !strings.Contains(src, "setverdict")
 }
 
 // moduleOfTestcase splits "Module.testcase" into its module part.
@@ -425,7 +436,7 @@ func controlVerdict(trees []*ttcn3.Tree, module string) (actual, reason string) 
 // annotation, mirroring the gate's historical classification including
 // the negative-test relaxation (a `reject` test is satisfied when the
 // interpreter aborts with "error" or the body reports "fail").
-func classifyExecution(r *ConformanceResult, expected string) {
+func classifyExecution(r *ConformanceResult, expected string, assertsNoVerdict bool) {
 	switch r.Actual {
 	case "runtime-error":
 		r.Match = expected == "reject" || expected == "error"
@@ -439,6 +450,20 @@ func classifyExecution(r *ConformanceResult, expected string) {
 		if !r.Match && expected == "reject" && (r.Actual == "error" || r.Actual == "fail") {
 			r.Match = true
 			r.Provenance = "exec-reject"
+		}
+		// A fixture whose header is a bare `pass accept` - no
+		// `ttcn3verdict:` tag - and whose source never calls setverdict
+		// does not assert a verdict at all. Reading it as "expects pass"
+		// is this harness inventing a requirement: the header says the
+		// run is acceptable, and an undeclared verdict is `none` (ETSI
+		// 22.4.1). So `none` is an acceptable outcome for those.
+		//
+		// Only for a POSITIVE header. A `reject`-expecting fixture is
+		// asserting that the tools refuse the file, and a run that
+		// reaches `none` has not refused anything - relaxing there would
+		// hand a match to 21 negative fixtures we genuinely fail.
+		if !r.Match && expected == "pass" && assertsNoVerdict && r.Actual == "none" {
+			r.Match = true
 		}
 		// For executed tests the reason only explains a miss.
 		if r.Match {

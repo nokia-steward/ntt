@@ -454,21 +454,13 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 	// re-uses a daemon port number fails with "socket error".
 	drainAllPortMaps(exec)
 
-	v := exec.GetVerdict()
-	// A testcase that never calls setverdict ends with `pass` (ETSI ES
-	// 201 873-1 clause 22.4.1: an undeclared verdict resolves to pass).
-	// The test is "was one declared", not "is it none" — a body that
-	// explicitly sets none must keep it, because a control part's
-	// execute() can branch on the value (Sem_2601_ExecuteStatement_004).
-	//
-	// This also papers over 64 files whose body does call setverdict but
-	// never reaches it: see docs/conformance/remaining-work.md. Removing
-	// the coercion is a prerequisite for Sem_2303_timer_stop_004 and has
-	// to come after those are fixed, not before.
-	if !exec.VerdictWasSet() {
-		v = runtime.PassVerdict
-	}
-	return v, exec.Reason(), nil
+	// An undeclared verdict is `none` (ETSI ES 201 873-1 clause 22.4.1).
+	// It used to be coerced to `pass` here, which read the clause as "a
+	// testcase that says nothing passes" - but the clause says the verdict
+	// starts at none and setverdict is what moves it. The coercion also
+	// fabricated a verdict for files whose setverdict is never reached,
+	// which is a defect to fix rather than paper over.
+	return exec.GetVerdict(), exec.Reason(), nil
 }
 
 // bindTestcaseParams binds each formal parameter of the testcase to

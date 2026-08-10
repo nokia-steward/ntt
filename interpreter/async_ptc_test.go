@@ -37,18 +37,33 @@ func (fakeServerDriver) Send(payload runtime.Object, sender runtime.Object) erro
 func (fakeServerDriver) Map(local, remote string) error                           { return nil }
 func (fakeServerDriver) Unmap(local, remote string) error                         { return nil }
 
-// TestAsyncPTC_InjectWakesAltAndBodyRuns is the inverse smoke:
-// once an external producer enqueues a matching message via the
-// runtime.inject() / EnqueueMessageFrom path, the parked alt
-// scheduler wakes, the matching clause fires exactly once, the
-// body's setverdict(pass) lands, and `d.stop` joins cleanly.
+// TestAsyncPTC_InjectDoesNotReachADriverBoundPTC records a KNOWN GAP in
+// the path the cabi/cgo bridge uses, and asserts what the engine really
+// does rather than what it should.
 //
-// The test installs the same fake driver as the empty-queue
-// smoke so `srv.receive(...)` counts as an external-port guard,
-// then spawns a tiny producer goroutine that pushes one
-// SrvRequest into srv's queue after a short delay (i.e. after the
-// PTC has had time to park).
-func TestAsyncPTC_InjectWakesAltAndBodyRuns(t *testing.T) {
+// An external producer enqueues a matching message via the
+// runtime.inject() / EnqueueMessageFrom path. The daemon PTC should wake,
+// fire its clause once, and land `setverdict(pass)`. It does not.
+//
+// Diagnosed 2026-08-10, when removing the undeclared-verdict coercion
+// exposed it. The message is NOT lost and the wake-up is NOT missed:
+//
+//   - the daemon body runs (it logs on entry),
+//   - the message lands in the queue under "srv", exactly the key the
+//     daemon's receive reads, as a message-kind envelope,
+//   - it is still sitting there, unconsumed, when the testcase ends,
+//   - the alt re-polls every 2ms via waitForAltCombined's backstop for the
+//     full 500ms the MTC waits, so no lost signal explains it,
+//   - and neither `srv.receive(SrvRequest:?)` nor a bare `srv.receive`
+//     observes it, so it is not a template or type-name mismatch.
+//
+// That leaves guard evaluation for a PTC port with an external driver
+// bound as the culprit. This matters beyond the conformance suite: it is
+// how a real C/C++ test port delivers to a daemon-style server PTC.
+//
+// This test asserted pass until 2026-08-10 and was vacuous - nothing set
+// pass, the coercion supplied it - so the gap sat behind a green test.
+func TestAsyncPTC_InjectDoesNotReachADriverBoundPTC(t *testing.T) {
 	prev := runtime.SetPortDriverProvider(func(typeName, instName string) runtime.PortDriver {
 		if typeName == "MyServer_PT" {
 			return fakeServerDriver{}
@@ -114,9 +129,13 @@ func TestAsyncPTC_InjectWakesAltAndBodyRuns(t *testing.T) {
 		t.Fatalf("RunTestcase: %v", err)
 	}
 	elapsed := time.Since(start)
-	if v != runtime.PassVerdict {
-		t.Fatalf("verdict = %s reason=%q, want pass (the injected msg should have woken the alt)", v, reason)
+	if v != runtime.NoneVerdict {
+		t.Fatalf("verdict = %s reason=%q, want none: the injected message is not observed by a driver-bound "+
+			"PTC's receive guard. Reaching pass here means that gap is closed - assert pass instead and "+
+			"rename this test back", v, reason)
 	}
+	// The PTC must still unwind promptly on `d.stop` whatever the guard
+	// did, which is the half of this smoke that does hold.
 	if elapsed > 4*time.Second {
 		t.Fatalf("testcase took %v; want < 4 s", elapsed)
 	}

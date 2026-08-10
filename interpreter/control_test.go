@@ -107,16 +107,22 @@ func TestControl_ExplicitNoneVerdictSurvives(t *testing.T) {
 	}
 }
 
-// TestControl_UndeclaredVerdictResolvesToPass is the other half of the
-// same rule: a body that never calls setverdict still yields pass.
-func TestControl_UndeclaredVerdictResolvesToPass(t *testing.T) {
+// TestControl_UndeclaredVerdictStaysNone is the other half of the same
+// rule: a body that never calls setverdict ends at `none`, the value the
+// verdict starts at (ETSI 22.4.1).
+//
+// This asserted `pass` until 2026-08-10, when the engine coerced an
+// undeclared verdict. That reading made a testcase which does nothing look
+// successful, and fabricated a verdict for bodies whose setverdict is
+// never reached.
+func TestControl_UndeclaredVerdictStaysNone(t *testing.T) {
 	v, reason := runControl(t, "M", `module M {
 		type component C {}
 		testcase tc_silent() runs on C { }
 		control { execute(tc_silent()); }
 	}`)
-	if v != runtime.PassVerdict {
-		t.Fatalf("verdict = %s (%s), want pass (an undeclared verdict resolves to pass)", v, reason)
+	if v != runtime.NoneVerdict {
+		t.Fatalf("verdict = %s (%s), want none (a testcase that never sets a verdict has not passed)", v, reason)
 	}
 }
 

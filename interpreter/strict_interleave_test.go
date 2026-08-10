@@ -10,6 +10,29 @@ import (
 	"github.com/nokia/ntt/ttcn3"
 )
 
+// wantNoneProcCommGap asserts a KNOWN GAP: a procedure-communication
+// testcase whose PTC bodies never run, so nothing in it sets a verdict.
+//
+// `comp.start(f)` does not execute a body containing a procedure operation
+// (startBodyShouldSkip in interpreter/interpreter.go); a syntactic model
+// stands in for it. So in these testcases neither the server's `getcall`
+// nor its safety timer nor the client's `call` happens at all - not the
+// server accepting, not the timer firing, nothing.
+//
+// The four tests below asserted `pass` until 2026-08-10 and every one was
+// vacuous: the engine coerced an undeclared verdict to pass, so a testcase
+// in which nothing ran looked successful and the behaviours they describe
+// were never exercised. They are kept, pointed at the truth, as tripwires:
+// when PTC bodies really run, each of these fails and has to be restored
+// to asserting what its name claims.
+func wantNoneProcCommGap(t *testing.T, v runtime.Verdict, reason, claim string) {
+	t.Helper()
+	if v != runtime.NoneVerdict {
+		t.Fatalf("verdict = %s (%s), want none: the PTC bodies are skipped, so nothing sets a verdict. "+
+			"A verdict here means bodies now run - restore this test to asserting %s", v, reason, claim)
+	}
+}
+
 // TestStrictSched_GetcallSenderGuardNotCorrupted covers C1: a server whose
 // getcall is gated on a `[v == null]` boolean guard and binds the caller via
 // `-> sender v` must still accept the call under the scheduler. The
@@ -48,9 +71,7 @@ func TestStrictSched_GetcallSenderGuardNotCorrupted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
-	if v != runtime.PassVerdict {
-		t.Fatalf("verdict = %s (%s), want pass (getcall sender-guard must not be corrupted)", v, reason)
-	}
+	wantNoneProcCommGap(t, v, reason, "pass: the getcall sender-guard must not be corrupted")
 }
 
 // TestStrictSched_CallTimeoutCatchFires covers C3: the timeout duration D of
@@ -92,9 +113,7 @@ func TestStrictSched_CallTimeoutCatchFires(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
-	if v != runtime.PassVerdict {
-		t.Fatalf("verdict = %s (%s), want pass (catch(timeout) must fire when the call is unanswered)", v, reason)
-	}
+	wantNoneProcCommGap(t, v, reason, "pass: catch(timeout) must fire when the call is unanswered")
 }
 
 // TestStrictSched_CallReplyBeatsTimeout is C3's ordering guard: when a
@@ -138,9 +157,7 @@ func TestStrictSched_CallReplyBeatsTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
-	if v != runtime.PassVerdict {
-		t.Fatalf("verdict = %s (%s), want pass (a matching reply must beat catch(timeout))", v, reason)
-	}
+	wantNoneProcCommGap(t, v, reason, "pass: a matching reply must beat catch(timeout)")
 }
 
 // TestStrictSched_MulticastCallTargetsOnly covers non-blocking multicast
@@ -385,9 +402,7 @@ func TestStrictSched_AnyPortGetcallBindsRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
-	if v != runtime.PassVerdict {
-		t.Fatalf("verdict = %s (%s), want pass (any port.getcall must bind its redirect)", v, reason)
-	}
+	wantNoneProcCommGap(t, v, reason, "pass: any port.getcall must bind its redirect")
 }
 
 // TestStrictSched_ForkMessagePeers covers the coop fork model: a sender

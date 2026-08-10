@@ -21,7 +21,10 @@ func parse(t *testing.T, src string) *ttcn3.Tree {
 	return tree
 }
 
-func TestRunTestcase_DefaultsToPass(t *testing.T) {
+// A testcase that never calls setverdict ends at `none`: the verdict
+// starts there and only setverdict moves it (ETSI 22.4.1). Asserted `pass`
+// until 2026-08-10, while the engine coerced an undeclared verdict.
+func TestRunTestcase_UndeclaredVerdictStaysNone(t *testing.T) {
 	tree := parse(t, `module M {
         testcase tc_empty() runs on C {}
     }`)
@@ -29,8 +32,8 @@ func TestRunTestcase_DefaultsToPass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTestcase: %v", err)
 	}
-	if v != runtime.PassVerdict {
-		t.Errorf("verdict = %s, want pass", v)
+	if v != runtime.NoneVerdict {
+		t.Errorf("verdict = %s, want none", v)
 	}
 }
 
