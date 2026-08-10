@@ -1871,7 +1871,34 @@ func (t *TestcaseExec) SchedPark(id int64, deadline float64, hasTimer bool, stop
 	if t.sched == nil {
 		return false, false
 	}
-	return t.sched.park(id, deadline, hasTimer, stop)
+	re, st := t.sched.park(id, deadline, hasTimer, stop)
+	if !re && !st {
+		t.reportDeadlock()
+	}
+	return re, st
+}
+
+// reportDeadlock records a terminal scheduler deadlock as an `error`
+// verdict: every component was blocked with no timer able to fire, so the
+// test system - not the test - failed.
+//
+// The inference holds because the loopback model has no outside: once
+// every participant is parked and the clock cannot advance, nothing can
+// ever arrive. With an external port driver installed that stops being
+// true, since a real peer may still send, so there the participants are
+// released to conclude as they always did rather than being told the run
+// is dead.
+//
+// `error` outranks every other verdict in SetVerdict's aggregation, so it
+// wins over a `pass` the body had already set. That is deliberate: a
+// verdict reached before the test system broke is not worth reporting.
+func (t *TestcaseExec) reportDeadlock() {
+	if HasPortDriverProvider() {
+		return
+	}
+	t.SetVerdict(ErrorVerdict,
+		"test system deadlocked: every component is blocked and no timer can fire")
+	t.Stop()
 }
 
 // portQualPrefix tags a component-qualified port key. The leading NUL

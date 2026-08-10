@@ -243,16 +243,13 @@ func (c *coopScheduler) handoffLocked() {
 		c.grantLocked(id)
 		return
 	}
-	// Nothing can ever fire: deadlock. Release all parked participants so
-	// their blocked alts conclude without matching.
-	//
-	// A TTCN-3 alt with no matching alternative and no [else] should
-	// block, not conclude - that is what Sem_2601_ExecuteStatement_003
-	// asks for, and leaving the participants parked does produce the
-	// `error` it expects. It also turns 51 other files into timeouts,
-	// because their alts cannot fire for reasons of our own: this release
-	// is what lets them fall through to a verdict. See
-	// docs/conformance/remaining-work.md.
+	// Nothing can ever fire: every component is blocked and no timer can
+	// advance the clock. That is a terminal deadlock, and in the loopback
+	// model it is provable - no event can arrive from outside - so the
+	// participants are released to unwind and TestcaseExec.SchedPark
+	// turns it into an `error` verdict. Releasing without reporting is
+	// what used to let a blocked alt conclude as though it had simply not
+	// matched.
 	if len(c.blocked) > 0 {
 		c.deadlock = true
 		for id := range c.blocked {

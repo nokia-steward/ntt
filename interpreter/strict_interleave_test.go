@@ -553,15 +553,29 @@ func TestStrictInterleave_TakesEachBranchOnce(t *testing.T) {
 	}
 }
 
-// TestStrictInterleave_BlockingBodyRunsOnSnapshotEvaluator covers a branch
-// body that itself blocks, which used to be handed to the legacy best-effort
-// evaluator on the assumption that it needed cooperative suspend/resume.
+// TestStrictInterleave_MutuallyDependentBranchesDeadlock records a KNOWN GAP,
+// and is deliberately asserted against what the engine really does rather
+// than what the spec asks for.
+//
 // Mirrors Sem_2004_InterleaveStatement_001: branch 1's body sends the message
 // that enables branch 2's guard and then blocks in a nested alt waiting for
 // the message branch 2's body sends, so the two branches are mutually
-// dependent. The snapshot evaluator must still take both branches and reach
-// the nested alt's verdict.
-func TestStrictInterleave_BlockingBodyRunsOnSnapshotEvaluator(t *testing.T) {
+// dependent. ETSI 20.4 wants both branches taken and the nested alt to reach
+// `setverdict(pass)`, which needs the interleave to SUSPEND a blocked branch
+// body and run another ready branch - coroutine-style interleaving inside a
+// single component, which we do not implement. We run branch 1's body to
+// completion, so its nested alt waits for a message nobody will send.
+//
+// A nested alt inside an interleave body is legal as far as the suite is
+// concerned: NegSem_2004_InterleaveStatement_001 has the same construct and
+// blames its `for` loop for the rejection, not the alt.
+//
+// This test asserted `pass` until 2026-08-10 and was vacuous: nothing set
+// pass. The nested alt never matched, so `setverdict(pass)` never ran, and
+// the verdict came from the engine's undeclared-verdict coercion. Both that
+// coercion and the deadlock release that let the blocked alt conclude have
+// since been removed, so the deadlock is now reported for what it is.
+func TestStrictInterleave_MutuallyDependentBranchesDeadlock(t *testing.T) {
 	src := `module M {
 		type port P message { inout integer }
 		type component C { port P p1, p2 }
@@ -587,8 +601,10 @@ func TestStrictInterleave_BlockingBodyRunsOnSnapshotEvaluator(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
-	if v != runtime.PassVerdict {
-		t.Fatalf("verdict = %s (%s), want pass (a blocking branch body must still reach its nested alt)", v, reason)
+	if v != runtime.ErrorVerdict {
+		t.Fatalf("verdict = %s (%s), want error: branch 1's body blocks on a message only branch 2 can send, "+
+			"and we do not suspend a blocked branch body, so this deadlocks. Reaching pass here would mean "+
+			"branch-level suspension now works - update this test and Sem_2004_InterleaveStatement_001 with it", v, reason)
 	}
 }
 
