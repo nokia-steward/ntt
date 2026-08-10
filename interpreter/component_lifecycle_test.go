@@ -8,6 +8,44 @@ import (
 	"github.com/nokia/ntt/ttcn3"
 )
 
+// TestRestartAfterStop_DoesNotRunTheNewBehaviour records a KNOWN GAP and
+// asserts what the engine really does. ETSI 21.3.3: `stop` on a component
+// created with `alive` only suspends it, and it stays reusable, so the
+// second body below should run and set pass. Mirrors
+// Sem_210303_Stop_test_component_005..010.
+//
+// Two distinct layers were diagnosed on 2026-08-10 and neither is fixed:
+//
+//  1. `start` does not clear the component's `done` flag, so the following
+//     `v_ptc.done` is satisfied by the PREVIOUS run and the MTC walks off
+//     the end of the testcase before the new body is scheduled. Clearing it
+//     on start (ETSI 21.3.2 / 21.3.6) is correct and necessary.
+//  2. With that cleared, the re-forked PTC goroutine still never gets
+//     scheduled, so the MTC blocks on `done` and the run deadlocks. That
+//     is the layer still unexplained.
+//
+// Both were tried together and the corpus moved -7 / +0, so the change was
+// reverted rather than absorbed. When it is done properly this test fails
+// and must be restored to asserting pass.
+func TestRestartAfterStop_DoesNotRunTheNewBehaviour(t *testing.T) {
+	v, reason := runSched(t, "M.tc", `module M {
+		type component C {}
+		function f_first() runs on C { timer t := 1.0; t.start; t.timeout; }
+		function f_second() runs on C { setverdict(pass); }
+		testcase tc() runs on C system C {
+			var C v_ptc := C.create("PTC") alive;
+			v_ptc.start(f_first());
+			v_ptc.stop;
+			v_ptc.start(f_second());
+			v_ptc.done;
+		}
+	}`)
+	if v == runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s): the restarted body now runs - restore this test to asserting pass "+
+			"and re-check Sem_210303_Stop_test_component_005..010", v, reason)
+	}
+}
+
 func TestAliveComponentStopPreservesStateAfterConnectedSend(t *testing.T) {
 	tree := parse(t, `module ComponentLifecycleSmoke {
 		type port P message { inout charstring; }
