@@ -10523,6 +10523,20 @@ func evalPortMap(opName string, n *syntax.CallExpr, env runtime.Scope) (runtime.
 				compID = cur.ID
 			}
 			exec.RecordPortMap(compID, local, remote)
+			// Register the (name -> per-PTC qualified key) resolution the
+			// inject path relies on: a real external test port (goport /
+			// cabi bridge) delivers inbound traffic by the port TYPE name
+			// or the bare instance name, but the receiving PTC reads its
+			// per-component qualified key ("\x00c<id>/p", from PortKey).
+			// Without this the injected message lands under the bare name
+			// and the driver-bound PTC's receive never observes it
+			// (TestAsyncPTC_InjectWakesAltAndBodyRuns). Register both the
+			// type name and the bare instance name so either injector
+			// spelling resolves to the live queue.
+			if pt := exec.PortType(localName); pt != "" {
+				runtime.RegisterPortTypeInstance(pt, local)
+			}
+			runtime.RegisterPortTypeInstance(localName, local)
 			// Release the start-barrier this PTC's parent
 			// goroutine is parked on. Without this signal,
 			// the parent's next `d.start` would race ahead

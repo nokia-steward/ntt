@@ -725,6 +725,15 @@ func (t *TestcaseExec) EnqueueMessage(port string, msg Object) {
 // parked on an empty-queue real-port-receive guard can re-enter
 // the first-pass walk. Capacity-1 channel: coalesces bursts.
 func (t *TestcaseExec) EnqueueMessageFrom(port string, msg Object, sender Object) {
+	// An external test port injects by the port TYPE name or the bare
+	// instance name; resolve it to the receiving PTC's per-component
+	// qualified queue key ("\x00c<id>/p") registered at map time, so a
+	// driver-bound PTC's receive (which reads the qualified key) observes
+	// the message. No-op for loopback: already-qualified keys and
+	// unregistered names are not in the (type/bare -> qualified) map.
+	if resolved := LookupPortTypeInstance(port); resolved != "" {
+		port = resolved
+	}
 	t.mu.Lock()
 	if t.ports == nil {
 		t.ports = map[string][]PortMessage{}
