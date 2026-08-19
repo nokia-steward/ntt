@@ -26,6 +26,7 @@ var (
 	execOutDir   string
 	execPatterns []string
 	execTimeout  time.Duration
+	execLive     bool
 
 	// deterministicSafetyTimeout bounds a testcase when the user gave no
 	// --timeout, so a body the scheduler does not yet fully model can't
@@ -51,11 +52,17 @@ Testcases can be selected three ways, in priority order:
 
 If none of those produce a list, exec runs every discovered testcase.
 
-Execution model: a deterministic discrete-event scheduler (one component runs
-at a time; virtual time advances only at quiescence) plus a virtual clock.
-Concurrent components interleave deterministically and timers fire virtually,
-so verdicts are reproducible and free of real-clock races. A 60s per-testcase
-safety timeout applies when --timeout is unset.`,
+Execution model (default): a deterministic discrete-event scheduler (one
+component runs at a time; virtual time advances only at quiescence) plus a
+virtual clock. Concurrent components interleave deterministically and timers
+fire virtually, so verdicts are reproducible and free of real-clock races. A
+60s per-testcase safety timeout applies when --timeout is unset.
+
+--live: the same strict engine on a REAL clock with real concurrency, for
+driving a live system under test (real timers pace real I/O). Verdicts are
+functional, not reproducible-by-construction; use --timeout to bound a run.
+The virtual-clock default is for reproducible conformance; --live is for
+testing (and later profiling) an external SUT over mapped/networked ports.`,
 		RunE: runExec,
 	}
 )
@@ -69,6 +76,10 @@ func init() {
 	ExecCommand.Flags().DurationVar(&execTimeout, "timeout", 0,
 		"per-testcase wall-clock limit (0 = none). A 60s safety default applies "+
 			"when unset.")
+	ExecCommand.Flags().BoolVar(&execLive, "live", false,
+		"run the strict engine on a REAL clock (real timers, real concurrency) "+
+			"for driving a live system under test, instead of the default "+
+			"deterministic virtual clock. Bound runs with --timeout.")
 }
 
 func runExec(cmd *cobra.Command, args []string) error {
@@ -81,6 +92,7 @@ func runExec(cmd *cobra.Command, args []string) error {
 	files := collectTTCN3Files(args)
 	driver := newStaticDriver(files)
 	driver.timeout = execTimeout
+	driver.live = execLive
 
 	var cfgFile *cfg.File
 	if execCfgPath != "" {
@@ -163,6 +175,7 @@ type staticDriver struct {
 	modParam map[string]string      // last cfg's [MODULE_PARAMETERS], threaded into RunTestcaseWith
 
 	timeout time.Duration // --timeout: per-testcase wall-clock bound (0 = none)
+	live    bool          // --live: real clock + real concurrency (drive a live SUT) instead of the virtual clock
 }
 
 // SetModuleParameters records the [MODULE_PARAMETERS] map produced
@@ -259,13 +272,17 @@ func (d *staticDriver) Run(ctx context.Context, name string) (rreport.Verdict, s
 			fmt.Fprintf(os.Stderr, "module parameter: %s\n", msg)
 		},
 	}
-	// The deterministic discrete-event scheduler (single-runner token,
-	// virtual time advancing only at quiescence) plus the virtual clock, so
-	// concurrent components interleave deterministically and verdicts are
-	// reproducible. A per-testcase deadline bounds a body the evaluator does
-	// not yet fully model.
-	opts.DeterministicClock = true
-	opts.DeterministicScheduler = true
+	// Default: the deterministic discrete-event scheduler (single-runner
+	// token, virtual time advancing only at quiescence) plus the virtual
+	// clock, so concurrent components interleave deterministically and
+	// verdicts are reproducible. Under --live (d.live) the same strict engine
+	// runs on the REAL clock with real concurrency — timers pace real I/O
+	// against a live SUT — so leave both off. A per-testcase deadline still
+	// bounds the run either way.
+	if !d.live {
+		opts.DeterministicClock = true
+		opts.DeterministicScheduler = true
+	}
 	timeout := d.timeout
 	if timeout <= 0 {
 		timeout = deterministicSafetyTimeout

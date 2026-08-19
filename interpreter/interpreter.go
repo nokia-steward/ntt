@@ -672,7 +672,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			case "running":
 				return runtime.NewBool(timerStillRunning(th, env))
 			case "read":
-				return timerReadVirtual(th, env)
+				return timerRead(th, env)
 			case "timeout":
 				det := deterministicClockEnabled(env)
 				schedActive := deterministicSchedulerEnabled(env)
@@ -6772,7 +6772,7 @@ func evalTimerMethod(th *runtime.TimerHandle, sel syntax.Expr, n *syntax.CallExp
 	case "running":
 		return runtime.NewBool(timerStillRunning(th, env))
 	case "read":
-		return timerReadVirtual(th, env)
+		return timerRead(th, env)
 	case "timeout":
 		det := deterministicClockEnabled(env)
 		schedActive := deterministicSchedulerEnabled(env)
@@ -8091,16 +8091,36 @@ func tickTimer(th *runtime.TimerHandle) bool {
 	return true
 }
 
-// timerReadVirtual reports the elapsed time of a running timer as the
-// difference between the per-testcase virtual clock and the timer's
-// virtual start, clamped to [0, Duration]. A stopped, expired or
-// never-started timer reads 0.0 (ETSI 23.4). The virtual clock is only
-// advanced by `T.timeout` (see evalTimerMethod), so a freshly started
-// timer reads exactly 0.0 (Sem_2304_001) while a read taken after a
-// sibling `T2.timeout` sees that timeout's duration (Sem_2304_003).
-func timerReadVirtual(th *runtime.TimerHandle, env runtime.Scope) runtime.Object {
+// timerRead reports the elapsed time of a running timer (ETSI 23.4),
+// clamped to [0, Duration]; a stopped/expired/never-started timer reads 0.0.
+//
+// Under the virtual clock it is the difference between the per-testcase
+// virtual clock and the timer's virtual start. The virtual clock advances
+// only at `T.timeout` (see evalTimerMethod), so a freshly started timer
+// reads 0.0 (Sem_2304_001) while a read after a sibling `T2.timeout` sees
+// that timeout's duration (Sem_2304_003).
+//
+// On the REAL clock (e.g. `ntt exec --live`), the virtual clock does not
+// advance mid-run, so read the actual wall-clock elapsed from the timer's
+// real StartedAt instead. This lets a script measure real latency —
+// `t.start; <request/response>; t.read` — the enabler for profiling a live
+// SUT.
+func timerRead(th *runtime.TimerHandle, env runtime.Scope) runtime.Object {
 	if th == nil || !th.Running {
 		return runtime.Float(0.0)
+	}
+	if !useVirtualClock(env) {
+		if th.StartedAt.IsZero() {
+			return runtime.Float(0.0)
+		}
+		elapsed := time.Since(th.StartedAt).Seconds()
+		if elapsed < 0 {
+			elapsed = 0
+		}
+		if th.Duration > 0 && elapsed > th.Duration {
+			elapsed = th.Duration
+		}
+		return runtime.Float(elapsed)
 	}
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil {

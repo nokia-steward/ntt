@@ -75,3 +75,42 @@ func TestExecDeterministicForkedPTC(t *testing.T) {
 		t.Fatalf("verdict = %s (%s), want pass", v, reason)
 	}
 }
+
+// TestExecLiveUsesRealClock covers the `ntt exec --live` wiring: with
+// live=true the staticDriver leaves both deterministic knobs off, so the
+// same strict engine runs on the REAL clock — a 0.4s timer takes real wall
+// time to fire, whereas the virtual-clock default fires it instantly. This
+// is the mode that paces real I/O against a live SUT.
+func TestExecLiveUsesRealClock(t *testing.T) {
+	src := `module m {
+		type component C {}
+		testcase tc() runs on C system C {
+			timer t := 0.4;
+			t.start;
+			t.timeout;
+			setverdict(pass);
+		}
+	}`
+	path := writeTC(t, src)
+
+	// Virtual-clock default: fires instantly.
+	dv := newStaticDriver([]string{path})
+	startV := time.Now()
+	if v, reason, err := dv.Run(context.Background(), "m.tc"); err != nil || v != rreport.Pass {
+		t.Fatalf("virtual Run: verdict=%s reason=%q err=%v, want pass", v, reason, err)
+	}
+	if elapsed := time.Since(startV); elapsed > 200*time.Millisecond {
+		t.Fatalf("virtual clock took %v for a 0.4s timer; should fire instantly", elapsed)
+	}
+
+	// --live: real clock paces the 0.4s timer for real.
+	dl := newStaticDriver([]string{path})
+	dl.live = true
+	startL := time.Now()
+	if v, reason, err := dl.Run(context.Background(), "m.tc"); err != nil || v != rreport.Pass {
+		t.Fatalf("live Run: verdict=%s reason=%q err=%v, want pass", v, reason, err)
+	}
+	if elapsed := time.Since(startL); elapsed < 350*time.Millisecond {
+		t.Fatalf("live clock took only %v for a 0.4s timer; the real clock should pace it", elapsed)
+	}
+}
