@@ -10922,6 +10922,9 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 			sender = cur
 		}
 	}
+	// Profiling: count the send and stamp it so the next receive on this
+	// port can sample the round-trip latency (no-op unless profiling is on).
+	exec.RecordSend(port)
 	// External port-driver path: when the testcase has a driver
 	// bound to this port instance (typically a C/C++ test port
 	// registered via the cabi/cgo bridge), route the payload
@@ -11268,6 +11271,13 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 			} else {
 				applyRedirect(info.redirect, head, env)
 			}
+		}
+		// Profiling: a message receive that consumed a value samples the
+		// round-trip latency against the last send on this port. Procedure
+		// receives (getcall/getreply/catch) are excluded — the latency model
+		// pairs a message send with its response.
+		if consume && !isProc {
+			exec.RecordReceive(port)
 		}
 		return runtime.NewBool(true)
 	}

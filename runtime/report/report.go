@@ -16,6 +16,7 @@ import (
 	"fmt"
 	"html/template"
 	"io"
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -63,21 +64,53 @@ func Aggregate(vs ...Verdict) Verdict {
 
 // Case is the outcome of a single testcase run.
 type Case struct {
-	Name    string
-	Module  string
-	Verdict Verdict
+	Name     string
+	Module   string
+	Verdict  Verdict
 	Duration time.Duration
-	Reason  string
-	Logs    []string
+	Reason   string
+	Logs     []string
+
+	// Metrics carries per-port performance data from a profiling run
+	// (ntt exec --profile). Nil for a functional run.
+	Metrics *Metrics
+}
+
+// Metrics is a testcase's performance profile: one entry per port that
+// carried traffic during a real-clock (live-SUT) run.
+type Metrics struct {
+	Ports []PortMetric
+}
+
+// PortMetric aggregates one port's traffic over a profiling run.
+type PortMetric struct {
+	Port       string
+	Sends      int
+	Receives   int
+	Throughput float64 // receives per second over the testcase duration
+	Latency    LatencyStats
+}
+
+// LatencyStats summarises the send->receive round-trip samples for a port
+// (one sample per send answered by a receive). Zero-valued when the port
+// produced no samples.
+type LatencyStats struct {
+	Count int
+	Min   time.Duration
+	Max   time.Duration
+	Mean  time.Duration
+	P50   time.Duration
+	P90   time.Duration
+	P99   time.Duration
 }
 
 // Suite is the outcome of running one or more testcases. Suites
 // aggregate to a single verdict via Aggregate over the case verdicts.
 type Suite struct {
-	Name    string
-	Cases   []Case
-	Start   time.Time
-	End     time.Time
+	Name  string
+	Cases []Case
+	Start time.Time
+	End   time.Time
 }
 
 // Verdict returns the aggregate verdict over all cases.
@@ -116,20 +149,20 @@ func (s *Suite) CountBy() map[Verdict]int {
 // ---------------------------------------------------------------------------
 
 type junitTestsuite struct {
-	XMLName  xml.Name `xml:"testsuite"`
-	Name     string   `xml:"name,attr"`
-	Tests    int      `xml:"tests,attr"`
-	Failures int      `xml:"failures,attr"`
-	Errors   int      `xml:"errors,attr"`
-	Skipped  int      `xml:"skipped,attr"`
-	Time     float64  `xml:"time,attr"`
+	XMLName  xml.Name    `xml:"testsuite"`
+	Name     string      `xml:"name,attr"`
+	Tests    int         `xml:"tests,attr"`
+	Failures int         `xml:"failures,attr"`
+	Errors   int         `xml:"errors,attr"`
+	Skipped  int         `xml:"skipped,attr"`
+	Time     float64     `xml:"time,attr"`
 	Cases    []junitCase `xml:"testcase"`
 }
 
 type junitCase struct {
-	ClassName string  `xml:"classname,attr,omitempty"`
-	Name      string  `xml:"name,attr"`
-	Time      float64 `xml:"time,attr"`
+	ClassName string    `xml:"classname,attr,omitempty"`
+	Name      string    `xml:"name,attr"`
+	Time      float64   `xml:"time,attr"`
 	Failure   *junitMsg `xml:"failure,omitempty"`
 	Errored   *junitMsg `xml:"error,omitempty"`
 	Skipped   *struct{} `xml:"skipped,omitempty"`
@@ -219,29 +252,67 @@ func RenderTAP(w io.Writer, s *Suite) error {
 
 // RenderJSON writes the suite as pretty JSON.
 func RenderJSON(w io.Writer, s *Suite) error {
-	type wireCase struct {
-		Name     string  `json:"name"`
-		Module   string  `json:"module,omitempty"`
-		Verdict  string  `json:"verdict"`
-		Duration float64 `json:"duration_seconds"`
-		Reason   string  `json:"reason,omitempty"`
+	type wireLatency struct {
+		Count  int     `json:"count"`
+		MinMs  float64 `json:"min_ms"`
+		MaxMs  float64 `json:"max_ms"`
+		MeanMs float64 `json:"mean_ms"`
+		P50Ms  float64 `json:"p50_ms"`
+		P90Ms  float64 `json:"p90_ms"`
+		P99Ms  float64 `json:"p99_ms"`
 	}
-	type wire struct {
+	type wirePort struct {
+		Port       string      `json:"port"`
+		Sends      int         `json:"sends"`
+		Receives   int         `json:"receives"`
+		Throughput float64     `json:"throughput_per_second"`
+		Latency    wireLatency `json:"latency"`
+	}
+	type wireCase struct {
 		Name     string     `json:"name"`
+		Module   string     `json:"module,omitempty"`
 		Verdict  string     `json:"verdict"`
 		Duration float64    `json:"duration_seconds"`
+		Reason   string     `json:"reason,omitempty"`
+		Ports    []wirePort `json:"ports,omitempty"`
+	}
+	ms := func(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
+	type wire struct {
+		Name     string         `json:"name"`
+		Verdict  string         `json:"verdict"`
+		Duration float64        `json:"duration_seconds"`
 		Counts   map[string]int `json:"counts"`
-		Cases    []wireCase `json:"cases"`
+		Cases    []wireCase     `json:"cases"`
 	}
 	cs := make([]wireCase, 0, len(s.Cases))
 	for _, c := range s.Cases {
-		cs = append(cs, wireCase{
+		wc := wireCase{
 			Name:     c.Name,
 			Module:   c.Module,
 			Verdict:  c.Verdict.String(),
 			Duration: c.Duration.Seconds(),
 			Reason:   c.Reason,
-		})
+		}
+		if c.Metrics != nil {
+			for _, p := range c.Metrics.Ports {
+				wc.Ports = append(wc.Ports, wirePort{
+					Port:       p.Port,
+					Sends:      p.Sends,
+					Receives:   p.Receives,
+					Throughput: p.Throughput,
+					Latency: wireLatency{
+						Count:  p.Latency.Count,
+						MinMs:  ms(p.Latency.Min),
+						MaxMs:  ms(p.Latency.Max),
+						MeanMs: ms(p.Latency.Mean),
+						P50Ms:  ms(p.Latency.P50),
+						P90Ms:  ms(p.Latency.P90),
+						P99Ms:  ms(p.Latency.P99),
+					},
+				})
+			}
+		}
+		cs = append(cs, wc)
 	}
 	counts := map[string]int{}
 	for v, n := range s.CountBy() {
@@ -349,6 +420,75 @@ func SortCases(cs []Case) {
 		}
 		return cs[i].Name < cs[j].Name
 	})
+}
+
+// ---------------------------------------------------------------------------
+// Profiling
+// ---------------------------------------------------------------------------
+
+// LatencyStatsFromSamples summarises round-trip latency samples: count,
+// min/max/mean and the p50/p90/p99 nearest-rank percentiles. An empty
+// input yields a zero LatencyStats.
+func LatencyStatsFromSamples(samples []time.Duration) LatencyStats {
+	n := len(samples)
+	if n == 0 {
+		return LatencyStats{}
+	}
+	sorted := make([]time.Duration, n)
+	copy(sorted, samples)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i] < sorted[j] })
+	var sum time.Duration
+	for _, d := range sorted {
+		sum += d
+	}
+	pct := func(p float64) time.Duration {
+		// Nearest-rank: index = ceil(p/100 * n) - 1, clamped.
+		idx := int(math.Ceil(p/100*float64(n))) - 1
+		if idx < 0 {
+			idx = 0
+		}
+		if idx >= n {
+			idx = n - 1
+		}
+		return sorted[idx]
+	}
+	return LatencyStats{
+		Count: n,
+		Min:   sorted[0],
+		Max:   sorted[n-1],
+		Mean:  sum / time.Duration(n),
+		P50:   pct(50),
+		P90:   pct(90),
+		P99:   pct(99),
+	}
+}
+
+// RenderProfile writes a human-readable performance profile: per testcase,
+// one row per port with send/receive counts, throughput and latency
+// percentiles. Cases without metrics (a functional run) are listed with a
+// note so the output is never silently empty.
+func RenderProfile(w io.Writer, s *Suite) error {
+	fmt.Fprintf(w, "profile %q: %s (%d cases in %s)\n", s.Name, s.Verdict(), len(s.Cases), s.Duration())
+	any := false
+	for _, c := range s.Cases {
+		if c.Metrics == nil || len(c.Metrics.Ports) == 0 {
+			continue
+		}
+		any = true
+		fmt.Fprintf(w, "\n%s.%s  [%s]  %s\n", c.Module, c.Name, c.Verdict, c.Duration)
+		fmt.Fprintf(w, "  %-20s %8s %8s %12s %10s %10s %10s %10s\n",
+			"port", "sent", "recv", "recv/s", "min", "p50", "p90", "p99")
+		for _, p := range c.Metrics.Ports {
+			l := p.Latency
+			fmt.Fprintf(w, "  %-20s %8d %8d %12.1f %10s %10s %10s %10s\n",
+				p.Port, p.Sends, p.Receives, p.Throughput,
+				l.Min, l.P50, l.P90, l.P99)
+		}
+	}
+	if !any {
+		fmt.Fprintln(w, "  (no per-port metrics captured; run with --profile against a live SUT)")
+	}
+	return nil
 }
 
 // VerdictFromString parses a TTCN-3 verdict keyword. Unknown text

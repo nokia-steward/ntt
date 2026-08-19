@@ -27,6 +27,7 @@ var (
 	execPatterns []string
 	execTimeout  time.Duration
 	execLive     bool
+	execProfile  bool
 
 	// deterministicSafetyTimeout bounds a testcase when the user gave no
 	// --timeout, so a body the scheduler does not yet fully model can't
@@ -70,7 +71,7 @@ testing (and later profiling) an external SUT over mapped/networked ports.`,
 func init() {
 	RootCommand.AddCommand(ExecCommand)
 	ExecCommand.Flags().StringVar(&execCfgPath, "cfg", "", "TTCN-3 module configuration file")
-	ExecCommand.Flags().StringVar(&execFormat, "format", "text", "report format: text|json|junit|tap|html")
+	ExecCommand.Flags().StringVar(&execFormat, "format", "text", "report format: text|json|junit|tap|html|profile")
 	ExecCommand.Flags().StringVar(&execOutDir, "out", "", "directory to write the report file (default: stdout)")
 	ExecCommand.Flags().StringSliceVar(&execPatterns, "pattern", nil, "testcase patterns to run (glob)")
 	ExecCommand.Flags().DurationVar(&execTimeout, "timeout", 0,
@@ -80,6 +81,12 @@ func init() {
 		"run the strict engine on a REAL clock (real timers, real concurrency) "+
 			"for driving a live system under test, instead of the default "+
 			"deterministic virtual clock. Bound runs with --timeout.")
+	ExecCommand.Flags().BoolVar(&execProfile, "profile", false,
+		"capture per-port performance metrics (send/receive counts, throughput, "+
+			"send->receive latency percentiles) and report them. Implies --live "+
+			"(latency is only meaningful on the real clock). Pair with "+
+			"--format=profile for a metrics table, or --format=json for machine "+
+			"output.")
 }
 
 func runExec(cmd *cobra.Command, args []string) error {
@@ -92,7 +99,10 @@ func runExec(cmd *cobra.Command, args []string) error {
 	files := collectTTCN3Files(args)
 	driver := newStaticDriver(files)
 	driver.timeout = execTimeout
-	driver.live = execLive
+	// --profile implies --live: real-clock latency is meaningless on the
+	// virtual clock, where timers fire instantly.
+	driver.live = execLive || execProfile
+	driver.profiling = execProfile
 
 	var cfgFile *cfg.File
 	if execCfgPath != "" {
@@ -148,6 +158,8 @@ func writeReport(w io.Writer, format string, suite *rreport.Suite) error {
 		return rreport.RenderJSON(w, suite)
 	case "html":
 		return rreport.RenderHTML(w, suite)
+	case "profile":
+		return rreport.RenderProfile(w, suite)
 	case "text", "":
 		fmt.Fprintf(w, "suite %q: %s (%d cases in %s)\n", suite.Name, suite.Verdict(), len(suite.Cases), suite.Duration())
 		for _, c := range suite.Cases {
@@ -176,6 +188,9 @@ type staticDriver struct {
 
 	timeout time.Duration // --timeout: per-testcase wall-clock bound (0 = none)
 	live    bool          // --live: real clock + real concurrency (drive a live SUT) instead of the virtual clock
+
+	profiling   bool             // --profile: capture per-port performance metrics
+	lastMetrics *rreport.Metrics // metrics from the most recent Run, for LastMetrics
 }
 
 // SetModuleParameters records the [MODULE_PARAMETERS] map produced
@@ -290,11 +305,73 @@ func (d *staticDriver) Run(ctx context.Context, name string) (rreport.Verdict, s
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	opts.Context = runCtx
+
+	// Profiling: capture the raw per-port stats at run end and aggregate
+	// them (with the wall-clock duration for throughput) into report
+	// metrics that LastMetrics hands to the executor.
+	d.lastMetrics = nil
+	var rawStats map[string]runtime.PortStat
+	if d.profiling {
+		opts.Profiling = true
+		opts.OnProfile = func(s map[string]runtime.PortStat) { rawStats = s }
+	}
+	start := time.Now()
 	v, reason, err := interpreter.RunTestcaseWith(trees, name, opts)
+	if d.profiling {
+		d.lastMetrics = buildMetrics(rawStats, time.Since(start))
+	}
 	if err != nil {
 		return rreport.Error, err.Error(), nil
 	}
 	return mapVerdict(v), reason, nil
+}
+
+// LastMetrics returns the performance profile of the most recent Run (nil
+// when profiling is off or the run captured nothing). Implements
+// exec.MetricsProvider; the executor calls it right after each Run.
+func (d *staticDriver) LastMetrics() *rreport.Metrics { return d.lastMetrics }
+
+// buildMetrics aggregates the interpreter's raw per-port capture into a
+// report profile: latency percentiles per port, and throughput as
+// receives over the testcase's wall-clock duration. Ports are ordered by
+// key so the report is stable. Returns nil when nothing was captured.
+func buildMetrics(raw map[string]runtime.PortStat, dur time.Duration) *rreport.Metrics {
+	if len(raw) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(raw))
+	for k := range raw {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	m := &rreport.Metrics{}
+	for _, k := range keys {
+		st := raw[k]
+		var thr float64
+		if dur > 0 {
+			thr = float64(st.Receives) / dur.Seconds()
+		}
+		m.Ports = append(m.Ports, rreport.PortMetric{
+			Port:       displayPortKey(k),
+			Sends:      st.Sends,
+			Receives:   st.Receives,
+			Throughput: thr,
+			Latency:    rreport.LatencyStatsFromSamples(st.Latencies),
+		})
+	}
+	return m
+}
+
+// displayPortKey strips the internal per-component qualifier
+// ("\x00c<id>/name", from runtime.PortKey) so a profile shows the plain
+// port instance name.
+func displayPortKey(k string) string {
+	if len(k) > 0 && k[0] == 0 {
+		if i := strings.IndexByte(k, '/'); i >= 0 {
+			return k[i+1:]
+		}
+	}
+	return k
 }
 
 // mapVerdict translates the interpreter's runtime.Verdict (a string

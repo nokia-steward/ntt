@@ -63,6 +63,17 @@ type TestcaseOptions struct {
 	// Nil = unbounded.
 	Context context.Context
 
+	// Profiling turns on per-port performance capture (send/receive
+	// counts and send->receive round-trip latency). Meaningful only on the
+	// real clock (a live SUT); the virtual-clock path measures no real
+	// time. When set, OnProfile receives the raw capture at run end.
+	Profiling bool
+
+	// OnProfile, if non-nil and Profiling is set, is called once at the end
+	// of the run with the per-port capture (keyed by qualified port key)
+	// so the caller can aggregate it into a report.
+	OnProfile func(map[string]runtime.PortStat)
+
 	// actualArgs carries actual parameters already evaluated by a
 	// control part's execute(). Nil means "mine them from the control
 	// part statically", which is what a directly-executed testcase does.
@@ -315,6 +326,15 @@ func newModuleEnv(trees []*ttcn3.Tree, modNode *syntax.Module, module string, op
 // mined statically from the source.
 func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3.Tree, modNode *syntax.Module, module, fnName string, tcNode *syntax.FuncDecl, opts TestcaseOptions) (verdict runtime.Verdict, reason string, err error) {
 	exec.SetDeterministicClock(opts.DeterministicClock)
+	// Per-port performance capture (real-clock live runs). Hand the raw
+	// capture back at run end, on every exit path including a recovered
+	// panic, so a partial profile is still reported.
+	if opts.Profiling {
+		exec.EnableProfiling()
+		if opts.OnProfile != nil {
+			defer func() { opts.OnProfile(exec.ProfileStats()) }()
+		}
+	}
 	// The cooperative scheduler is engaged after SetMTCID below (it needs
 	// the MTC's component id as the root participant).
 	// Cancellation: when the caller supplies a context, stop the
@@ -2672,6 +2692,7 @@ func evalPortReceiveBare(port string, env runtime.Scope, consume bool) bool {
 	}
 	if consume {
 		_, _ = exec.DequeueMessageFullLimited(port, limit)
+		exec.RecordReceive(port) // profiling: pair with the last send (no-op if off)
 	}
 	return true
 }

@@ -121,3 +121,71 @@ func TestSuite_VerdictAndCounts(t *testing.T) {
 		t.Errorf("CountBy = %v", counts)
 	}
 }
+
+func TestLatencyStatsFromSamples(t *testing.T) {
+	// Empty -> zero stats.
+	if got := report.LatencyStatsFromSamples(nil); got.Count != 0 {
+		t.Fatalf("empty: count=%d, want 0", got.Count)
+	}
+	// 1..10 ms. Nearest-rank: p50=idx ceil(.5*10)-1=4 -> 5ms; p90 idx 8 -> 9ms;
+	// p99 idx 9 -> 10ms; min 1ms, max 10ms, mean 5.5ms.
+	var s []time.Duration
+	for i := 1; i <= 10; i++ {
+		s = append(s, time.Duration(i)*time.Millisecond)
+	}
+	got := report.LatencyStatsFromSamples(s)
+	want := report.LatencyStats{
+		Count: 10,
+		Min:   1 * time.Millisecond,
+		Max:   10 * time.Millisecond,
+		Mean:  5500 * time.Microsecond,
+		P50:   5 * time.Millisecond,
+		P90:   9 * time.Millisecond,
+		P99:   10 * time.Millisecond,
+	}
+	if got != want {
+		t.Fatalf("stats=%+v, want %+v", got, want)
+	}
+}
+
+func TestRenderProfile(t *testing.T) {
+	s := &report.Suite{
+		Name:  "prof",
+		Start: time.Unix(0, 0),
+		End:   time.Unix(1, 0),
+		Cases: []report.Case{{
+			Module:   "m",
+			Name:     "tc",
+			Verdict:  report.Pass,
+			Duration: time.Second,
+			Metrics: &report.Metrics{Ports: []report.PortMetric{{
+				Port:       "p",
+				Sends:      3,
+				Receives:   3,
+				Throughput: 3.0,
+				Latency:    report.LatencyStatsFromSamples([]time.Duration{time.Millisecond, 2 * time.Millisecond, 3 * time.Millisecond}),
+			}}},
+		}},
+	}
+	var buf bytes.Buffer
+	if err := report.RenderProfile(&buf, s); err != nil {
+		t.Fatalf("RenderProfile: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"m.tc", "port", "p", "recv/s"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("profile output missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderProfileNoMetrics(t *testing.T) {
+	// A functional-only suite must not render silently empty.
+	var buf bytes.Buffer
+	if err := report.RenderProfile(&buf, sampleSuite()); err != nil {
+		t.Fatalf("RenderProfile: %v", err)
+	}
+	if !strings.Contains(buf.String(), "no per-port metrics") {
+		t.Fatalf("expected an explicit no-metrics note:\n%s", buf.String())
+	}
+}

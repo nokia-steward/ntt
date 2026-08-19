@@ -92,6 +92,15 @@ type TestcaseExec struct {
 	altFreeze       sync.Map // uint64 goroutine id -> map[string]int
 	altFreezeActive int32    // atomic; >0 while any freeze is set
 
+	// profiling turns on per-port performance capture (send/receive
+	// counts + send->receive round-trip latency samples). Set once at
+	// exec setup before the body runs, then only read, so the gate in
+	// RecordSend/RecordReceive needs no lock. Meaningful only on the real
+	// clock (a live SUT); the virtual-clock conformance path leaves it off.
+	profiling bool
+	profMu    sync.Mutex
+	portStats map[string]*portStat
+
 	// componentTimers records every timer started on each component so
 	// `any timer` / `all timer` (ETSI 23.7) can resolve the CURRENT
 	// component's running timers DYNAMICALLY — a timer started in a testcase
@@ -1562,6 +1571,95 @@ func (t *TestcaseExec) AltLimit(gid uint64, port string) (int, bool) {
 		return n, true
 	}
 	return 0, true
+}
+
+// portStat is the mutable per-port capture the exec keeps while
+// profiling. lastSendAt/pending pair a send with the next receive on the
+// same port to sample a request/response round-trip latency.
+type portStat struct {
+	sends      int
+	receives   int
+	lastSendAt time.Time
+	pending    bool
+	latencies  []time.Duration
+}
+
+// PortStat is an immutable snapshot of one port's profiling capture,
+// returned by ProfileStats.
+type PortStat struct {
+	Sends     int
+	Receives  int
+	Latencies []time.Duration // one sample per send answered by a receive
+}
+
+// EnableProfiling turns on per-port performance capture for this run.
+// Call once before the body starts.
+func (t *TestcaseExec) EnableProfiling() { t.profiling = true }
+
+// Profiling reports whether per-port capture is on (cheap gate for the
+// send/receive hot path).
+func (t *TestcaseExec) Profiling() bool { return t.profiling }
+
+// RecordSend notes an outgoing message on the qualified port key and
+// timestamps it so the next receive on that port can sample the
+// round-trip latency. No-op unless profiling is on.
+func (t *TestcaseExec) RecordSend(port string) {
+	if !t.profiling {
+		return
+	}
+	now := time.Now()
+	t.profMu.Lock()
+	s := t.portStatLocked(port)
+	s.sends++
+	s.lastSendAt = now
+	s.pending = true
+	t.profMu.Unlock()
+}
+
+// RecordReceive notes an inbound message on the qualified port key and,
+// when it answers a preceding send, records the send->receive latency.
+// No-op unless profiling is on.
+func (t *TestcaseExec) RecordReceive(port string) {
+	if !t.profiling {
+		return
+	}
+	now := time.Now()
+	t.profMu.Lock()
+	s := t.portStatLocked(port)
+	s.receives++
+	if s.pending {
+		s.latencies = append(s.latencies, now.Sub(s.lastSendAt))
+		s.pending = false
+	}
+	t.profMu.Unlock()
+}
+
+// portStatLocked returns the mutable stat for port, creating it on first
+// use. Caller holds profMu.
+func (t *TestcaseExec) portStatLocked(port string) *portStat {
+	if t.portStats == nil {
+		t.portStats = map[string]*portStat{}
+	}
+	s := t.portStats[port]
+	if s == nil {
+		s = &portStat{}
+		t.portStats[port] = s
+	}
+	return s
+}
+
+// ProfileStats returns an immutable snapshot of the per-port capture,
+// keyed by qualified port key. Empty when profiling was off.
+func (t *TestcaseExec) ProfileStats() map[string]PortStat {
+	t.profMu.Lock()
+	defer t.profMu.Unlock()
+	out := make(map[string]PortStat, len(t.portStats))
+	for k, s := range t.portStats {
+		lat := make([]time.Duration, len(s.latencies))
+		copy(lat, s.latencies)
+		out[k] = PortStat{Sends: s.sends, Receives: s.receives, Latencies: lat}
+	}
+	return out
 }
 
 // TestcaseExecKey is the env-store key under which the interpreter

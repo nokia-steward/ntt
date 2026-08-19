@@ -55,6 +55,15 @@ type ModuleParamSetter interface {
 	SetModuleParameters(params map[string]string) error
 }
 
+// MetricsProvider is the optional surface a Driver implements to expose a
+// per-testcase performance profile. The executor calls LastMetrics right
+// after each Run and attaches the result to that testcase's report.Case.
+// A driver that returns nil (or doesn't implement the interface) yields a
+// functional-only report.
+type MetricsProvider interface {
+	LastMetrics() *report.Metrics
+}
+
 // Options configures one executor invocation.
 type Options struct {
 	SuiteName string
@@ -110,13 +119,17 @@ func Run(ctx context.Context, opts Options) (*report.Suite, error) {
 				reason = err.Error()
 			}
 		}
-		suite.Cases = append(suite.Cases, report.Case{
+		c := report.Case{
 			Module:   moduleOf(name),
 			Name:     localName(name),
 			Verdict:  verdict,
 			Reason:   reason,
 			Duration: time.Since(caseStart),
-		})
+		}
+		if mp, ok := opts.Driver.(MetricsProvider); ok {
+			c.Metrics = mp.LastMetrics()
+		}
+		suite.Cases = append(suite.Cases, c)
 	}
 	suite.End = time.Now()
 	report.SortCases(suite.Cases)

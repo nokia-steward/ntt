@@ -2,13 +2,49 @@ package main
 
 import (
 	"context"
+	"io"
+	"net"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/nokia/ntt/runtime/port/tcpport"
 	rreport "github.com/nokia/ntt/runtime/report"
 )
+
+// startEchoServer spins up a local TCP echo server (bytes back verbatim,
+// newlines included) standing in for a live SUT, and returns its address
+// plus a stop func that closes the listener and joins its goroutines.
+func startEchoServer(t *testing.T) (addr string, stop func()) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer conn.Close()
+				io.Copy(conn, conn)
+			}()
+		}
+	}()
+	return ln.Addr().String(), func() {
+		ln.Close()
+		wg.Wait()
+	}
+}
 
 // writeTC writes a TTCN-3 source file to a temp dir and returns its path.
 func writeTC(t *testing.T, src string) string {
@@ -112,5 +148,82 @@ func TestExecLiveUsesRealClock(t *testing.T) {
 	}
 	if elapsed := time.Since(startL); elapsed < 350*time.Millisecond {
 		t.Fatalf("live clock took only %v for a 0.4s timer; the real clock should pace it", elapsed)
+	}
+}
+
+// TestExecProfileCapturesMetrics covers `ntt exec --profile`: a
+// request/response loop against a live TCP SUT yields a per-port profile
+// with matching send/receive counts, one latency sample per round trip,
+// and a positive throughput. Proves the whole stack — interpreter capture,
+// driver aggregation, LastMetrics — end to end over a real socket.
+func TestExecProfileCapturesMetrics(t *testing.T) {
+	addr, stop := startEchoServer(t)
+	defer stop()
+	tcpport.Register("P", addr)
+	t.Cleanup(tcpport.Reset)
+
+	path := writeTC(t, `module m {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 5.0;
+			map(self:p, system:p);
+			var integer i := 0;
+			while (i < 5) {
+				g.start;
+				p.send("ping");
+				alt {
+					[] p.receive("ping") { }
+					[] g.timeout { setverdict(fail, "no echo"); }
+				}
+				i := i + 1;
+			}
+			setverdict(pass);
+			unmap(self:p, system:p);
+		}
+	}`)
+	d := newStaticDriver([]string{path})
+	d.profiling = true
+	d.live = true
+
+	v, reason, err := d.Run(context.Background(), "m.tc")
+	if err != nil || v != rreport.Pass {
+		t.Fatalf("Run: verdict=%s reason=%q err=%v, want pass", v, reason, err)
+	}
+	m := d.LastMetrics()
+	if m == nil || len(m.Ports) != 1 {
+		t.Fatalf("metrics = %+v, want one port", m)
+	}
+	p := m.Ports[0]
+	if p.Port != "p" {
+		t.Fatalf("port name = %q, want %q", p.Port, "p")
+	}
+	if p.Sends != 5 || p.Receives != 5 {
+		t.Fatalf("sends=%d receives=%d, want 5/5", p.Sends, p.Receives)
+	}
+	if p.Latency.Count != 5 {
+		t.Fatalf("latency samples = %d, want 5", p.Latency.Count)
+	}
+	if p.Latency.Min <= 0 || p.Latency.Max < p.Latency.Min {
+		t.Fatalf("latency min/max = %s/%s, want a real positive range", p.Latency.Min, p.Latency.Max)
+	}
+	if p.Throughput <= 0 {
+		t.Fatalf("throughput = %f, want > 0", p.Throughput)
+	}
+}
+
+// TestExecNoProfileByDefault confirms a plain run carries no metrics, so
+// the functional path is untouched.
+func TestExecNoProfileByDefault(t *testing.T) {
+	path := writeTC(t, `module m {
+		type component C {}
+		testcase tc() runs on C system C { setverdict(pass); }
+	}`)
+	d := newStaticDriver([]string{path})
+	if _, _, err := d.Run(context.Background(), "m.tc"); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if m := d.LastMetrics(); m != nil {
+		t.Fatalf("LastMetrics = %+v, want nil without --profile", m)
 	}
 }
