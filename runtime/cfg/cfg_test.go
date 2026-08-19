@@ -92,3 +92,27 @@ b := 2
 		t.Errorf("ModuleParameters = %v", m)
 	}
 }
+
+func TestTestPortParameters(t *testing.T) {
+	src := `[TESTPORT_PARAMETERS]
+*.p.transport := "tcp"
+*.p.host := "127.0.0.1"
+*.p.port := "9000"
+mtc.q.address := "sut.example:5555"
+# a comment
+badkey := "ignored"
+`
+	f, _ := cfg.Parse(strings.NewReader(src))
+	got := f.TestPortParameters()
+	if len(got) != 4 {
+		t.Fatalf("got %d params, want 4: %+v", len(got), got)
+	}
+	// First entry: *.p.transport := "tcp" (quotes stripped).
+	if got[0].Component != "*" || got[0].Port != "p" || got[0].Param != "transport" || got[0].Value != "tcp" {
+		t.Fatalf("entry[0] = %+v", got[0])
+	}
+	// Specific component preserved; value unquoted.
+	if got[3].Component != "mtc" || got[3].Port != "q" || got[3].Param != "address" || got[3].Value != "sut.example:5555" {
+		t.Fatalf("entry[3] = %+v", got[3])
+	}
+}

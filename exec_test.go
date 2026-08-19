@@ -2,14 +2,17 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
 
+	"github.com/nokia/ntt/runtime/cfg"
 	"github.com/nokia/ntt/runtime/port/tcpport"
 	rreport "github.com/nokia/ntt/runtime/report"
 )
@@ -225,5 +228,68 @@ func TestExecNoProfileByDefault(t *testing.T) {
 	}
 	if m := d.LastMetrics(); m != nil {
 		t.Fatalf("LastMetrics = %+v, want nil without --profile", m)
+	}
+}
+
+// TestExecConfiguredTCPPort covers config-driven test-port wiring: a
+// [TESTPORT_PARAMETERS] block with transport=tcp is enough for a plain
+// `ntt exec` to register the built-in TCP port and drive a live SUT — no
+// user Go code. It exercises the .cfg -> registerConfiguredTestPorts ->
+// live round-trip path over a real socket.
+func TestExecConfiguredTCPPort(t *testing.T) {
+	addr, stop := startEchoServer(t)
+	defer stop()
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("split addr: %v", err)
+	}
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "t.cfg")
+	cfgSrc := fmt.Sprintf("[TESTPORT_PARAMETERS]\n*.p.transport := \"tcp\"\n*.p.host := %q\n*.p.port := %q\n", host, port)
+	if err := os.WriteFile(cfgPath, []byte(cfgSrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, _, err := cfg.Load(cfgPath)
+	if err != nil {
+		t.Fatalf("load cfg: %v", err)
+	}
+	if n := registerConfiguredTestPorts(f); n != 1 {
+		t.Fatalf("registered %d ports, want 1", n)
+	}
+	t.Cleanup(tcpport.Reset)
+
+	path := writeTC(t, `module m {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 5.0;
+			map(self:p, system:p);
+			g.start;
+			p.send("hi");
+			alt {
+				[] p.receive("hi") { setverdict(pass); }
+				[] g.timeout { setverdict(fail, "no reply from configured SUT"); }
+			}
+			unmap(self:p, system:p);
+		}
+	}`)
+	d := newStaticDriver([]string{path})
+	d.live = true // an external transport needs the real clock (as runExec sets)
+
+	v, reason, err := d.Run(context.Background(), "m.tc")
+	if err != nil || v != rreport.Pass {
+		t.Fatalf("Run: verdict=%s reason=%q err=%v, want pass", v, reason, err)
+	}
+}
+
+// TestRegisterConfiguredTestPorts_NonTCPIgnored confirms a non-tcp (or
+// address-less) transport registers nothing, so unrelated
+// [TESTPORT_PARAMETERS] entries are inert.
+func TestRegisterConfiguredTestPorts_NonTCPIgnored(t *testing.T) {
+	f, _ := cfg.Parse(strings.NewReader("[TESTPORT_PARAMETERS]\n*.p.transport := \"udp\"\n*.q.host := \"h\"\n"))
+	t.Cleanup(tcpport.Reset)
+	if n := registerConfiguredTestPorts(f); n != 0 {
+		t.Fatalf("registered %d ports, want 0 (udp + address-less should be ignored)", n)
 	}
 }

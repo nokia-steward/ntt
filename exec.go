@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"os"
 	"path/filepath"
 	"sort"
@@ -14,6 +15,7 @@ import (
 	"github.com/nokia/ntt/runtime"
 	"github.com/nokia/ntt/runtime/cfg"
 	"github.com/nokia/ntt/runtime/exec"
+	"github.com/nokia/ntt/runtime/port/tcpport"
 	rreport "github.com/nokia/ntt/runtime/report"
 	"github.com/nokia/ntt/ttcn3"
 	"github.com/nokia/ntt/ttcn3/syntax"
@@ -114,6 +116,13 @@ func runExec(cmd *cobra.Command, args []string) error {
 			fmt.Fprintf(os.Stderr, "cfg:%d: %s\n", d.Line, d.Message)
 		}
 		cfgFile = f
+		// Wire built-in test ports declared in [TESTPORT_PARAMETERS]. An
+		// external transport drives real I/O, which needs the real clock —
+		// switch to live so timers pace the network instead of firing
+		// instantly on the virtual clock.
+		if n := registerConfiguredTestPorts(cfgFile); n > 0 {
+			driver.live = true
+		}
 	}
 
 	selectors := make([]exec.Selector, 0, len(execPatterns))
@@ -146,6 +155,66 @@ func runExec(cmd *cobra.Command, args []string) error {
 	}
 
 	return writeReport(out, execFormat, suite)
+}
+
+// registerConfiguredTestPorts wires the built-in TCP test port for every
+// port declared with `transport := "tcp"` in the .cfg's
+// [TESTPORT_PARAMETERS], so a plain `ntt exec` drives a live SUT with no
+// user Go code. Returns how many ports were registered.
+//
+// Keys follow the Titan grammar `<component>.<port>.<param> := "value"`
+// (component is usually `*`, meaning any). Recognised params:
+//
+//	transport     "tcp" selects the built-in TCP port
+//	address       "host:port" (overrides host/port)
+//	host, port    combined into host:port when address is absent
+//	dial_timeout  a Go duration, e.g. "5s" (default 10s)
+//
+// Ports are keyed by instance name (the goport resolver matches it), so a
+// single address per port name is supported; a per-component address is a
+// follow-on.
+func registerConfiguredTestPorts(f *cfg.File) int {
+	byPort := map[string]map[string]string{}
+	var order []string
+	for _, p := range f.TestPortParameters() {
+		m := byPort[p.Port]
+		if m == nil {
+			m = map[string]string{}
+			byPort[p.Port] = m
+			order = append(order, p.Port)
+		}
+		// A specific component wins over a `*` wildcard for the same param,
+		// regardless of declaration order.
+		if _, ok := m[p.Param]; !ok || p.Component != "*" {
+			m[p.Param] = p.Value
+		}
+	}
+	n := 0
+	for _, port := range order {
+		params := byPort[port]
+		if !strings.EqualFold(params["transport"], "tcp") {
+			continue
+		}
+		addr := params["address"]
+		if addr == "" && params["host"] != "" && params["port"] != "" {
+			addr = net.JoinHostPort(params["host"], params["port"])
+		}
+		if addr == "" {
+			fmt.Fprintf(os.Stderr, "testport %q: transport=tcp but no address (need address, or host+port)\n", port)
+			continue
+		}
+		var opts []tcpport.Option
+		if d := params["dial_timeout"]; d != "" {
+			if dt, err := time.ParseDuration(d); err == nil {
+				opts = append(opts, tcpport.WithDialTimeout(dt))
+			} else {
+				fmt.Fprintf(os.Stderr, "testport %q: bad dial_timeout %q: %v\n", port, d, err)
+			}
+		}
+		tcpport.Register(port, addr, opts...)
+		n++
+	}
+	return n
 }
 
 func writeReport(w io.Writer, format string, suite *rreport.Suite) error {

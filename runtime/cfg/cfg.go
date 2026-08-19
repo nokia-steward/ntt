@@ -188,6 +188,53 @@ func (f *File) ExecuteList() []string {
 	return out
 }
 
+// TestPortParam is one parsed [TESTPORT_PARAMETERS] entry. The Titan
+// grammar keys these as `<component>.<port>.<param> := "value"`, where
+// component may be `*` (any component). Value has any surrounding double
+// quotes stripped.
+type TestPortParam struct {
+	Component string
+	Port      string
+	Param     string
+	Value     string
+}
+
+// TestPortParameters returns the [TESTPORT_PARAMETERS] section parsed into
+// (component, port, param, value) tuples in declaration order. Entries
+// whose key isn't the expected three dot-separated parts are skipped.
+func (f *File) TestPortParameters() []TestPortParam {
+	sec := f.Section("TESTPORT_PARAMETERS")
+	if sec == nil {
+		return nil
+	}
+	var out []TestPortParam
+	for _, st := range sec.Settings {
+		if st.Comment || st.Key == "" {
+			continue
+		}
+		parts := strings.SplitN(st.Key, ".", 3)
+		if len(parts) != 3 {
+			continue
+		}
+		out = append(out, TestPortParam{
+			Component: strings.TrimSpace(parts[0]),
+			Port:      strings.TrimSpace(parts[1]),
+			Param:     strings.TrimSpace(parts[2]),
+			Value:     unquote(st.Value),
+		})
+	}
+	return out
+}
+
+// unquote strips a single pair of surrounding double quotes from a .cfg
+// value, leaving unquoted values untouched.
+func unquote(s string) string {
+	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
+		return s[1 : len(s)-1]
+	}
+	return s
+}
+
 // ModuleParameters returns the [MODULE_PARAMETERS] settings as a map
 // from key to value text. Duplicate keys keep the last value, which
 // matches Titan's behaviour.
