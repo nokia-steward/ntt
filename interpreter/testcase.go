@@ -1901,8 +1901,24 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		}
 
 		// Snapshot pass: the first clause whose guard fires wins.
+		//
+		// Freeze the visible-message boundary for the duration of the guard
+		// scan (ETSI 20.2 snapshot). On the real-clock concurrent path a
+		// message arriving mid-scan (appended at a port's tail) must stay
+		// invisible until the next round, otherwise a later catch-all clause
+		// could match a message an earlier specific clause would have taken
+		// had it arrived one step sooner. Under the coop scheduler a single
+		// runner owns the token, so no arrival can interleave a scan and the
+		// freeze is skipped (behaviour byte-identical to before). The freeze
+		// is cleared before any matched body runs so body receives see live
+		// state.
 		var elseClause *syntax.CommClause
-		matched := false
+		var matchedClause *syntax.CommClause
+		altExec := runtime.FindTestcaseExec(env)
+		freeze := altExec != nil && !deterministicSchedulerEnabled(env)
+		if freeze {
+			altExec.BeginAltRound(goroutineID())
+		}
 		for _, s := range n.Body.Stmts {
 			cc, ok := s.(*syntax.CommClause)
 			if !ok {
@@ -1932,20 +1948,23 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 				}
 			}
 			if commGuardMatches(cc.Comm, env) {
-				matched = true
+				matchedClause = cc
 				defaultBranchFire() // no-op unless inside a runDefaults sweep
-				if cc.Body != nil {
-					if res := evalAltClauseBody(cc.Body, env); res == runtime.Repeat {
-						break
-					} else {
-						return res
-					}
-				}
-				return nil
+				break
 			}
 		}
-		if matched {
-			continue // a body returned Repeat -> re-snapshot
+		if freeze {
+			altExec.EndAltRound(goroutineID())
+		}
+		if matchedClause != nil {
+			if matchedClause.Body != nil {
+				if res := evalAltClauseBody(matchedClause.Body, env); res == runtime.Repeat {
+					continue // a body returned Repeat -> re-snapshot
+				} else {
+					return res
+				}
+			}
+			return nil
 		}
 		if elseClause != nil {
 			res := evalAltClauseBody(elseClause.Body, env)
@@ -2644,11 +2663,15 @@ func evalPortReceiveBare(port string, env runtime.Scope, consume bool) bool {
 		}
 		return false
 	}
-	if _, ok := exec.PeekMessage(port); !ok {
+	// ETSI 20.2 alt snapshot boundary (real-clock concurrent path only; -1
+	// otherwise, so behaviour is byte-identical off it): only a message
+	// queued when this alt round began is visible to the guard this round.
+	limit := altReceiveLimit(exec, port)
+	if _, ok := exec.PeekMessageFullLimited(port, limit); !ok {
 		return false
 	}
 	if consume {
-		_, _ = exec.DequeueMessage(port)
+		_, _ = exec.DequeueMessageFullLimited(port, limit)
 	}
 	return true
 }

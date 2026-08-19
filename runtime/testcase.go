@@ -7,6 +7,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -75,6 +76,21 @@ type TestcaseExec struct {
 	// conformance suite, where the SUT-under-test is typically the
 	// testcase itself echoing values back to itself.
 	ports map[string][]PortMessage
+
+	// altFreeze enforces the ETSI ES 201 873-1 §20.2 alt SNAPSHOT boundary
+	// on the real-clock concurrent path. Keyed by the alt-executing
+	// goroutine's id, it records each port's queue length captured at the
+	// current alt round's start; a receive guard this round only considers
+	// entries[:boundary], so a message that arrives mid-round (appended at
+	// the tail, index >= boundary) can't be matched until the next round.
+	// Without it, an earlier specific-template branch that peeks an empty
+	// queue can lose the message to a later catch-all branch that peeks it
+	// one step after it arrives. The coop scheduler is single-runner (live
+	// == snapshot, no mid-round arrivals), so it never sets a freeze; the
+	// atomic altFreezeActive gate keeps every peek on that hot path free of
+	// even a goroutine-id lookup.
+	altFreeze       sync.Map // uint64 goroutine id -> map[string]int
+	altFreezeActive int32    // atomic; >0 while any freeze is set
 
 	// componentTimers records every timer started on each component so
 	// `any timer` / `all timer` (ETSI 23.7) can resolve the CURRENT
@@ -758,12 +774,22 @@ func (t *TestcaseExec) PeekMessage(port string) (Object, bool) {
 // PeekMessageFull is PeekMessage but returns the full envelope so
 // callers can access the sender address.
 func (t *TestcaseExec) PeekMessageFull(port string) (PortMessage, bool) {
+	return t.PeekMessageFullLimited(port, -1)
+}
+
+// PeekMessageFullLimited is PeekMessageFull but only considers the first
+// `limit` queued entries (limit < 0 = all), for the alt snapshot boundary.
+func (t *TestcaseExec) PeekMessageFullLimited(port string, limit int) (PortMessage, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	// Skip procedure-comm envelopes (call/reply/exception): a
 	// message receive only ever observes message-kind entries, so a
 	// queued procedure call can never be consumed by `.receive`.
-	for _, m := range t.ports[port] {
+	q := t.ports[port]
+	if limit >= 0 && limit < len(q) {
+		q = q[:limit]
+	}
+	for _, m := range q {
 		if m.Kind == MsgMessage {
 			return m, true
 		}
@@ -1261,11 +1287,23 @@ func (t *TestcaseExec) DrainAllPortMaps() []PortMapEntry {
 // over any interleaved procedure-comm envelopes so a `.receive` never
 // dequeues a queued call/reply/exception.
 func (t *TestcaseExec) DequeueMessageFull(port string) (PortMessage, bool) {
+	return t.DequeueMessageFullLimited(port, -1)
+}
+
+// DequeueMessageFullLimited is DequeueMessageFull but only considers the
+// first `limit` queued entries (limit < 0 = all), for the alt snapshot
+// boundary.
+func (t *TestcaseExec) DequeueMessageFullLimited(port string, limit int) (PortMessage, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	q := t.ports[port]
-	for i, m := range q {
-		if m.Kind == MsgMessage {
+	hi := len(q)
+	if limit >= 0 && limit < hi {
+		hi = limit
+	}
+	for i := 0; i < hi; i++ {
+		if q[i].Kind == MsgMessage {
+			m := q[i]
 			t.ports[port] = append(q[:i], q[i+1:]...)
 			return m, true
 		}
@@ -1429,9 +1467,21 @@ func (t *TestcaseExec) ReceiveUnlock() { t.recvMu.Unlock() }
 // PeekKind returns the first envelope of the given kind on the port
 // without removing it, or (zero, false) when none is queued.
 func (t *TestcaseExec) PeekKind(port string, kind PortMsgKind) (PortMessage, bool) {
+	return t.PeekKindLimited(port, kind, -1)
+}
+
+// PeekKindLimited is PeekKind but only considers the first `limit` queued
+// entries (limit < 0 = all). Enforces the alt snapshot boundary: an
+// envelope that arrived after the round's snapshot (index >= limit) is
+// invisible this round. See the altFreeze field.
+func (t *TestcaseExec) PeekKindLimited(port string, kind PortMsgKind, limit int) (PortMessage, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
-	for _, m := range t.ports[port] {
+	q := t.ports[port]
+	if limit >= 0 && limit < len(q) {
+		q = q[:limit]
+	}
+	for _, m := range q {
 		if m.Kind == kind {
 			return m, true
 		}
@@ -1443,16 +1493,75 @@ func (t *TestcaseExec) PeekKind(port string, kind PortMsgKind) (PortMessage, boo
 // on the port, stepping over other-kind entries. Used by the
 // procedure receive operations (getcall / getreply / catch).
 func (t *TestcaseExec) DequeueKind(port string, kind PortMsgKind) (PortMessage, bool) {
+	return t.DequeueKindLimited(port, kind, -1)
+}
+
+// DequeueKindLimited is DequeueKind but only considers the first `limit`
+// queued entries (limit < 0 = all), for the alt snapshot boundary.
+func (t *TestcaseExec) DequeueKindLimited(port string, kind PortMsgKind, limit int) (PortMessage, bool) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	q := t.ports[port]
-	for i, m := range q {
-		if m.Kind == kind {
+	hi := len(q)
+	if limit >= 0 && limit < hi {
+		hi = limit
+	}
+	for i := 0; i < hi; i++ {
+		if q[i].Kind == kind {
+			m := q[i]
 			t.ports[port] = append(q[:i], q[i+1:]...)
 			return m, true
 		}
 	}
 	return PortMessage{}, false
+}
+
+// BeginAltRound freezes the alt snapshot boundary for goroutine gid: the
+// current queue length of every port. Called at the top of a strict alt
+// round on the real-clock concurrent path (the coop scheduler is
+// single-runner, so it needs no freeze). Pair with EndAltRound.
+func (t *TestcaseExec) BeginAltRound(gid uint64) {
+	t.mu.Lock()
+	m := make(map[string]int, len(t.ports))
+	for k, q := range t.ports {
+		m[k] = len(q)
+	}
+	t.mu.Unlock()
+	t.altFreeze.Store(gid, m)
+	atomic.AddInt32(&t.altFreezeActive, 1)
+}
+
+// EndAltRound clears goroutine gid's snapshot boundary. Idempotent.
+func (t *TestcaseExec) EndAltRound(gid uint64) {
+	if _, ok := t.altFreeze.LoadAndDelete(gid); ok {
+		atomic.AddInt32(&t.altFreezeActive, -1)
+	}
+}
+
+// AltFreezeActive reports whether any alt-round freeze is set, so the
+// receive hot path can skip the goroutine-id lookup entirely when none is
+// (always the case on the coop / conformance path).
+func (t *TestcaseExec) AltFreezeActive() bool {
+	return atomic.LoadInt32(&t.altFreezeActive) > 0
+}
+
+// AltLimit returns the snapshot boundary for (gid, port): the number of
+// entries visible to a receive guard this round, and whether a freeze is
+// in effect for gid. A port absent from the snapshot was empty at round
+// start, so its boundary is 0 (nothing visible this round).
+func (t *TestcaseExec) AltLimit(gid uint64, port string) (int, bool) {
+	v, ok := t.altFreeze.Load(gid)
+	if !ok {
+		return -1, false
+	}
+	m, ok := v.(map[string]int)
+	if !ok {
+		return -1, false
+	}
+	if n, ok := m[port]; ok {
+		return n, true
+	}
+	return 0, true
 }
 
 // TestcaseExecKey is the env-store key under which the interpreter

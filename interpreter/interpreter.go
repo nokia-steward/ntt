@@ -11107,6 +11107,22 @@ func isUndefinedResult(res runtime.Object) bool {
 // inner call is `trigger(...)` we honour TTCN-3 22.2.3 - non-
 // matching head messages are discarded until either a matching one
 // surfaces or the queue empties.
+// altReceiveLimit returns the ETSI 20.2 alt-snapshot visibility boundary
+// for a receive on the qualified port key `port`: the number of queue
+// entries present when the current alt round began, or -1 when no freeze
+// is in effect (the coop / conformance path, and any receive outside a
+// strict alt round). Cheap on the hot path — the atomic AltFreezeActive
+// gate skips the goroutine-id lookup entirely when nothing is frozen.
+func altReceiveLimit(exec *runtime.TestcaseExec, port string) int {
+	if exec == nil || !exec.AltFreezeActive() {
+		return -1
+	}
+	if n, ok := exec.AltLimit(goroutineID(), port); ok {
+		return n
+	}
+	return -1
+}
+
 func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consume bool) runtime.Object {
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil {
@@ -11164,8 +11180,14 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 	}
 	kind := commOpKind(info)
 	isProc := kind != runtime.MsgMessage
+	// ETSI 20.2 alt snapshot boundary: on the real-clock concurrent path a
+	// receive guard only observes messages that were queued when this alt
+	// round began, so a message arriving mid-round can't be stolen by a
+	// later catch-all clause from an earlier specific one. -1 (no freeze)
+	// on the coop / conformance path — behaviour is then byte-identical.
+	limit := altReceiveLimit(exec, port)
 	for {
-		head, ok := exec.PeekKind(port, kind)
+		head, ok := exec.PeekKindLimited(port, kind, limit)
 		if !ok {
 			// Without the cooperative scheduler, bind a `-> sender v`
 			// target to the latest PTC ref so fixtures whose PTC body was
@@ -11222,7 +11244,12 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 		fromOk := fromAddrMatches(head.Sender, info.from, env)
 		if !payloadOk || !fromOk {
 			if isTrigger {
-				_, _ = exec.DequeueKind(port, kind)
+				// trigger drops a non-matching head and retries; it consumed
+				// one frozen entry, so shrink the snapshot window to match.
+				_, _ = exec.DequeueKindLimited(port, kind, limit)
+				if limit > 0 {
+					limit--
+				}
 				continue
 			}
 			return runtime.Undefined
@@ -11231,7 +11258,7 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 			// Bind the redirect to the envelope actually removed
 			// from the queue, not the separately-peeked head, so a
 			// concurrent receiver can never make the two diverge.
-			if deq, okDeq := exec.DequeueKind(port, kind); okDeq {
+			if deq, okDeq := exec.DequeueKindLimited(port, kind, limit); okDeq {
 				head = deq
 			}
 		}

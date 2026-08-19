@@ -269,3 +269,51 @@ func TestGoPort_ProcedureException(t *testing.T) {
 		t.Fatalf("verdict = %s (%s), want pass", v, reason)
 	}
 }
+
+// asyncEchoPort bounces every sent value back from its OWN goroutine, so
+// the reply races the testcase's alt evaluation (unlike echoPort, which
+// injects synchronously inside Send). This reproduces the real-clock
+// arrival timing a networked port produces.
+type asyncEchoPort struct {
+	api.Base
+	inst string
+}
+
+func (a *asyncEchoPort) Send(_ context.Context, env *port.Envelope) error {
+	if obj, ok := env.Payload.(runtime.Object); ok {
+		go goport.Inject(a.inst, obj)
+	}
+	return nil
+}
+
+// TestGoPort_AltSnapshotSpecificBeatsCatchAll is the regression for the
+// ETSI 20.2 alt-snapshot race: with two receive branches on one port
+// (specific template first, catch-all second) and an ASYNCHRONOUS reply,
+// the specific branch must always win — a message arriving mid-round must
+// not be visible to the catch-all before the earlier specific clause has
+// had its shot at it. Before the snapshot boundary this flaked under
+// -race: the catch-all intermittently matched the reply one step after it
+// arrived. Run it -count to exercise the timing window.
+func TestGoPort_AltSnapshotSpecificBeatsCatchAll(t *testing.T) {
+	goport.Register("P", func(inst string) api.TestPort { return &asyncEchoPort{inst: inst} })
+	t.Cleanup(goport.Reset)
+
+	v, reason := run(t, "M.tc", `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 5.0;
+			map(self:p, system:p);
+			g.start;
+			p.send("ping");
+			alt {
+				[] p.receive("ping") { setverdict(pass); }
+				[] p.receive { setverdict(fail, "catch-all matched before the specific clause"); }
+				[] g.timeout { setverdict(fail, "no async delivery"); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+}
