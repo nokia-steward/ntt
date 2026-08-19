@@ -134,6 +134,14 @@ The short version, for the impatient:
 system besides a working ntt binary - no C++ toolchain, no `make`,
 no codegen step. It is the same engine `ntt conformance` uses.
 
+To drive a **real System Under Test over TCP** with no user code, and to
+**profile** its latency and throughput, add a `[TESTPORT_PARAMETERS]` block
+to a `.cfg` and run `ntt exec --profile`. See
+[docs/live-testing-and-profiling.md](docs/live-testing-and-profiling.md):
+
+	# request/response against a live SUT, with a per-port latency report
+	ntt exec --cfg app.cfg --profile --format=profile app.ttcn
+
 Suites that need to drive a real System Under Test through a Titan-
 style C/C++ test port (e.g. `MyClient_PT.cc`) build a dedicated
 binary that statically links the port via the cgo bridge. See

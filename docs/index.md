@@ -8,6 +8,10 @@ canonical reference for the project.
 
 - [Getting started](getting-started.md) - install, write your first
   testcase, run it, and use the editor integration.
+- [Live testing and performance profiling](live-testing-and-profiling.md) -
+  drive a real system under test over TCP with no user code, measure
+  latency from inside a testcase, and produce a per-port performance
+  report with `ntt exec --live` / `--profile`.
 
 ## For Titan users
 
