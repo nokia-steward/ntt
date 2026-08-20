@@ -1,9 +1,26 @@
 # Remaining Conformance Work
 
-State as of 2026-08-20: **4746 / 4948 matched (96.37%)**, 23 skipped
-(inconclusive / no-verdict), **202 real misses** in the inventory.
+State as of 2026-08-20: **4754 / 4948 matched (96.53%)**, 23 skipped
+(inconclusive / no-verdict), **194 real misses** in the inventory.
 
-**2026-08-20 — `all component.done` now blocks (ETSI 21.3.7), net −1.** It
+**2026-08-20 (b) — `to <component>` unicast routing, +8, 0 regressions.**
+`p.send(v) to c`, `p.reply(...) to c` and `p.raise(S,v) to c` broadcast to
+every connected peer under the scheduler — the `to` address only tagged the
+sender, it did not restrict delivery — so a sibling PTC received a value or
+caught an exception meant for another. And a **bare** `p.getreply` /
+`p.getcall` / `p.catch` guard peeked the *unqualified* port name instead of
+the current PTC's per-component key, so a reply/exception routed to the
+PTC's qualified queue was invisible and its call block hung. Both are fixed
+(routeProcEnvelopeTo / the send `to` filter honour the addressed component
+set; the bare-guard path qualifies via PortKey). Recovered the 5 fixtures
+the all-done change had exposed (SendOperation_005/006, raise_002/003/004)
+plus 3 more that were timing out (check_operation_033/034/106). Combined
+with the all-done change this session is **net +7 over 4747, zero
+regressions**, and the multi-PTC `to`-routing tier described under "Async
+multi-PTC message echo" is now largely closed.
+
+**2026-08-20 (a) — `all component.done` now blocks (ETSI 21.3.7), net −1
+(superseded by (b) above).** It
 answered a non-blocking snapshot the statement context discarded, so under
 the cooperative scheduler a started PTC was never granted the token and its
 body never ran — its verdict silently lost. Making it park like the

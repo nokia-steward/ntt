@@ -2573,10 +2573,17 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 								return evalProcedureCallTo(portName, info.call, info.to, env)
 							}
 						case "reply", "raise":
-							// Procedure replies/exceptions enqueue a
-							// kind-tagged envelope; the `to <addr>`
-							// is honoured implicitly by the loopback
-							// name-collision routing.
+							// `p.reply(...) to c` / `p.raise(...) to (a,b)`:
+							// under the scheduler, route the reply/exception to
+							// ONLY the addressed component(s) via their
+							// per-component port key — a broadcast would let a
+							// sibling PTC catch an exception meant for another
+							// (Sem_220305_raise_operation_002). Without the
+							// scheduler there are no per-component keys, so keep
+							// the loopback name-collision routing.
+							if deterministicSchedulerEnabled(env) {
+								return evalProcedureReplyRaiseTo(name.String(), portName, info.call, info.to, env)
+							}
 							return evalProcedurePortOp(name.String(), portName, info.call, env)
 						case "receive", "trigger", "getreply", "catch", "getcall":
 							return evalPortReceiveInfo(portName, info, env, true)
@@ -10895,6 +10902,72 @@ func enqueueEnvelopeRouted(exec *runtime.TestcaseExec, port, bareName string, ms
 	exec.EnqueueEnvelope(port, msg)
 }
 
+// routeProcEnvelopeTo delivers a procedure reply/exception envelope to
+// ONLY the components named by toExpr (a `reply ... to c` / `raise ... to
+// (a,b)` clause), mirroring evalProcedureCallTo's per-component routing.
+// Falls back to the default broadcast routing (enqueueEnvelopeRouted) when
+// the target set can't be resolved or matches no connected peer, so a
+// mis-typed target degrades to the old behaviour rather than vanishing.
+func routeProcEnvelopeTo(exec *runtime.TestcaseExec, bareName string, toExpr syntax.Expr, msg runtime.PortMessage, env runtime.Scope) {
+	targets := callTargetComponentIDs(toExpr, env)
+	if targets == nil {
+		enqueueEnvelopeRouted(exec, exec.PortKey(bareName), bareName, msg)
+		return
+	}
+	curID := int64(-1)
+	if cur := exec.CurrentComponent(); cur != nil {
+		curID = cur.ID
+	}
+	delivered := false
+	for _, peer := range exec.ConnectedPeers(runtime.PortEndpoint{Comp: curID, Port: bareName}) {
+		if !targets[peer.Comp] {
+			continue
+		}
+		exec.EnqueueEnvelope(exec.PortKeyFor(peer.Comp, peer.Port), msg)
+		delivered = true
+	}
+	if !delivered {
+		enqueueEnvelopeRouted(exec, exec.PortKey(bareName), bareName, msg)
+	}
+}
+
+// evalProcedureReplyRaiseTo handles `p.reply(...) to <dest>` and
+// `p.raise(...) to <dest>` under the cooperative scheduler: it builds the
+// kind-tagged envelope and routes it to only the addressed component(s),
+// so a unicast reply/exception is not broadcast to every connected peer
+// (which would let a sibling PTC catch an exception meant for another).
+func evalProcedureReplyRaiseTo(op, bareName string, call *syntax.CallExpr, toExpr syntax.Expr, env runtime.Scope) runtime.Object {
+	exec := runtime.FindTestcaseExec(env)
+	if exec == nil {
+		return runtime.Undefined
+	}
+	var msg runtime.PortMessage
+	switch op {
+	case "reply":
+		var params, ret runtime.Object
+		var sig string
+		if call != nil && call.Args != nil && len(call.Args.List) > 0 {
+			params, ret = procSignatureArg(call.Args.List[0], env)
+			sig = procSignatureName(call.Args.List[0])
+		}
+		msg = runtime.PortMessage{Kind: runtime.MsgReply, Sender: exec.CurrentComponent(), Payload: params, RetValue: ret, Signature: sig}
+	case "raise":
+		var exc runtime.Object
+		var sig string
+		if call != nil && call.Args != nil && len(call.Args.List) >= 1 {
+			sig = procSignatureName(call.Args.List[0])
+		}
+		if call != nil && call.Args != nil && len(call.Args.List) >= 2 {
+			exc = evalExceptionValue(call.Args.List[1], env)
+		}
+		msg = runtime.PortMessage{Kind: runtime.MsgException, Sender: exec.CurrentComponent(), RetValue: exc, Signature: sig}
+	default:
+		return evalProcedurePortOp(op, bareName, call, env)
+	}
+	routeProcEnvelopeTo(exec, bareName, toExpr, msg, env)
+	return runtime.Undefined
+}
+
 func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syntax.Expr) runtime.Object {
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil || n.Args == nil || len(n.Args.List) == 0 {
@@ -10956,6 +11029,31 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 	// matches. Falls through to self-delivery when the port has no peer
 	// (loopback-to-self / self-connect handled by ConnectedPeers).
 	if targets := strictConnectedTargets(exec, bareName); targets != nil {
+		// `p.send(v) to c` / `to (a,b)`: under the scheduler route to ONLY
+		// the addressed component(s) via their per-component port key, so a
+		// unicast send is not broadcast to every connected peer (which would
+		// let a sibling PTC receive a value meant for another —
+		// Sem_220201_SendOperation_005). Fall back to broadcast when the
+		// target set can't be resolved or matches no connected peer.
+		if dest != nil && deterministicSchedulerEnabled(env) {
+			if ids := callTargetComponentIDs(dest, env); ids != nil {
+				curID := int64(-1)
+				if cur := exec.CurrentComponent(); cur != nil {
+					curID = cur.ID
+				}
+				delivered := false
+				for _, peer := range exec.ConnectedPeers(runtime.PortEndpoint{Comp: curID, Port: bareName}) {
+					if !ids[peer.Comp] {
+						continue
+					}
+					exec.EnqueueMessageFrom(exec.PortKeyFor(peer.Comp, peer.Port), payload, exec.CurrentComponent())
+					delivered = true
+				}
+				if delivered {
+					return runtime.Undefined
+				}
+			}
+		}
 		for _, key := range targets {
 			exec.EnqueueMessageFrom(key, payload, exec.CurrentComponent())
 		}

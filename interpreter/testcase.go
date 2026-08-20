@@ -2554,6 +2554,14 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 						// enqueued one).
 						if kind, ok := procKindForOp(op.String()); ok {
 							if exec := runtime.FindTestcaseExec(env); exec != nil {
+								// Qualify the port to the CURRENT component's
+								// per-PTC key ("\x00c<id>/p"): a bare
+								// getreply/getcall/catch in a PTC must read that
+								// PTC's own queue, not the unqualified name (where
+								// a broadcast reply/exception routed to the PTC's
+								// qualified key would be invisible, hanging the
+								// call block — Sem_220305_raise_operation_003).
+								qkey := exec.PortKey(portIdent.String())
 								// ETSI 22.3.1 h: an unqualified
 								// getreply / catch inside a blocking
 								// call(S,...){ } block treats only
@@ -2562,12 +2570,12 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 								// falls through to its timeout branch.
 								if kind == runtime.MsgReply || kind == runtime.MsgException {
 									if csig := currentCallSignature(env); csig != "" {
-										if head, ok := exec.PeekKind(portIdent.String(), kind); ok && head.Signature != "" && head.Signature != csig {
+										if head, ok := exec.PeekKind(qkey, kind); ok && head.Signature != "" && head.Signature != csig {
 											return false
 										}
 									}
 								}
-								if _, ok := exec.DequeueKind(portIdent.String(), kind); ok {
+								if _, ok := exec.DequeueKind(qkey, kind); ok {
 									return true
 								}
 							}

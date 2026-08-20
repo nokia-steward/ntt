@@ -762,3 +762,120 @@ func TestStrictInterleave_NoDefaultSuppressesDefaults(t *testing.T) {
 		t.Fatalf("verdict = %s (%s), want pass (@nodefault must suppress the default)", v, reason)
 	}
 }
+
+// TestStrictSched_UnicastSendToComponent covers `p.send(v) to c`: a unicast
+// message must reach ONLY the addressed component, not every connected
+// peer. Two PTCs each expect a distinct value; a broadcast would deliver
+// the wrong value to one and its catch-all would fail. Mirrors
+// Sem_220201_SendOperation_005.
+func TestStrictSched_UnicastSendToComponent(t *testing.T) {
+	src := `module m {
+		type port P message { inout integer }
+		type component C { port P p }
+		function f(integer expected) runs on C {
+			alt {
+				[] p.receive(expected) { setverdict(pass); }
+				[] p.receive { setverdict(fail, "got a value meant for another component"); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C a := C.create, b := C.create;
+			connect(self:p, a:p);
+			connect(self:p, b:p);
+			a.start(f(0));
+			b.start(f(1));
+			p.send(0) to a;
+			p.send(1) to b;
+			all component.done;
+			setverdict(pass);
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass: a unicast send must reach only the addressed component", v, reason)
+	}
+}
+
+// TestStrictSched_UnicastRaiseToComponent covers `p.raise(S, v) to c`: a
+// unicast exception must reach ONLY the addressed component. Each PTC
+// blocks in a call and catches its own exception value. Mirrors
+// Sem_220305_raise_operation_002.
+func TestStrictSched_UnicastRaiseToComponent(t *testing.T) {
+	src := `module m {
+		signature S() exception(integer);
+		type port P procedure { inout S }
+		type component C { port P p }
+		function f(integer expected) runs on C {
+			p.call(S:{}) {
+				[] p.catch(S, expected) { setverdict(pass); }
+				[] p.catch { setverdict(fail, "caught an exception meant for another component"); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C a := C.create, b := C.create;
+			connect(self:p, a:p);
+			connect(self:p, b:p);
+			a.start(f(1));
+			b.start(f(2));
+			p.getcall(S:?);
+			p.getcall(S:?);
+			p.raise(S, 1) to a;
+			p.raise(S, 2) to b;
+			all component.done;
+			setverdict(pass);
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass: a unicast raise must reach only the addressed component", v, reason)
+	}
+}
+
+// TestStrictSched_BroadcastRaiseToAll covers `p.raise(S, v) to all
+// component` with a bare `p.catch`: the exception broadcasts to every
+// connected PTC and each bare catch (reading its OWN per-component queue)
+// matches. Mirrors Sem_220305_raise_operation_003.
+func TestStrictSched_BroadcastRaiseToAll(t *testing.T) {
+	src := `module m {
+		signature S() exception(integer);
+		type port P procedure { inout S }
+		type component C { port P p }
+		function f() runs on C {
+			p.call(S:{}) { [] p.catch { setverdict(pass); } }
+		}
+		testcase tc() runs on C system C {
+			var C a := C.create, b := C.create;
+			connect(self:p, a:p);
+			connect(self:p, b:p);
+			a.start(f());
+			b.start(f());
+			p.getcall(S:?);
+			p.getcall(S:?);
+			p.raise(S, 1) to all component;
+			all component.done;
+			setverdict(pass);
+		}
+	}`
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "m.tc",
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass: a bare catch must read its own component's queue", v, reason)
+	}
+}

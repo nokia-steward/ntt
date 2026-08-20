@@ -1,28 +1,28 @@
 {
- "summary": "ran 4948 files: 4746 matched, 23 skipped (96.37% match rate)",
- "source": "/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b00a-12bcd47feab7/scratchpad/full.json",
- "miss_count": 202,
+ "summary": "ran 4948 files: 4754 matched, 23 skipped (96.53% match rate)",
+ "source": "/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b00a-12bcd47feab7/scratchpad/final.json",
+ "miss_count": 194,
  "outcomes": {
   "reject->pass": 75,
   "pass->none": 34,
   "reject->none": 27,
   "->": 23,
-  "pass->timeout": 18,
-  "pass->error": 16,
-  "pass->fail": 7,
+  "pass->timeout": 15,
+  "pass->error": 13,
+  "pass->fail": 5,
   "pass->parse-error": 2
  },
  "chapters": [
   {
    "chapter": "core_language/22_communication_operations",
-   "misses": 73,
+   "misses": 65,
    "outcomes": {
     "reject->pass": 19,
-    "pass->fail": 7,
     "pass->none": 17,
     "reject->none": 2,
-    "pass->error": 10,
-    "pass->timeout": 18
+    "pass->error": 7,
+    "pass->fail": 5,
+    "pass->timeout": 15
    }
   },
   {
@@ -1111,22 +1111,6 @@
   },
   {
    "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/Sem_220201_SendOperation_005.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/Sem_220201_SendOperation_006.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
    "expected": "reject",
    "actual": "pass",
    "outcome": "reject->pass",
@@ -1335,30 +1319,6 @@
   },
   {
    "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/Sem_220305_raise_operation_002.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/Sem_220305_raise_operation_003.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/Sem_220305_raise_operation_004.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
    "expected": "reject",
    "actual": "pass",
    "outcome": "reject->pass",
@@ -1444,22 +1404,6 @@
    "outcome": "pass->none",
    "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_032.ttcn",
    "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "timeout",
-   "outcome": "pass->timeout",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_033.ttcn",
-   "message": "control execution exceeded 4s"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "timeout",
-   "outcome": "pass->timeout",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_034.ttcn",
-   "message": "control execution exceeded 4s"
   },
   {
    "chapter": "core_language/22_communication_operations",
@@ -1619,14 +1563,6 @@
    "actual": "timeout",
    "outcome": "pass->timeout",
    "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_102.ttcn",
-   "message": "control execution exceeded 4s"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "timeout",
-   "outcome": "pass->timeout",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_106.ttcn",
    "message": "control execution exceeded 4s"
   },
   {
