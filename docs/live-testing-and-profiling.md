@@ -76,16 +76,25 @@ ETSI §23.4 virtual-time semantics instead — a freshly started timer reads
 connection to the SUT:
 
 - `map(self:p, system:sp)` dials the configured address.
-- `p.send(cs)` writes the `charstring` `cs` as a newline-terminated frame.
-- every line the SUT sends back is delivered to `p.receive` as a
-  `charstring`.
+- `p.send(v)` writes `v` as one frame.
+- each inbound frame the SUT sends back is delivered to `p.receive`.
 - `unmap` / test teardown closes the connection.
 
-The TTCN-3 side is a plain message port carrying `charstring`:
+It supports two framings (the `framing` parameter, below):
+
+- **newline** (default) — one text record per line. Payloads are
+  `charstring`, written as UTF-8 + `\n` and delivered with the trailing
+  newline stripped. Ideal for line / JSON / text protocols.
+- **length-prefix** — a 4-byte big-endian length followed by that many raw
+  bytes. Payloads are `octetstring`, so arbitrary binary (newlines and NULs
+  included) round-trips intact.
+
+The TTCN-3 side is a plain message port carrying the matching type:
 
 ```ttcn3
-type port P message { inout charstring }
-type component C { port P p }
+type port P message { inout charstring }   // newline framing
+type port B message { inout octetstring }  // length-prefix framing
+type component C { port P p; port B b }
 ```
 
 A failed connection surfaces as an error at `map` time — the engine never
@@ -109,12 +118,22 @@ app.tc
 
 Recognised parameters:
 
-| Parameter      | Meaning                                             |
-| -------------- | --------------------------------------------------- |
-| `transport`    | `"tcp"` selects the built-in TCP port               |
-| `host`, `port` | combined into `host:port`                            |
-| `address`      | `"host:port"` (overrides `host` + `port`)           |
-| `dial_timeout` | a Go duration (e.g. `"5s"`), default `10s`          |
+| Parameter      | Meaning                                                         |
+| -------------- | -------------------------------------------------------------- |
+| `transport`    | `"tcp"` selects the built-in TCP port                          |
+| `host`, `port` | combined into `host:port`                                       |
+| `address`      | `"host:port"` (overrides `host` + `port`)                      |
+| `dial_timeout` | a Go duration (e.g. `"5s"`), default `10s`                     |
+| `framing`      | `"newline"` (default, charstring) or `"length-prefix"` (octetstring) |
+
+For a binary protocol, use length-prefix framing and an `octetstring` port:
+
+```ini
+[TESTPORT_PARAMETERS]
+*.b.transport := "tcp"
+*.b.address   := "127.0.0.1:9000"
+*.b.framing   := "length-prefix"
+```
 
 Run it with `--cfg`; the presence of an external transport switches the
 engine to the real clock automatically:
@@ -249,6 +268,10 @@ import "github.com/nokia/ntt/runtime/port/tcpport"
 
 func init() {
     tcpport.Register("MyPort_PT", "127.0.0.1:9000")
+    // or, for a binary protocol:
+    tcpport.Register("MyBin_PT", "127.0.0.1:9001",
+        tcpport.WithFraming(tcpport.FramingLengthPrefix),
+        tcpport.WithDialTimeout(5*time.Second))
 }
 ```
 
@@ -264,13 +287,14 @@ existing Titan-style C/C++ ports, see
 
 ## Limitations and notes
 
-- **Framing** is newline-delimited (one `charstring` per line), the broadly
-  compatible default for line / JSON / text protocols. Binary /
-  length-prefixed framing and `octetstring` payloads are a planned
-  follow-on.
+- **Framing** is newline-delimited `charstring` by default, or
+  length-prefixed `octetstring` (`framing := "length-prefix"`) for binary.
+  A custom wire protocol (a different delimiter, TLS, a message bus) is a
+  Go [`api.TestPort`](../runtime/port/api/api.go) — see below.
 - **One address per port name.** A `.cfg` maps a port *instance name* to a
   single address; a per-component address (different SUTs behind the same
-  port name on different components) is a follow-on.
+  port name on different components) is a follow-on — the config's component
+  field doesn't yet map to the runtime's per-component port identity.
 - **Reproducibility.** Live verdicts depend on the real SUT and network;
   they are not reproducible-by-construction the way virtual-clock functional
   runs are. Keep functional conformance runs on the default clock.

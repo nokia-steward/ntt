@@ -1,6 +1,7 @@
 package tcpport_test
 
 import (
+	"encoding/binary"
 	"io"
 	"net"
 	"sync"
@@ -158,4 +159,85 @@ func TestTCPPort_DialFailureIsHonest(t *testing.T) {
 	if v == runtime.PassVerdict {
 		t.Fatalf("verdict = pass, want a non-pass (error) verdict: a failed dial must not fabricate success")
 	}
+}
+
+// TestTCPPort_LengthPrefixOctetstring proves binary round-trips intact
+// under length-prefix framing: an octetstring containing a newline and a
+// NUL byte comes back byte-for-byte (a newline-framed port would corrupt
+// it). The echo server here speaks the same 4-byte-BE-length framing.
+func TestTCPPort_LengthPrefixOctetstring(t *testing.T) {
+	addr, stop := startLVEchoServer(t)
+	defer stop()
+
+	tcpport.Register("P", addr, tcpport.WithFraming(tcpport.FramingLengthPrefix))
+	t.Cleanup(tcpport.Reset)
+
+	// '0A00FF'O — contains a newline (0x0A) and a NUL (0x00).
+	v, reason := run(t, "M.tc", `module M {
+		type port P message { inout octetstring }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 5.0;
+			map(self:p, system:p);
+			g.start;
+			p.send('0A00FF'O);
+			alt {
+				[] p.receive('0A00FF'O) { setverdict(pass); }
+				[] p.receive { setverdict(fail, "wrong bytes echoed"); }
+				[] g.timeout { setverdict(fail, "no echo"); }
+			}
+			// '0000'O exercises the padding edge: big.Int drops leading
+			// zero octets, so the frame width must come from the declared
+			// length, not Value.Bytes().
+			p.send('0000'O);
+			alt {
+				[] p.receive('0000'O) { setverdict(pass); }
+				[] p.receive { setverdict(fail, "zero octets not preserved"); }
+				[] g.timeout { setverdict(fail, "no echo (zeros)"); }
+			}
+			unmap(self:p, system:p);
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+}
+
+// startLVEchoServer echoes 4-byte-BE-length-prefixed frames verbatim.
+func startLVEchoServer(t *testing.T) (addr string, stop func()) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer conn.Close()
+				var hdr [4]byte
+				for {
+					if _, err := io.ReadFull(conn, hdr[:]); err != nil {
+						return
+					}
+					n := binary.BigEndian.Uint32(hdr[:])
+					buf := make([]byte, n)
+					if _, err := io.ReadFull(conn, buf); err != nil {
+						return
+					}
+					conn.Write(hdr[:])
+					conn.Write(buf)
+				}
+			}()
+		}
+	}()
+	return ln.Addr().String(), func() { ln.Close(); wg.Wait() }
 }

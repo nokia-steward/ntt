@@ -169,6 +169,8 @@ func runExec(cmd *cobra.Command, args []string) error {
 //	address       "host:port" (overrides host/port)
 //	host, port    combined into host:port when address is absent
 //	dial_timeout  a Go duration, e.g. "5s" (default 10s)
+//	framing       "newline" (default, charstring) or "length-prefix"
+//	              (octetstring, 4-byte big-endian length + raw bytes)
 //
 // Ports are keyed by instance name (the goport resolver matches it), so a
 // single address per port name is supported; a per-component address is a
@@ -210,6 +212,14 @@ func registerConfiguredTestPorts(f *cfg.File) int {
 			} else {
 				fmt.Fprintf(os.Stderr, "testport %q: bad dial_timeout %q: %v\n", port, d, err)
 			}
+		}
+		switch f := strings.ToLower(params["framing"]); f {
+		case "", "newline", "line":
+			// default (charstring, one record per line)
+		case "length-prefix", "lengthprefix", "lv":
+			opts = append(opts, tcpport.WithFraming(tcpport.FramingLengthPrefix))
+		default:
+			fmt.Fprintf(os.Stderr, "testport %q: unknown framing %q (want newline or length-prefix)\n", port, f)
 		}
 		tcpport.Register(port, addr, opts...)
 		n++
