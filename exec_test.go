@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"io"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -292,4 +294,145 @@ func TestRegisterConfiguredTestPorts_NonTCPIgnored(t *testing.T) {
 	if n := registerConfiguredTestPorts(f); n != 0 {
 		t.Fatalf("registered %d ports, want 0 (udp + address-less should be ignored)", n)
 	}
+}
+
+// startTagServer is a TCP server that replies a fixed tag line to every
+// inbound line, so a test can tell which of several SUTs a port reached.
+func startTagServer(t *testing.T, tag string) (addr string, hits *int64, stop func()) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	hits = new(int64)
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			atomic.AddInt64(hits, 1)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer conn.Close()
+				sc := bufio.NewScanner(conn)
+				for sc.Scan() {
+					if _, err := conn.Write([]byte(tag + "\n")); err != nil {
+						return
+					}
+				}
+			}()
+		}
+	}()
+	return ln.Addr().String(), hits, func() { ln.Close(); wg.Wait() }
+}
+
+// TestExecPerComponentAddress_MTC covers a per-component override for the
+// MTC: `mtc.p.address` wins over the `*.p.address` default, so the MTC's
+// port reaches the mtc-specific SUT.
+func TestExecPerComponentAddress_MTC(t *testing.T) {
+	addrA, hitsA, stopA := startTagServer(t, "A")
+	defer stopA()
+	addrB, hitsB, stopB := startTagServer(t, "B")
+	defer stopB()
+
+	f := loadCfg(t, fmt.Sprintf("[TESTPORT_PARAMETERS]\n*.p.transport := \"tcp\"\n*.p.address := %q\nmtc.p.address := %q\n", addrA, addrB))
+	if n := registerConfiguredTestPorts(f); n != 1 {
+		t.Fatalf("registered %d ports, want 1", n)
+	}
+	t.Cleanup(tcpport.Reset)
+
+	// The MTC's rule ("mtc") must win over "*": it reaches server B and the
+	// echoed tag it receives is "B".
+	path := writeTC(t, `module m {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 5.0;
+			map(self:p, system:p);
+			g.start;
+			p.send("hi");
+			alt {
+				[] p.receive("B") { setverdict(pass); }
+				[] p.receive(charstring:?) -> value v { setverdict(fail, "reached the * SUT, not mtc's"); }
+				[] g.timeout { setverdict(fail, "no reply"); }
+			}
+		}
+	}`)
+	d := newStaticDriver([]string{path})
+	d.live = true
+	if v, reason, err := d.Run(context.Background(), "m.tc"); err != nil || v != rreport.Pass {
+		t.Fatalf("Run: verdict=%s reason=%q err=%v, want pass (mtc rule -> server B)", v, reason, err)
+	}
+	if atomic.LoadInt64(hitsB) == 0 || atomic.LoadInt64(hitsA) != 0 {
+		t.Fatalf("connections: A=%d B=%d, want A=0 B>0 (mtc rule points at B)", *hitsA, *hitsB)
+	}
+}
+
+// TestExecPerComponentAddress_PTCType covers a per-component override by
+// component TYPE: a PTC of type Worker reaches the Worker-specific SUT
+// while the `*` default points elsewhere. The proof is which server took
+// the connection (verdict propagation from a forked PTC is orthogonal).
+func TestExecPerComponentAddress_PTCType(t *testing.T) {
+	addrA, hitsA, stopA := startTagServer(t, "A")
+	defer stopA()
+	addrB, hitsB, stopB := startTagServer(t, "B")
+	defer stopB()
+
+	f := loadCfg(t, fmt.Sprintf("[TESTPORT_PARAMETERS]\n*.p.transport := \"tcp\"\n*.p.address := %q\nWorker.p.address := %q\n", addrA, addrB))
+	if n := registerConfiguredTestPorts(f); n != 1 {
+		t.Fatalf("registered %d ports, want 1", n)
+	}
+	t.Cleanup(tcpport.Reset)
+
+	path := writeTC(t, `module m {
+		type port P message { inout charstring }
+		type component C { port P p }
+		type component Worker { port P p }
+		function work() runs on Worker {
+			timer g := 5.0;
+			map(self:p, system:p);
+			g.start;
+			p.send("hi");
+			alt {
+				[] p.receive { }
+				[] g.timeout { }
+			}
+			unmap(self:p, system:p);
+		}
+		testcase tc() runs on C system C {
+			var Worker w := Worker.create alive;
+			w.start(work());
+			w.done;
+			setverdict(pass);
+		}
+	}`)
+	d := newStaticDriver([]string{path})
+	d.live = true
+	if v, reason, err := d.Run(context.Background(), "m.tc"); err != nil || v != rreport.Pass {
+		t.Fatalf("Run: verdict=%s reason=%q err=%v, want pass", v, reason, err)
+	}
+	// The Worker-typed PTC must dial server B (its type rule), not the *
+	// default A.
+	if atomic.LoadInt64(hitsB) == 0 || atomic.LoadInt64(hitsA) != 0 {
+		t.Fatalf("connections: A=%d B=%d, want A=0 B>0 (Worker rule points at B)", *hitsA, *hitsB)
+	}
+}
+
+// loadCfg writes src to a temp .cfg and loads it.
+func loadCfg(t *testing.T, src string) *cfg.File {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "t.cfg")
+	if err := os.WriteFile(p, []byte(src), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f, _, err := cfg.Load(p)
+	if err != nil {
+		t.Fatalf("load cfg: %v", err)
+	}
+	return f
 }

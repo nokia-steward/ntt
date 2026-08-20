@@ -172,59 +172,102 @@ func runExec(cmd *cobra.Command, args []string) error {
 //	framing       "newline" (default, charstring) or "length-prefix"
 //	              (octetstring, 4-byte big-endian length + raw bytes)
 //
-// Ports are keyed by instance name (the goport resolver matches it), so a
-// single address per port name is supported; a per-component address is a
-// follow-on.
+// A `*` (any-component) entry supplies defaults that a specific-component
+// entry for the same port inherits and overrides (Titan semantics), so a
+// port can reach different SUTs on different components:
+//
+//	*.p.transport := "tcp"          # default transport for every p
+//	*.p.address   := "10.0.0.1:80"  # the default SUT
+//	server.p.address := "10.0.0.2:80"  # component "server" talks elsewhere
+//
+// At map time the port picks the rule matching the mapping component's
+// name (e.g. "server"), then "mtc", then its type, then "*".
 func registerConfiguredTestPorts(f *cfg.File) int {
-	byPort := map[string]map[string]string{}
-	var order []string
+	// port -> component selector -> param -> value, preserving first-seen
+	// order for stable output.
+	byPort := map[string]map[string]map[string]string{}
+	var portOrder []string
+	compOrder := map[string][]string{}
 	for _, p := range f.TestPortParameters() {
-		m := byPort[p.Port]
+		comps := byPort[p.Port]
+		if comps == nil {
+			comps = map[string]map[string]string{}
+			byPort[p.Port] = comps
+			portOrder = append(portOrder, p.Port)
+		}
+		m := comps[p.Component]
 		if m == nil {
 			m = map[string]string{}
-			byPort[p.Port] = m
-			order = append(order, p.Port)
+			comps[p.Component] = m
+			compOrder[p.Port] = append(compOrder[p.Port], p.Component)
 		}
-		// A specific component wins over a `*` wildcard for the same param,
-		// regardless of declaration order.
-		if _, ok := m[p.Param]; !ok || p.Component != "*" {
-			m[p.Param] = p.Value
-		}
+		m[p.Param] = p.Value
 	}
 	n := 0
-	for _, port := range order {
-		params := byPort[port]
-		if !strings.EqualFold(params["transport"], "tcp") {
-			continue
-		}
-		addr := params["address"]
-		if addr == "" && params["host"] != "" && params["port"] != "" {
-			addr = net.JoinHostPort(params["host"], params["port"])
-		}
-		if addr == "" {
-			fmt.Fprintf(os.Stderr, "testport %q: transport=tcp but no address (need address, or host+port)\n", port)
-			continue
-		}
-		var opts []tcpport.Option
-		if d := params["dial_timeout"]; d != "" {
-			if dt, err := time.ParseDuration(d); err == nil {
-				opts = append(opts, tcpport.WithDialTimeout(dt))
-			} else {
-				fmt.Fprintf(os.Stderr, "testport %q: bad dial_timeout %q: %v\n", port, d, err)
+	for _, port := range portOrder {
+		comps := byPort[port]
+		star := comps["*"]
+		var rules []tcpport.Rule
+		for _, comp := range compOrder[port] {
+			// Effective params: `*` defaults overlaid with this component's
+			// own (a component's own value wins; comp=="*" is just star).
+			params := mergeParams(star, comps[comp])
+			rule, ok := tcpPortRule(port, comp, params)
+			if ok {
+				rules = append(rules, rule)
 			}
 		}
-		switch f := strings.ToLower(params["framing"]); f {
-		case "", "newline", "line":
-			// default (charstring, one record per line)
-		case "length-prefix", "lengthprefix", "lv":
-			opts = append(opts, tcpport.WithFraming(tcpport.FramingLengthPrefix))
-		default:
-			fmt.Fprintf(os.Stderr, "testport %q: unknown framing %q (want newline or length-prefix)\n", port, f)
+		if len(rules) > 0 {
+			tcpport.RegisterRules(port, rules)
+			n++
 		}
-		tcpport.Register(port, addr, opts...)
-		n++
 	}
 	return n
+}
+
+// mergeParams overlays own onto base, returning a new map (base unchanged).
+func mergeParams(base, own map[string]string) map[string]string {
+	out := make(map[string]string, len(base)+len(own))
+	for k, v := range base {
+		out[k] = v
+	}
+	for k, v := range own {
+		out[k] = v
+	}
+	return out
+}
+
+// tcpPortRule builds one component rule from effective params, or reports
+// !ok (with a diagnostic) when the entry isn't a usable TCP port.
+func tcpPortRule(port, comp string, params map[string]string) (tcpport.Rule, bool) {
+	if !strings.EqualFold(params["transport"], "tcp") {
+		return tcpport.Rule{}, false
+	}
+	addr := params["address"]
+	if addr == "" && params["host"] != "" && params["port"] != "" {
+		addr = net.JoinHostPort(params["host"], params["port"])
+	}
+	if addr == "" {
+		fmt.Fprintf(os.Stderr, "testport %q (%s): transport=tcp but no address (need address, or host+port)\n", port, comp)
+		return tcpport.Rule{}, false
+	}
+	rule := tcpport.Rule{Component: comp, Addr: addr}
+	if d := params["dial_timeout"]; d != "" {
+		if dt, err := time.ParseDuration(d); err == nil {
+			rule.DialTimeout = dt
+		} else {
+			fmt.Fprintf(os.Stderr, "testport %q (%s): bad dial_timeout %q: %v\n", port, comp, d, err)
+		}
+	}
+	switch fr := strings.ToLower(params["framing"]); fr {
+	case "", "newline", "line":
+		rule.Framing = tcpport.FramingNewline
+	case "length-prefix", "lengthprefix", "lv":
+		rule.Framing = tcpport.FramingLengthPrefix
+	default:
+		fmt.Fprintf(os.Stderr, "testport %q (%s): unknown framing %q (want newline or length-prefix)\n", port, comp, fr)
+	}
+	return rule, true
 }
 
 func writeReport(w io.Writer, format string, suite *rreport.Suite) error {

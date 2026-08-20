@@ -2168,6 +2168,13 @@ func barePortName(key string) string {
 	return key
 }
 
+// BarePortName strips the per-component qualifier PortKey adds to a
+// non-MTC PTC's port key ("\x00c<id>/name" -> "name"), returning an
+// unqualified name unchanged. A port-driver provider needs it to resolve a
+// registration keyed by the plain instance name when the runtime hands it
+// a qualified PTC key.
+func BarePortName(key string) string { return barePortName(key) }
+
 func (t *TestcaseExec) Type() ObjectType { return "testcase_exec" }
 func (t *TestcaseExec) Inspect() string {
 	return fmt.Sprintf("testcase(%q) verdict=%s logs=%d", t.Name, t.GetVerdict(), len(t.Logs()))

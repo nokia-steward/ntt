@@ -135,6 +135,27 @@ For a binary protocol, use length-prefix framing and an `octetstring` port:
 *.b.framing   := "length-prefix"
 ```
 
+### Per-component addresses
+
+The `<component>` field selects which components a setting applies to. A `*`
+(any-component) entry supplies defaults that a specific entry inherits and
+overrides, so one port name can reach different SUTs on different
+components:
+
+```ini
+[TESTPORT_PARAMETERS]
+*.p.transport    := "tcp"           # default transport for every p
+*.p.address      := "10.0.0.1:8080" # the default SUT
+server.p.address := "10.0.0.2:8080" # component "server" talks elsewhere
+mtc.p.address    := "10.0.0.3:8080" # the MTC talks elsewhere again
+```
+
+At map time the port picks the rule whose component best matches the
+mapping component, in order: its **name** (from `C.create("name")`), then
+**`mtc`** for the main test component, then its **component type** name,
+then **`*`**. So `server` above may be a component name or a component
+type; `mtc.p` overrides `*.p` for the MTC.
+
 Run it with `--cfg`; the presence of an external transport switches the
 engine to the real clock automatically:
 
@@ -291,10 +312,10 @@ existing Titan-style C/C++ ports, see
   length-prefixed `octetstring` (`framing := "length-prefix"`) for binary.
   A custom wire protocol (a different delimiter, TLS, a message bus) is a
   Go [`api.TestPort`](../runtime/port/api/api.go) — see below.
-- **One address per port name.** A `.cfg` maps a port *instance name* to a
-  single address; a per-component address (different SUTs behind the same
-  port name on different components) is a follow-on — the config's component
-  field doesn't yet map to the runtime's per-component port identity.
+- **Component matching granularity.** A rule's component selector matches a
+  component's name, type, `mtc`, or `*` (see above). Two *instances* of the
+  same component type that need different addresses can't yet be told apart
+  by the config unless they were created with distinct names.
 - **Reproducibility.** Live verdicts depend on the real SUT and network;
   they are not reproducible-by-construction the way virtual-clock functional
   runs are. Keep functional conformance runs on the default clock.

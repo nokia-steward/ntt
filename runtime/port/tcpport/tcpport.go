@@ -69,6 +69,20 @@ const (
 	FramingLengthPrefix
 )
 
+// Rule binds one component selector to a dial address and framing for a
+// port. At map time the port picks the rule that best matches the mapping
+// component (see resolveRule), so different components can drive different
+// SUTs through the same port name.
+type Rule struct {
+	// Component selects which components this rule applies to: "*" (any),
+	// "mtc" (the main test component), a component name (from
+	// MyComp.create("name")), or a component type name.
+	Component   string
+	Addr        string        // "host:port" to dial
+	Framing     Framing       // wire framing (FramingNewline if zero)
+	DialTimeout time.Duration // OnMap dial timeout (defaultDialTimeout if <= 0)
+}
+
 // config holds the tunables an Option can set.
 type config struct {
 	dialTimeout time.Duration
@@ -90,17 +104,38 @@ func WithFraming(f Framing) Option {
 
 // Register binds a TTCN-3 message port TYPE name (e.g. "MyPort_PT") to a
 // built-in TCP test port that dials addr ("host:port") when a port of
-// that type is mapped. Each mapped instance opens its own connection.
-// Call once per type at startup; the first Register installs the global
-// port-driver provider. Defer Reset in tests to restore the previous
-// provider.
+// that type is mapped, for any component. Each mapped instance opens its
+// own connection. Call once per type at startup; the first Register
+// installs the global port-driver provider. Defer Reset in tests to
+// restore the previous provider.
 func Register(portTypeName, addr string, opts ...Option) {
 	cfg := config{dialTimeout: defaultDialTimeout, framing: FramingNewline}
 	for _, o := range opts {
 		o(&cfg)
 	}
-	goport.Register(portTypeName, func(inst string) api.TestPort {
-		return newPort(inst, addr, cfg)
+	RegisterRules(portTypeName, []Rule{{
+		Component:   "*",
+		Addr:        addr,
+		Framing:     cfg.framing,
+		DialTimeout: cfg.dialTimeout,
+	}})
+}
+
+// RegisterRules binds a port name to component-selective address rules.
+// When a port of this name is mapped, the port dials the address of the
+// rule whose Component best matches the mapping component — its name, then
+// "mtc" for the MTC, then its component type, then "*" — so one port name
+// can reach different SUTs on different components. Defer Reset in tests.
+func RegisterRules(portName string, rules []Rule) {
+	norm := make([]Rule, len(rules))
+	for i, r := range rules {
+		if r.DialTimeout <= 0 {
+			r.DialTimeout = defaultDialTimeout
+		}
+		norm[i] = r
+	}
+	goport.Register(portName, func(inst string) api.TestPort {
+		return newPort(inst, norm)
 	})
 }
 
@@ -114,42 +149,84 @@ func Reset() { goport.Reset() }
 // back through goport.Inject, the sanctioned cross-goroutine path.
 type tcpPort struct {
 	api.Base
-	inst        string
-	addr        string
-	dialTimeout time.Duration
-	framing     Framing
+	inst  string
+	rules []Rule
 
-	mu     sync.Mutex
-	conn   net.Conn
-	done   chan struct{} // closed when the read loop exits
-	closed bool
+	mu      sync.Mutex
+	conn    net.Conn
+	framing Framing       // resolved from the matched rule at OnMap
+	done    chan struct{} // closed when the read loop exits
+	closed  bool
 }
 
-func newPort(inst, addr string, cfg config) *tcpPort {
+func newPort(inst string, rules []Rule) *tcpPort {
 	return &tcpPort{
-		Base:        api.Base{PortName: "tcp:" + inst},
-		inst:        inst,
-		addr:        addr,
-		dialTimeout: cfg.dialTimeout,
-		framing:     cfg.framing,
+		Base:  api.Base{PortName: "tcp:" + inst},
+		inst:  inst,
+		rules: rules,
 	}
 }
 
-// OnMap dials the endpoint and starts the read loop. A dial failure
-// surfaces as a map error, so a testcase against a down SUT fails
-// honestly at map time rather than silently receiving nothing.
+// resolveRule picks the rule that best matches the component doing the
+// map, in precedence order: the component's name, "mtc" (for the MTC),
+// the component's type name, then "*". OnMap runs on the mapping
+// component's goroutine, so CurrentComponent identifies it.
+func (p *tcpPort) resolveRule() (Rule, bool) {
+	var name, typeName string
+	isMTC := true // a nil CurrentComponent is the MTC's main body
+	if exec := runtime.CurrentExec(); exec != nil {
+		if c := exec.CurrentComponent(); c != nil {
+			name, typeName = c.Name, c.TypeName
+			isMTC = c.ID == exec.MTCID()
+		}
+	}
+	find := func(sel string) (Rule, bool) {
+		if sel == "" {
+			return Rule{}, false
+		}
+		for _, r := range p.rules {
+			if r.Component == sel {
+				return r, true
+			}
+		}
+		return Rule{}, false
+	}
+	if r, ok := find(name); ok {
+		return r, true
+	}
+	if isMTC {
+		if r, ok := find("mtc"); ok {
+			return r, true
+		}
+	}
+	if r, ok := find(typeName); ok {
+		return r, true
+	}
+	return find("*")
+}
+
+// OnMap resolves the address for the mapping component, dials it, and
+// starts the read loop. A dial failure (or no matching rule) surfaces as a
+// map error, so a testcase against a down/misconfigured SUT fails honestly
+// at map time rather than silently receiving nothing.
 func (p *tcpPort) OnMap(context.Context) error {
-	conn, err := net.DialTimeout("tcp", p.addr, p.dialTimeout)
+	rule, ok := p.resolveRule()
+	if !ok {
+		return fmt.Errorf("tcpport %s: no address rule matches the mapping component", p.inst)
+	}
+	conn, err := net.DialTimeout("tcp", rule.Addr, rule.DialTimeout)
 	if err != nil {
-		return fmt.Errorf("tcpport %s: dial %s: %w", p.inst, p.addr, err)
+		return fmt.Errorf("tcpport %s: dial %s: %w", p.inst, rule.Addr, err)
 	}
 	p.mu.Lock()
 	p.conn = conn
 	p.closed = false
+	p.framing = rule.Framing
 	p.done = make(chan struct{})
 	done := p.done
+	framing := p.framing
 	p.mu.Unlock()
-	go p.readLoop(conn, done)
+	go p.readLoop(conn, done, framing)
 	return nil
 }
 
@@ -157,10 +234,10 @@ func (p *tcpPort) OnMap(context.Context) error {
 // injects it into the running testcase. It exits when the connection is
 // closed (by the SUT or by OnUnmap/OnStop) or on any read error, closing
 // done so a concurrent close can join it.
-func (p *tcpPort) readLoop(conn net.Conn, done chan struct{}) {
+func (p *tcpPort) readLoop(conn net.Conn, done chan struct{}, framing Framing) {
 	defer close(done)
 	r := bufio.NewReader(conn)
-	if p.framing == FramingLengthPrefix {
+	if framing == FramingLengthPrefix {
 		p.readLengthPrefixed(r)
 		return
 	}
@@ -205,12 +282,13 @@ func (p *tcpPort) Send(_ context.Context, env *port.Envelope) error {
 	}
 	p.mu.Lock()
 	conn := p.conn
+	framing := p.framing
 	p.mu.Unlock()
 	if conn == nil {
 		return fmt.Errorf("tcpport %s: send before map", p.inst)
 	}
 	var frame []byte
-	if p.framing == FramingLengthPrefix {
+	if framing == FramingLengthPrefix {
 		frame = make([]byte, 4+len(b))
 		binary.BigEndian.PutUint32(frame[:4], uint32(len(b)))
 		copy(frame[4:], b)

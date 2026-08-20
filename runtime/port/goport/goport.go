@@ -110,6 +110,14 @@ func provide(portTypeName, portInstName string) runtime.PortDriver {
 		f = factories[portInstName]
 	}
 	if f == nil {
+		// A non-MTC PTC hands us the per-component-qualified instance key
+		// ("\x00c<id>/p"); fall back to the plain port-instance name a
+		// registration by instance name ("p") used.
+		if bare := runtime.BarePortName(portInstName); bare != portInstName {
+			f = factories[bare]
+		}
+	}
+	if f == nil {
 		return nil
 	}
 	tp := instances[portInstName]
