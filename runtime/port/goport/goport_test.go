@@ -317,3 +317,38 @@ func TestGoPort_AltSnapshotSpecificBeatsCatchAll(t *testing.T) {
 		t.Fatalf("verdict = %s (%s), want pass", v, reason)
 	}
 }
+
+// TestGoPort_InterleaveSnapshotSpecificBeatsCatchAll is the interleave
+// analogue of the alt-snapshot regression: with a specific and a catch-all
+// receive branch on one port and asynchronous arrivals, the specific
+// branch must take its value — the catch-all must not grab a message
+// mid-round that an earlier specific clause would match. Each interleave
+// branch is taken exactly once; the specific takes "ping", the catch-all
+// takes "other".
+func TestGoPort_InterleaveSnapshotSpecificBeatsCatchAll(t *testing.T) {
+	goport.Register("P", func(inst string) api.TestPort { return &asyncEchoPort{inst: inst} })
+	t.Cleanup(goport.Reset)
+
+	v, reason := run(t, "M.tc", `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 5.0;
+			map(self:p, system:p);
+			g.start;
+			p.send("ping");
+			p.send("other");
+			var charstring v_caught := "";
+			interleave {
+				[] p.receive("ping") { setverdict(pass); }
+				[] p.receive(charstring:?) -> value v_caught {
+					if (v_caught == "ping") { setverdict(fail, "catch-all took the specific value"); }
+					else { setverdict(pass); }
+				}
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+}

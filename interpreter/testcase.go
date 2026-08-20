@@ -2071,7 +2071,16 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 				return r
 			}
 		}
-		matched := false
+		// Freeze the visible-message boundary for the guard scan (ETSI 20.2
+		// snapshot), same as evalAltStmtStrict: on the real-clock concurrent
+		// path a message arriving mid-scan must not let a later branch take
+		// what an earlier one would. Cleared before the matched body runs.
+		altExec := runtime.FindTestcaseExec(env)
+		freeze := altExec != nil && !deterministicSchedulerEnabled(env)
+		if freeze {
+			altExec.BeginAltRound(goroutineID())
+		}
+		matchedIdx := -1
 		for i, cc := range clauses {
 			if taken[i] {
 				continue
@@ -2083,24 +2092,27 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 				}
 			}
 			if commGuardMatches(cc.Comm, env) {
-				taken[i] = true
-				remaining--
-				matched = true
+				matchedIdx = i
 				defaultBranchFire() // no-op unless inside a runDefaults sweep
-				if cc.Body != nil {
-					res := evalAltClauseBody(cc.Body, env)
-					// `repeat` is not permitted in interleave (20.4); ignore
-					// it. `break` / `return` / `stop` / `goto` / error leaves
-					// the interleave immediately.
-					if res != runtime.Repeat && needBreak(res) {
-						return res
-					}
-				}
-				break // re-snapshot: taking one branch may enable another
+				break
 			}
 		}
-		if matched {
-			continue
+		if freeze {
+			altExec.EndAltRound(goroutineID())
+		}
+		if matchedIdx >= 0 {
+			taken[matchedIdx] = true
+			remaining--
+			if body := clauses[matchedIdx].Body; body != nil {
+				res := evalAltClauseBody(body, env)
+				// `repeat` is not permitted in interleave (20.4); ignore
+				// it. `break` / `return` / `stop` / `goto` / error leaves
+				// the interleave immediately.
+				if res != runtime.Repeat && needBreak(res) {
+					return res
+				}
+			}
+			continue // re-snapshot: taking one branch may enable another
 		}
 		// No alternative matched. Activated defaults are appended after the
 		// remaining alternatives (20.5); one that fires leaves the interleave.
