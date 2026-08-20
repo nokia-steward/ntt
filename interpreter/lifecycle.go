@@ -212,6 +212,58 @@ func blockUntilComponentState(ref *runtime.ComponentRef, op string, env runtime.
 	return runtime.Undefined
 }
 
+// blockUntilComponentsState is the `all component.done` / `any
+// component.done` (and `.killed`) analogue of blockUntilComponentState: it
+// parks the MTC on the cooperative scheduler until the aggregate predicate
+// holds over the given started PTCs, so their forked bodies are granted the
+// token and actually run (setting their verdict) rather than the MTC
+// racing past a non-blocking snapshot. Each park advances to the soonest
+// modelled deadline among the still-unsatisfied PTCs; a forked PTC with no
+// modelled duration wakes the park when it finishes.
+func blockUntilComponentsState(kind, op string, refs []*runtime.ComponentRef, env runtime.Scope) runtime.Object {
+	pred := compDone
+	if op == "killed" {
+		pred = compKilled
+	}
+	satisfied := func() bool {
+		if kind == "any component" {
+			for _, r := range refs {
+				if pred(r, env) {
+					return true
+				}
+			}
+			return false
+		}
+		for _, r := range refs { // all component
+			if !pred(r, env) {
+				return false
+			}
+		}
+		return true
+	}
+	exec := runtime.FindTestcaseExec(env)
+	if exec == nil {
+		return runtime.NewBool(satisfied())
+	}
+	stop := currentStopChan(exec)
+	for !satisfied() {
+		deadline, hasTimer := 0.0, false
+		for _, r := range refs {
+			if pred(r, env) || r.ModeledDuration <= 0 {
+				continue
+			}
+			if d := r.StartedAtVirtual + r.ModeledDuration; !hasTimer || d < deadline {
+				deadline, hasTimer = d, true
+			}
+		}
+		re, stopped := exec.SchedPark(currentCompID(exec), deadline, hasTimer, stop)
+		if stopped || !re {
+			break
+		}
+	}
+	return runtime.Undefined
+}
+
 // compAlive / compRunning / compDone / compKilled are the single source
 // of truth for the four component-state predicates. They take env so the
 // modelled-completion window can consult the active clock (see

@@ -886,12 +886,18 @@ func evalComponentQuery(kind string, sel syntax.Expr, env runtime.Scope) (runtim
 	if predicate == nil {
 		return nil, false
 	}
-	// A standalone `all component.done` / `.killed` ought to block like
-	// its singular counterpart (ETSI 21.3.7/21.3.8) rather than answer a
-	// snapshot the statement context discards. Making it park costs two
-	// files today because it lets PTC bodies reach branches that expose a
-	// `send ... to <component>` routing defect - see
-	// docs/conformance/remaining-work.md.
+	// A standalone `all component.done` / `.killed` blocks like its
+	// singular counterpart (ETSI 21.3.7/21.3.8) rather than answering a
+	// snapshot the statement context discards: under the cooperative
+	// scheduler it parks so each started PTC is granted the token and its
+	// body actually runs (and records its verdict). Inside an alt guard the
+	// alt owns the blocking, so it stays a non-blocking snapshot. Only the
+	// genuinely-blocking ops (done / killed) park; alive / running are pure
+	// queries.
+	if (op == "done" || op == "killed") && len(ptcs) > 0 &&
+		deterministicSchedulerEnabled(env) && !altCtx.active() {
+		return blockUntilComponentsState(kind, op, ptcs, env), true
+	}
 	switch kind {
 	case "all component":
 		if len(ptcs) == 0 {

@@ -1,27 +1,27 @@
 {
- "summary": "ran 4948 files: 4747 matched, 23 skipped (96.39% match rate)",
- "source": "/tmp/p4b.json",
- "miss_count": 201,
+ "summary": "ran 4948 files: 4746 matched, 23 skipped (96.37% match rate)",
+ "source": "/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b00a-12bcd47feab7/scratchpad/full.json",
+ "miss_count": 202,
  "outcomes": {
   "reject->pass": 75,
-  "pass->none": 38,
+  "pass->none": 34,
   "reject->none": 27,
   "->": 23,
   "pass->timeout": 18,
-  "pass->error": 13,
-  "pass->fail": 5,
+  "pass->error": 16,
+  "pass->fail": 7,
   "pass->parse-error": 2
  },
  "chapters": [
   {
    "chapter": "core_language/22_communication_operations",
-   "misses": 68,
+   "misses": 73,
    "outcomes": {
     "reject->pass": 19,
+    "pass->fail": 7,
     "pass->none": 17,
     "reject->none": 2,
-    "pass->error": 7,
-    "pass->fail": 5,
+    "pass->error": 10,
     "pass->timeout": 18
    }
   },
@@ -54,21 +54,10 @@
   },
   {
    "chapter": "core_language/21_configuration_operations",
-   "misses": 16,
+   "misses": 13,
    "outcomes": {
     "reject->pass": 2,
-    "pass->none": 14
-   }
-  },
-  {
-   "chapter": "core_language/16_functions_altsteps_testcases",
-   "misses": 9,
-   "outcomes": {
-    "reject->none": 1,
-    "reject->pass": 4,
-    "pass->none": 2,
-    "->": 1,
-    "pass->error": 1
+    "pass->none": 11
    }
   },
   {
@@ -78,6 +67,17 @@
     "reject->none": 4,
     "reject->pass": 3,
     "pass->error": 1
+   }
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "misses": 8,
+   "outcomes": {
+    "reject->none": 1,
+    "reject->pass": 4,
+    "->": 1,
+    "pass->error": 1,
+    "pass->none": 1
    }
   },
   {
@@ -871,14 +871,6 @@
   },
   {
    "chapter": "core_language/16_functions_altsteps_testcases",
-   "expected": "pass",
-   "actual": "none",
-   "outcome": "pass->none",
-   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/Sem_160102_predefined_functions_091.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/16_functions_altsteps_testcases",
    "expected": "reject",
    "actual": "pass",
    "outcome": "reject->pass",
@@ -1050,30 +1042,6 @@
    "expected": "pass",
    "actual": "none",
    "outcome": "pass->none",
-   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210102_disconnect_and_unmap_operations/Sem_210102_disconnect_and_unmap_operations_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/21_configuration_operations",
-   "expected": "pass",
-   "actual": "none",
-   "outcome": "pass->none",
-   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210102_disconnect_and_unmap_operations/Sem_210102_disconnect_and_unmap_operations_002.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/21_configuration_operations",
-   "expected": "pass",
-   "actual": "none",
-   "outcome": "pass->none",
-   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210102_disconnect_and_unmap_operations/Sem_210102_disconnect_and_unmap_operations_003.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/21_configuration_operations",
-   "expected": "pass",
-   "actual": "none",
-   "outcome": "pass->none",
    "relpath": "core_language/21_configuration_operations/2101_connection_operations/210102_disconnect_and_unmap_operations/Sem_210102_disconnect_operation_001.ttcn",
    "message": ""
   },
@@ -1139,6 +1107,22 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/NegSem_220201_SendOperation_011.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/Sem_220201_SendOperation_005.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/Sem_220201_SendOperation_006.ttcn",
    "message": ""
   },
   {
@@ -1348,6 +1332,30 @@
    "outcome": "reject->pass",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/NegSem_220305_raise_operation_009.ttcn",
    "message": ""
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "error",
+   "outcome": "pass->error",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/Sem_220305_raise_operation_002.ttcn",
+   "message": "test system deadlocked: every component is blocked and no timer can fire"
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "error",
+   "outcome": "pass->error",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/Sem_220305_raise_operation_003.ttcn",
+   "message": "test system deadlocked: every component is blocked and no timer can fire"
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "expected": "pass",
+   "actual": "error",
+   "outcome": "pass->error",
+   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/Sem_220305_raise_operation_004.ttcn",
+   "message": "test system deadlocked: every component is blocked and no timer can fire"
   },
   {
    "chapter": "core_language/22_communication_operations",

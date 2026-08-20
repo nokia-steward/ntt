@@ -1,7 +1,24 @@
 # Remaining Conformance Work
 
-State as of 2026-08-10: **4747 / 4948 matched (96.39%)**, 23 skipped
-(inconclusive / no-verdict), **178 real misses**.
+State as of 2026-08-20: **4746 / 4948 matched (96.37%)**, 23 skipped
+(inconclusive / no-verdict), **202 real misses** in the inventory.
+
+**2026-08-20 — `all component.done` now blocks (ETSI 21.3.7), net −1.** It
+answered a non-blocking snapshot the statement context discarded, so under
+the cooperative scheduler a started PTC was never granted the token and its
+body never ran — its verdict silently lost. Making it park like the
+singular `.done` **gained 4** fixtures whose PTC verdict now propagates
+(`Sem_160102_predefined_functions_091`,
+`Sem_210102_disconnect_and_unmap_operations_001/002/003`) and **exposed 5**
+whose old `pass` was hollow: the PTC body was skipped, so nothing could
+fail. With the body now running they hit the still-unfixed multi-PTC
+send-routing / raise defects and fail honestly
+(`Sem_220201_SendOperation_005/006` → fail, `Sem_220305_raise_operation_002/003/004`
+→ error). Those five are the same deep tier described under "Async
+multi-PTC message echo" below; the change surfaces them rather than
+creating them. Net −1 on the number, more correct on the semantics.
+
+Earlier state (2026-08-10): 4747 / 4948 matched (96.39%), 178 real misses.
 
 The rate went **down** on purpose. It read 4813 / 97.73% on 2026-08-04,
 and part of that was fiction: two mechanisms in the engine existed to make

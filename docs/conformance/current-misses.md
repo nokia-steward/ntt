@@ -1,30 +1,30 @@
 # Current Conformance Misses
 
-Generated from `/tmp/p4b.json` using the current workspace runner.
+Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b00a-12bcd47feab7/scratchpad/full.json` using the current workspace runner.
 
-- Summary: `ran 4948 files: 4747 matched, 23 skipped (96.39% match rate)`
-- Misses: `201`
+- Summary: `ran 4948 files: 4746 matched, 23 skipped (96.37% match rate)`
+- Misses: `202`
 
 ## Misses By Outcome
 
 - `reject->pass`: `75`
-- `pass->none`: `38`
+- `pass->none`: `34`
 - `reject->none`: `27`
 - `->`: `23`
 - `pass->timeout`: `18`
-- `pass->error`: `13`
-- `pass->fail`: `5`
+- `pass->error`: `16`
+- `pass->fail`: `7`
 - `pass->parse-error`: `2`
 
 ## Misses By Chapter
 
-- `core_language/22_communication_operations`: `68` (`pass->error`=7, `pass->fail`=5, `pass->none`=17, `pass->timeout`=18, `reject->none`=2, `reject->pass`=19)
+- `core_language/22_communication_operations`: `73` (`pass->error`=10, `pass->fail`=7, `pass->none`=17, `pass->timeout`=18, `reject->none`=2, `reject->pass`=19)
 - `core_language/06_types_and_values`: `34` (`->`=9, `reject->none`=12, `reject->pass`=13)
 - `core_language/05_basic_language_elements`: `20` (`->`=3, `reject->none`=1, `reject->pass`=16)
 - `core_language/15_templates`: `16` (`->`=2, `reject->none`=3, `reject->pass`=11)
-- `core_language/21_configuration_operations`: `16` (`pass->none`=14, `reject->pass`=2)
-- `core_language/16_functions_altsteps_testcases`: `9` (`->`=1, `pass->error`=1, `pass->none`=2, `reject->none`=1, `reject->pass`=4)
+- `core_language/21_configuration_operations`: `13` (`pass->none`=11, `reject->pass`=2)
 - `core_language/09_test_configurations`: `8` (`pass->error`=1, `reject->none`=4, `reject->pass`=3)
+- `core_language/16_functions_altsteps_testcases`: `8` (`->`=1, `pass->error`=1, `pass->none`=1, `reject->none`=1, `reject->pass`=4)
 - `core_language/20_statement_and_operations_for_alt`: `8` (`pass->error`=2, `pass->none`=3, `reject->pass`=3)
 - `core_language/11_variables`: `4` (`->`=2, `pass->error`=2)
 - `core_language/26_module_control`: `3` (`->`=3)
@@ -43,6 +43,8 @@ Generated from `/tmp/p4b.json` using the current workspace runner.
 
 - `core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/NegSem_220201_SendOperation_005.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/NegSem_220201_SendOperation_011.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/Sem_220201_SendOperation_005.ttcn`: `pass -> fail`
+- `core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/Sem_220201_SendOperation_006.ttcn`: `pass -> fail`
 - `core_language/22_communication_operations/2202_message_based_communication/220202_receive_operation/NegSem_220202_ReceiveOperation_006.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2202_message_based_communication/220202_receive_operation/NegSem_220202_ReceiveOperation_023.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2202_message_based_communication/220202_receive_operation/Sem_220202_ReceiveOperation_031.ttcn`: `pass -> none`
@@ -59,9 +61,7 @@ Generated from `/tmp/p4b.json` using the current workspace runner.
 - `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_007.ttcn`: `pass -> fail` - "The any from getcall operation didn't match for some reason"
 - `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_010.ttcn`: `pass -> fail` - "The any from getcall operation didn't match for some reason"
 - `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_011.ttcn`: `pass -> fail` - "The any from getcall operation didn't match for some reason"
-- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_012.ttcn`: `pass -> fail` - "The any from getcall didn't match for some reason"
-- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_013.ttcn`: `pass -> fail` - "The any from getcall didn't match for some reason"
-- ... `48` more in `current-misses.json`
+- ... `53` more in `current-misses.json`
 
 ### `core_language/06_types_and_values`
 
@@ -137,9 +137,6 @@ Generated from `/tmp/p4b.json` using the current workspace runner.
 - `core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/Sem_210101_connect_and_map_operations_002.ttcn`: `pass -> none`
 - `core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/Sem_210101_connect_and_map_operations_003.ttcn`: `pass -> none`
 - `core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/Sem_210101_connect_and_map_operations_004.ttcn`: `pass -> none`
-- `core_language/21_configuration_operations/2101_connection_operations/210102_disconnect_and_unmap_operations/Sem_210102_disconnect_and_unmap_operations_001.ttcn`: `pass -> none`
-- `core_language/21_configuration_operations/2101_connection_operations/210102_disconnect_and_unmap_operations/Sem_210102_disconnect_and_unmap_operations_002.ttcn`: `pass -> none`
-- `core_language/21_configuration_operations/2101_connection_operations/210102_disconnect_and_unmap_operations/Sem_210102_disconnect_and_unmap_operations_003.ttcn`: `pass -> none`
 - `core_language/21_configuration_operations/2101_connection_operations/210102_disconnect_and_unmap_operations/Sem_210102_disconnect_operation_001.ttcn`: `pass -> none`
 - `core_language/21_configuration_operations/2103_test_component_operations/210303_stop_test_component/Sem_210303_Stop_test_component_005.ttcn`: `pass -> none`
 - `core_language/21_configuration_operations/2103_test_component_operations/210303_stop_test_component/Sem_210303_Stop_test_component_006.ttcn`: `pass -> none`

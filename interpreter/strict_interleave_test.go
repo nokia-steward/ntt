@@ -10,26 +10,20 @@ import (
 	"github.com/nokia/ntt/ttcn3"
 )
 
-// wantNoneProcCommGap asserts a KNOWN GAP: a procedure-communication
-// testcase whose PTC bodies never run, so nothing in it sets a verdict.
+// wantProcCommPass asserts a procedure-communication testcase reaches
+// `pass` because its PTC bodies actually ran.
 //
-// `comp.start(f)` does not execute a body containing a procedure operation
-// (startBodyShouldSkip in interpreter/interpreter.go); a syntactic model
-// stands in for it. So in these testcases neither the server's `getcall`
-// nor its safety timer nor the client's `call` happens at all - not the
-// server accepting, not the timer firing, nothing.
-//
-// The four tests below asserted `pass` until 2026-08-10 and every one was
-// vacuous: the engine coerced an undeclared verdict to pass, so a testcase
-// in which nothing ran looked successful and the behaviours they describe
-// were never exercised. They are kept, pointed at the truth, as tripwires:
-// when PTC bodies really run, each of these fails and has to be restored
-// to asserting what its name claims.
-func wantNoneProcCommGap(t *testing.T, v runtime.Verdict, reason, claim string) {
+// The four tests below asserted `pass` until 2026-08-10, then `none` as
+// tripwires: while the PTC bodies were skipped nothing ran, so an
+// undeclared verdict was the honest outcome, and the comment promised to
+// restore the real `pass` assertion "when PTC bodies really run". That
+// happened once `all component.done` was made blocking (ETSI 21.3.7): each
+// started PTC is now granted the scheduler token and its body runs, so
+// each of these behaviours is genuinely exercised and its testcase passes.
+func wantProcCommPass(t *testing.T, v runtime.Verdict, reason, claim string) {
 	t.Helper()
-	if v != runtime.NoneVerdict {
-		t.Fatalf("verdict = %s (%s), want none: the PTC bodies are skipped, so nothing sets a verdict. "+
-			"A verdict here means bodies now run - restore this test to asserting %s", v, reason, claim)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass: %s", v, reason, claim)
 	}
 }
 
@@ -71,7 +65,7 @@ func TestStrictSched_GetcallSenderGuardNotCorrupted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
-	wantNoneProcCommGap(t, v, reason, "pass: the getcall sender-guard must not be corrupted")
+	wantProcCommPass(t, v, reason, "the getcall sender-guard must not be corrupted")
 }
 
 // TestStrictSched_CallTimeoutCatchFires covers C3: the timeout duration D of
@@ -113,7 +107,7 @@ func TestStrictSched_CallTimeoutCatchFires(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
-	wantNoneProcCommGap(t, v, reason, "pass: catch(timeout) must fire when the call is unanswered")
+	wantProcCommPass(t, v, reason, "catch(timeout) must fire when the call is unanswered")
 }
 
 // TestStrictSched_CallReplyBeatsTimeout is C3's ordering guard: when a
@@ -157,7 +151,7 @@ func TestStrictSched_CallReplyBeatsTimeout(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
-	wantNoneProcCommGap(t, v, reason, "pass: a matching reply must beat catch(timeout)")
+	wantProcCommPass(t, v, reason, "a matching reply must beat catch(timeout)")
 }
 
 // TestStrictSched_MulticastCallTargetsOnly covers non-blocking multicast
@@ -402,7 +396,7 @@ func TestStrictSched_AnyPortGetcallBindsRedirect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunTestcaseWith: %v", err)
 	}
-	wantNoneProcCommGap(t, v, reason, "pass: any port.getcall must bind its redirect")
+	wantProcCommPass(t, v, reason, "any port.getcall must bind its redirect")
 }
 
 // TestStrictSched_ForkMessagePeers covers the coop fork model: a sender

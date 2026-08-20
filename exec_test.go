@@ -436,3 +436,33 @@ func loadCfg(t *testing.T, src string) *cfg.File {
 	}
 	return f
 }
+
+// TestExecAllComponentDoneMergesPTCVerdict covers ETSI 21.3.7: `all
+// component.done` blocks like the singular `.done`, so under the
+// cooperative scheduler each started PTC is granted the token and its body
+// actually runs — a failing PTC's verdict must survive, not be lost to the
+// MTC racing past a non-blocking snapshot. Runs on the default (virtual /
+// coop) path, where the bug lived.
+func TestExecAllComponentDoneMergesPTCVerdict(t *testing.T) {
+	path := writeTC(t, `module m {
+		type component C {}
+		function ok() runs on C { setverdict(pass); }
+		function bad() runs on C { setverdict(fail, "ptc must be heard"); }
+		testcase tc() runs on C system C {
+			var C a := C.create alive;
+			var C b := C.create alive;
+			a.start(ok());
+			b.start(bad());
+			all component.done;
+			setverdict(pass);
+		}
+	}`)
+	d := newStaticDriver([]string{path})
+	v, reason, err := d.Run(context.Background(), "m.tc")
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if v != rreport.Fail {
+		t.Fatalf("verdict=%s (%s), want fail: a failing PTC's verdict must survive all component.done", v, reason)
+	}
+}
