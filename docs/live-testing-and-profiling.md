@@ -19,9 +19,13 @@ measure latency from inside a testcase, and how to produce a performance
 report.
 
 > **Background.** The idea that a single functional TTCN-3 test can double
-> as a performance probe comes from an [ICT Express article on using TTCN-3
-> for functional testing and performance
-> profiling](https://www.sciencedirect.com/science/article/pii/S2405959519300402).
+> as a performance probe comes from:
+>
+> Manuel Peuster, Christian Dröge, Clemens Boos, Holger Karl. *Joint testing
+> and profiling of microservice-based network services using TTCN-3.* ICT
+> Express, Volume 5, Issue 2, 2019, pp. 150–153.
+> [doi:10.1016/j.icte.2019.02.001](https://doi.org/10.1016/j.icte.2019.02.001).
+>
 > This is that approach, realized on `ntt`'s strict engine.
 
 ## Contents

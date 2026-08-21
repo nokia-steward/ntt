@@ -13,10 +13,10 @@ Releases before 0.24.0 predate this file; see the
 Live testing and performance profiling: the same strict TTCN-3 engine can now
 drive a real system under test over the network and measure how it behaves —
 functional testing *and* profiling on one engine, with the deterministic
-conformance path untouched. It realizes the approach from an
-[ICT Express article on using TTCN-3 for functional testing and performance
-profiling](https://www.sciencedirect.com/science/article/pii/S2405959519300402):
-a single functional test doubles as a performance probe. See
+conformance path untouched. It realizes the approach from Peuster et al.,
+["Joint testing and profiling of microservice-based network services using
+TTCN-3"](https://doi.org/10.1016/j.icte.2019.02.001) (ICT Express, 2019): a
+single functional test doubles as a performance probe. See
 [docs/live-testing-and-profiling.md](docs/live-testing-and-profiling.md).
 
 ### Added
