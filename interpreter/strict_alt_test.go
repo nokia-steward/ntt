@@ -20,6 +20,22 @@ func runStrict(t *testing.T, qname, src string) (runtime.Verdict, string) {
 	return v, reason
 }
 
+// runStrictDet runs a logical alt/interleave test under the deterministic
+// scheduler + virtual clock, so a timer guard (e.g. `t := 0.05`) fires on
+// the virtual clock — deterministically — instead of racing a real 50ms
+// deadline on a slow/loaded CI runner. Use it for tests that only care
+// about WHICH clause fires, not how long the wait took; use runStrict for
+// tests that assert real-clock timing (e.g. TestStrictAlt_TimerGuardFires).
+func runStrictDet(t *testing.T, qname, src string) (runtime.Verdict, string) {
+	t.Helper()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, qname,
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith(%s): %v", qname, err)
+	}
+	return v, reason
+}
+
 // TestStrictAlt_ConnectedPeerReceive covers the ProfileStrict snapshot
 // alt evaluator + connection-topology routing: a connected peer sends,
 // and the MTC's alt receives it on the connected port. Under the strict
@@ -237,7 +253,11 @@ func TestStrictProc_CheckHonoursTemplate(t *testing.T) {
 // take the second (true-guarded) clause. Without guard evaluation the
 // first clause would win by source order and the verdict would be fail.
 func TestStrictAlt_BooleanGuardGatesClause(t *testing.T) {
-	v, reason := runStrict(t, "M.tc", `module M {
+	// Deterministic clock: the 0.05s timer is only the event that lets the
+	// alt conclude; the test is about WHICH guarded clause fires, not the
+	// wait. Firing it virtually makes the outcome deterministic instead of
+	// racing a real 50ms deadline on a loaded runner (a Windows CI flake).
+	v, reason := runStrictDet(t, "M.tc", `module M {
 		type component C { }
 		testcase tc() runs on C system C {
 			var integer x := 0;
