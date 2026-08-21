@@ -64,6 +64,9 @@ re-renders.
 | Titan-compat port shim               | done     | done  | `runtime/port/api/cabi/ntt_titan_compat.h` (Handler_Add_Fd_Read, TTCN_Buffer) |
 | C ABI bridge wired into interpreter  | done     | n/a   | `-tags cabicgo` enables it; see [docs/cabi-ports.md](cabi-ports.md) |
 | Typed-value -> wire encoding (JSON)  | done     | done  | runtime records/lists/maps auto-JSONed before reaching C `send` hook |
+| Built-in TCP test port (no user code)| done     | n/a   | `[TESTPORT_PARAMETERS] transport := "tcp"`; newline or length-prefix framing; `runtime/port/tcpport`; see [docs/live-testing-and-profiling.md](live-testing-and-profiling.md) |
+| Real-clock live execution            | done     | done  | `ntt exec --live` drives a live SUT on the real clock (same strict engine) |
+| Performance profiling                | done     | partial | `ntt exec --profile`: per-port latency percentiles + throughput; `--format=profile` / json |
 
 ## Build / integration
 
