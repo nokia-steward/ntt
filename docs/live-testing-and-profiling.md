@@ -18,6 +18,12 @@ This page shows how to drive a live SUT over TCP with no user code, how to
 measure latency from inside a testcase, and how to produce a performance
 report.
 
+> **Background.** The idea that a single functional TTCN-3 test can double
+> as a performance probe comes from an [ICT Express article on using TTCN-3
+> for functional testing and performance
+> profiling](https://www.sciencedirect.com/science/article/pii/S2405959519300402).
+> This is that approach, realized on `ntt`'s strict engine.
+
 ## Contents
 
 - [Two clocks: functional vs live](#two-clocks-functional-vs-live)
