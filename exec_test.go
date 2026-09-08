@@ -516,3 +516,45 @@ func TestExampleLiveTestingRuns(t *testing.T) {
 		}
 	}
 }
+
+// TestExecExitStatusReflectsVerdict covers the CI contract: `ntt exec`
+// must report a failing suite through a non-zero exit status (runExec
+// returning an error), not just in the printed report — otherwise a CI
+// pipeline treats a red suite as green. A passing suite must stay silent.
+func TestExecExitStatusReflectsVerdict(t *testing.T) {
+	// runExec reads package-level flag vars; save and restore them so this
+	// test can't leak state into its neighbours.
+	oldFormat, oldOut, oldCfg, oldPatterns := execFormat, execOutDir, execCfgPath, execPatterns
+	t.Cleanup(func() {
+		execFormat, execOutDir, execCfgPath, execPatterns = oldFormat, oldOut, oldCfg, oldPatterns
+	})
+	execFormat, execOutDir, execCfgPath, execPatterns = "text", "", "", nil
+
+	tc := func(body string) string {
+		return `module m {
+			type component C {}
+			testcase tc() runs on C system C { ` + body + ` }
+		}`
+	}
+	for _, k := range []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{"pass", "setverdict(pass);", false},
+		{"none", "", false},
+		{"fail", `setverdict(fail, "boom");`, true},
+		{"inconc", "setverdict(inconc);", true},
+	} {
+		t.Run(k.name, func(t *testing.T) {
+			execOutDir = t.TempDir() // keep the report out of the test log
+			err := runExec(nil, []string{writeTC(t, tc(k.body))})
+			if k.wantErr && err == nil {
+				t.Fatalf("%s suite: runExec returned nil; want an error so the CLI exits non-zero", k.name)
+			}
+			if !k.wantErr && err != nil {
+				t.Fatalf("%s suite: runExec returned %v; want nil", k.name, err)
+			}
+		})
+	}
+}

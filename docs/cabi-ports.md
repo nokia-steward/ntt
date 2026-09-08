@@ -201,9 +201,10 @@ By default the bridge passes payloads to the C side as raw bytes:
 So a TTCN-3 program that sends a record:
 
 ```ttcn3
-type record HttpRequest { charstring path, integer port };
+// `port` is a TTCN-3 keyword, so the field is named serverPort.
+type record HttpRequest { charstring path, integer serverPort };
 
-template HttpRequest probe := { path := "/probe/liveness", port := 8080 };
+template HttpRequest probe := { path := "/probe/liveness", serverPort := 8080 };
 
 cli.send(probe);
 ```
@@ -211,7 +212,7 @@ cli.send(probe);
 reaches the C side as the JSON document
 
 ```json
-{"path":"/probe/liveness","port":8080}
+{"path":"/probe/liveness","serverPort":8080}
 ```
 
 with deterministic field ordering (lexicographic). Any mainstream

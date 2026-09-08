@@ -22,7 +22,8 @@ Create a `package.yml` so ntt recognises this folder as a project root:
 ```yaml
 # /tmp/hello-ntt/package.yml
 name: hello
-source_dir: .
+sources:
+  - Hello.ttcn3
 ```
 
 Create the test file itself:
@@ -30,11 +31,13 @@ Create the test file itself:
 ```ttcn3
 // /tmp/hello-ntt/Hello.ttcn3
 module Hello {
+    type component MTC {}
+
     function add(integer a, integer b) return integer {
         return a + b;
     }
 
-    testcase TC_Add() runs on system {
+    testcase TC_Add() runs on MTC {
         if (add(2, 3) == 5) {
             setverdict(pass);
         } else {
@@ -47,6 +50,10 @@ module Hello {
     }
 }
 ```
+
+Every testcase names the component it runs on, so the one-line
+`type component MTC {}` declaration above is required even for a test
+that uses no ports or timers.
 
 ## 2. List discovered tests
 
@@ -80,9 +87,12 @@ uses against the ETSI suite, which means anything that runs under
 `ntt conformance` also runs under `ntt exec`.
 
 ```
-=== RUN   Hello.TC_Add
-=== PASS  Hello.TC_Add  0.001s
+suite "ntt": pass (1 cases in 156.155µs)
+  pass    Hello.TC_Add
 ```
+
+Pick a different report format with `--format` (`text`, `json`, `junit`,
+`tap`, `html`, `profile`) and write it to a file with `--out`.
 
 This is the recommended way to iterate while you're writing tests:
 start-up is fast, you don't need a working build chain, and the
@@ -91,19 +101,29 @@ error messages come straight from the interpreter.
 ### 3b. `ntt run` (Go backend)
 
 ```sh
-ntt run
+ntt run Hello.ttcn3
 ```
 
 `ntt run` lowers your test to the SSA-ish IR and emits Go that gets
 compiled and executed. The first run costs a Go compile; subsequent
 runs are cached. Prefer this when you care about steady-state
 throughput rather than start-up latency, or when you want to embed
-ntt-compiled tests in a Go binary.
+ntt-compiled tests in a Go binary. Unlike `ntt exec`, it takes the
+file (or testcase) to run as an argument:
 
-Both backends print the same `=== RUN / === PASS / === FAIL` output,
-so CI pipelines do not need to know which one produced it. If you
-change `add(2, 3) == 5` to `add(2, 3) == 6` and re-run, you'll get a
-failing verdict and a non-zero exit status - exactly what a CI
+```
+suite "Hello": pass (1 cases, build 273ms, run 2ms)
+  pass	Hello.TC_Add
+```
+
+> **Note.** The Go backend compiles a module that links the ntt runtime,
+> so it must run from inside a Go module — the ntt source checkout, or a
+> project of your own with a `go.mod`. From a standalone directory like
+> `/tmp/hello-ntt` it reports `cannot locate repository root`; use
+> `ntt exec` there, which has no such requirement.
+
+If you change `add(2, 3) == 5` to `add(2, 3) == 6` and re-run, you'll
+get a failing verdict and a non-zero exit status - exactly what a CI
 pipeline needs.
 
 ## 4. Format the code

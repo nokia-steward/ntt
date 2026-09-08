@@ -49,6 +49,12 @@ single functional test doubles as a performance probe. See
 
 ### Changed
 
+- **`ntt exec` exits non-zero when the suite does not pass.** It previously
+  exited `0` even for a failing suite, so a CI pipeline treated red as green.
+  Severity follows the JUnit mapping already used by the reports: `inconc`,
+  `fail` and `error` exit non-zero; `pass` and `none` exit `0`. The report
+  itself is written first and is byte-identical — only the exit status
+  changed.
 - **`all component.done` / `.killed` now block** (ETSI 21.3.7/21.3.8) instead
   of answering a non-blocking snapshot, so a forked PTC's body actually runs
   and its verdict is recorded — a failing PTC can no longer leave the testcase
@@ -71,5 +77,14 @@ single functional test doubles as a performance probe. See
 - A **bare** `p.getreply` / `p.getcall` / `p.catch` guard reads the running
   PTC's own per-component queue, so a reply/exception routed to it is no longer
   invisible to the PTC's own `catch`.
+- **Documentation defects found by running the docs through `ntt check`.**
+  The getting-started walkthrough used an invalid `package.yml` field
+  (`source_dir` instead of `sources`), a testcase with `runs on system`
+  (`system` is a keyword, not a component type), and showed `ntt exec` output
+  that the tool never produced; `cabi-ports.md` used the keyword `port` as a
+  record field name; and the `t.read` stopwatch snippet started a timer with
+  no default duration (invalid per ETSI 12). Every TTCN-3 snippet in the docs
+  now passes `ntt check`, and the walkthrough was replayed verbatim to confirm
+  its commands and output.
 
 [0.24.0]: https://github.com/nokia/ntt/compare/v0.23.2...v0.24.0

@@ -154,7 +154,33 @@ func runExec(cmd *cobra.Command, args []string) error {
 		out = f
 	}
 
-	return writeReport(out, execFormat, suite)
+	if err := writeReport(out, execFormat, suite); err != nil {
+		return err
+	}
+	// A test runner must signal failure through its exit status, or CI
+	// treats a red suite as green. The report is written first, so the
+	// output is identical either way — only the exit status differs.
+	// Severity follows the JUnit mapping already used above: inconc and
+	// fail are failures, error is an error, none/pass are not (verdicts
+	// are ordered none < pass < inconc < fail < error).
+	if v := suite.Verdict(); v >= rreport.Inconc {
+		return fmt.Errorf("suite %q: %s (%s)", suite.Name, v, verdictBreakdown(suite))
+	}
+	return nil
+}
+
+// verdictBreakdown renders "1 fail, 2 pass" for a suite, worst verdict
+// first, so the exit-status error says which cases were bad.
+func verdictBreakdown(suite *rreport.Suite) string {
+	counts := suite.CountBy()
+	order := []rreport.Verdict{rreport.Error, rreport.Fail, rreport.Inconc, rreport.None, rreport.Pass}
+	parts := make([]string, 0, len(order))
+	for _, v := range order {
+		if n := counts[v]; n > 0 {
+			parts = append(parts, fmt.Sprintf("%d %s", n, v))
+		}
+	}
+	return strings.Join(parts, ", ")
 }
 
 // registerConfiguredTestPorts wires the built-in TCP test port for every
