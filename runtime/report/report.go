@@ -357,6 +357,8 @@ tr.fail td:first-child { border-left: 4px solid #c62828; }
 tr.error td:first-child { border-left: 4px solid #6a1b9a; }
 tr.inconc td:first-child { border-left: 4px solid #ef6c00; }
 tr.pass td:first-child { border-left: 4px solid #2e7d32; }
+h2 { margin: 2rem 0 0.5rem; font-size: 1.1rem; }
+.num { text-align: right; font-variant-numeric: tabular-nums; }
 </style></head><body>
 <h1>{{.Name}}</h1>
 <p class="meta">
@@ -372,6 +374,20 @@ overall verdict
 <td>{{.Module}}</td><td>{{.Name}}</td><td>{{printf "%.2fs" .DurationSeconds}}</td><td>{{.Reason}}</td></tr>
 {{end -}}
 </tbody></table>
+{{if .HasMetrics}}
+<h2>Performance profile</h2>
+<p class="meta">per-port send&rarr;receive latency and throughput, captured on the real clock (<code>ntt exec --profile</code>)</p>
+<table>
+<thead><tr><th>testcase</th><th>port</th><th class="num">sent</th><th class="num">recv</th>
+<th class="num">recv/s</th><th class="num">min</th><th class="num">p50</th><th class="num">p90</th><th class="num">p99</th></tr></thead>
+<tbody>
+{{range .Metrics -}}
+<tr><td>{{.Case}}</td><td>{{.Port}}</td><td class="num">{{.Sends}}</td><td class="num">{{.Receives}}</td>
+<td class="num">{{printf "%.1f" .Throughput}}</td><td class="num">{{.Min}}</td><td class="num">{{.P50}}</td>
+<td class="num">{{.P90}}</td><td class="num">{{.P99}}</td></tr>
+{{end -}}
+</tbody></table>
+{{end}}
 </body></html>
 `
 
@@ -380,10 +396,20 @@ type htmlCase struct {
 	DurationSeconds                  float64
 }
 
+// htmlMetric is one flattened (testcase, port) profiling row.
+type htmlMetric struct {
+	Case, Port         string
+	Sends, Receives    int
+	Throughput         float64
+	Min, P50, P90, P99 string
+}
+
 type htmlData struct {
 	Name, OverallStr, OverallClass string
 	DurationSeconds                float64
 	Cases                          []htmlCase
+	Metrics                        []htmlMetric
+	HasMetrics                     bool
 }
 
 // RenderHTML writes the suite as a self-contained HTML document.
@@ -407,7 +433,31 @@ func RenderHTML(w io.Writer, s *Suite) error {
 			Class:           c.Verdict.String(),
 			DurationSeconds: c.Duration.Seconds(),
 		})
+		// Flatten any profiling metrics into a second table, so a
+		// --profile run's latency/throughput shows up in the HTML
+		// artefact CI publishes (not only in --format=profile/json).
+		if c.Metrics == nil {
+			continue
+		}
+		name := c.Name
+		if c.Module != "" {
+			name = c.Module + "." + name
+		}
+		for _, p := range c.Metrics.Ports {
+			data.Metrics = append(data.Metrics, htmlMetric{
+				Case:       name,
+				Port:       p.Port,
+				Sends:      p.Sends,
+				Receives:   p.Receives,
+				Throughput: p.Throughput,
+				Min:        p.Latency.Min.String(),
+				P50:        p.Latency.P50.String(),
+				P90:        p.Latency.P90.String(),
+				P99:        p.Latency.P99.String(),
+			})
+		}
 	}
+	data.HasMetrics = len(data.Metrics) > 0
 	return tpl.Execute(w, data)
 }
 

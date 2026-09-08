@@ -466,3 +466,53 @@ func TestExecAllComponentDoneMergesPTCVerdict(t *testing.T) {
 		t.Fatalf("verdict=%s (%s), want fail: a failing PTC's verdict must survive all component.done", v, reason)
 	}
 }
+
+// TestExampleLiveTestingRuns keeps examples/live-testing/ honest: it runs
+// the example's real .ttcn source against an in-process echo SUT and
+// checks the shipped .cfg still parses into a TCP port registration. A
+// docs example that no longer compiles or passes is worse than none, and
+// this catches that in CI without needing an external server or the
+// example's fixed port.
+func TestExampleLiveTestingRuns(t *testing.T) {
+	const src = "examples/live-testing/app.ttcn"
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("example not present: %v", err)
+	}
+
+	// The shipped cfg must still describe a TCP test port.
+	f, _, err := cfg.Load("examples/live-testing/app.cfg")
+	if err != nil {
+		t.Fatalf("load example cfg: %v", err)
+	}
+	var sawTCP bool
+	for _, p := range f.TestPortParameters() {
+		if p.Param == "transport" && strings.EqualFold(p.Value, "tcp") {
+			sawTCP = true
+		}
+	}
+	if !sawTCP {
+		t.Fatal(`example app.cfg no longer declares transport := "tcp"`)
+	}
+
+	// Run the example's own source against an ephemeral echo SUT, so the
+	// test never contends for the example's fixed port.
+	addr, stop := startEchoServer(t)
+	defer stop()
+	tcpport.Register("p", addr)
+	t.Cleanup(tcpport.Reset)
+
+	d := newStaticDriver([]string{src})
+	d.profiling = true
+	d.live = true
+
+	for _, tc := range []string{"app.tc_echo", "app.tc_latency_budget"} {
+		v, reason, err := d.Run(context.Background(), tc)
+		if err != nil || v != rreport.Pass {
+			t.Fatalf("%s: verdict=%s reason=%q err=%v, want pass", tc, v, reason, err)
+		}
+		m := d.LastMetrics()
+		if m == nil || len(m.Ports) == 0 || m.Ports[0].Latency.Count == 0 {
+			t.Fatalf("%s: expected per-port latency samples, got %+v", tc, m)
+		}
+	}
+}

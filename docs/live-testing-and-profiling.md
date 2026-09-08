@@ -16,7 +16,8 @@ and it is the foundation for **performance profiling** (`--profile`).
 
 This page shows how to drive a live SUT over TCP with no user code, how to
 measure latency from inside a testcase, and how to produce a performance
-report.
+report. For a ready-to-run version of everything below, see
+[`examples/live-testing/`](../examples/live-testing/).
 
 > **Background.** The idea that a single functional TTCN-3 test can double
 > as a performance probe comes from:
@@ -67,14 +68,18 @@ On the real clock, `t.read` reports the actual wall-clock time elapsed
 since the timer started, so a testcase can time an operation directly:
 
 ```ttcn3
-timer rtt;
-rtt.start;
+timer rtt := 60.0;   // a default duration is required (ETSI 12); it is
+rtt.start;           // just an upper bound here — we only ever `read` it
 p.send(request);
 p.receive(response);
 if (rtt.read > 0.100) {
     setverdict(fail, "SUT slower than 100ms");
 }
 ```
+
+A timer used purely as a stopwatch still needs a default duration, since
+`.start` without an argument requires one; `read` clamps to it, so pick a
+bound comfortably above any latency you expect to measure.
 
 Under the virtual clock (`ntt exec` without `--live`) `t.read` follows
 ETSI §23.4 virtual-time semantics instead — a freshly started timer reads
@@ -241,6 +246,9 @@ setverdict(pass);
 ```
 
 ## A complete example
+
+Also available ready to run, with a copy-pasteable stand-in SUT, in
+[`examples/live-testing/`](../examples/live-testing/).
 
 `app.ttcn` — a request/response loop against a line-based SUT:
 

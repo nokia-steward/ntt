@@ -189,3 +189,45 @@ func TestRenderProfileNoMetrics(t *testing.T) {
 		t.Fatalf("expected an explicit no-metrics note:\n%s", buf.String())
 	}
 }
+
+func TestRenderHTMLIncludesMetrics(t *testing.T) {
+	s := &report.Suite{
+		Name:  "prof",
+		Start: time.Unix(0, 0),
+		End:   time.Unix(1, 0),
+		Cases: []report.Case{{
+			Module:   "app",
+			Name:     "tc",
+			Verdict:  report.Pass,
+			Duration: time.Second,
+			Metrics: &report.Metrics{Ports: []report.PortMetric{{
+				Port:       "p",
+				Sends:      6,
+				Receives:   6,
+				Throughput: 5644.9,
+				Latency:    report.LatencyStatsFromSamples([]time.Duration{time.Millisecond, 2 * time.Millisecond, 3 * time.Millisecond}),
+			}}},
+		}},
+	}
+	var buf bytes.Buffer
+	if err := report.RenderHTML(&buf, s); err != nil {
+		t.Fatalf("RenderHTML: %v", err)
+	}
+	out := buf.String()
+	for _, want := range []string{"Performance profile", "app.tc", ">p<", "recv/s", "p99", "5644.9"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("HTML profile section missing %q:\n%s", want, out)
+		}
+	}
+}
+
+func TestRenderHTMLNoMetricsSection(t *testing.T) {
+	// A functional (non-profiling) run must not grow an empty profile table.
+	var buf bytes.Buffer
+	if err := report.RenderHTML(&buf, sampleSuite()); err != nil {
+		t.Fatalf("RenderHTML: %v", err)
+	}
+	if strings.Contains(buf.String(), "Performance profile") {
+		t.Fatalf("unexpected profile section in a functional report:\n%s", buf.String())
+	}
+}

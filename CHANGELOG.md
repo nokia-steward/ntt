@@ -39,8 +39,13 @@ single functional test doubles as a performance probe. See
   different components.
 - **Performance profiling** — `ntt exec --profile` captures per-port send /
   receive counts, send→receive round-trip latency (min / p50 / p90 / p99) and
-  throughput. Report it as a table with `--format=profile`, or as a metrics
-  section in `--format=json`.
+  throughput. Report it as a table with `--format=profile`, as a metrics
+  section in `--format=json`, or as a **Performance profile** table in the
+  self-contained `--format=html` report (handy as a CI artefact).
+- **Runnable example** — [`examples/live-testing/`](examples/live-testing/):
+  a TTCN-3 module plus `.cfg` that drive a real TCP SUT and report its
+  latency, with a copy-pasteable stand-in server. Exercised by CI so it
+  cannot rot.
 
 ### Changed
 
