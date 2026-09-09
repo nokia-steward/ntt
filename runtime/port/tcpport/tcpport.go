@@ -30,6 +30,19 @@
 // A charstring may also be sent under length-prefix framing (its UTF-8
 // bytes are the frame) and an octetstring under newline framing (its raw
 // octets, then '\n'); the delivered type follows the framing.
+//
+// If the peer closes the connection mid-test, that is reported rather than
+// left as a silence a suite cannot distinguish from a slow answer: always as
+// a warning on stderr, and — when the port is registered with
+// WithDisconnectEvent — as an inbound value the suite can match on:
+//
+//	type enumerated DisconnectReason { closed(0), aborted(1) }
+//	type record Disconnected { DisconnectReason reason, charstring detail }
+//	type port P message { inout charstring; in Disconnected }
+//
+// The value is opt-in because injecting a new inbound type into a port a
+// suite declared as `inout charstring` would let a bare `p.receive` consume
+// it as data. Declare the type and enable the option together.
 package tcpport
 
 import (
@@ -37,10 +50,12 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
 	"net"
+	"os"
 	"sync"
 	"time"
 
@@ -81,12 +96,20 @@ type Rule struct {
 	Addr        string        // "host:port" to dial
 	Framing     Framing       // wire framing (FramingNewline if zero)
 	DialTimeout time.Duration // OnMap dial timeout (defaultDialTimeout if <= 0)
+	// ReportDisconnect delivers a `Disconnected` record to the suite when
+	// the peer closes the connection mid-test. Off by default: injecting a
+	// new inbound type into a port a suite declared as `inout charstring`
+	// would be consumed as data by a bare `p.receive`. Turn it on — and
+	// declare the type — in a suite that waits for pushes, where a hang-up
+	// is otherwise indistinguishable from silence.
+	ReportDisconnect bool
 }
 
 // config holds the tunables an Option can set.
 type config struct {
-	dialTimeout time.Duration
-	framing     Framing
+	dialTimeout      time.Duration
+	framing          Framing
+	reportDisconnect bool
 }
 
 // Option configures a registered TCP test port.
@@ -102,6 +125,13 @@ func WithFraming(f Framing) Option {
 	return func(c *config) { c.framing = f }
 }
 
+// WithDisconnectEvent makes a peer-initiated close arrive as a Disconnected
+// record the suite can match on. See Rule.ReportDisconnect for why it is
+// opt-in.
+func WithDisconnectEvent() Option {
+	return func(c *config) { c.reportDisconnect = true }
+}
+
 // Register binds a TTCN-3 message port TYPE name (e.g. "MyPort_PT") to a
 // built-in TCP test port that dials addr ("host:port") when a port of
 // that type is mapped, for any component. Each mapped instance opens its
@@ -114,10 +144,11 @@ func Register(portTypeName, addr string, opts ...Option) {
 		o(&cfg)
 	}
 	RegisterRules(portTypeName, []Rule{{
-		Component:   "*",
-		Addr:        addr,
-		Framing:     cfg.framing,
-		DialTimeout: cfg.dialTimeout,
+		Component:        "*",
+		Addr:             addr,
+		Framing:          cfg.framing,
+		DialTimeout:      cfg.dialTimeout,
+		ReportDisconnect: cfg.reportDisconnect,
 	}})
 }
 
@@ -152,11 +183,12 @@ type tcpPort struct {
 	inst  string
 	rules []Rule
 
-	mu      sync.Mutex
-	conn    net.Conn
-	framing Framing       // resolved from the matched rule at OnMap
-	done    chan struct{} // closed when the read loop exits
-	closed  bool
+	mu               sync.Mutex
+	conn             net.Conn
+	framing          Framing       // resolved from the matched rule at OnMap
+	done             chan struct{} // closed when the read loop exits
+	closed           bool
+	reportDisconnect bool // resolved from the matched rule at OnMap
 }
 
 func newPort(inst string, rules []Rule) *tcpPort {
@@ -221,6 +253,7 @@ func (p *tcpPort) OnMap(context.Context) error {
 	p.mu.Lock()
 	p.conn = conn
 	p.closed = false
+	p.reportDisconnect = rule.ReportDisconnect
 	p.framing = rule.Framing
 	p.done = make(chan struct{})
 	done := p.done
@@ -238,7 +271,7 @@ func (p *tcpPort) readLoop(conn net.Conn, done chan struct{}, framing Framing) {
 	defer close(done)
 	r := bufio.NewReader(conn)
 	if framing == FramingLengthPrefix {
-		p.readLengthPrefixed(r)
+		p.reportExit(p.readLengthPrefixed(r))
 		return
 	}
 	for {
@@ -248,27 +281,82 @@ func (p *tcpPort) readLoop(conn net.Conn, done chan struct{}, framing Framing) {
 			goport.Inject(p.inst, runtime.NewCharstring(string(frame)))
 		}
 		if err != nil {
+			p.reportExit(err)
 			return
 		}
 	}
 }
 
+// reportExit announces that the read loop has stopped. A connection the SUT
+// closed mid-test is otherwise a silence: the suite waits out its guard
+// timer, unable to tell "the SUT hung up" from "the SUT is slow" (see
+// docs/engine-trust.md, "An ending is a value, not a silence").
+//
+// It says so two ways, because they have different costs. The warning is
+// unconditional: a human always learns. The inbound Disconnected value is
+// opt-in, because injecting a new type into a port a suite declared as
+// `inout charstring` would be consumed as data by a bare `p.receive` — the
+// fix would introduce a subtler bug than the one it cures. A suite that
+// declares the type asks for it explicitly.
+//
+// A close we initiated (unmap / stop) is not reported: the suite knows.
+func (p *tcpPort) reportExit(cause error) {
+	p.mu.Lock()
+	selfClosed, want := p.closed, p.reportDisconnect
+	p.mu.Unlock()
+	if selfClosed {
+		return
+	}
+	reason, detail := reasonClosed, "connection closed by peer"
+	if cause != nil && !errors.Is(cause, io.EOF) {
+		reason, detail = reasonAborted, cause.Error()
+	}
+	fmt.Fprintf(os.Stderr, "tcpport %s: %s while the port was mapped\n", p.inst, detail)
+	if want {
+		goport.Inject(p.inst, newDisconnected(reason, detail))
+	}
+}
+
+// Disconnect reasons, in the canonical order fixing their integer values.
+// As with the HTTP port, new reasons are APPENDED: the integers are part of
+// the contract with any suite that declared the enumeration.
+const (
+	reasonClosed = "closed" // 0 — orderly close by the peer
+	// `error` is a TTCN-3 reserved word (the verdict), so it cannot be an
+	// enumeration label: a suite declaring it would not compile.
+	reasonAborted = "aborted" // 1 — the connection failed
+)
+
+var disconnectReasons = runtime.NewEnumType("DisconnectReason", reasonClosed, reasonAborted)
+
+// newDisconnected builds the TTCN-3 Disconnected record.
+func newDisconnected(reason, detail string) *runtime.Record {
+	rec := runtime.NewRecord()
+	ev, err := runtime.NewEnumValueByKey(disconnectReasons, reason)
+	if err != nil {
+		ev, _ = runtime.NewEnumValueByKey(disconnectReasons, reasonAborted)
+	}
+	rec.Fields["reason"] = ev
+	rec.Fields["detail"] = runtime.NewCharstring(detail)
+	return rec
+}
+
 // readLengthPrefixed reads 4-byte-BE-length-delimited frames and injects
 // each as an octetstring. A length over maxFrameLen (a desynchronised or
 // hostile peer) ends the loop rather than allocating unbounded memory.
-func (p *tcpPort) readLengthPrefixed(r *bufio.Reader) {
+func (p *tcpPort) readLengthPrefixed(r *bufio.Reader) error {
 	var hdr [4]byte
 	for {
 		if _, err := io.ReadFull(r, hdr[:]); err != nil {
-			return
+			return err
 		}
 		n := binary.BigEndian.Uint32(hdr[:])
 		if n > maxFrameLen {
-			return
+			return fmt.Errorf("frame length %d exceeds the %d-byte cap", n, maxFrameLen)
 		}
 		buf := make([]byte, n)
 		if _, err := io.ReadFull(r, buf); err != nil {
-			return
+			return err
 		}
 		goport.Inject(p.inst, bytesToOctetstring(buf))
 	}

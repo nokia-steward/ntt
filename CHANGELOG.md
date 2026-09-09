@@ -30,7 +30,10 @@ single functional test doubles as a performance probe. See
   Virtual-clock semantics (ETSI 23.4) are unchanged.
 - **Built-in TCP test port** (`runtime/port/tcpport`) — bind a TTCN-3 message
   port to a live TCP endpoint with no user C code and no cgo. Newline framing
-  (charstring) or length-prefix framing (octetstring, binary-safe).
+  (charstring) or length-prefix framing (octetstring, binary-safe). A peer
+  hang-up mid-test is reported rather than left as a silence a suite cannot
+  distinguish from a slow answer: always as a stderr warning, and — opt-in via
+  `report_disconnect` — as an inbound `Disconnected` value it can match on.
 - **Config-driven test ports** — declare the TCP port in a `.cfg`
   `[TESTPORT_PARAMETERS]` block (`transport := "tcp"`, `host`/`port` or
   `address`, `dial_timeout`, `framing`); no Go code required. A `*`

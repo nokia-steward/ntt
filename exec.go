@@ -201,6 +201,8 @@ func verdictBreakdown(suite *rreport.Suite) string {
 //	  dial_timeout  a Go duration, e.g. "5s" (default 10s)
 //	  framing       "newline" (default, charstring) or "length-prefix"
 //	                (octetstring, 4-byte big-endian length + raw bytes)
+//	  report_disconnect  "true" delivers a peer hang-up as an inbound
+//	                Disconnected value (the suite must declare the type)
 //
 //	http:
 //	  base_url      "http://host:port" (overrides scheme/host/port)
@@ -361,6 +363,13 @@ func tcpPortRule(port, comp string, params map[string]string) (tcpport.Rule, boo
 		} else {
 			fmt.Fprintf(os.Stderr, "testport %q (%s): bad dial_timeout %q: %v\n", port, comp, d, err)
 		}
+	}
+	if v := params["report_disconnect"]; v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "testport %q (%s): bad report_disconnect %q: %v\n", port, comp, v, err)
+		}
+		rule.ReportDisconnect = b
 	}
 	switch fr := strings.ToLower(params["framing"]); fr {
 	case "", "newline", "line":

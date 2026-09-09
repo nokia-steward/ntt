@@ -115,6 +115,27 @@ type component C { port P p; port B b }
 A failed connection surfaces as an error at `map` time — the engine never
 reports a pass for a SUT it could not reach.
 
+If the SUT closes the connection **mid-test**, that is reported too, because
+otherwise a suite cannot tell a hang-up from a slow answer: it would simply
+wait out its guard timer. A warning always goes to stderr; a suite that needs
+to *branch* on it opts in and declares the type:
+
+```ini
+*.p.report_disconnect := "true"
+```
+
+```ttcn3
+type enumerated DisconnectReason { closed(0), aborted(1) }
+type record Disconnected { DisconnectReason reason, charstring detail }
+type port P message { inout charstring; in Disconnected }
+```
+
+It is opt-in rather than automatic because injecting a new inbound type into
+a port declared `inout charstring` would let a bare `p.receive` consume it as
+data — curing a silence by introducing a mis-typed match. Declare the type
+and set the parameter together. (`aborted` rather than `error`: `error` is a
+TTCN-3 reserved word and cannot be an enumeration label.)
+
 ## Configuring a TCP port from a `.cfg` file
 
 You do **not** need to write any Go code to use the TCP port. Declare it in

@@ -143,18 +143,29 @@ status, and it is the first question to ask of any streaming or push
 mechanism, where "the stream closed" and "the stream is quiet" are otherwise
 indistinguishable.
 
-**Where we currently fail this test: the TCP port does not report a hang-up.**
-When the system under test closes the connection, `tcpport`'s read loop
-exits and the suite is told nothing — it waits out its guard timer, unable
-to distinguish a closed connection from a slow one. Only the *dial* is
-reported honestly; a mid-test close is a silence. The HTTP port has the
-answer already (`TransportError` with a `reason`), so the fix is the same
-shape: a second inbound type. It is unbuilt because it changes the port's
-contract — a suite declaring `inout charstring` would need to declare the
-new type too, or find an unmatched value sitting in its queue — and that is
-a decision to take with a consumer rather than in the abstract. Recorded
-here rather than left implicit, because a rule the codebase states and does
-not follow is worse than no rule.
+**A worked example, including the awkward part.** Auditing ntt's own inbound
+paths against this test found the TCP port failing it: when the system under
+test closed the connection mid-run, the read loop exited and the suite was
+told nothing — it waited out its guard timer, unable to tell a hang-up from
+a slow answer. Only the *dial* was reported honestly.
+
+It now says so, but the fix is shaped by a constraint worth recording. The
+obvious move — inject a `Disconnected` value the way the HTTP port injects
+`TransportError` — changes the contract of every suite that declared its
+port as `inout charstring`: a bare `p.receive` matches any message, so the
+new value would be silently consumed as data. Curing a silence by
+introducing a mis-typed match is a worse trade.
+
+So it is split by cost. The **warning is unconditional** — a human always
+learns a peer hung up while the port was mapped. The **inbound value is
+opt-in** (`WithDisconnectEvent`, or `report_disconnect := "true"` in a
+`.cfg`), for the suite that waits on pushes and needs to branch. Default
+behaviour is byte-identical to before.
+
+That is a compromise, not a clean application of the rule, and it is written
+down as one: a suite that does not opt in still cannot distinguish a hang-up
+from silence. The honest default would be to deliver the value always, and
+the reason we do not is compatibility with suites that already exist.
 
 ## What this means in practice
 

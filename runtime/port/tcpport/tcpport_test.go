@@ -241,3 +241,92 @@ func startLVEchoServer(t *testing.T) (addr string, stop func()) {
 	}()
 	return ln.Addr().String(), func() { ln.Close(); wg.Wait() }
 }
+
+// startHangUpServer accepts one connection, reads a request, then closes
+// without answering — a SUT going away mid-test.
+func startHangUpServer(t *testing.T) (addr string, stop func()) {
+	t.Helper()
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			buf := make([]byte, 64)
+			_, _ = c.Read(buf)
+			c.Close()
+		}
+	}()
+	return ln.Addr().String(), func() { ln.Close(); wg.Wait() }
+}
+
+// TestTCPPort_HangUpIsVisibleWhenRequested covers the honesty contract for a
+// mid-test close: with the disconnect event enabled, a suite learns the peer
+// hung up instead of waiting out its guard timer, unable to tell a closed
+// connection from a slow one.
+func TestTCPPort_HangUpIsVisibleWhenRequested(t *testing.T) {
+	addr, stop := startHangUpServer(t)
+	defer stop()
+
+	tcpport.Register("p", addr, tcpport.WithDisconnectEvent())
+	t.Cleanup(tcpport.Reset)
+
+	v, reason := run(t, "M.tc", `module M {
+		type enumerated DisconnectReason { closed(0), aborted(1) }
+		type record Disconnected { DisconnectReason reason, charstring detail }
+		type port P message { inout charstring; in Disconnected }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 5.0;
+			map(self:p, system:p);
+			g.start;
+			p.send("ping");
+			alt {
+				[] p.receive(Disconnected:{ reason := closed, detail := ? }) { setverdict(pass); }
+				[] p.receive(Disconnected:{ reason := ?, detail := ? }) { setverdict(pass); }
+				[] p.receive(charstring:?) { setverdict(fail, "unexpected data"); }
+				[] g.timeout { setverdict(fail, "hang-up was silent: only the guard timer fired"); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (a peer hang-up must reach the suite)", v, reason)
+	}
+}
+
+// TestTCPPort_HangUpSilentByDefault pins the compatibility half: without the
+// opt-in, no new inbound value appears, so a suite declaring only
+// `inout charstring` cannot have a Disconnected record consumed by a bare
+// `p.receive` as if it were data. The human is still told, on stderr.
+func TestTCPPort_HangUpSilentByDefault(t *testing.T) {
+	addr, stop := startHangUpServer(t)
+	defer stop()
+
+	tcpport.Register("p", addr) // no WithDisconnectEvent
+	t.Cleanup(tcpport.Reset)
+
+	v, reason := run(t, "M.tc", `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 0.4;
+			map(self:p, system:p);
+			g.start;
+			p.send("ping");
+			alt {
+				[] p.receive { setverdict(fail, "an unexpected value reached a charstring-only port"); }
+				[] g.timeout { setverdict(pass); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (default must inject nothing)", v, reason)
+	}
+}
