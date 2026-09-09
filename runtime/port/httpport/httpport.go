@@ -44,16 +44,25 @@
 // request in flight at a time — the usual request/response pattern — that
 // is also request order.
 //
-// Not modelled: TLS/mTLS (plain http:// only), request or response headers
-// beyond content type, and binary (non-UTF-8) bodies.
+// An `https://` base URL enables TLS. By default the server is verified
+// against the system roots; supply a CA bundle, a client certificate for
+// mutual TLS, or an SNI/name override through the TLS settings (see Rule
+// and WithTLS). Certificate files are read at map time, so a bad path fails
+// the map operation and names the file.
+//
+// Not modelled: request or response headers beyond content type, and binary
+// (non-UTF-8) bodies.
 package httpport
 
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -72,6 +81,31 @@ const defaultTimeout = 30 * time.Second
 // read loop allocate unbounded memory.
 const maxBodyLen = 64 << 20 // 64 MiB
 
+// warnInsecureOnce keeps the skip-verify warning to one line per run.
+var warnInsecureOnce sync.Once
+
+// TLS describes the client-side TLS settings for an `https://` base URL.
+// The zero value verifies the server against the system roots, which is
+// what a service with a publicly-rooted or cluster-CA certificate needs.
+// Paths are read at map time, so a bad path surfaces as a map error on the
+// testcase rather than at registration.
+type TLS struct {
+	// CACert is a PEM bundle used to verify the server. Empty means the
+	// system roots.
+	CACert string
+	// ClientCert and ClientKey are the PEM client certificate and key for
+	// mutual TLS. Both must be set, or neither.
+	ClientCert string
+	ClientKey  string
+	// ServerName overrides the name checked against the server's
+	// certificate (and sent as SNI). Useful when connecting by IP.
+	ServerName string
+	// Insecure disables server-certificate verification. TEST ENVIRONMENTS
+	// ONLY: it removes the guarantee that you are talking to the intended
+	// service, so a suite using it cannot make a security claim.
+	Insecure bool
+}
+
 // Rule binds one component selector to a base URL. At map time the port
 // picks the rule that best matches the mapping component, so different
 // components can drive different instances of the same service — one per
@@ -81,12 +115,16 @@ type Rule struct {
 	// "mtc" (the main test component), a component name (from
 	// MyComp.create("name")), or a component type name.
 	Component string
-	BaseURL   string        // e.g. "http://10.0.0.7:8080"
+	BaseURL   string        // e.g. "http://10.0.0.7:8080" or "https://…"
 	Timeout   time.Duration // per-request timeout (defaultTimeout if <= 0)
+	// TLS configures an https base URL. Nil verifies against the system
+	// roots; it is ignored for a plain http:// URL.
+	TLS *TLS
 }
 
 type config struct {
 	timeout time.Duration
+	tls     *TLS
 }
 
 // Option configures a registered HTTP test port.
@@ -95,6 +133,11 @@ type Option func(*config)
 // WithTimeout overrides the per-request timeout (default 30s).
 func WithTimeout(d time.Duration) Option {
 	return func(c *config) { c.timeout = d }
+}
+
+// WithTLS sets the client TLS settings used for an https base URL.
+func WithTLS(t TLS) Option {
+	return func(c *config) { c.tls = &t }
 }
 
 // Register binds a TTCN-3 message port name to an HTTP test port that
@@ -106,7 +149,7 @@ func Register(portName, baseURL string, opts ...Option) {
 	for _, o := range opts {
 		o(&cfg)
 	}
-	RegisterRules(portName, []Rule{{Component: "*", BaseURL: baseURL, Timeout: cfg.timeout}})
+	RegisterRules(portName, []Rule{{Component: "*", BaseURL: baseURL, Timeout: cfg.timeout, TLS: cfg.tls}})
 }
 
 // RegisterRules binds a port name to component-selective base URLs. The
@@ -198,12 +241,69 @@ func (p *httpPort) OnMap(context.Context) error {
 	if rule.BaseURL == "" {
 		return fmt.Errorf("httpport %s: empty base URL", p.inst)
 	}
+	client := &http.Client{Timeout: rule.Timeout}
+	// TLS applies to an https base URL. Building the config here (rather
+	// than at registration) means a missing or malformed cert file fails
+	// the map operation, so the testcase reports an error verdict naming
+	// the file instead of failing later for an unrelated-looking reason.
+	if strings.HasPrefix(strings.ToLower(rule.BaseURL), "https://") {
+		cfg, err := buildTLSConfig(rule.TLS)
+		if err != nil {
+			return fmt.Errorf("httpport %s: %w", p.inst, err)
+		}
+		client.Transport = &http.Transport{TLSClientConfig: cfg}
+	}
 	p.mu.Lock()
 	p.baseURL = rule.BaseURL
-	p.client = &http.Client{Timeout: rule.Timeout}
+	p.client = client
 	p.mapped = true
 	p.mu.Unlock()
 	return nil
+}
+
+// buildTLSConfig turns the declarative TLS settings into a tls.Config,
+// reading any certificate files from disk. A nil t verifies against the
+// system roots.
+func buildTLSConfig(t *TLS) (*tls.Config, error) {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS12}
+	if t == nil {
+		return cfg, nil
+	}
+	cfg.ServerName = t.ServerName
+	cfg.InsecureSkipVerify = t.Insecure
+	if t.Insecure {
+		// Say so, once, on stderr. Skipping verification is a legitimate
+		// convenience against a self-signed test endpoint, but a run that
+		// did it cannot support a security claim — and that is easy to
+		// forget when the setting lives in a config file nobody re-reads.
+		warnInsecureOnce.Do(func() {
+			fmt.Fprintln(os.Stderr,
+				"httpport: TLS certificate verification is DISABLED (insecure_skip_verify); "+
+					"the identity of the server is not checked")
+		})
+	}
+	if t.CACert != "" {
+		pem, err := os.ReadFile(t.CACert)
+		if err != nil {
+			return nil, fmt.Errorf("reading ca_cert: %w", err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pem) {
+			return nil, fmt.Errorf("ca_cert %s: no certificates found", t.CACert)
+		}
+		cfg.RootCAs = pool
+	}
+	switch {
+	case t.ClientCert != "" && t.ClientKey != "":
+		pair, err := tls.LoadX509KeyPair(t.ClientCert, t.ClientKey)
+		if err != nil {
+			return nil, fmt.Errorf("loading client certificate: %w", err)
+		}
+		cfg.Certificates = []tls.Certificate{pair}
+	case t.ClientCert != "" || t.ClientKey != "":
+		return nil, fmt.Errorf("mutual TLS needs both client_cert and client_key")
+	}
+	return cfg, nil
 }
 
 // OnUnmap waits for in-flight requests so no response is injected into a

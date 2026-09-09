@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -204,8 +205,13 @@ func verdictBreakdown(suite *rreport.Suite) string {
 //	http:
 //	  base_url      "http://host:port" (overrides scheme/host/port)
 //	  host, port    combined with scheme when base_url is absent
-//	  scheme        "http" (default)
+//	  scheme        "http" (default) or "https"
 //	  timeout       per-request Go duration, e.g. "5s" (default 30s)
+//	  ca_cert       PEM bundle verifying the server (https; default: system roots)
+//	  client_cert   PEM client certificate for mutual TLS (with client_key)
+//	  client_key    PEM client key for mutual TLS (with client_cert)
+//	  server_name   SNI / certificate-name override, e.g. when dialling by IP
+//	  insecure_skip_verify  "true" disables verification — TEST ONLY
 //
 // A `*` (any-component) entry supplies defaults that a specific-component
 // entry for the same port inherits and overrides (Titan semantics), so a
@@ -299,6 +305,25 @@ func httpPortRule(port, comp string, params map[string]string) (httpport.Rule, b
 		} else {
 			fmt.Fprintf(os.Stderr, "testport %q (%s): bad timeout %q: %v\n", port, comp, d, err)
 		}
+	}
+	// TLS settings apply to an https base URL. Certificate paths are
+	// resolved at map time, so a typo fails the testcase with the file
+	// named rather than being silently ignored here.
+	tlsCfg := httpport.TLS{
+		CACert:     params["ca_cert"],
+		ClientCert: params["client_cert"],
+		ClientKey:  params["client_key"],
+		ServerName: params["server_name"],
+	}
+	if v := params["insecure_skip_verify"]; v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "testport %q (%s): bad insecure_skip_verify %q: %v\n", port, comp, v, err)
+		}
+		tlsCfg.Insecure = b
+	}
+	if tlsCfg != (httpport.TLS{}) {
+		rule.TLS = &tlsCfg
 	}
 	return rule, true
 }

@@ -47,7 +47,14 @@ single functional test doubles as a performance probe. See
   the response arrives at `p.receive` as a `{status, body}` record. Wired from
   a `.cfg` with `transport := "http"`, supports per-component base URLs, and
   surfaces a transport failure as `status := 0` with the reason in `body`
-  rather than a silent timeout. Plain `http://` only — no TLS, no gRPC.
+  rather than a silent timeout.
+- **TLS and mutual TLS for the HTTP port** — an `https://` base URL verifies
+  against the system roots by default, or against a supplied `ca_cert`;
+  `client_cert` + `client_key` enable mTLS, and `server_name` overrides SNI
+  when dialling by IP. Certificate files are read at map time, so a bad path
+  fails the map operation naming the file. `insecure_skip_verify` is
+  supported for self-signed test endpoints and warns on stderr each run.
+  No gRPC.
 - **Runnable example** — [`examples/live-testing/`](examples/live-testing/):
   a TTCN-3 module plus `.cfg` that drive a real TCP SUT and report its
   latency, with a copy-pasteable stand-in server. Exercised by CI so it

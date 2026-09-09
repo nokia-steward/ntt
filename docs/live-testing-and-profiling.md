@@ -197,8 +197,43 @@ the reason in `body`, so a testcase can assert on it instead of just timing
 out with no explanation. A 4xx/5xx is an ordinary response you match on.
 
 Requests run on their own goroutine, so the engine never blocks on I/O.
-Not modelled: TLS/mTLS (plain `http://` only), arbitrary request/response
-headers, and binary bodies.
+
+### TLS and mutual TLS
+
+An `https://` base URL enables TLS. By default the server is verified
+against the system roots; for a service with its own CA, point at the
+bundle:
+
+```ini
+[TESTPORT_PARAMETERS]
+*.p.transport   := "http"
+*.p.base_url    := "https://10.0.0.7:8443"
+*.p.ca_cert     := "/etc/certs/ca.pem"
+*.p.server_name := "my-service"          # SNI / cert name, e.g. when dialling by IP
+
+# mutual TLS — both are required together
+*.p.client_cert := "/etc/certs/tls.crt"
+*.p.client_key  := "/etc/certs/tls.key"
+```
+
+Certificate files are read at **map** time, so a wrong path fails the map
+operation and names the file, instead of surfacing later as a puzzling
+transport error.
+
+For a self-signed ("snake oil") endpoint in a test environment, verification
+can be turned off:
+
+```ini
+*.p.insecure_skip_verify := "true"
+```
+
+This is supported deliberately, but it prints a warning on stderr each run,
+because a suite that skipped verification cannot support a claim about *which*
+server it talked to. Prefer `ca_cert` — pointing at the self-signed
+certificate itself works and keeps verification on.
+
+Not modelled: arbitrary request/response headers beyond content type, and
+binary bodies.
 
 ### Per-component addresses
 

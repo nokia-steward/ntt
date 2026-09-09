@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"encoding/pem"
 	"fmt"
 	"io"
 	"net"
@@ -599,6 +600,56 @@ func TestExecConfiguredHTTPPort(t *testing.T) {
 				[] g.timeout { setverdict(fail, "no response from the configured SUT"); }
 			}
 			unmap(self:p, system:p);
+		}
+	}`)
+	d := newStaticDriver([]string{path})
+	d.live = true
+	if v, reason, err := d.Run(context.Background(), "m.tc"); err != nil || v != rreport.Pass {
+		t.Fatalf("Run: verdict=%s reason=%q err=%v, want pass", v, reason, err)
+	}
+}
+
+// TestExecConfiguredHTTPSPort covers TLS wiring from a .cfg: scheme=https
+// plus a ca_cert is enough to verify a real TLS endpoint with no Go code.
+func TestExecConfiguredHTTPSPort(t *testing.T) {
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"secure":true}`)
+	}))
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ca := filepath.Join(t.TempDir(), "ca.crt")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{
+		Type: "CERTIFICATE", Bytes: srv.Certificate().Raw}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	f, _ := cfg.Parse(strings.NewReader(fmt.Sprintf(
+		"[TESTPORT_PARAMETERS]\n*.p.transport := \"http\"\n*.p.scheme := \"https\"\n"+
+			"*.p.host := %q\n*.p.port := %q\n*.p.ca_cert := %q\n*.p.server_name := \"example.com\"\n",
+		u.Hostname(), u.Port(), ca)))
+	if n := registerConfiguredTestPorts(f); n != 1 {
+		t.Fatalf("registered %d ports, want 1", n)
+	}
+	t.Cleanup(httpport.Reset)
+
+	path := writeTC(t, `module m {
+		type record HttpRequest  { charstring method, charstring path, charstring body }
+		type record HttpResponse { integer status, charstring body }
+		type port P message { out HttpRequest; in HttpResponse }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 5.0;
+			map(self:p, system:p);
+			g.start;
+			p.send(HttpRequest:{ method := "GET", path := "/secure", body := "" });
+			alt {
+				[] p.receive(HttpResponse:{ status := 200, body := ? }) { setverdict(pass); }
+				[] p.receive(HttpResponse:{ status := 0, body := ? }) { setverdict(fail, "TLS failed"); }
+				[] g.timeout { setverdict(fail, "no response"); }
+			}
 		}
 	}`)
 	d := newStaticDriver([]string{path})
