@@ -2570,6 +2570,16 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 								// qualified key would be invisible, hanging the
 								// call block — Sem_220305_raise_operation_003).
 								qkey := exec.PortKey(portIdent.String())
+								// Honour the alt round's snapshot boundary
+								// (ETSI 20.2), as the templated and message
+								// receive paths do. Without it this bare
+								// guard peeked the LIVE queue, so a reply
+								// arriving mid-round was invisible to an
+								// earlier, more specific clause and got
+								// consumed by this catch-all one instead —
+								// `[] p.getreply(S:? value 42)` losing to a
+								// following `[] p.getreply`.
+								limit := altReceiveLimit(exec, qkey)
 								// ETSI 22.3.1 h: an unqualified
 								// getreply / catch inside a blocking
 								// call(S,...){ } block treats only
@@ -2578,12 +2588,12 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 								// falls through to its timeout branch.
 								if kind == runtime.MsgReply || kind == runtime.MsgException {
 									if csig := currentCallSignature(env); csig != "" {
-										if head, ok := exec.PeekKind(qkey, kind); ok && head.Signature != "" && head.Signature != csig {
+										if head, ok := exec.PeekKindLimited(qkey, kind, limit); ok && head.Signature != "" && head.Signature != csig {
 											return false
 										}
 									}
 								}
-								if _, ok := exec.DequeueKind(qkey, kind); ok {
+								if _, ok := exec.DequeueKindLimited(qkey, kind, limit); ok {
 									return true
 								}
 							}

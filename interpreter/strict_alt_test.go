@@ -431,3 +431,45 @@ func TestStrictProc_PortArrayConnectedRouting(t *testing.T) {
 		t.Fatalf("verdict = %s (%s), want pass (port-array connected routing)", v, reason)
 	}
 }
+
+// TestStrictProc_BareGetreplyRespectsSnapshot guards the ETSI 20.2 snapshot
+// boundary on the BARE procedure-guard path. A specific
+// `getreply(S:? value 42)` clause followed by a catch-all `getreply` must
+// never lose the reply to the catch-all: the templated and message receive
+// paths honour the round's frozen boundary, and this path used to peek the
+// LIVE queue instead, so a reply arriving mid-round was invisible to the
+// earlier clause and consumed by the later one. It surfaced as an
+// intermittent "wrong reply" on loaded CI runners and reproduced under
+// -race; run with -count to exercise the window.
+func TestStrictProc_BareGetreplyRespectsSnapshot(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		signature S() return integer;
+		type port P procedure { inout S }
+		type component C { port P p }
+		function server() runs on C {
+			timer t := 30.0; t.start;
+			alt {
+				[] p.getcall(S:?) { p.reply(S:{} value 42); }
+				[] t.timeout { setverdict(fail, "server timed out"); }
+			}
+		}
+		function client() runs on C {
+			p.call(S:{}, 5.0) {
+				[] p.getreply(S:? value 42) { setverdict(pass); }
+				[] p.getreply { setverdict(fail, "catch-all took the reply from the specific clause"); }
+				[] p.catch(timeout) { setverdict(fail, "call timed out"); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C srv := C.create;
+			var C cli := C.create;
+			connect(srv:p, cli:p);
+			srv.start(server());
+			cli.start(client());
+			all component.done;
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (a bare guard must respect the alt snapshot)", v, reason)
+	}
+}
