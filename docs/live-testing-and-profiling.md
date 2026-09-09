@@ -161,6 +161,7 @@ Recognised parameters:
 | `address`      | `"host:port"` (overrides `host` + `port`)                      |
 | `dial_timeout` | a Go duration (e.g. `"5s"`), default `10s`                     |
 | `framing`      | `"newline"` (default, charstring) or `"length-prefix"` (octetstring) |
+| `report_disconnect` | `"true"` delivers a peer hang-up as an inbound `Disconnected` value (declare the type too) |
 
 For a binary protocol, use length-prefix framing and an `octetstring` port:
 
