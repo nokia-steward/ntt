@@ -1914,7 +1914,14 @@ func (t *TestcaseExec) SetVerdict(v Verdict, reason string) {
 	defer t.mu.Unlock()
 	if verdictRank(v) > verdictRank(t.verdict) {
 		t.verdict = v
-		if reason != "" && (v == FailVerdict || v == ErrorVerdict) {
+		// Keep the reason for every verdict, not just fail/error. It is
+		// the message that explains the verdict currently in force, and
+		// dropping it silently loses `setverdict(inconc, "...")` — which
+		// CI treats as a failure and therefore most needs explained — as
+		// well as a `setverdict(pass, "...")` label. A later, worse
+		// verdict replaces both verdict and reason together, so they
+		// never disagree.
+		if reason != "" {
 			t.reason = reason
 		}
 	}

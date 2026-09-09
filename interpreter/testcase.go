@@ -987,8 +987,16 @@ func evalSetverdict(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 		// calls into a helper which logs progress doesn't blow up.
 		return nil
 	}
+	// Render a charstring reason as its text, not its TTCN-3 literal form:
+	// Inspect quotes it, so `setverdict(fail, "why")` reached a report as
+	// `"why"` (and JSON as "\"why\""). Non-string arguments keep Inspect,
+	// which is how an integer or a record should read in a message.
 	var reasonParts []string
 	for _, a := range args[1:] {
+		if s, ok := a.(*runtime.String); ok && s != nil {
+			reasonParts = append(reasonParts, string(s.Value))
+			continue
+		}
 		reasonParts = append(reasonParts, a.Inspect())
 	}
 	exec.SetVerdict(verdict, strings.Join(reasonParts, " "))

@@ -36,15 +36,17 @@
 // as a second inbound type rather than as a sentinel status:
 //
 //	type enumerated TransportErrorReason {
-//	    refused(0), unreachable(1), timeout(2), dns(3), tls(4), other(5)
+//	    refused(0), unreachable(1), timeout(2), dns(3), tls(4), other(5),
+//	    reset(6)
 //	}
 //	type record TransportError { TransportErrorReason reason, charstring detail }
 //	type port ApiPort message { out HttpRequest; in HttpResponse, TransportError }
 //
-// `reason` is machine-matchable (`refused` — the pod is not listening, often
-// a restart — reads very differently from `timeout` — the pod is wedged),
-// while `detail` carries the underlying message for logging. The message
-// text is diagnostic only; do not match on it.
+// `reason` is machine-matchable, which is the point: `refused` (nothing
+// listening) and `reset` (accepted, then dropped mid-request — a service
+// being torn down) are both retryable, while `timeout` (listening but
+// wedged) is a finding. `detail` carries the underlying message for
+// logging; it is diagnostic only, so do not match on it.
 //
 // Declare the enumeration with the explicit values shown above. A TTCN-3
 // enumeration's integer values come from declaration order unless written
@@ -108,6 +110,9 @@ var warnInsecureOnce sync.Once
 // integer values. A suite must declare the matching TTCN-3 enumeration with
 // these explicit values (see the package comment): enum matching compares
 // the integer as well as the label.
+// New reasons are APPENDED, never inserted: the integers are part of the
+// contract with every suite that declared the enumeration, so renumbering
+// an existing label would silently break their templates.
 const (
 	reasonRefused     = "refused"     // 0 — nothing listening
 	reasonUnreachable = "unreachable" // 1 — no route to host / network down
@@ -115,11 +120,13 @@ const (
 	reasonDNS         = "dns"         // 3 — name did not resolve
 	reasonTLS         = "tls"         // 4 — handshake or verification failed
 	reasonOther       = "other"       // 5 — unclassified
+	reasonReset       = "reset"       // 6 — accepted, then dropped mid-request
 )
 
-// transportErrorReasons numbers the reasons 0..5 in the order above.
+// transportErrorReasons numbers the reasons 0..6 in the order above.
 var transportErrorReasons = runtime.NewEnumType("TransportErrorReason",
-	reasonRefused, reasonUnreachable, reasonTimeout, reasonDNS, reasonTLS, reasonOther)
+	reasonRefused, reasonUnreachable, reasonTimeout, reasonDNS, reasonTLS,
+	reasonOther, reasonReset)
 
 // TLS describes the client-side TLS settings for an `https://` base URL.
 // The zero value verifies the server against the system roots, which is
@@ -469,6 +476,17 @@ func classify(err error) string {
 	if errors.Is(err, syscall.ECONNREFUSED) {
 		return reasonRefused
 	}
+	// Accepted, then dropped before answering: the peer WAS there and went
+	// away mid-request — a pod being torn down, typically. Retryable like
+	// refused, and distinct from it (something was listening) and from
+	// timeout (it is gone, not slow). A reset and a graceful EOF differ
+	// only in politeness; from a suite's side they are the same event, so
+	// they share one reason rather than splitting a distinction no branch
+	// would act on.
+	if errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return reasonReset
+	}
 	if errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ENETUNREACH) {
 		return reasonUnreachable
 	}
@@ -481,6 +499,9 @@ func classify(err error) string {
 		return reasonUnreachable
 	case strings.Contains(msg, "timeout"), strings.Contains(msg, "deadline exceeded"):
 		return reasonTimeout
+	case strings.Contains(msg, "connection reset"), strings.Contains(msg, "unexpected eof"),
+		strings.Contains(msg, "server closed idle connection"):
+		return reasonReset
 	}
 	return reasonOther
 }

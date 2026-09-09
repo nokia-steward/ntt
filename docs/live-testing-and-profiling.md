@@ -199,7 +199,7 @@ on:
 
 ```ttcn3
 type enumerated TransportErrorReason {
-    refused(0), unreachable(1), timeout(2), dns(3), tls(4), other(5)
+    refused(0), unreachable(1), timeout(2), dns(3), tls(4), other(5), reset(6)
 }
 type record TransportError { TransportErrorReason reason, charstring detail }
 type port ApiPort message { out HttpRequest; in HttpResponse, TransportError }
@@ -207,7 +207,8 @@ type port ApiPort message { out HttpRequest; in HttpResponse, TransportError }
 alt {
     [] p.receive(HttpResponse:{ status := 200, body := ? })         { /* healthy */ }
     [] p.receive(HttpResponse:{ status := ?,   body := ? })         { /* answered; assert on it */ }
-    [] p.receive(TransportError:{ reason := refused, detail := ? }) { /* not listening — often a restart */ }
+    [] p.receive(TransportError:{ reason := refused, detail := ? }) { /* nothing listening — retry */ }
+    [] p.receive(TransportError:{ reason := reset,   detail := ? }) { /* dropped mid-request — retry */ }
     [] p.receive(TransportError:{ reason := timeout, detail := ? }) { /* listening but wedged */ }
     [] g.timeout                                                    { /* harness problem */ }
 }
@@ -220,6 +221,7 @@ alt {
 | `timeout` | No answer within the deadline |
 | `dns` | The name did not resolve |
 | `tls` | Handshake or certificate verification failed |
+| `reset` | Accepted, then dropped mid-request — a service being torn down |
 | `other` | Anything unclassified |
 
 `detail` carries the underlying message for logging. **Match on `reason`, not

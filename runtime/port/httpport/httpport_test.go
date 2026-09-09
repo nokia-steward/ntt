@@ -43,7 +43,7 @@ const decls = `
 	type record HttpRequest  { charstring method, charstring path, charstring body }
 	type record HttpResponse { integer status, charstring body }
 	type enumerated TransportErrorReason {
-		refused(0), unreachable(1), timeout(2), dns(3), tls(4), other(5)
+		refused(0), unreachable(1), timeout(2), dns(3), tls(4), other(5), reset(6)
 	}
 	type record TransportError { TransportErrorReason reason, charstring detail }
 	type port P message { out HttpRequest; in HttpResponse, TransportError }
@@ -385,5 +385,68 @@ func TestHTTPPort_TransportErrorEnumValuesArePinned(t *testing.T) {
 	}`)
 	if v != runtime.PassVerdict {
 		t.Fatalf("verdict = %s (%s), want pass (explicit enum values must pin the contract)", v, reason)
+	}
+}
+
+// TestHTTPPort_ResetMidRequest covers the window a service actually spends
+// being torn down: the listener ACCEPTS the connection and the process then
+// goes away, so the client sees a reset or an orderly EOF rather than a
+// refusal. That is retryable like `refused` and must not land in `other` —
+// a catch-all that also contains the commonest transient failure is one a
+// suite cannot branch on.
+func TestHTTPPort_ResetMidRequest(t *testing.T) {
+	for _, k := range []struct {
+		name  string
+		close func(net.Conn)
+	}{
+		{"rst", func(c net.Conn) {
+			if tc, ok := c.(*net.TCPConn); ok {
+				tc.SetLinger(0) // force RST rather than FIN
+			}
+			c.Close()
+		}},
+		{"eof", func(c net.Conn) { c.Close() }},
+	} {
+		t.Run(k.name, func(t *testing.T) {
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer ln.Close()
+			go func() {
+				for {
+					c, err := ln.Accept()
+					if err != nil {
+						return
+					}
+					// Accept, read a little of the request, then die.
+					one := make([]byte, 1)
+					_, _ = c.Read(one)
+					k.close(c)
+				}
+			}()
+
+			httpport.Register("p", "http://"+ln.Addr().String())
+			t.Cleanup(httpport.Reset)
+
+			v, reason := run(t, "M.tc", `module M {`+decls+`
+				testcase tc() runs on C system C {
+					timer g := 10.0;
+					map(self:p, system:p);
+					g.start;
+					p.send(HttpRequest:{ method := "GET", path := "/x", body := "" });
+					alt {
+						[] p.receive(TransportError:{ reason := reset, detail := ? }) { setverdict(pass); }
+						[] p.receive(TransportError:{ reason := other, detail := ? }) { setverdict(fail, "mid-restart drop fell into the other catch-all"); }
+						[] p.receive(TransportError:{ reason := ?, detail := ? }) { setverdict(fail, "wrong reason"); }
+						[] p.receive { setverdict(fail, "expected a TransportError"); }
+						[] g.timeout { setverdict(fail, "nothing arrived"); }
+					}
+				}
+			}`)
+			if v != runtime.PassVerdict {
+				t.Fatalf("%s: verdict = %s (%s), want pass (reason reset)", k.name, v, reason)
+			}
+		})
 	}
 }

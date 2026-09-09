@@ -48,7 +48,7 @@ single functional test doubles as a performance probe. See
   a `.cfg` with `transport := "http"`, supports per-component base URLs, and
   surfaces a failed request as a separate `TransportError` inbound type with
   a machine-matchable `reason` (`refused`, `unreachable`, `timeout`, `dns`,
-  `tls`, `other`) plus a `detail` string for logging — so a suite can branch
+  `tls`, `other`, `reset`) plus a `detail` string for logging — so a suite can branch
   on "the pod is restarting" versus "the pod is wedged" instead of
   substring-matching an error message, and a failure is never a silent
   timeout. A 4xx/5xx stays an ordinary response.
@@ -66,6 +66,11 @@ single functional test doubles as a performance probe. See
 
 ### Changed
 
+- **A `setverdict` reason is reported for every verdict, not just fail and
+  error.** `setverdict(inconc, "why")` lost its message even though CI counts
+  inconc as a failure, and `setverdict(pass, "label")` lost it too. The reason
+  is also no longer rendered as a quoted TTCN-3 literal, so a JUnit
+  `<failure message="...">` now reads as written.
 - **`ntt exec` exits non-zero when the suite does not pass.** It previously
   exited `0` even for a failing suite, so a CI pipeline treated red as green.
   Severity follows the JUnit mapping already used by the reports: `inconc`,
