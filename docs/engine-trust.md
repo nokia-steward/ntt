@@ -143,6 +143,19 @@ status, and it is the first question to ask of any streaming or push
 mechanism, where "the stream closed" and "the stream is quiet" are otherwise
 indistinguishable.
 
+**Where we currently fail this test: the TCP port does not report a hang-up.**
+When the system under test closes the connection, `tcpport`'s read loop
+exits and the suite is told nothing — it waits out its guard timer, unable
+to distinguish a closed connection from a slow one. Only the *dial* is
+reported honestly; a mid-test close is a silence. The HTTP port has the
+answer already (`TransportError` with a `reason`), so the fix is the same
+shape: a second inbound type. It is unbuilt because it changes the port's
+contract — a suite declaring `inout charstring` would need to declare the
+new type too, or find an unmatched value sitting in its queue — and that is
+a decision to take with a consumer rather than in the abstract. Recorded
+here rather than left implicit, because a rule the codebase states and does
+not follow is worse than no rule.
+
 ## What this means in practice
 
 The engine is dependable for single-component testcases: templates and
