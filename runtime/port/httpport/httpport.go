@@ -503,7 +503,7 @@ func classify(err error) string {
 		return reasonRefused
 	case strings.Contains(msg, "no route to host"),
 		strings.Contains(msg, "network is unreachable"),
-		strings.Contains(msg, "host is unreachable"): // Windows phrasing
+		strings.Contains(msg, "unreachable host"): // Windows phrasing
 		return reasonUnreachable
 	case strings.Contains(msg, "timeout"), strings.Contains(msg, "deadline exceeded"):
 		return reasonTimeout
