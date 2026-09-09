@@ -112,6 +112,37 @@ Defects that had been sitting behind green tests:
 Each has a test carrying its diagnosis, so the next attempt starts from what
 was already learned.
 
+## An ending is a value, not a silence
+
+"The engine does not guess" has an outward-facing twin that is easy to
+violate while honouring the first: **when nothing happened, say so with a
+value the suite can match on.** A testcase cannot distinguish an absence
+from a slow answer, and a harness that reports absence by simply not
+delivering anything forces every failure through the same channel — the
+guard timer — where they all look alike.
+
+It is the same rule each time it comes up, and it has come up repeatedly:
+
+- A **dial failure** on the TCP port fails the `map` operation, naming the
+  address, rather than leaving a mapped port that receives nothing.
+- A **failed HTTP request** arrives as a `TransportError` with a matchable
+  `reason` (`refused` and `reset` are retryable; `timeout` means wedged),
+  rather than as no response at all. The reason is an enumeration, not the
+  underlying error text, because that text is diagnostic and not API.
+- A **scheduler deadlock** is an `error` verdict, not a shrug.
+- An **undeclared verdict** stays `none` instead of being coerced to `pass`.
+- A **catch-all that also holds the commonest transient failure** is not a
+  catch-all but a hole: after `reset` was split out of `other`, `other`
+  means "unknown" again, and a suite can branch on it.
+
+The test for a new inbound path is therefore: *can a suite tell "it ended",
+"it failed", and "it is still going" apart without waiting for a timer?* If
+not, the missing distinction is a value that has not been given a name yet.
+This is why the HTTP port grew a second inbound type rather than a sentinel
+status, and it is the first question to ask of any streaming or push
+mechanism, where "the stream closed" and "the stream is quiet" are otherwise
+indistinguishable.
+
 ## What this means in practice
 
 The engine is dependable for single-component testcases: templates and
