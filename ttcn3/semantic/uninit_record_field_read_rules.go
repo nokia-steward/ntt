@@ -291,6 +291,47 @@ func scanStmtForUninitReads(st syntax.Stmt, ctx *uninitRecordCtx, records map[st
 		})
 		return true
 	})
+	// A `-> value v` redirect assigns v as part of the matching, before the
+	// clause body runs, so reads of v inside THAT body see an initialized
+	// value. The context clear in updateUninitCtxAfterStmt happens only once
+	// the whole statement is scanned, which is too late for an alt whose
+	// redirect and read live in the same statement — the ordinary
+	// `alt { [] p.receive(R:?) -> value r { log(r.body) } }`. Scope the
+	// exemption to the clause carrying the redirect, so a sibling branch
+	// that has no redirect is still checked.
+	syntax.Inspect(st, func(n syntax.Node) bool {
+		cc, ok := n.(*syntax.CommClause)
+		if !ok || cc == nil || cc.Body == nil || cc.Comm == nil {
+			return true
+		}
+		redirected := map[string]bool{}
+		syntax.Inspect(cc.Comm, func(m syntax.Node) bool {
+			re, ok := m.(*syntax.RedirectExpr)
+			if !ok || re == nil {
+				return true
+			}
+			for _, target := range re.Value {
+				if name := rootIdentName(target); name != "" {
+					redirected[name] = true
+				}
+			}
+			return true
+		})
+		if len(redirected) == 0 {
+			return true
+		}
+		syntax.Inspect(cc.Body, func(m syntax.Node) bool {
+			sel, ok := m.(*syntax.SelectorExpr)
+			if !ok || sel == nil {
+				return true
+			}
+			if root, ok := sel.X.(*syntax.Ident); ok && root != nil && redirected[root.String()] {
+				skip[sel] = true
+			}
+			return true
+		})
+		return true
+	})
 	syntax.Inspect(st, func(n syntax.Node) bool {
 		sel, ok := n.(*syntax.SelectorExpr)
 		if !ok || sel == nil {
