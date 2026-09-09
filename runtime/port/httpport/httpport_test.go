@@ -4,10 +4,12 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/nokia/ntt/interpreter"
 	"github.com/nokia/ntt/runtime"
@@ -40,7 +42,11 @@ func run(t *testing.T, tc, src string) (runtime.Verdict, string) {
 const decls = `
 	type record HttpRequest  { charstring method, charstring path, charstring body }
 	type record HttpResponse { integer status, charstring body }
-	type port P message { out HttpRequest; in HttpResponse }
+	type enumerated TransportErrorReason {
+		refused(0), unreachable(1), timeout(2), dns(3), tls(4), other(5)
+	}
+	type record TransportError { TransportErrorReason reason, charstring detail }
+	type port P message { out HttpRequest; in HttpResponse, TransportError }
 	type component C { port P p }
 `
 
@@ -129,8 +135,8 @@ func TestHTTPPort_PostBodyReachesServer(t *testing.T) {
 }
 
 // TestHTTPPort_TransportFailureIsVisible covers the honesty contract: when
-// the endpoint is down the testcase must SEE it (status 0 plus the reason)
-// rather than just time out with no explanation.
+// the endpoint is down the testcase must SEE it, as a TransportError whose
+// reason it can branch on, rather than just time out with no explanation.
 func TestHTTPPort_TransportFailureIsVisible(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 	url := srv.URL
@@ -146,14 +152,15 @@ func TestHTTPPort_TransportFailureIsVisible(t *testing.T) {
 			g.start;
 			p.send(HttpRequest:{ method := "GET", path := "/api/v1/health", body := "" });
 			alt {
-				[] p.receive(HttpResponse:{ status := 0, body := ? }) { setverdict(pass); }
-				[] p.receive { setverdict(fail, "expected a status-0 transport error"); }
-				[] g.timeout { setverdict(fail, "failure was silent: no response at all"); }
+				[] p.receive(TransportError:{ reason := refused, detail := ? }) { setverdict(pass); }
+				[] p.receive(TransportError:{ reason := ?, detail := ? }) { setverdict(fail, "wrong reason"); }
+				[] p.receive { setverdict(fail, "expected a TransportError"); }
+				[] g.timeout { setverdict(fail, "failure was silent: nothing at all"); }
 			}
 		}
 	}`)
 	if v != runtime.PassVerdict {
-		t.Fatalf("verdict = %s (%s), want pass (a dead endpoint must surface as status 0)", v, reason)
+		t.Fatalf("verdict = %s (%s), want pass (a dead endpoint must surface as TransportError refused)", v, reason)
 	}
 }
 
@@ -273,5 +280,110 @@ func TestHTTPPort_PerComponentBaseURLs(t *testing.T) {
 	if atomic.LoadInt64(hitsB) == 0 || atomic.LoadInt64(hitsA) != 0 {
 		t.Fatalf("connections: A=%d B=%d, want A=0 B>0 (the node-b rule must win)",
 			atomic.LoadInt64(hitsA), atomic.LoadInt64(hitsB))
+	}
+}
+
+// TestHTTPPort_TransportErrorReasons covers the classification the suite
+// branches on: refused (nothing listening — often a restarting pod) must be
+// distinguishable from timeout (listening but wedged), because they are
+// different findings.
+func TestHTTPPort_TransportErrorReasons(t *testing.T) {
+	// A listener that accepts and then never answers, so the request times
+	// out rather than being refused.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			_ = c // hold it open, answer nothing
+		}
+	}()
+
+	// A closed port, for refused.
+	dead, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	deadURL := "http://" + dead.Addr().String()
+	dead.Close()
+
+	for _, k := range []struct {
+		name, baseURL, wantReason string
+		timeout                   time.Duration
+	}{
+		{"refused", deadURL, "refused", 5 * time.Second},
+		{"timeout", "http://" + ln.Addr().String(), "timeout", 150 * time.Millisecond},
+		{"dns", "http://no-such-host.invalid", "dns", 5 * time.Second},
+	} {
+		t.Run(k.name, func(t *testing.T) {
+			httpport.Register("p", k.baseURL, httpport.WithTimeout(k.timeout))
+			t.Cleanup(httpport.Reset)
+			v, reason := run(t, "M.tc", `module M {`+decls+`
+				testcase tc() runs on C system C {
+					timer g := 10.0;
+					map(self:p, system:p);
+					g.start;
+					p.send(HttpRequest:{ method := "GET", path := "/x", body := "" });
+					alt {
+						[] p.receive(TransportError:{ reason := `+k.wantReason+`, detail := ? }) { setverdict(pass); }
+						[] p.receive(TransportError:{ reason := ?, detail := ? }) { setverdict(fail, "wrong reason"); }
+						[] p.receive { setverdict(fail, "expected a TransportError"); }
+						[] g.timeout { setverdict(fail, "nothing arrived"); }
+					}
+				}
+			}`)
+			if v != runtime.PassVerdict {
+				t.Fatalf("%s: verdict = %s (%s), want pass (reason %s)", k.name, v, reason, k.wantReason)
+			}
+		})
+	}
+}
+
+// TestHTTPPort_TransportErrorEnumValuesArePinned guards the documented
+// contract: the port emits reasons with fixed integer values, and a suite
+// declaring them explicitly must match regardless of the order those lines
+// appear in. If this breaks, every TransportError template in the field
+// silently stops matching.
+func TestHTTPPort_TransportErrorEnumValuesArePinned(t *testing.T) {
+	dead, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	url := "http://" + dead.Addr().String()
+	dead.Close()
+
+	httpport.Register("p", url)
+	t.Cleanup(httpport.Reset)
+
+	// Declared in a deliberately shuffled order, with explicit values.
+	v, reason := run(t, "M.tc", `module M {
+		type record HttpRequest  { charstring method, charstring path, charstring body }
+		type record HttpResponse { integer status, charstring body }
+		type enumerated TransportErrorReason {
+			other(5), timeout(2), refused(0), tls(4), dns(3), unreachable(1)
+		}
+		type record TransportError { TransportErrorReason reason, charstring detail }
+		type port P message { out HttpRequest; in HttpResponse, TransportError }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 5.0;
+			map(self:p, system:p);
+			g.start;
+			p.send(HttpRequest:{ method := "GET", path := "/x", body := "" });
+			alt {
+				[] p.receive(TransportError:{ reason := refused, detail := ? }) { setverdict(pass); }
+				[] p.receive { setverdict(fail, "explicit enum values did not match"); }
+				[] g.timeout { setverdict(fail, "nothing arrived"); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (explicit enum values must pin the contract)", v, reason)
 	}
 }

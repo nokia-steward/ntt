@@ -46,8 +46,12 @@ single functional test doubles as a performance probe. See
   with no user code: `map` binds a base URL, `p.send` issues the request, and
   the response arrives at `p.receive` as a `{status, body}` record. Wired from
   a `.cfg` with `transport := "http"`, supports per-component base URLs, and
-  surfaces a transport failure as `status := 0` with the reason in `body`
-  rather than a silent timeout.
+  surfaces a failed request as a separate `TransportError` inbound type with
+  a machine-matchable `reason` (`refused`, `unreachable`, `timeout`, `dns`,
+  `tls`, `other`) plus a `detail` string for logging — so a suite can branch
+  on "the pod is restarting" versus "the pod is wedged" instead of
+  substring-matching an error message, and a failure is never a silent
+  timeout. A 4xx/5xx stays an ordinary response.
 - **TLS and mutual TLS for the HTTP port** — an `https://` base URL verifies
   against the system roots by default, or against a supplied `ca_cert`;
   `client_cert` + `client_key` enable mTLS, and `server_name` overrides SNI

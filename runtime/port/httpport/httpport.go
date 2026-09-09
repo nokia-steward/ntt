@@ -28,12 +28,29 @@
 // Response record fields, always exactly these two, so a template can match
 // on them without knowing about optional fields:
 //
-//	status       HTTP status code; 0 when the request never completed
-//	body         response body, or the transport error when status is 0
+//	status       HTTP status code
+//	body         response body
 //
-// A transport failure (connection refused, DNS, timeout) therefore surfaces
-// in-script as `status == 0` with the reason in `body`, rather than as a
-// silent absence of reply.
+// A request that never completed is a different KIND of event from a server
+// answering — the SUT was not there, rather than saying no — so it arrives
+// as a second inbound type rather than as a sentinel status:
+//
+//	type enumerated TransportErrorReason {
+//	    refused(0), unreachable(1), timeout(2), dns(3), tls(4), other(5)
+//	}
+//	type record TransportError { TransportErrorReason reason, charstring detail }
+//	type port ApiPort message { out HttpRequest; in HttpResponse, TransportError }
+//
+// `reason` is machine-matchable (`refused` — the pod is not listening, often
+// a restart — reads very differently from `timeout` — the pod is wedged),
+// while `detail` carries the underlying message for logging. The message
+// text is diagnostic only; do not match on it.
+//
+// Declare the enumeration with the explicit values shown above. A TTCN-3
+// enumeration's integer values come from declaration order unless written
+// down, and matching compares the value as well as the label, so pinning
+// them keeps a later reordering of those lines from silently breaking every
+// TransportError template.
 //
 // It is a thin layer over runtime/port/goport, which installs the global
 // port-driver provider and pushes responses back into the running testcase
@@ -59,12 +76,15 @@ import (
 	"context"
 	"crypto/tls"
 	"crypto/x509"
+	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/nokia/ntt/runtime"
@@ -83,6 +103,23 @@ const maxBodyLen = 64 << 20 // 64 MiB
 
 // warnInsecureOnce keeps the skip-verify warning to one line per run.
 var warnInsecureOnce sync.Once
+
+// Transport-failure reasons, in the canonical order that fixes their
+// integer values. A suite must declare the matching TTCN-3 enumeration with
+// these explicit values (see the package comment): enum matching compares
+// the integer as well as the label.
+const (
+	reasonRefused     = "refused"     // 0 — nothing listening
+	reasonUnreachable = "unreachable" // 1 — no route to host / network down
+	reasonTimeout     = "timeout"     // 2 — no answer within the deadline
+	reasonDNS         = "dns"         // 3 — name did not resolve
+	reasonTLS         = "tls"         // 4 — handshake or verification failed
+	reasonOther       = "other"       // 5 — unclassified
+)
+
+// transportErrorReasons numbers the reasons 0..5 in the order above.
+var transportErrorReasons = runtime.NewEnumType("TransportErrorReason",
+	reasonRefused, reasonUnreachable, reasonTimeout, reasonDNS, reasonTLS, reasonOther)
 
 // TLS describes the client-side TLS settings for an `https://` base URL.
 // The zero value verifies the server against the system roots, which is
@@ -348,15 +385,26 @@ func (p *httpPort) Send(_ context.Context, env *port.Envelope) error {
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
-		status, body := p.do(client, base, req)
+		status, body, failure := p.do(client, base, req)
+		if failure != nil {
+			goport.Inject(p.inst, newTransportError(failure))
+			return
+		}
 		goport.Inject(p.inst, newResponse(status, body))
 	}()
 	return nil
 }
 
-// do performs the request and returns (status, body). A transport failure
-// yields (0, reason) so the testcase can see why nothing arrived.
-func (p *httpPort) do(client *http.Client, base string, r request) (int, string) {
+// transportFailure is a request that never produced an HTTP response.
+type transportFailure struct {
+	reason string // one of the reason* constants
+	detail string // underlying message, for logging only
+}
+
+// do performs the request. It returns either (status, body, nil) for a
+// server response — including 4xx and 5xx, which are answers — or a
+// non-nil transportFailure when no response was obtained.
+func (p *httpPort) do(client *http.Client, base string, r request) (int, string, *transportFailure) {
 	var bodyReader io.Reader
 	if r.body != "" {
 		bodyReader = bytes.NewReader([]byte(r.body))
@@ -364,7 +412,7 @@ func (p *httpPort) do(client *http.Client, base string, r request) (int, string)
 	url := base + r.path
 	req, err := http.NewRequest(r.method, url, bodyReader)
 	if err != nil {
-		return 0, fmt.Sprintf("build request %s %s: %v", r.method, url, err)
+		return 0, "", &transportFailure{reasonOther, fmt.Sprintf("build request %s %s: %v", r.method, url, err)}
 	}
 	if r.body != "" {
 		ct := r.contentType
@@ -375,14 +423,66 @@ func (p *httpPort) do(client *http.Client, base string, r request) (int, string)
 	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, fmt.Sprintf("%s %s: %v", r.method, url, err)
+		return 0, "", &transportFailure{classify(err), fmt.Sprintf("%s %s: %v", r.method, url, err)}
 	}
 	defer resp.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyLen))
 	if err != nil {
-		return resp.StatusCode, fmt.Sprintf("read body: %v", err)
+		// Headers arrived, so the SUT did answer; report the status and
+		// surface the truncated read in the body rather than pretending
+		// the request never happened.
+		return resp.StatusCode, fmt.Sprintf("read body: %v", err), nil
 	}
-	return resp.StatusCode, string(b)
+	return resp.StatusCode, string(b), nil
+}
+
+// classify maps a transport error onto one of the reason labels. The
+// specific causes are checked before the general ones: a certificate
+// rejection and a refused connection are both "the request failed", but
+// they send an engineer to different places.
+func classify(err error) string {
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) {
+		return reasonDNS
+	}
+	// Certificate / handshake problems: the transport worked, trust did not.
+	var (
+		unknownAuthority x509.UnknownAuthorityError
+		hostnameErr      x509.HostnameError
+		certInvalid      x509.CertificateInvalidError
+		recordHeaderErr  tls.RecordHeaderError
+	)
+	if errors.As(err, &unknownAuthority) || errors.As(err, &hostnameErr) ||
+		errors.As(err, &certInvalid) || errors.As(err, &recordHeaderErr) {
+		return reasonTLS
+	}
+	if msg := err.Error(); strings.Contains(msg, "tls:") || strings.Contains(msg, "x509:") {
+		return reasonTLS
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		return reasonTimeout
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return reasonTimeout
+	}
+	if errors.Is(err, syscall.ECONNREFUSED) {
+		return reasonRefused
+	}
+	if errors.Is(err, syscall.EHOSTUNREACH) || errors.Is(err, syscall.ENETUNREACH) {
+		return reasonUnreachable
+	}
+	// Fall back to the message for platforms whose errors don't unwrap to
+	// the syscall constants above.
+	switch msg := strings.ToLower(err.Error()); {
+	case strings.Contains(msg, "connection refused"):
+		return reasonRefused
+	case strings.Contains(msg, "no route to host"), strings.Contains(msg, "network is unreachable"):
+		return reasonUnreachable
+	case strings.Contains(msg, "timeout"), strings.Contains(msg, "deadline exceeded"):
+		return reasonTimeout
+	}
+	return reasonOther
 }
 
 // request is the decoded form of an outgoing HttpRequest record.
@@ -439,5 +539,20 @@ func newResponse(status int, body string) *runtime.Record {
 	rec := runtime.NewRecord()
 	rec.Fields["status"] = runtime.NewInt(status)
 	rec.Fields["body"] = runtime.NewCharstring(body)
+	return rec
+}
+
+// newTransportError builds the TTCN-3 TransportError record: a matchable
+// `reason` enumeration plus the underlying message in `detail`.
+func newTransportError(f *transportFailure) *runtime.Record {
+	rec := runtime.NewRecord()
+	ev, err := runtime.NewEnumValueByKey(transportErrorReasons, f.reason)
+	if err != nil {
+		// Unreachable for the constants above; degrade to `other` rather
+		// than dropping the message and looking like a lost reply.
+		ev, _ = runtime.NewEnumValueByKey(transportErrorReasons, reasonOther)
+	}
+	rec.Fields["reason"] = ev
+	rec.Fields["detail"] = runtime.NewCharstring(f.detail)
 	return rec
 }

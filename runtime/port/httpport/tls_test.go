@@ -98,7 +98,7 @@ func TestHTTPPort_TLSVerifiesWithCACert(t *testing.T) {
 		testcase tc() runs on C system C {`+tlsProbe+`
 			alt {
 				[] p.receive(HttpResponse:{ status := 200, body := "{\"secure\":true}" }) { setverdict(pass); }
-				[] p.receive(HttpResponse:{ status := 0, body := ? }) { setverdict(fail, "TLS handshake failed"); }
+				[] p.receive(TransportError:{ reason := ?, detail := ? }) { setverdict(fail, "TLS handshake failed"); }
 				[] g.timeout { setverdict(fail, "no response"); }
 			}
 		}
@@ -123,7 +123,8 @@ func TestHTTPPort_TLSUntrustedIsRejected(t *testing.T) {
 	v, reason := run(t, "M.tc", `module M {`+decls+`
 		testcase tc() runs on C system C {`+tlsProbe+`
 			alt {
-				[] p.receive(HttpResponse:{ status := 0, body := ? }) { setverdict(pass); }
+				[] p.receive(TransportError:{ reason := tls, detail := ? }) { setverdict(pass); }
+				[] p.receive(TransportError:{ reason := ?, detail := ? }) { setverdict(fail, "misclassified: not reported as a tls failure"); }
 				[] p.receive { setverdict(fail, "an untrusted certificate was accepted"); }
 				[] g.timeout { setverdict(fail, "failure was silent"); }
 			}
@@ -190,7 +191,7 @@ func TestHTTPPort_MutualTLS(t *testing.T) {
 		testcase tc() runs on C system C {`+tlsProbe+`
 			alt {
 				[] p.receive(HttpResponse:{ status := 200, body := "{\"cn\":\"ntt-test-client\"}" }) { setverdict(pass); }
-				[] p.receive(HttpResponse:{ status := 0, body := ? }) { setverdict(fail, "mTLS handshake failed"); }
+				[] p.receive(TransportError:{ reason := ?, detail := ? }) { setverdict(fail, "mTLS handshake failed"); }
 				[] p.receive { setverdict(fail, "unexpected response"); }
 				[] g.timeout { setverdict(fail, "no response"); }
 			}

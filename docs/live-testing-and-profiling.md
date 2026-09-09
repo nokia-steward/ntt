@@ -191,10 +191,45 @@ Bodies stay `charstring`, so a JSON API composes with whatever types your
 suite already generates from its schema; this port does not need to know
 them.
 
-**A failed request is visible, not silent.** A connection refusal, DNS
-failure or timeout is delivered as a normal response with `status := 0` and
-the reason in `body`, so a testcase can assert on it instead of just timing
-out with no explanation. A 4xx/5xx is an ordinary response you match on.
+**A failed request is visible, not silent — and classified.** A 4xx/5xx is
+an ordinary response you match on: the SUT answered, it just said no. A
+request that never completed is a different kind of event — the SUT was not
+there — so it arrives as a *second inbound type* whose reason you can branch
+on:
+
+```ttcn3
+type enumerated TransportErrorReason {
+    refused(0), unreachable(1), timeout(2), dns(3), tls(4), other(5)
+}
+type record TransportError { TransportErrorReason reason, charstring detail }
+type port ApiPort message { out HttpRequest; in HttpResponse, TransportError }
+
+alt {
+    [] p.receive(HttpResponse:{ status := 200, body := ? })         { /* healthy */ }
+    [] p.receive(HttpResponse:{ status := ?,   body := ? })         { /* answered; assert on it */ }
+    [] p.receive(TransportError:{ reason := refused, detail := ? }) { /* not listening — often a restart */ }
+    [] p.receive(TransportError:{ reason := timeout, detail := ? }) { /* listening but wedged */ }
+    [] g.timeout                                                    { /* harness problem */ }
+}
+```
+
+| `reason` | Meaning |
+| --- | --- |
+| `refused` | Connection actively refused — nothing listening |
+| `unreachable` | No route to host, or the network is down |
+| `timeout` | No answer within the deadline |
+| `dns` | The name did not resolve |
+| `tls` | Handshake or certificate verification failed |
+| `other` | Anything unclassified |
+
+`detail` carries the underlying message for logging. **Match on `reason`, not
+on `detail`** — the message text is diagnostic, not API.
+
+Declare the enumeration with the explicit values above. A TTCN-3
+enumeration's integers come from declaration order unless written down, and
+matching compares the integer as well as the label, so pinning them stops a
+later reordering of those lines from silently breaking every
+`TransportError` template.
 
 Requests run on their own goroutine, so the engine never blocks on I/O.
 
