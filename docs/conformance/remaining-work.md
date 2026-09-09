@@ -322,6 +322,37 @@ contradictory/runtime clusters alone. See buckets + slice notes below.
 These are worth doing; each is a multi-hour focused slice with real
 regression risk on a load-bearing path. Listed by ROI.
 
+### 1y. `comp.done` does not block on the real clock — SCOPED, not started
+
+Found 2026-09-09 by a Windows CI failure in a test of the built-in TCP port,
+which is a slower runner losing a race the faster ones win.
+
+`comp.done` and `comp.killed` park properly under the cooperative scheduler
+(`blockUntilComponentState`), and `all component.done` was given the same
+treatment. Both are gated on `deterministicSchedulerEnabled`. On the
+**real-clock path** — `ntt exec --live`, which is what an external transport
+forces — they fall through to a non-blocking snapshot. A testcase that forks
+PTCs and then waits on `.done` therefore does not wait: it reaches the end
+of its body, and teardown stops the PTCs (stop-first, by design) before they
+have done their work. ETSI 21.3.7 says the operation blocks.
+
+Anything driving a live SUT from PTCs is exposed, because that is exactly
+the shape: fork a worker per node, wait for them, assert. The workaround is
+to wait on an event instead — have each worker report completion over a
+connected port and receive those reports — which is what
+`TestPerComponentAddressesScale` now does, with a comment saying why.
+
+**Why it was not fixed on the spot.** Each forked PTC already has a
+`DoneChan` (`TestcaseExec.RegisterPTC`), so the wait itself is easy and needs
+no polling. The obstacle is cancellation: `TestcaseExec.Stop()` sets a flag
+and signals the message-ready condition; it does **not** close a broadcast
+channel. There is nothing safe to `select` on alongside `DoneChan`, so a
+naive implementation hangs the interpreter when a PTC never finishes — a far
+worse defect than the one it fixes. The honest fix is therefore two steps:
+give the exec a close-once stop channel, then make `.done` / `.killed` /
+`all component.done` wait on `DoneChan` against it. Both steps are small; the
+ordering is what matters.
+
 ### 1z. `decvalue` structured decode — SCOPED, not started
 
 Raised 2026-09-09 by a suite driving a REST service through the built-in

@@ -68,9 +68,17 @@ func TestPerComponentAddressesScale(t *testing.T) {
 			tcpport.RegisterRules("p", rules)
 			t.Cleanup(tcpport.Reset)
 
+			// Each worker reports completion over a connected port, and the
+			// MTC waits by RECEIVING that report — an event, not a duration.
+			// `comp.done` cannot serve here: on the real-clock path it is a
+			// non-blocking snapshot (it only parks under the cooperative
+			// scheduler), so the MTC would race to teardown, which stops the
+			// PTCs before they ever dial. That surfaced as a Windows-only
+			// failure where the slower runner lost the race.
 			src := `module m {
 				type port P message { inout charstring }
-				type component C { port P p }
+				type port Q message { inout charstring }
+				type component C { port P p; port Q q }
 				function f(charstring expected) runs on C {
 					timer g := 10.0;
 					map(self:p, system:p);
@@ -82,18 +90,25 @@ func TestPerComponentAddressesScale(t *testing.T) {
 						[] g.timeout { setverdict(fail, "no reply"); }
 					}
 					unmap(self:p, system:p);
+					q.send("done");
 				}
 				testcase tc() runs on C system C {
+					timer w := 30.0;
+					var integer seen := 0;
 `
 			for i := 0; i < N; i++ {
-				src += fmt.Sprintf("\t\t\t\t\tvar C c%d := C.create(\"node-%02d\") alive; c%d.start(f(\"node-%02d\"));\n", i, i, i, i)
+				src += fmt.Sprintf("\t\t\t\t\tvar C c%d := C.create(\"node-%02d\") alive; connect(self:q, c%d:q); c%d.start(f(\"node-%02d\"));\n", i, i, i, i, i)
 			}
-			for i := 0; i < N; i++ {
-				src += fmt.Sprintf("\t\t\t\t\tc%d.done;\n", i)
-			}
-			src += `					setverdict(pass);
+			src += fmt.Sprintf(`					w.start;
+					while (seen < %d) {
+						alt {
+							[] q.receive("done") { seen := seen + 1; }
+							[] w.timeout { setverdict(fail, "workers did not report in"); seen := %d; }
+						}
+					}
+					setverdict(pass);
 				}
-			}`
+			}`, N, N)
 			d := newStaticDriver([]string{writeTC(t, src)})
 			d.live = true
 			v, reason, err := d.Run(context.Background(), "m.tc")
