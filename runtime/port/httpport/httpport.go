@@ -473,6 +473,11 @@ func classify(err error) string {
 	if errors.As(err, &netErr) && netErr.Timeout() {
 		return reasonTimeout
 	}
+	// Platform-specific socket errors (Windows returns Winsock numbers that
+	// the POSIX-named constants below never match).
+	if reason, ok := platformReason(err); ok {
+		return reason
+	}
 	if errors.Is(err, syscall.ECONNREFUSED) {
 		return reasonRefused
 	}
@@ -493,14 +498,19 @@ func classify(err error) string {
 	// Fall back to the message for platforms whose errors don't unwrap to
 	// the syscall constants above.
 	switch msg := strings.ToLower(err.Error()); {
-	case strings.Contains(msg, "connection refused"):
+	case strings.Contains(msg, "connection refused"),
+		strings.Contains(msg, "actively refused"): // Windows phrasing
 		return reasonRefused
-	case strings.Contains(msg, "no route to host"), strings.Contains(msg, "network is unreachable"):
+	case strings.Contains(msg, "no route to host"),
+		strings.Contains(msg, "network is unreachable"),
+		strings.Contains(msg, "host is unreachable"): // Windows phrasing
 		return reasonUnreachable
 	case strings.Contains(msg, "timeout"), strings.Contains(msg, "deadline exceeded"):
 		return reasonTimeout
-	case strings.Contains(msg, "connection reset"), strings.Contains(msg, "unexpected eof"),
-		strings.Contains(msg, "server closed idle connection"):
+	case strings.Contains(msg, "connection reset"),
+		strings.Contains(msg, "unexpected eof"),
+		strings.Contains(msg, "server closed idle connection"),
+		strings.Contains(msg, "forcibly closed"): // Windows phrasing
 		return reasonReset
 	}
 	return reasonOther
