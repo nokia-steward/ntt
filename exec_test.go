@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -15,6 +18,7 @@ import (
 	"time"
 
 	"github.com/nokia/ntt/runtime/cfg"
+	"github.com/nokia/ntt/runtime/port/httpport"
 	"github.com/nokia/ntt/runtime/port/tcpport"
 	rreport "github.com/nokia/ntt/runtime/report"
 )
@@ -556,5 +560,50 @@ func TestExecExitStatusReflectsVerdict(t *testing.T) {
 				t.Fatalf("%s suite: runExec returned %v; want nil", k.name, err)
 			}
 		})
+	}
+}
+
+// TestExecConfiguredHTTPPort covers config-driven HTTP wiring: a
+// [TESTPORT_PARAMETERS] block with transport=http is enough for a plain
+// `ntt exec` to drive a REST service — no user Go code.
+func TestExecConfiguredHTTPPort(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, `{"status":"ok"}`)
+	}))
+	defer srv.Close()
+	u, err := url.Parse(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f, _ := cfg.Parse(strings.NewReader(fmt.Sprintf(
+		"[TESTPORT_PARAMETERS]\n*.p.transport := \"http\"\n*.p.host := %q\n*.p.port := %q\n",
+		u.Hostname(), u.Port())))
+	if n := registerConfiguredTestPorts(f); n != 1 {
+		t.Fatalf("registered %d ports, want 1", n)
+	}
+	t.Cleanup(httpport.Reset)
+
+	path := writeTC(t, `module m {
+		type record HttpRequest  { charstring method, charstring path, charstring body }
+		type record HttpResponse { integer status, charstring body }
+		type port P message { out HttpRequest; in HttpResponse }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 5.0;
+			map(self:p, system:p);
+			g.start;
+			p.send(HttpRequest:{ method := "GET", path := "/api/v1/health", body := "" });
+			alt {
+				[] p.receive(HttpResponse:{ status := 200, body := ? }) { setverdict(pass); }
+				[] g.timeout { setverdict(fail, "no response from the configured SUT"); }
+			}
+			unmap(self:p, system:p);
+		}
+	}`)
+	d := newStaticDriver([]string{path})
+	d.live = true
+	if v, reason, err := d.Run(context.Background(), "m.tc"); err != nil || v != rreport.Pass {
+		t.Fatalf("Run: verdict=%s reason=%q err=%v, want pass", v, reason, err)
 	}
 }

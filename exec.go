@@ -15,6 +15,7 @@ import (
 	"github.com/nokia/ntt/runtime"
 	"github.com/nokia/ntt/runtime/cfg"
 	"github.com/nokia/ntt/runtime/exec"
+	"github.com/nokia/ntt/runtime/port/httpport"
 	"github.com/nokia/ntt/runtime/port/tcpport"
 	rreport "github.com/nokia/ntt/runtime/report"
 	"github.com/nokia/ntt/ttcn3"
@@ -183,20 +184,28 @@ func verdictBreakdown(suite *rreport.Suite) string {
 	return strings.Join(parts, ", ")
 }
 
-// registerConfiguredTestPorts wires the built-in TCP test port for every
-// port declared with `transport := "tcp"` in the .cfg's
-// [TESTPORT_PARAMETERS], so a plain `ntt exec` drives a live SUT with no
-// user Go code. Returns how many ports were registered.
+// registerConfiguredTestPorts wires a built-in test port for every port
+// declared with a `transport` in the .cfg's [TESTPORT_PARAMETERS], so a
+// plain `ntt exec` drives a live SUT with no user Go code. Returns how many
+// ports were registered.
 //
 // Keys follow the Titan grammar `<component>.<port>.<param> := "value"`
 // (component is usually `*`, meaning any). Recognised params:
 //
-//	transport     "tcp" selects the built-in TCP port
-//	address       "host:port" (overrides host/port)
-//	host, port    combined into host:port when address is absent
-//	dial_timeout  a Go duration, e.g. "5s" (default 10s)
-//	framing       "newline" (default, charstring) or "length-prefix"
-//	              (octetstring, 4-byte big-endian length + raw bytes)
+//	transport     "tcp" or "http" — selects the built-in port
+//
+//	tcp:
+//	  address       "host:port" (overrides host/port)
+//	  host, port    combined into host:port when address is absent
+//	  dial_timeout  a Go duration, e.g. "5s" (default 10s)
+//	  framing       "newline" (default, charstring) or "length-prefix"
+//	                (octetstring, 4-byte big-endian length + raw bytes)
+//
+//	http:
+//	  base_url      "http://host:port" (overrides scheme/host/port)
+//	  host, port    combined with scheme when base_url is absent
+//	  scheme        "http" (default)
+//	  timeout       per-request Go duration, e.g. "5s" (default 30s)
 //
 // A `*` (any-component) entry supplies defaults that a specific-component
 // entry for the same port inherits and overrides (Titan semantics), so a
@@ -233,22 +242,65 @@ func registerConfiguredTestPorts(f *cfg.File) int {
 	for _, port := range portOrder {
 		comps := byPort[port]
 		star := comps["*"]
-		var rules []tcpport.Rule
+		var tcpRules []tcpport.Rule
+		var httpRules []httpport.Rule
 		for _, comp := range compOrder[port] {
 			// Effective params: `*` defaults overlaid with this component's
 			// own (a component's own value wins; comp=="*" is just star).
 			params := mergeParams(star, comps[comp])
-			rule, ok := tcpPortRule(port, comp, params)
-			if ok {
-				rules = append(rules, rule)
+			switch strings.ToLower(params["transport"]) {
+			case "tcp":
+				if rule, ok := tcpPortRule(port, comp, params); ok {
+					tcpRules = append(tcpRules, rule)
+				}
+			case "http":
+				if rule, ok := httpPortRule(port, comp, params); ok {
+					httpRules = append(httpRules, rule)
+				}
 			}
 		}
-		if len(rules) > 0 {
-			tcpport.RegisterRules(port, rules)
+		switch {
+		case len(tcpRules) > 0 && len(httpRules) > 0:
+			fmt.Fprintf(os.Stderr, "testport %q: mixes tcp and http transports; ignoring the http rules\n", port)
+			tcpport.RegisterRules(port, tcpRules)
+			n++
+		case len(tcpRules) > 0:
+			tcpport.RegisterRules(port, tcpRules)
+			n++
+		case len(httpRules) > 0:
+			httpport.RegisterRules(port, httpRules)
 			n++
 		}
 	}
 	return n
+}
+
+// httpPortRule builds one component rule for the built-in HTTP port, or
+// reports !ok (with a diagnostic) when the entry is unusable. Recognised
+// params: base_url, or host+port (+ optional scheme, default http), and an
+// optional timeout (a Go duration).
+func httpPortRule(port, comp string, params map[string]string) (httpport.Rule, bool) {
+	base := params["base_url"]
+	if base == "" && params["host"] != "" && params["port"] != "" {
+		scheme := params["scheme"]
+		if scheme == "" {
+			scheme = "http"
+		}
+		base = scheme + "://" + net.JoinHostPort(params["host"], params["port"])
+	}
+	if base == "" {
+		fmt.Fprintf(os.Stderr, "testport %q (%s): transport=http but no base_url (or host+port)\n", port, comp)
+		return httpport.Rule{}, false
+	}
+	rule := httpport.Rule{Component: comp, BaseURL: base}
+	if d := params["timeout"]; d != "" {
+		if t, err := time.ParseDuration(d); err == nil {
+			rule.Timeout = t
+		} else {
+			fmt.Fprintf(os.Stderr, "testport %q (%s): bad timeout %q: %v\n", port, comp, d, err)
+		}
+	}
+	return rule, true
 }
 
 // mergeParams overlays own onto base, returning a new map (base unchanged).

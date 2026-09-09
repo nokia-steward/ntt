@@ -42,6 +42,12 @@ single functional test doubles as a performance probe. See
   throughput. Report it as a table with `--format=profile`, as a metrics
   section in `--format=json`, or as a **Performance profile** table in the
   self-contained `--format=html` report (handy as a CI artefact).
+- **Built-in HTTP test port** (`runtime/port/httpport`) — drive a REST service
+  with no user code: `map` binds a base URL, `p.send` issues the request, and
+  the response arrives at `p.receive` as a `{status, body}` record. Wired from
+  a `.cfg` with `transport := "http"`, supports per-component base URLs, and
+  surfaces a transport failure as `status := 0` with the reason in `body`
+  rather than a silent timeout. Plain `http://` only — no TLS, no gRPC.
 - **Runnable example** — [`examples/live-testing/`](examples/live-testing/):
   a TTCN-3 module plus `.cfg` that drive a real TCP SUT and report its
   latency, with a copy-pasteable stand-in server. Exercised by CI so it

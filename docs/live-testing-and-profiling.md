@@ -150,6 +150,56 @@ For a binary protocol, use length-prefix framing and an `octetstring` port:
 *.b.framing   := "length-prefix"
 ```
 
+## The built-in HTTP test port
+
+Most services under test speak HTTP rather than a raw socket, so `ntt` also
+ships an HTTP port. It models one request/response exchange as a record
+pair:
+
+```ttcn3
+type record HttpRequest  { charstring method, charstring path, charstring body }
+type record HttpResponse { integer status, charstring body }
+type port ApiPort message { out HttpRequest; in HttpResponse }
+type component C { port ApiPort p }
+```
+
+`map(self:p, system:sp)` binds the base URL, `p.send(req)` issues the
+request, and the response arrives at `p.receive`:
+
+```ttcn3
+p.send(HttpRequest:{ method := "GET", path := "/api/v1/health", body := "" });
+alt {
+    [] p.receive(HttpResponse:{ status := 200, body := ? }) { setverdict(pass); }
+    [] g.timeout { setverdict(fail, "no response"); }
+}
+```
+
+Wire it from a `.cfg` the same way as TCP:
+
+```ini
+[TESTPORT_PARAMETERS]
+*.p.transport := "http"
+*.p.host      := "127.0.0.1"
+*.p.port      := "8080"
+# or: *.p.base_url := "http://127.0.0.1:8080"
+# optional: *.p.scheme := "http"   *.p.timeout := "5s"
+```
+
+Request fields — only `path` is required; `method` defaults to `GET`, and
+`contentType` defaults to `application/json` when a body is present.
+Bodies stay `charstring`, so a JSON API composes with whatever types your
+suite already generates from its schema; this port does not need to know
+them.
+
+**A failed request is visible, not silent.** A connection refusal, DNS
+failure or timeout is delivered as a normal response with `status := 0` and
+the reason in `body`, so a testcase can assert on it instead of just timing
+out with no explanation. A 4xx/5xx is an ordinary response you match on.
+
+Requests run on their own goroutine, so the engine never blocks on I/O.
+Not modelled: TLS/mTLS (plain `http://` only), arbitrary request/response
+headers, and binary bodies.
+
 ### Per-component addresses
 
 The `<component>` field selects which components a setting applies to. A `*`
