@@ -322,6 +322,49 @@ contradictory/runtime clusters alone. See buckets + slice notes below.
 These are worth doing; each is a multi-hour focused slice with real
 regression risk on a load-bearing path. Listed by ROI.
 
+### 1z. `decvalue` structured decode — SCOPED, not started
+
+Raised 2026-09-09 by a suite driving a REST service through the built-in
+HTTP port: its assertions were substring matches against a JSON body, which
+cannot show that the *right* element of an array changed. The route from
+TTCN-3 to the JSON codec is `decvalue_unichar`, and it is narrower than it
+looks. Scoped here so the next attempt starts from the shape rather than
+repeating the reconnaissance.
+
+**Do not read `builtins.DecValue`.** It is a stub that returns `Undefined`,
+and it is **not the live path** — the interpreter intercepts `decvalue` /
+`decvalue_unichar` / `decvalue_o` at the call site (`evalDecValue`) and never
+reaches it. Concluding "decvalue is unimplemented" from that stub is the
+mistake to avoid; it cost someone an investigation already.
+
+**What already works.** `evalDecValue` has a JSON branch
+(`decodeExplicitJSON`) that decodes **scalars and enumerated values**, and
+implements the error-behaviour spec (`ET_UNDEF` / `EB_IGNORE`, return code 2
+for undecodable input). It requires an explicit third argument —
+`decvalue_unichar(body, v, "JSON")` — and does **not** read
+`with { encode "JSON" }` off the type.
+
+**The gap is structured decode only**: a JSON object into a record, and a
+JSON array into a `record of`.
+
+**Why it is smaller than the stub comment suggests.** That comment ("expects
+data shaped types we don't model yet") predates the type machinery:
+`TypeDesc.Struct` now carries a record's declared field names and types,
+`declaredTypeBinding` already resolves a target's declared type (the enum
+path uses it), and `assignToLHS` handles write-back. The work is one
+recursive type-directed converter plus tests — afternoon-scale.
+
+**The risk is the gate, not the difficulty.** The ETSI suite exercises
+`decvalue` heavily and those fixtures currently fail in a *known* way, so a
+partial implementation can move the number in either direction. Measure the
+per-file delta before committing, as with any Bucket 1 slice; that is the
+reason this wants a dedicated slot rather than being squeezed in.
+
+A useful first slice, from the asking suite: object into a record of
+`charstring` / `integer` / nested record / `record of` fields, returning
+non-zero when the body does not fit. Encoding, unions, optionality
+subtleties and the alias machinery are not needed for it.
+
 ### 1a. Strict procedure-payload matching — DONE
 **Closed 2026-07-28.** The previously listed fixtures
 (`Sem_220302_getcall_operation_020/021`,

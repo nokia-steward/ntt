@@ -464,4 +464,19 @@ existing Titan-style C/C++ ports, see
   §20.2), so a message that arrives mid-evaluation cannot let a later
   catch-all clause jump ahead of an earlier, more specific one — even when
   the message arrives asynchronously from a live socket.
+- **JSON bodies are `charstring`, by design.** The port does not decode
+  them: your suite owns its schema, and a port that knew about it would be
+  a port you had to modify per service. To assert on individual fields,
+  decode in the suite with `decvalue_unichar(body, v, "JSON")` — which today
+  handles scalars and enumerated values; decoding a JSON *object* into a
+  record is scoped but not built (see
+  [remaining-work.md §1z](conformance/remaining-work.md)). Until then,
+  assertions are pattern matches against the body.
+
+  Worth knowing regardless of decoding: **assert on a value you controlled
+  in the stimulus**, not just on the value you expected back. Matching
+  `"linkStatus":"down"` shows *something* is down; matching an identifier
+  you set when provoking the change shows the thing you perturbed is the
+  thing that changed — which is usually what the requirement actually says.
+  Field access makes that assertion tidier, not stronger.
 ```
