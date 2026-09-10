@@ -255,7 +255,11 @@ matching compares the integer as well as the label, so pinning them stops a
 later reordering of those lines from silently breaking every
 `TransportError` template.
 
-Requests run on their own goroutine, so the engine never blocks on I/O.
+Requests run on their own goroutine, so the engine never blocks on I/O —
+but **issue one at a time**: send, receive, then send again. `p.send`
+returns immediately, so a suite *can* have two requests in flight, and
+responses then arrive in completion order with nothing to say which request
+each answers. A slow request sent first has its response delivered second.
 
 ### TLS and mutual TLS
 

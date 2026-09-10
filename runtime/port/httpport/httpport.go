@@ -59,9 +59,19 @@
 // via Inject; httpport.Reset restores the previous provider.
 //
 // Requests are issued on their own goroutine, so the runtime goroutine
-// never blocks on I/O. Responses are injected in completion order: with one
-// request in flight at a time — the usual request/response pattern — that
-// is also request order.
+// never blocks on I/O. Responses are injected in COMPLETION order, and an
+// HttpResponse carries no request identity, so **issue one request at a
+// time**: send, receive, then send again. That is the usual pattern and
+// completion order is then request order.
+//
+// Two requests in flight is a trap rather than a feature. `p.send` returns
+// immediately, so a suite can issue both, and the faster endpoint answers
+// first regardless of which was sent first — verified: a slow request sent
+// before a fast one has its response delivered second. Nothing in the
+// response says which request it belongs to, so the suite cannot tell them
+// apart. Correlating them would mean putting an identifier in the response
+// record, which is a contract change worth making only for a suite that
+// actually needs concurrency.
 //
 // An `https://` base URL enables TLS. By default the server is verified
 // against the system roots; supply a CA bundle, a client certificate for
