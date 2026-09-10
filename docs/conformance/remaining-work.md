@@ -337,7 +337,12 @@ of its body, and teardown stops the PTCs (stop-first, by design) before they
 have done their work. ETSI 21.3.7 says the operation blocks.
 
 Anything driving a live SUT from PTCs is exposed, because that is exactly
-the shape: fork a worker per node, wait for them, assert. The workaround is
+the shape: fork a worker per node, wait for them, assert. It has now caught
+two of our own tests — `TestPerComponentAddressesScale` on a Windows runner
+and `TestExecPerComponentAddress_PTCType` on Linux — both of which had been
+passing on faster machines by winning the race. That is the hazard in
+miniature: the failure is timing-dependent, so it looks like flakiness and
+gets re-run rather than diagnosed. The workaround is
 to wait on an event instead — have each worker report completion over a
 connected port and receive those reports — which is what
 `TestPerComponentAddressesScale` now does, with a comment saying why.

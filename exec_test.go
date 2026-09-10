@@ -394,10 +394,15 @@ func TestExecPerComponentAddress_PTCType(t *testing.T) {
 	}
 	t.Cleanup(tcpport.Reset)
 
+	// The MTC waits by RECEIVING the worker's report, not with `w.done`:
+	// on the real-clock path `.done` is a non-blocking snapshot (see
+	// remaining-work §1y), so the MTC would reach the end of its body and
+	// teardown would stop the worker before it ever dialled.
 	path := writeTC(t, `module m {
 		type port P message { inout charstring }
-		type component C { port P p }
-		type component Worker { port P p }
+		type port Q message { inout charstring }
+		type component C { port P p; port Q q }
+		type component Worker { port P p; port Q q }
 		function work() runs on Worker {
 			timer g := 5.0;
 			map(self:p, system:p);
@@ -408,12 +413,18 @@ func TestExecPerComponentAddress_PTCType(t *testing.T) {
 				[] g.timeout { }
 			}
 			unmap(self:p, system:p);
+			q.send("done");
 		}
 		testcase tc() runs on C system C {
+			timer w2 := 20.0;
 			var Worker w := Worker.create alive;
+			connect(self:q, w:q);
 			w.start(work());
-			w.done;
-			setverdict(pass);
+			w2.start;
+			alt {
+				[] q.receive("done") { setverdict(pass); }
+				[] w2.timeout { setverdict(fail, "worker did not report in"); }
+			}
 		}
 	}`)
 	d := newStaticDriver([]string{path})
