@@ -5,6 +5,7 @@ import (
 	"io"
 	"net"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -328,5 +329,70 @@ func TestTCPPort_HangUpSilentByDefault(t *testing.T) {
 	}`)
 	if v != runtime.PassVerdict {
 		t.Fatalf("verdict = %s (%s), want pass (default must inject nothing)", v, reason)
+	}
+}
+
+// TestTCPPort_ConnectionDoesNotOutliveTestcase pins a property the package
+// doc asserts — the read loop is joined on unmap/stop, so a port's I/O
+// goroutine never outlives its testcase — for the case that would break it
+// if anything did: a suite that maps and never unmaps. The verdict says
+// nothing about this, so a regression here would be invisible; teardown
+// draining port maps is what makes it hold, and that is a few layers away
+// from this package.
+func TestTCPPort_ConnectionDoesNotOutliveTestcase(t *testing.T) {
+	var open int64
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	defer ln.Close()
+	var wg sync.WaitGroup
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			c, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			atomic.AddInt64(&open, 1)
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				defer atomic.AddInt64(&open, -1)
+				defer c.Close()
+				buf := make([]byte, 256)
+				for {
+					if _, err := c.Read(buf); err != nil {
+						return // the client went away
+					}
+				}
+			}()
+		}
+	}()
+
+	tcpport.Register("p", ln.Addr().String())
+	t.Cleanup(tcpport.Reset)
+
+	// Deliberately no unmap.
+	v, reason := run(t, "M.tc", `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			map(self:p, system:p);
+			p.send("hello");
+			setverdict(pass);
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	for time.Now().Before(deadline) && atomic.LoadInt64(&open) != 0 {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if n := atomic.LoadInt64(&open); n != 0 {
+		t.Fatalf("%d connection(s) still open after the testcase ended: the read loop outlived its testcase", n)
 	}
 }
