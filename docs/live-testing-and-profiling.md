@@ -221,7 +221,8 @@ on:
 
 ```ttcn3
 type enumerated TransportErrorReason {
-    refused(0), unreachable(1), timeout(2), dns(3), tls(4), other(5), reset(6)
+    refused(0), unreachable(1), timeout(2), dns(3), tls(4), other(5), reset(6),
+    oversize(7)
 }
 type record TransportError { TransportErrorReason reason, charstring detail }
 type port ApiPort message { out HttpRequest; in HttpResponse, TransportError }
@@ -244,6 +245,7 @@ alt {
 | `dns` | The name did not resolve |
 | `tls` | Handshake or certificate verification failed |
 | `reset` | Accepted, then dropped mid-request — a service being torn down |
+| `oversize` | The answer exceeded the 64 MiB body cap; reported rather than truncated |
 | `other` | Anything unclassified |
 
 `detail` carries the underlying message for logging. **Match on `reason`, not

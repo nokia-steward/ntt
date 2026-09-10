@@ -43,7 +43,8 @@ const decls = `
 	type record HttpRequest  { charstring method, charstring path, charstring body }
 	type record HttpResponse { integer status, charstring body }
 	type enumerated TransportErrorReason {
-		refused(0), unreachable(1), timeout(2), dns(3), tls(4), other(5), reset(6)
+		refused(0), unreachable(1), timeout(2), dns(3), tls(4), other(5), reset(6),
+		oversize(7)
 	}
 	type record TransportError { TransportErrorReason reason, charstring detail }
 	type port P message { out HttpRequest; in HttpResponse, TransportError }

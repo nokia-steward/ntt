@@ -51,7 +51,7 @@ single functional test doubles as a performance probe. See
   a `.cfg` with `transport := "http"`, supports per-component base URLs, and
   surfaces a failed request as a separate `TransportError` inbound type with
   a machine-matchable `reason` (`refused`, `unreachable`, `timeout`, `dns`,
-  `tls`, `other`, `reset`) plus a `detail` string for logging — so a suite can branch
+  `tls`, `other`, `reset`, `oversize`) plus a `detail` string for logging — so a suite can branch
   on "the pod is restarting" versus "the pod is wedged" instead of
   substring-matching an error message, and a failure is never a silent
   timeout. A 4xx/5xx stays an ordinary response.

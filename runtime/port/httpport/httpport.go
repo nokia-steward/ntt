@@ -37,7 +37,7 @@
 //
 //	type enumerated TransportErrorReason {
 //	    refused(0), unreachable(1), timeout(2), dns(3), tls(4), other(5),
-//	    reset(6)
+//	    reset(6), oversize(7)
 //	}
 //	type record TransportError { TransportErrorReason reason, charstring detail }
 //	type port ApiPort message { out HttpRequest; in HttpResponse, TransportError }
@@ -110,8 +110,11 @@ import (
 const defaultTimeout = 30 * time.Second
 
 // maxBodyLen caps a response body so a runaway endpoint can't make the
-// read loop allocate unbounded memory.
-const maxBodyLen = 64 << 20 // 64 MiB
+// read loop allocate unbounded memory. A response that exceeds it is
+// REPORTED, not truncated: handing a suite a body that looks whole but is
+// missing its tail makes every assertion on it meaningless, and silently
+// so. A variable rather than a constant only so a test can lower it.
+var maxBodyLen = 64 << 20 // 64 MiB
 
 // warnInsecureOnce keeps the skip-verify warning to one line per run.
 var warnInsecureOnce sync.Once
@@ -131,12 +134,13 @@ const (
 	reasonTLS         = "tls"         // 4 — handshake or verification failed
 	reasonOther       = "other"       // 5 — unclassified
 	reasonReset       = "reset"       // 6 — accepted, then dropped mid-request
+	reasonOversize    = "oversize"    // 7 — answer too large to deliver intact
 )
 
-// transportErrorReasons numbers the reasons 0..6 in the order above.
+// transportErrorReasons numbers the reasons 0..7 in the order above.
 var transportErrorReasons = runtime.NewEnumType("TransportErrorReason",
 	reasonRefused, reasonUnreachable, reasonTimeout, reasonDNS, reasonTLS,
-	reasonOther, reasonReset)
+	reasonOther, reasonReset, reasonOversize)
 
 // TLS describes the client-side TLS settings for an `https://` base URL.
 // The zero value verifies the server against the system roots, which is
@@ -443,7 +447,15 @@ func (p *httpPort) do(client *http.Client, base string, r request) (int, string,
 		return 0, "", &transportFailure{classify(err), fmt.Sprintf("%s %s: %v", r.method, url, err)}
 	}
 	defer resp.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(resp.Body, maxBodyLen))
+	// Read one byte past the cap so exceeding it is detectable: a plain
+	// LimitReader stops at the limit and reports success, which is how a
+	// too-large answer became a silently truncated one.
+	b, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxBodyLen)+1))
+	if err == nil && len(b) > maxBodyLen {
+		return 0, "", &transportFailure{reasonOversize, fmt.Sprintf(
+			"%s %s: response body exceeds the %d-byte cap; not delivered rather than truncated",
+			r.method, url, maxBodyLen)}
+	}
 	if err != nil {
 		// Headers arrived, so the SUT did answer; report the status and
 		// surface the truncated read in the body rather than pretending

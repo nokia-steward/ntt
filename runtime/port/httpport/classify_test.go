@@ -15,9 +15,13 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/http"
+	"net/http/httptest"
 	"net/url"
+	"strings"
 	"syscall"
 	"testing"
+	"time"
 
 	"github.com/nokia/ntt/runtime"
 )
@@ -111,4 +115,64 @@ func runtimeEnumValue(key string) (*runtime.EnumValue, error) {
 		return nil, fmt.Errorf("enum %q: %w", key, err)
 	}
 	return ev, nil
+}
+
+// TestOversizeResponseIsReportedNotTruncated covers a defect found by
+// testing a claim in this package's own doc comment. The body cap was
+// applied with a plain LimitReader, which stops at the limit and reports
+// success — so a response larger than the cap arrived as a body that looked
+// whole and was missing its tail, with nothing to tell the suite. Every
+// assertion on such a body is meaningless, and silently so.
+//
+// The cap is lowered here rather than sending 64 MiB, so the test is fast
+// and deterministic.
+func TestOversizeResponseIsReportedNotTruncated(t *testing.T) {
+	orig := maxBodyLen
+	maxBodyLen = 32
+	defer func() { maxBodyLen = orig }()
+
+	body := strings.Repeat("x", 200) // comfortably over the lowered cap
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	p := &httpPort{inst: "p", rules: []Rule{{Component: "*", BaseURL: srv.URL, Timeout: 5 * time.Second}}}
+	if err := p.OnMap(context.Background()); err != nil {
+		t.Fatalf("OnMap: %v", err)
+	}
+	status, got, failure := p.do(p.client, p.baseURL, request{method: "GET", path: "/big"})
+	if failure == nil {
+		t.Fatalf("oversize response delivered as a normal reply (status %d, %d bytes) — "+
+			"a truncated body must not look like a whole one", status, len(got))
+	}
+	if failure.reason != reasonOversize {
+		t.Fatalf("reason = %q, want %q", failure.reason, reasonOversize)
+	}
+}
+
+// TestBodyAtCapIsDelivered pins the boundary: a body exactly at the cap is
+// complete, not oversize.
+func TestBodyAtCapIsDelivered(t *testing.T) {
+	orig := maxBodyLen
+	maxBodyLen = 32
+	defer func() { maxBodyLen = orig }()
+
+	body := strings.Repeat("y", 32)
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		fmt.Fprint(w, body)
+	}))
+	defer srv.Close()
+
+	p := &httpPort{inst: "p", rules: []Rule{{Component: "*", BaseURL: srv.URL, Timeout: 5 * time.Second}}}
+	if err := p.OnMap(context.Background()); err != nil {
+		t.Fatalf("OnMap: %v", err)
+	}
+	status, got, failure := p.do(p.client, p.baseURL, request{method: "GET", path: "/exact"})
+	if failure != nil {
+		t.Fatalf("a body exactly at the cap was reported as %q; it is complete", failure.reason)
+	}
+	if status != 200 || got != body {
+		t.Fatalf("status=%d len=%d, want 200 and %d bytes intact", status, len(got), len(body))
+	}
 }
