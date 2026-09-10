@@ -5,7 +5,6 @@ import (
 	"io"
 	"net"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -340,12 +339,18 @@ func TestTCPPort_HangUpSilentByDefault(t *testing.T) {
 // draining port maps is what makes it hold, and that is a few layers away
 // from this package.
 func TestTCPPort_ConnectionDoesNotOutliveTestcase(t *testing.T) {
-	var open int64
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatalf("listen: %v", err)
 	}
 	defer ln.Close()
+
+	// Closed when the server's side of the connection ends — i.e. when the
+	// port closed its end. Waiting on the event rather than polling a
+	// counter: a test that sleeps between samples is synchronising by hope,
+	// which would be a poor way to test for a race.
+	gone := make(chan struct{})
+	var once sync.Once
 	var wg sync.WaitGroup
 	wg.Add(1)
 	go func() {
@@ -355,11 +360,10 @@ func TestTCPPort_ConnectionDoesNotOutliveTestcase(t *testing.T) {
 			if err != nil {
 				return
 			}
-			atomic.AddInt64(&open, 1)
 			wg.Add(1)
 			go func() {
 				defer wg.Done()
-				defer atomic.AddInt64(&open, -1)
+				defer once.Do(func() { close(gone) })
 				defer c.Close()
 				buf := make([]byte, 256)
 				for {
@@ -388,11 +392,12 @@ func TestTCPPort_ConnectionDoesNotOutliveTestcase(t *testing.T) {
 		t.Fatalf("verdict = %s (%s), want pass", v, reason)
 	}
 
-	deadline := time.Now().Add(3 * time.Second)
-	for time.Now().Before(deadline) && atomic.LoadInt64(&open) != 0 {
-		time.Sleep(10 * time.Millisecond)
+	select {
+	case <-gone: // the port closed its end: nothing outlived the testcase
+	case <-time.After(5 * time.Second):
+		t.Fatal("the connection was still open 5s after the testcase ended: " +
+			"the read loop outlived its testcase")
 	}
-	if n := atomic.LoadInt64(&open); n != 0 {
-		t.Fatalf("%d connection(s) still open after the testcase ended: the read loop outlived its testcase", n)
-	}
+	// No wg.Wait() here: the accept loop only returns once the deferred
+	// ln.Close() runs, so waiting for it before that would deadlock.
 }
