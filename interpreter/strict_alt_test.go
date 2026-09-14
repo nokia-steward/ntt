@@ -585,3 +585,159 @@ func TestLiveClock_DoneBlocksAndPreservesPTCVerdict(t *testing.T) {
 		}
 	}
 }
+
+// TestLiveClock_ToAddressUnicasts pins that `to <component>` addresses one
+// component on BOTH clocks, for every operation that accepts it.
+//
+// The per-component routing was gated on the cooperative scheduler, on the
+// stated grounds that "without the scheduler there are no per-component
+// keys". That was not so — PortKey/PortKeyFor and ConnectedPeers consult
+// only the MTC id, the current component and the connection map — so the
+// gate made `to` silently a no-op under --live and delivered to every
+// connected peer instead. A sibling PTC then received a value, or caught an
+// exception, meant for another component, with nothing reporting it.
+//
+// Each case runs two receivers and addresses only the first; the second
+// reporting a delivery means the address was ignored. Both clocks must
+// agree, which is the property that failed.
+func TestLiveClock_ToAddressUnicasts(t *testing.T) {
+	const prelude = `
+		signature S() return integer exception (charstring);
+		signature N();
+		type port Q procedure { inout S, N }
+		type port P message { inout charstring }
+		type port R message { inout charstring }
+		type component C { port P p; port Q q; port R r }
+		type component W { port P p; port Q q; port R r }
+	`
+	for _, k := range []struct{ name, body string }{
+		{"send", `
+		function rx(charstring tag) runs on W {
+			timer t := 0.3; t.start;
+			alt { [] p.receive(charstring:?) { r.send(tag & ":GOT"); }
+			      [] t.timeout { r.send(tag & ":NONE"); } }
+		}
+		testcase tc() runs on C system C {
+			timer g := 15.0;
+			var W a := W.create("a"); var W b := W.create("b");
+			connect(self:p, a:p); connect(self:p, b:p);
+			connect(self:r, a:r); connect(self:r, b:r);
+			a.start(rx("a")); b.start(rx("b"));
+			p.send("hello") to a;
+			g.start;
+			var integer n := 0; var boolean bad := false;
+			while (n < 2) {
+				alt { [] r.receive("b:GOT") { bad := true; n := n + 1; }
+				      [] r.receive(charstring:?) { n := n + 1; }
+				      [] g.timeout { n := 2; } }
+			}
+			if (bad) { setverdict(fail, "broadcast: b got a message addressed to a"); }
+			else { setverdict(pass); }
+		}`},
+		{"call", `
+		function rx(charstring tag) runs on W {
+			timer t := 0.3; t.start;
+			alt { [] q.getcall(N:?) { r.send(tag & ":GOT"); }
+			      [] t.timeout { r.send(tag & ":NONE"); } }
+		}
+		testcase tc() runs on C system C {
+			timer g := 15.0;
+			var W a := W.create("a"); var W b := W.create("b");
+			connect(self:q, a:q); connect(self:q, b:q);
+			connect(self:r, a:r); connect(self:r, b:r);
+			a.start(rx("a")); b.start(rx("b"));
+			q.call(N:{}, nowait) to a;
+			g.start;
+			var integer n := 0; var boolean bad := false;
+			while (n < 2) {
+				alt { [] r.receive("b:GOT") { bad := true; n := n + 1; }
+				      [] r.receive(charstring:?) { n := n + 1; }
+				      [] g.timeout { n := 2; } }
+			}
+			if (bad) { setverdict(fail, "broadcast: b got a call addressed to a"); }
+			else { setverdict(pass); }
+		}`},
+		{"reply", `
+		function cli(charstring tag) runs on W {
+			q.call(S:{}, 1.0) {
+				[] q.getreply(S:?) { r.send(tag & ":GOT"); }
+				[] q.catch(timeout) { r.send(tag & ":NONE"); }
+			}
+		}
+		function srv() runs on W {
+			timer t := 3.0; t.start; var W vc;
+			alt { [] q.getcall(S:?) -> sender vc { q.reply(S:{} value 7) to vc; }
+			      [] t.timeout { } }
+		}
+		testcase tc() runs on C system C {
+			timer g := 15.0;
+			var W s := W.create("s"); var W a := W.create("a"); var W b := W.create("b");
+			connect(s:q, a:q); connect(s:q, b:q);
+			connect(self:r, a:r); connect(self:r, b:r);
+			s.start(srv()); a.start(cli("a")); b.start(cli("b"));
+			g.start;
+			var integer n := 0; var integer got := 0;
+			while (n < 2) {
+				alt { [] r.receive("a:GOT") { got := got + 1; n := n + 1; }
+				      [] r.receive("b:GOT") { got := got + 1; n := n + 1; }
+				      [] r.receive(charstring:?) { n := n + 1; }
+				      [] g.timeout { n := 2; } }
+			}
+			if (got > 1) { setverdict(fail, "broadcast: both clients got the reply"); }
+			else { setverdict(pass); }
+		}`},
+		{"raise", `
+		function cli(charstring tag) runs on W {
+			q.call(S:{}, 1.0) {
+				[] q.catch(S, charstring:?) { r.send(tag & ":GOT"); }
+				[] q.getreply(S:?) { r.send(tag & ":REPLY"); }
+				[] q.catch(timeout) { r.send(tag & ":NONE"); }
+			}
+		}
+		function srv() runs on W {
+			timer t := 3.0; t.start; var W vc;
+			alt { [] q.getcall(S:?) -> sender vc { q.raise(S, "boom") to vc; }
+			      [] t.timeout { } }
+		}
+		testcase tc() runs on C system C {
+			timer g := 15.0;
+			var W s := W.create("s"); var W a := W.create("a"); var W b := W.create("b");
+			connect(s:q, a:q); connect(s:q, b:q);
+			connect(self:r, a:r); connect(self:r, b:r);
+			s.start(srv()); a.start(cli("a")); b.start(cli("b"));
+			g.start;
+			var integer n := 0; var integer got := 0;
+			while (n < 2) {
+				alt { [] r.receive("a:GOT") { got := got + 1; n := n + 1; }
+				      [] r.receive("b:GOT") { got := got + 1; n := n + 1; }
+				      [] r.receive(charstring:?) { n := n + 1; }
+				      [] g.timeout { n := 2; } }
+			}
+			if (got > 1) { setverdict(fail, "broadcast: both clients caught the exception"); }
+			else { setverdict(pass); }
+		}`},
+	} {
+		t.Run(k.name, func(t *testing.T) {
+			src := "module M {" + prelude + k.body + "}"
+			var first runtime.Verdict
+			for i, opts := range []interpreter.TestcaseOptions{
+				{DeterministicScheduler: true, DeterministicClock: true},
+				{},
+			} {
+				v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", opts)
+				if err != nil {
+					t.Fatalf("RunTestcaseWith: %v", err)
+				}
+				if v != runtime.PassVerdict {
+					t.Fatalf("%s clock: verdict = %s (%s), want pass",
+						map[int]string{0: "virtual", 1: "live"}[i], v, reason)
+				}
+				if i == 0 {
+					first = v
+				} else if v != first {
+					t.Fatalf("clock substitution changed the verdict: virtual=%s live=%s", first, v)
+				}
+			}
+		})
+	}
+}

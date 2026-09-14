@@ -2571,25 +2571,23 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 							// `p.call(S:{...}) to (targets)` — a non-blocking
 							// (noblock signature / nowait) call addressed to
 							// specific components: multicast to ONLY those.
-							// Needs the scheduler's per-component port
-							// routing; without it fall through to the
-							// loopback broadcast (eval(n.X)).
-							if deterministicSchedulerEnabled(env) {
-								return evalProcedureCallTo(portName, info.call, info.to, env)
-							}
+							return evalProcedureCallTo(portName, info.call, info.to, env)
 						case "reply", "raise":
 							// `p.reply(...) to c` / `p.raise(...) to (a,b)`:
-							// under the scheduler, route the reply/exception to
-							// ONLY the addressed component(s) via their
-							// per-component port key — a broadcast would let a
-							// sibling PTC catch an exception meant for another
-							// (Sem_220305_raise_operation_002). Without the
-							// scheduler there are no per-component keys, so keep
-							// the loopback name-collision routing.
-							if deterministicSchedulerEnabled(env) {
-								return evalProcedureReplyRaiseTo(name.String(), portName, info.call, info.to, env)
-							}
-							return evalProcedurePortOp(name.String(), portName, info.call, env)
+							// route to ONLY the addressed component(s) via
+							// their per-component port key — a broadcast would
+							// let a sibling PTC catch an exception meant for
+							// another (Sem_220305_raise_operation_002).
+							//
+							// This was gated on the scheduler, on the stated
+							// grounds that "without the scheduler there are no
+							// per-component keys". That is not so: PortKey /
+							// PortKeyFor and ConnectedPeers consult only the
+							// MTC id, the current component and the connection
+							// map, none of which involve the scheduler. The
+							// gate therefore made `to` silently a no-op on the
+							// real clock, delivering to every connected peer.
+							return evalProcedureReplyRaiseTo(name.String(), portName, info.call, info.to, env)
 						case "receive", "trigger", "getreply", "catch", "getcall":
 							return evalPortReceiveInfo(portName, info, env, true)
 						case "check":
@@ -11058,7 +11056,7 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 		// let a sibling PTC receive a value meant for another —
 		// Sem_220201_SendOperation_005). Fall back to broadcast when the
 		// target set can't be resolved or matches no connected peer.
-		if dest != nil && deterministicSchedulerEnabled(env) {
+		if dest != nil {
 			if ids := callTargetComponentIDs(dest, env); ids != nil {
 				curID := int64(-1)
 				if cur := exec.CurrentComponent(); cur != nil {

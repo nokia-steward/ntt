@@ -463,6 +463,72 @@ unnoticed. Gates protect the paths they cover.
 Method note, since it cost a wrong entry: *wall-clock elapsed time is not
 evidence that a component ran.* Ask what it observably produced.
 
+### 1v. `to <component>` was ignored under `--live` — FIXED 2026-09-14
+
+Found 2026-09-14 by broadening the two-clock probe, and found by a method
+worth recording as much as the defect is.
+
+`p.send(v) to c`, `p.call(...) to (...)`, `p.reply(...) to c` and
+`p.raise(...) to c` all routed to the addressed component under the
+cooperative scheduler and **broadcast to every connected peer** on the real
+clock. A sibling PTC therefore received a value, or caught an exception,
+meant for another component — and nothing reported it. Silent mis-delivery
+is worse than the earlier two live-only defects (§1x, §1y), which caused
+silent non-execution: a test can at least notice that nothing happened.
+
+The virtual-clock path was fixed for exactly this in August
+(`Sem_220201_SendOperation_005`, `Sem_220305_raise_operation_002`). The
+real-clock path was never brought along.
+
+**The gate's stated justification was false.** At interpreter.go:2589 the
+comment read: *"Without the scheduler there are no per-component keys, so
+keep the loopback name-collision routing."* There are. `PortKey`,
+`PortKeyFor` and `ConnectedPeers` consult only the MTC id, the current
+component and the connection map — none of which involve the scheduler.
+The routing the gate was protecting works identically on both paths, so
+removing the gate at all three sites (2577, 2589, 11061) is the whole fix.
+The scheduler path already took the unicast branch, so its behaviour is
+unchanged and the corpus provably cannot move: 4754, provenance counts
+identical, gate exit 0.
+
+Verified by `TestLiveClock_ToAddressUnicasts`, four subtests (send, call,
+reply, raise), each running one source under both clocks and failing if a
+second receiver sees traffic addressed to the first. Re-gating makes all
+four fail.
+
+**How it was found.** The probe was broadened by two strategies in
+parallel. Six shapes chosen by informed intuition — `interleave` with
+timers, nested `alt` with component operations, `any component.running`,
+timer `.read`/`.stop` in forked bodies, two-PTC procedure call/reply —
+found **nothing**. Six shapes derived mechanically, by enumerating every
+`deterministicSchedulerEnabled` / `SchedulerActive` / `useVirtualClock`
+branch in the interpreter and writing one shape per branch that changes
+behaviour, found **four** (the four above, one root cause).
+
+That asymmetry is the transferable result: in a two-clock engine the
+divergence candidates are not the shapes a tester imagines but the
+conditional branches that distinguish the clocks, and those can be listed
+from the source with `grep`. It also gives probe-broadening a stopping
+condition — one shape per behaviour-changing gated branch — instead of
+being open-ended.
+
+### T1. `any timer.timeout` does not clear the fired timer — SCOPED, not started
+
+Found 2026-09-14 alongside §1v, but unrelated to the two-clock work: it
+behaves identically on both clocks, so no fixture or probe of clock
+substitution can distinguish it.
+
+`any timer.timeout` blocks correctly — 0.41 s for a 0.4 s timer, the same
+as a named `t.timeout` — but leaves the fired timer `running`:
+
+    timer t := 0.05; t.start; t.timeout;            -> t.running is false  (correct)
+    timer t := 0.05; t.start; any timer.timeout;    -> t.running is TRUE   (wrong)
+
+Per ETSI ES 201 873-1 §23.5 the timeout operation removes the timeout event
+and the timer becomes inactive, so `.running` must be false either way. The
+practical consequence is a loop that re-arms or re-checks timers seeing a
+timer that has already fired as still pending.
+
 ### 1z. `decvalue` structured decode — SCOPED, not started
 
 Raised 2026-09-09 by a suite driving a REST service through the built-in
