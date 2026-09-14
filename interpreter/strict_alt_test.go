@@ -473,3 +473,63 @@ func TestStrictProc_BareGetreplyRespectsSnapshot(t *testing.T) {
 		t.Fatalf("verdict = %s (%s), want pass (a bare guard must respect the alt snapshot)", v, reason)
 	}
 }
+
+// TestLiveClock_PTCBodyWithTimerRuns guards the real-clock fork predicate.
+// A started PTC gets a goroutine only when a predicate says its body needs
+// one. Under the cooperative scheduler that predicate is broad; on the real
+// clock it used to be the narrow getcall-only one, on the reasoning that
+// forking half a pair whose counterpart is not forked leaves it waiting for
+// traffic that never comes. That reasoning does not transfer: with no
+// scheduler there is no modelling, so an unforked body does not run at all.
+//
+// The body below sends, waits on a timer, then sends again. Before the fix
+// NEITHER send arrived under the real clock — the testcase died on its own
+// guard timer with no indication the PTC had never started — while the same
+// source passed on the virtual clock. "Wait, then act" is an ordinary shape
+// for pacing a live SUT, so this asserts both sends arrive.
+func TestLiveClock_PTCBodyWithTimerRuns(t *testing.T) {
+	src := `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		function two_phase() runs on C {
+			p.send("before");
+			timer d := 0.05; d.start; d.timeout;
+			p.send("after");
+		}
+		testcase tc() runs on C system C {
+			timer g := 10.0;
+			var C q := C.create;
+			connect(self:p, q:p);
+			q.start(two_phase());
+			g.start;
+			alt {
+				[] p.receive("before") { setverdict(pass); }
+				[] g.timeout { setverdict(fail, "PTC never ran at all"); stop; }
+			}
+			alt {
+				[] p.receive("after") { setverdict(pass); }
+				[] g.timeout { setverdict(fail, "PTC ran but its timer never released it"); }
+			}
+		}
+	}`
+	// Real clock: both options off, which is what --live selects.
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
+		interpreter.TestcaseOptions{})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("real clock: verdict = %s (%s), want pass", v, reason)
+	}
+	// Same source, virtual clock: the verdict must agree. This pair is the
+	// clock-substitution equivalence claim in miniature.
+	v2, reason2, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith (virtual): %v", err)
+	}
+	if v2 != v {
+		t.Fatalf("clock substitution changed the verdict: real=%s (%s) virtual=%s (%s)",
+			v, reason, v2, reason2)
+	}
+}

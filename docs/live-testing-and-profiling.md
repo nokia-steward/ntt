@@ -484,16 +484,6 @@ existing Titan-style C/C++ ports, see
   component's name, type, `mtc`, or `*` (see above). Two *instances* of the
   same component type that need different addresses can't yet be told apart
   by the config unless they were created with distinct names.
-- **A PTC body that waits on a timer is skipped under `--live`.** A started
-  PTC gets a real goroutine only when its body blocks on `getcall` or a
-  blocking `call{...}`; other bodies run on a synchronous model path that
-  the virtual clock backs with timer modelling and the real clock does not.
-  So `p.send("a"); timer d := 0.05; d.start; d.timeout; p.send("b");` as a
-  PTC body delivers **nothing** under `--live` — not even the first send —
-  while passing on the virtual clock. "Wait, then act" is an ordinary shape
-  for pacing or staggering a live SUT, so check any PTC that mixes a timer
-  with communication. The symptom is an unexplained guard-timer failure.
-  Tracked as [remaining-work §1x](conformance/remaining-work.md).
 - **`comp.done` does not block under `--live`.** This is the one live-mode
   trap that costs real debugging time. On the default virtual clock, `.done`
   and `all component.done` park until the components finish (ETSI 21.3.7).

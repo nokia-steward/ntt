@@ -358,7 +358,7 @@ give the exec a close-once stop channel, then make `.done` / `.killed` /
 `all component.done` wait on `DoneChan` against it. Both steps are small; the
 ordering is what matters.
 
-### 1x. A PTC body that waits on a timer is skipped under `--live` — SCOPED, not started
+### 1x. A PTC body that waits on a timer is skipped under `--live` — FIXED 2026-09-14
 
 Found 2026-09-14 while measuring whether the same suite produces the same
 verdicts under both clocks. It does, for 7 of 8 testcases in a probe suite
@@ -392,15 +392,21 @@ indication that the PTC never started. It is the same family as §1y
 (`comp.done` not blocking under `--live`): the live path lacks what the
 cooperative scheduler provides, and the symptom is an unexplained timeout.
 
-**Why it is not fixed here.** Widening the fork predicate is exactly the
-change that measured **-7 files and +0** on 2026-08-10 and was reverted (see
-"The correction"). The naive fix regresses conformance, so this needs the
-virtual-clock and real-clock paths distinguished rather than the predicate
-loosened: under the real clock there is no modelling to fall back on, so the
-argument for skipping does not transfer. Likely shape — fork on the real
-clock whenever the body contains any comm op or timer, and leave the
-virtual-clock predicate exactly as it is, so the conformance corpus cannot
-move. That wants measuring, not assuming.
+**Fixed** by distinguishing the two clock paths rather than loosening one
+predicate, which is what kept the conformance corpus still. The scheduler
+branch already used the broad `startBodyDoesPortComm`; the real-clock branch
+now uses it too, and the narrow `startBodyBlocksOnComm` is no longer reached
+from there. Because the corpus runs under the scheduler, that branch cannot
+move it — confirmed: 4754 matched, identical provenance counts, gate exit 0.
+This is why the August attempt cost -7 and this one costs nothing: that one
+widened the shared predicate, this one widens only the path where the
+argument for narrowness does not apply.
+
+Verified by `TestLiveClock_PTCBodyWithTimerRuns`, which runs one source under
+both clocks and asserts the verdicts agree. Reverting the one-line predicate
+change makes it fail with the original symptom ("PTC never ran at all"), so
+the test is load-bearing. The 8-case equivalence probe that found this now
+reports **8/8 identical verdicts** across the two clocks, up from 7/8.
 
 ### 1z. `decvalue` structured decode — SCOPED, not started
 

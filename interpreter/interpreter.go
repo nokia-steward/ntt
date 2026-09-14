@@ -7689,7 +7689,25 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 			if deterministicSchedulerEnabled(env) {
 				forkComm = startBodyDoesPortComm(body, env)
 			} else if skip {
-				forkComm = startBodyBlocksOnComm(body, env)
+				// Real clock: the narrow getcall-only predicate used to
+				// apply here, on the reasoning that forking one half of a
+				// pair whose counterpart is not forked leaves it waiting
+				// for traffic that never comes. That reasoning holds under
+				// the cooperative scheduler, where an unforked body is
+				// still modelled. It does not transfer to the real clock,
+				// where there is no modelling: a body that is not forked
+				// does not run AT ALL, so the choice is not "forked and
+				// maybe blocked" versus "modelled", it is "runs" versus
+				// "silently does nothing". A PTC that waits on a timer and
+				// then sends — an ordinary shape for pacing a live SUT —
+				// delivered nothing, not even the statements before the
+				// timer, and failed the testcase on its own guard timer
+				// with no indication why.
+				//
+				// So the real clock uses the same broad predicate as the
+				// scheduler. The conformance corpus runs under the
+				// scheduler, so this branch cannot move it.
+				forkComm = startBodyDoesPortComm(body, env)
 			}
 		}
 		if forkComm {
