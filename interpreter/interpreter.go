@@ -767,16 +767,21 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			case "running":
 				return runtime.NewBool(compRunning(ref, env))
 			case "done":
-				// Standalone `comp.done` is blocking (§21.3.7). Under the
-				// cooperative scheduler it must park so the target PTC is
-				// granted the token; inside an alt guard it stays a
-				// non-blocking snapshot check (the alt owns the blocking).
-				if deterministicSchedulerEnabled(env) && !altCtx.active() {
+				// Standalone `comp.done` is blocking (§21.3.7) on EITHER
+				// clock. Under the cooperative scheduler it parks so the
+				// target PTC is granted the token; on the real clock it
+				// waits on the PTC's exit. This used to be gated on the
+				// scheduler, so a live run answered a snapshot: the MTC ran
+				// on, the testcase ended, and teardown stopped a PTC that
+				// had not finished — losing any verdict it had not yet set.
+				// Inside an alt guard it stays a non-blocking snapshot
+				// check on both clocks (the alt owns the blocking).
+				if !altCtx.active() {
 					return blockUntilComponentState(ref, "done", env)
 				}
 				return runtime.NewBool(compDone(ref, env))
 			case "killed":
-				if deterministicSchedulerEnabled(env) && !altCtx.active() {
+				if !altCtx.active() {
 					return blockUntilComponentState(ref, "killed", env)
 				}
 				return runtime.NewBool(compKilled(ref, env))

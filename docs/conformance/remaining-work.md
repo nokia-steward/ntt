@@ -322,7 +322,7 @@ contradictory/runtime clusters alone. See buckets + slice notes below.
 These are worth doing; each is a multi-hour focused slice with real
 regression risk on a load-bearing path. Listed by ROI.
 
-### 1y. `comp.done` does not block on the real clock — SCOPED, not started
+### 1y. `comp.done` does not block on the real clock — FIXED 2026-09-14
 
 Found 2026-09-09 by a Windows CI failure in a test of the built-in TCP port,
 which is a slower runner losing a race the faster ones win.
@@ -355,33 +355,34 @@ to wait on an event instead — have each worker report completion over a
 connected port and receive those reports — which is what
 `TestPerComponentAddressesScale` now does, with a comment saying why.
 
-**Attempted and reverted 2026-09-14.** Both steps described previously were
-implemented — a close-once stop channel on `TestcaseExec`, and a real-clock
-branch in `blockUntilComponentsState` waiting on each PTC's `DoneChan`
-against it. The conformance gate stayed at 4754 and the suite stayed green,
-but the change **did not fix the symptom**, so it was reverted rather than
-shipped: it adds a channel to a core type for no demonstrated benefit.
+**Fixed 2026-09-14.** The first attempt was reverted, and the reason is
+the useful part: the wait was added *inside* `blockUntilComponentState`,
+but the gate is at the **call site** —
 
-Why it did not work is the useful part. `blockUntilComponentsState` is not
-on the path for the singular `comp.done`; an instrumented build showed the
-new branch never executing. The singular form is handled in
-`evalComponentQuery` (interpreter/testcase.go). Any next attempt should
-start there, and should start by confirming with a probe which function
-actually runs for the shape being fixed.
+    if deterministicSchedulerEnabled(env) && !altCtx.active() {
+        return blockUntilComponentState(ref, "done", env)
+    }
+    return runtime.NewBool(compDone(ref, env))   // live went here
 
-Minimal reproducer, which fails on HEAD:
+so a live run never reached the helper at all. An instrumented build showed
+the new branch never executing, which is what pointed at the call site.
+Both call sites — the singular `comp.done`/`.killed` in interpreter.go and
+the `all`/`any component` form in testcase.go — are now gated only on
+`!altCtx.active()`, since inside an alt guard the alt owns the blocking on
+either clock. The helpers gained a real-clock branch that waits on each
+forked PTC's `DoneChan` against a new close-once `TestcaseExec.StopChan()`,
+so a PTC that never finishes cannot hang the run.
 
-    function slow() runs on C { timer d := 0.3; d.start; d.timeout; p.send("marker"); }
-    q.start(slow()); q.done;
-    alt { [] p.receive("marker") { pass } [else] { fail } }
+One wrinkle worth recording: the real-clock branch returns the predicate
+rather than `Undefined`. With the scheduler off, this path also serves
+value contexts such as `if (p.done)` that previously got a plain
+non-blocking bool, and returning `Undefined` broke
+`TestStrictComp_ModeledDoneUsesVirtualClock`. Blocking must not cost those
+contexts their value.
 
-    virtual -> pass ("done waited")
-    --live  -> fail ("done returned before the PTC finished")
-
-Note that end-of-testcase teardown (`WaitPTCs`) joins PTCs anyway, so the
-defect is invisible whenever the testcase ends right after `.done`. It is
-observable only when the MTC does something after `.done` that depends on
-the PTC having finished — which is why it took a purpose-built probe to see.
+Verified by `TestLiveClock_DoneBlocksAndPreservesPTCVerdict`, which runs one
+source under both clocks and requires the PTC's `fail` to survive in both.
+Re-gating the call site makes it fail. Gate unchanged: 4754, exit 0.
 
 ### 1x. A PTC body that waits on a timer is skipped under `--live` — FIXED 2026-09-14
 
@@ -433,42 +434,34 @@ change makes it fail with the original symptom ("PTC never ran at all"), so
 the test is load-bearing. The 8-case equivalence probe that found this now
 reports **8/8 identical verdicts** across the two clocks, up from 7/8.
 
-### 1w. A forked PTC's verdict does not reach the testcase under `--live` — SCOPED, not started
+### 1w. A forked PTC's verdict is lost under `--live` — FIXED 2026-09-14 (same defect as §1y)
 
-Found 2026-09-14 while probing §1y. This is the most serious of the
-live-mode gaps because it produces a **hollow pass**: the testcase reports
-`pass` while a PTC that ran to completion set `fail`.
+Recorded briefly as an independent verdict-*merging* bug on the strength of
+this claim: *"the PTC demonstrably runs (full delay elapses, sends arrive),
+so this is verdict merging, not scheduling."* **That claim was wrong**, and
+checking it is what produced the §1y fix.
 
-    function late_fail() runs on C {
-        p.send("x");
-        timer d := 0.3; d.start; d.timeout;
-        setverdict(fail, "PTC ran to completion");
-    }
-    testcase tc() runs on C system C {
-        var C q := C.create; connect(self:p, q:p);
-        q.start(late_fail());
-        q.done;
-        setverdict(pass);
-    }
+The evidence for "the PTC runs" was elapsed wall time — but end-of-testcase
+teardown (`WaitPTCs`) joins PTCs with a grace period, so wall time is a
+misleading proxy: the clock advances whether or not the PTC got anywhere. A
+probe that sends immediately before `setverdict` and asks the MTC which
+sends actually arrived settles it:
 
-    virtual -> fail ("PTC ran to completion")   <- correct
-    --live  -> pass                             <- the PTC's verdict is lost
+    virtual -> "PTC reached setverdict"
+    --live  -> "only the early send - PTC was CUT OFF"
 
-The PTC does run: wall-clock time shows the full 0.3 s elapsing, and with
-§1x fixed its sends are delivered. So this is verdict *merging*, not
-scheduling. ETSI 21.3 makes the testcase verdict the merge of every
-component's, worst-wins.
+So the verdict was never *set*, not set-and-lost. The PTC was stopped by
+teardown because `comp.done` had not waited for it — i.e. this is §1y seen
+through its worst symptom, a **hollow pass**, and it disappeared when §1y
+was fixed.
 
-It is the exact failure class the 2026-08-10 correction was about — an
-engine reporting a pass that nothing earned — reappearing on the path the
-conformance corpus does not cover. The corpus runs under the virtual clock,
-where merging works, so no fixture can catch this and the gate will stay
-green however long it remains open. That is an argument for fixing it on
-its own merits rather than waiting for a number to move.
+Kept as its own entry because the symptom is worth naming: the corpus runs
+under the virtual clock, where merging works, so no fixture could have
+caught this and the gate would have stayed green for as long as it went
+unnoticed. Gates protect the paths they cover.
 
-Worth fixing before §1y: a lost verdict is worse than a mistimed wait, and
-the two may share a cause in how a forked PTC's exit is reconciled with the
-MTC on the real clock.
+Method note, since it cost a wrong entry: *wall-clock elapsed time is not
+evidence that a component ran.* Ask what it observably produced.
 
 ### 1z. `decvalue` structured decode — SCOPED, not started
 

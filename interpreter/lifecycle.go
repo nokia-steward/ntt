@@ -199,6 +199,15 @@ func blockUntilComponentState(ref *runtime.ComponentRef, op string, env runtime.
 		return runtime.NewBool(pred(ref, env))
 	}
 	stop := currentStopChan(exec)
+	if !exec.SchedulerActive() {
+		// Real clock. Returns the predicate rather than Undefined: with the
+		// scheduler off this path also serves value contexts such as
+		// `if (p.done)`, which previously got a plain non-blocking bool.
+		// Blocking must not cost them their value.
+		waitPTCDoneRealClock(exec, []*runtime.ComponentRef{ref},
+			func() bool { return pred(ref, env) }, stop, env, pred)
+		return runtime.NewBool(pred(ref, env))
+	}
 	for !pred(ref, env) {
 		deadline, hasTimer := 0.0, false
 		if ref.ModeledDuration > 0 {
@@ -246,6 +255,10 @@ func blockUntilComponentsState(kind, op string, refs []*runtime.ComponentRef, en
 		return runtime.NewBool(satisfied())
 	}
 	stop := currentStopChan(exec)
+	if !exec.SchedulerActive() {
+		waitPTCDoneRealClock(exec, refs, satisfied, stop, env, pred)
+		return runtime.NewBool(satisfied())
+	}
 	for !satisfied() {
 		deadline, hasTimer := 0.0, false
 		for _, r := range refs {
@@ -361,4 +374,46 @@ func componentStatePredicate(op string) func(*runtime.ComponentRef, runtime.Scop
 		return compKilled
 	}
 	return nil
+}
+
+// waitPTCDoneRealClock blocks until pred holds for every ref, on the real
+// clock, where SchedPark returns immediately because there is no scheduler
+// to park in. Without it `.done` answered a snapshot: the MTC ran on, the
+// testcase ended, and teardown stopped PTCs that had not finished — so a
+// PTC's `setverdict(fail)` was never reached and the testcase reported a
+// pass nothing had earned.
+//
+// It waits on the real event (each forked PTC closes DoneChan on exit) and
+// aborts on the waiter's own stop signal or on the testcase being stopped.
+// A ref with no registered exit cannot be waited on — never started, or
+// already reaped — so it gives up rather than hang, leaving the previous
+// non-blocking answer for that case.
+func waitPTCDoneRealClock(exec *runtime.TestcaseExec, refs []*runtime.ComponentRef,
+	done func() bool, stop <-chan struct{}, env runtime.Scope,
+	pred func(*runtime.ComponentRef, runtime.Scope) bool) {
+
+	for !done() {
+		var wait <-chan struct{}
+		for _, r := range refs {
+			if r == nil || pred(r, env) {
+				continue
+			}
+			exit := exec.PTCExit(r.ID)
+			if exit == nil {
+				return
+			}
+			wait = exit.DoneChan
+			break
+		}
+		if wait == nil {
+			return
+		}
+		select {
+		case <-wait:
+		case <-stop:
+			return
+		case <-exec.StopChan():
+			return
+		}
+	}
 }

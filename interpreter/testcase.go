@@ -894,8 +894,11 @@ func evalComponentQuery(kind string, sel syntax.Expr, env runtime.Scope) (runtim
 	// alt owns the blocking, so it stays a non-blocking snapshot. Only the
 	// genuinely-blocking ops (done / killed) park; alive / running are pure
 	// queries.
-	if (op == "done" || op == "killed") && len(ptcs) > 0 &&
-		deterministicSchedulerEnabled(env) && !altCtx.active() {
+	// Blocking on either clock (ETSI 21.3.7/21.3.8): the scheduler path
+	// parks, the real-clock path waits on each PTC's exit. Gating this on
+	// the scheduler made a live run answer a snapshot and race its own
+	// teardown, which stops PTCs — so a PTC's verdict could be lost.
+	if (op == "done" || op == "killed") && len(ptcs) > 0 && !altCtx.active() {
 		return blockUntilComponentsState(kind, op, ptcs, env), true
 	}
 	switch kind {

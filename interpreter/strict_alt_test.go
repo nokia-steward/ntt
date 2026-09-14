@@ -533,3 +533,55 @@ func TestLiveClock_PTCBodyWithTimerRuns(t *testing.T) {
 			v, reason, v2, reason2)
 	}
 }
+
+// TestLiveClock_DoneBlocksAndPreservesPTCVerdict covers ETSI 21.3.7 on the
+// real clock, and the hollow pass that followed from it not holding.
+//
+// `comp.done` was gated on the cooperative scheduler at its call site, so a
+// live run answered a non-blocking snapshot. The MTC then ran to the end of
+// its body and teardown stopped the PTC — which had not yet reached its
+// setverdict — so the testcase reported a pass nothing had earned. That is
+// the failure class this engine exists not to produce, on the one path the
+// conformance corpus cannot cover, since the corpus runs virtual.
+//
+// The PTC below sends immediately before its setverdict, so the probe
+// distinguishes "ran to completion" from "was cut off" rather than
+// inferring it from elapsed time — teardown's own grace period makes wall
+// time a misleading proxy here.
+func TestLiveClock_DoneBlocksAndPreservesPTCVerdict(t *testing.T) {
+	src := `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		function late_fail() runs on C {
+			p.send("early");
+			timer d := 0.2; d.start; d.timeout;
+			p.send("reached");
+			setverdict(fail, "PTC reached setverdict");
+		}
+		testcase tc() runs on C system C {
+			var C q := C.create;
+			connect(self:p, q:p);
+			q.start(late_fail());
+			q.done;
+			setverdict(pass);
+		}
+	}`
+	for _, k := range []struct {
+		name string
+		opts interpreter.TestcaseOptions
+	}{
+		{"virtual", interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true}},
+		{"live", interpreter.TestcaseOptions{}},
+	} {
+		v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", k.opts)
+		if err != nil {
+			t.Fatalf("%s: RunTestcaseWith: %v", k.name, err)
+		}
+		// The PTC sets fail and the testcase must inherit it: `.done` has
+		// to wait long enough for the PTC to get there.
+		if v != runtime.FailVerdict {
+			t.Fatalf("%s: verdict = %s (%s), want fail — the PTC's verdict must survive `.done`",
+				k.name, v, reason)
+		}
+	}
+}

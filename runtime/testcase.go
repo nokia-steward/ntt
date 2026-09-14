@@ -30,6 +30,11 @@ type TestcaseExec struct {
 	reason  string
 	log     []string
 	stopped bool
+	// stopCh is closed exactly once by Stop(). A flag cannot be selected
+	// on, so a waiter that is not parked in the scheduler — anything on
+	// the real clock — had nothing to abort against.
+	stopOnce sync.Once
+	stopCh   chan struct{}
 
 	// mtcID is the component ID of the MTC, used by PortKey to keep the
 	// MTC's ports on bare (unqualified) names so the single-MTC path is
@@ -1680,7 +1685,7 @@ const ScopeNameKey = "__ntt_scope_name__"
 // NewTestcaseExec returns a fresh execution context with the verdict
 // initialised to none.
 func NewTestcaseExec(name string) *TestcaseExec {
-	return &TestcaseExec{Name: name, verdict: NoneVerdict}
+	return &TestcaseExec{Name: name, verdict: NoneVerdict, stopCh: make(chan struct{})}
 }
 
 // RememberEnc records that binary blob bs (and any value-identity key
@@ -1970,8 +1975,22 @@ func (t *TestcaseExec) Logs() []string {
 func (t *TestcaseExec) Stop() {
 	t.mu.Lock()
 	t.stopped = true
+	ch := t.stopCh
 	t.mu.Unlock()
+	if ch != nil {
+		t.stopOnce.Do(func() { close(ch) })
+	}
 	t.signalMessageReady()
+}
+
+// StopChan is closed when the testcase is stopped, so a waiter running on
+// the real clock — where there is no scheduler to park in — can abort on
+// cancellation instead of polling. Nil-safe: an exec not built by the
+// constructor yields nil, which simply never wins a select.
+func (t *TestcaseExec) StopChan() <-chan struct{} {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.stopCh
 }
 
 // Stopped reports whether the testcase has been asked to stop.
