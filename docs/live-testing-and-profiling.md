@@ -16,8 +16,10 @@ and it is the foundation for **performance profiling** (`--profile`).
 
 This page shows how to drive a live SUT over TCP with no user code, how to
 measure latency from inside a testcase, and how to produce a performance
-report. For a ready-to-run version of everything below, see
-[`examples/live-testing/`](../examples/live-testing/).
+report. For ready-to-run versions of everything below, see
+[`examples/live-testing/`](../examples/live-testing/) (plain TCP) and
+[`examples/https-testing/`](../examples/https-testing/) (REST/JSON over
+HTTPS, with `TransportError` handling).
 
 > **Background.** The idea that a single functional TTCN-3 test can double
 > as a performance probe comes from:

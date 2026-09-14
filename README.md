@@ -137,7 +137,10 @@ no codegen step. It is the same engine `ntt conformance` uses.
 To drive a **real System Under Test over TCP** with no user code, and to
 **profile** its latency and throughput, add a `[TESTPORT_PARAMETERS]` block
 to a `.cfg` and run `ntt exec --profile`. See
-[docs/live-testing-and-profiling.md](docs/live-testing-and-profiling.md):
+[docs/live-testing-and-profiling.md](docs/live-testing-and-profiling.md),
+with runnable examples in [`examples/live-testing/`](examples/live-testing/)
+(TCP) and [`examples/https-testing/`](examples/https-testing/) (REST/JSON
+over HTTPS):
 
 	# request/response against a live SUT, with a per-port latency report
 	ntt exec --cfg app.cfg --profile --format=profile app.ttcn

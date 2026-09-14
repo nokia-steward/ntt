@@ -669,3 +669,65 @@ func TestExecConfiguredHTTPSPort(t *testing.T) {
 		t.Fatalf("Run: verdict=%s reason=%q err=%v, want pass", v, reason, err)
 	}
 }
+
+// TestExampleHTTPSTestingRuns keeps examples/https-testing/ honest the same
+// way TestExampleLiveTestingRuns does for the TCP example: it runs the
+// example's real .ttcn against an in-process TLS SUT and checks the shipped
+// .cfg still describes an HTTPS port. A docs example that no longer
+// compiles or passes is worse than none.
+//
+// The example's own base_url is overridden with the test server's, so this
+// needs neither the example's fixed port nor an external process.
+func TestExampleHTTPSTestingRuns(t *testing.T) {
+	const src = "examples/https-testing/app.ttcn"
+	if _, err := os.Stat(src); err != nil {
+		t.Skipf("example not present: %v", err)
+	}
+
+	// The shipped cfg must still describe an HTTPS test port.
+	f, _, err := cfg.Load("examples/https-testing/app.cfg")
+	if err != nil {
+		t.Fatalf("load example cfg: %v", err)
+	}
+	var sawHTTP, sawHTTPS bool
+	for _, p := range f.TestPortParameters() {
+		if p.Param == "transport" && strings.EqualFold(p.Value, "http") {
+			sawHTTP = true
+		}
+		if p.Param == "base_url" && strings.HasPrefix(strings.ToLower(p.Value), "https://") {
+			sawHTTPS = true
+		}
+	}
+	if !sawHTTP || !sawHTTPS {
+		t.Fatal(`example app.cfg no longer declares transport := "http" with an https:// base_url`)
+	}
+
+	srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/healthz":
+			fmt.Fprint(w, `{"status":"ok"}`)
+		case strings.HasPrefix(r.URL.Path, "/api/v1/status"):
+			fmt.Fprint(w, `{"state":"ready","entities":3}`)
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer srv.Close()
+
+	httpport.Register("p", srv.URL, httpport.WithTLS(httpport.TLS{Insecure: true}))
+	t.Cleanup(httpport.Reset)
+
+	d := newStaticDriver([]string{src})
+	d.live = true
+	for _, tc := range []string{
+		"app.tc_health", "app.tc_reports_status", "app.tc_load", "app.tc_latency_budget",
+	} {
+		v, reason, err := d.Run(context.Background(), tc)
+		if err != nil {
+			t.Fatalf("%s: %v", tc, err)
+		}
+		if v != rreport.Pass {
+			t.Fatalf("%s: verdict=%s reason=%q, want pass", tc, v, reason)
+		}
+	}
+}
