@@ -337,26 +337,51 @@ of its body, and teardown stops the PTCs (stop-first, by design) before they
 have done their work. ETSI 21.3.7 says the operation blocks.
 
 Anything driving a live SUT from PTCs is exposed, because that is exactly
-the shape: fork a worker per node, wait for them, assert. It has now caught
-two of our own tests — `TestPerComponentAddressesScale` on a Windows runner
-and `TestExecPerComponentAddress_PTCType` on Linux — both of which had been
-passing on faster machines by winning the race. That is the hazard in
+the shape: fork a worker per node, wait for them, assert.
+
+**Attribution corrected 2026-09-14.** Two CI failures were recorded here —
+`TestPerComponentAddressesScale` on Windows and
+`TestExecPerComponentAddress_PTCType` on Linux — as evidence for this entry.
+They were **§1x**, not this: the worker bodies contained a timer, so the
+real-clock fork predicate skipped them entirely and they never ran, which
+presents identically (a PTC that appears not to have waited is
+indistinguishable from one that never started). Both pass with §1x fixed,
+including with `.done` restored in place of the event-based workaround. The
+workarounds in those tests are now belt-and-braces rather than load-bearing,
+and are kept because this entry is still open. That is the hazard in
 miniature: the failure is timing-dependent, so it looks like flakiness and
 gets re-run rather than diagnosed. The workaround is
 to wait on an event instead — have each worker report completion over a
 connected port and receive those reports — which is what
 `TestPerComponentAddressesScale` now does, with a comment saying why.
 
-**Why it was not fixed on the spot.** Each forked PTC already has a
-`DoneChan` (`TestcaseExec.RegisterPTC`), so the wait itself is easy and needs
-no polling. The obstacle is cancellation: `TestcaseExec.Stop()` sets a flag
-and signals the message-ready condition; it does **not** close a broadcast
-channel. There is nothing safe to `select` on alongside `DoneChan`, so a
-naive implementation hangs the interpreter when a PTC never finishes — a far
-worse defect than the one it fixes. The honest fix is therefore two steps:
-give the exec a close-once stop channel, then make `.done` / `.killed` /
-`all component.done` wait on `DoneChan` against it. Both steps are small; the
-ordering is what matters.
+**Attempted and reverted 2026-09-14.** Both steps described previously were
+implemented — a close-once stop channel on `TestcaseExec`, and a real-clock
+branch in `blockUntilComponentsState` waiting on each PTC's `DoneChan`
+against it. The conformance gate stayed at 4754 and the suite stayed green,
+but the change **did not fix the symptom**, so it was reverted rather than
+shipped: it adds a channel to a core type for no demonstrated benefit.
+
+Why it did not work is the useful part. `blockUntilComponentsState` is not
+on the path for the singular `comp.done`; an instrumented build showed the
+new branch never executing. The singular form is handled in
+`evalComponentQuery` (interpreter/testcase.go). Any next attempt should
+start there, and should start by confirming with a probe which function
+actually runs for the shape being fixed.
+
+Minimal reproducer, which fails on HEAD:
+
+    function slow() runs on C { timer d := 0.3; d.start; d.timeout; p.send("marker"); }
+    q.start(slow()); q.done;
+    alt { [] p.receive("marker") { pass } [else] { fail } }
+
+    virtual -> pass ("done waited")
+    --live  -> fail ("done returned before the PTC finished")
+
+Note that end-of-testcase teardown (`WaitPTCs`) joins PTCs anyway, so the
+defect is invisible whenever the testcase ends right after `.done`. It is
+observable only when the MTC does something after `.done` that depends on
+the PTC having finished — which is why it took a purpose-built probe to see.
 
 ### 1x. A PTC body that waits on a timer is skipped under `--live` — FIXED 2026-09-14
 
@@ -407,6 +432,43 @@ both clocks and asserts the verdicts agree. Reverting the one-line predicate
 change makes it fail with the original symptom ("PTC never ran at all"), so
 the test is load-bearing. The 8-case equivalence probe that found this now
 reports **8/8 identical verdicts** across the two clocks, up from 7/8.
+
+### 1w. A forked PTC's verdict does not reach the testcase under `--live` — SCOPED, not started
+
+Found 2026-09-14 while probing §1y. This is the most serious of the
+live-mode gaps because it produces a **hollow pass**: the testcase reports
+`pass` while a PTC that ran to completion set `fail`.
+
+    function late_fail() runs on C {
+        p.send("x");
+        timer d := 0.3; d.start; d.timeout;
+        setverdict(fail, "PTC ran to completion");
+    }
+    testcase tc() runs on C system C {
+        var C q := C.create; connect(self:p, q:p);
+        q.start(late_fail());
+        q.done;
+        setverdict(pass);
+    }
+
+    virtual -> fail ("PTC ran to completion")   <- correct
+    --live  -> pass                             <- the PTC's verdict is lost
+
+The PTC does run: wall-clock time shows the full 0.3 s elapsing, and with
+§1x fixed its sends are delivered. So this is verdict *merging*, not
+scheduling. ETSI 21.3 makes the testcase verdict the merge of every
+component's, worst-wins.
+
+It is the exact failure class the 2026-08-10 correction was about — an
+engine reporting a pass that nothing earned — reappearing on the path the
+conformance corpus does not cover. The corpus runs under the virtual clock,
+where merging works, so no fixture can catch this and the gate will stay
+green however long it remains open. That is an argument for fixing it on
+its own merits rather than waiting for a number to move.
+
+Worth fixing before §1y: a lost verdict is worse than a mistimed wait, and
+the two may share a cause in how a forked PTC's exit is reconciled with the
+MTC on the real clock.
 
 ### 1z. `decvalue` structured decode — SCOPED, not started
 

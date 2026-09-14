@@ -484,6 +484,16 @@ existing Titan-style C/C++ ports, see
   component's name, type, `mtc`, or `*` (see above). Two *instances* of the
   same component type that need different addresses can't yet be told apart
   by the config unless they were created with distinct names.
+- **A forked PTC's `fail` verdict can be lost under `--live`.** The most
+  consequential of the live-mode gaps, because the result is a *pass* that
+  nothing earned. A PTC that runs to completion and calls
+  `setverdict(fail, ...)` has its verdict merged into the testcase on the
+  virtual clock, but not on the real one. Until this is fixed, do not treat
+  a green `--live` run with forked PTCs as evidence on its own — assert in
+  the MTC on something the PTC observably produced (a message over a
+  connected port, a value the SUT now returns) rather than relying on the
+  PTC's own verdict. Tracked as
+  [remaining-work §1w](conformance/remaining-work.md).
 - **`comp.done` does not block under `--live`.** This is the one live-mode
   trap that costs real debugging time. On the default virtual clock, `.done`
   and `all component.done` park until the components finish (ETSI 21.3.7).
