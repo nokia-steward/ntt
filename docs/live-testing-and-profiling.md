@@ -484,6 +484,31 @@ existing Titan-style C/C++ ports, see
   component's name, type, `mtc`, or `*` (see above). Two *instances* of the
   same component type that need different addresses can't yet be told apart
   by the config unless they were created with distinct names.
+- **`comp.done` does not block under `--live`.** This is the one live-mode
+  trap that costs real debugging time. On the default virtual clock, `.done`
+  and `all component.done` park until the components finish (ETSI 21.3.7).
+  Under `--live` there is no cooperative scheduler to park on, so they answer
+  a non-blocking snapshot: a testcase that forks PTCs and then waits on
+  `.done` does **not** wait — it reaches the end of its body and teardown
+  stops the workers, possibly before they have connected. Wait on an *event*
+  instead:
+
+  ```ttcn3
+  // each worker, when finished:        q.send("done");
+  // the MTC, instead of `w.done`:
+  w2.start;
+  while (seen < N) {
+      alt {
+          [] q.receive("done") { seen := seen + 1; }
+          [] w2.timeout { setverdict(fail, "workers did not report in"); seen := N; }
+      }
+  }
+  ```
+
+  The failure is timing-dependent, so it looks like flakiness and invites a
+  re-run rather than a diagnosis — it caught two of `ntt`'s own tests, on two
+  different platforms, both of which had been passing by winning the race.
+  Tracked as [remaining-work §1y](conformance/remaining-work.md).
 - **Reproducibility.** Live verdicts depend on the real SUT and network;
   they are not reproducible-by-construction the way virtual-clock functional
   runs are. Keep functional conformance runs on the default clock.

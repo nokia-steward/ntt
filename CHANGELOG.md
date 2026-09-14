@@ -8,7 +8,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 Releases before 0.24.0 predate this file; see the
 [git tags](https://github.com/nokia/ntt/tags) and GitHub releases for their history.
 
-## [0.24.0] - 2026-08-21
+## [0.24.0] - unreleased
 
 Live testing and performance profiling: the same strict TTCN-3 engine can now
 drive a real system under test over the network and measure how it behaves —
@@ -83,7 +83,13 @@ single functional test doubles as a performance probe. See
 - **`all component.done` / `.killed` now block** (ETSI 21.3.7/21.3.8) instead
   of answering a non-blocking snapshot, so a forked PTC's body actually runs
   and its verdict is recorded — a failing PTC can no longer leave the testcase
-  `pass`.
+  `pass`. **On the default (virtual-clock, cooperative-scheduler) path only.**
+  Under `--live` the parking helper has no scheduler to park on, so `.done`
+  still answers a snapshot and a testcase that forks PTCs will not wait for
+  them; teardown then stops them, possibly before they have done anything.
+  Wait on an event instead — have each worker report over a connected port
+  and receive those reports. Tracked as
+  [remaining-work §1y](docs/conformance/remaining-work.md).
 - Conformance baseline moved **4747 → 4754 (96.53%)**, net **+7 with zero
   per-file regressions**. The baseline is a measurement, not a high-water
   mark; the `--regress` gate is the ratchet.
@@ -112,4 +118,4 @@ single functional test doubles as a performance probe. See
   now passes `ntt check`, and the walkthrough was replayed verbatim to confirm
   its commands and output.
 
-[0.24.0]: https://github.com/nokia/ntt/compare/v0.23.2...v0.24.0
+[0.24.0]: https://github.com/nokia/ntt/compare/v0.23.2...ntt-titan
