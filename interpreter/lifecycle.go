@@ -218,7 +218,7 @@ func blockUntilComponentState(ref *runtime.ComponentRef, op string, env runtime.
 			break
 		}
 	}
-	return runtime.Undefined
+	return runtime.NewBool(pred(ref, env))
 }
 
 // blockUntilComponentsState is the `all component.done` / `any

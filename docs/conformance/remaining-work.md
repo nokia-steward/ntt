@@ -512,6 +512,75 @@ from the source with `grep`. It also gives probe-broadening a stopping
 condition — one shape per behaviour-changing gated branch — instead of
 being open-ended.
 
+### 1u. Two more clock divergences, from auditing the remaining gated branches — FIXED 2026-09-14
+
+The §1v enumeration listed every branch that selects between the clocks.
+Four had not been probed; auditing them found two more divergences, and —
+worth as much — cleared two.
+
+**Cleared.** The `alt`/`interleave` snapshot freeze (testcase.go:1955,
+2096) and the PTC start barrier (interpreter.go:7916) agree on both paths.
+The freeze is the interesting negative: its gate is *inverted*, the freeze
+existing only on the real clock because the cooperative scheduler's single
+runner already excludes a mid-scan arrival. Two different mechanisms, one
+semantics — and a 25-round race probe never let a catch-all clause beat an
+earlier specific one on either path.
+
+**Divergence 1: a default that re-asserts a verdict went undetected under
+`--live`** (interpreter.go:9242). A fired default branch was detected two
+ways: directly, by a flag armed around the altstep evaluation, and
+indirectly, by the testcase verdict changing. Only the indirect test ran
+off the scheduler, and the code's own comment says it "misses a default
+that re-asserts an already-set verdict". So the alt never learned the
+default had fired and waited out its guard timer:
+
+    virtual -> pass
+    --live  -> fail ("alt timed out: default branch not detected")
+
+The direct mechanism has no scheduler dependency, so the fix is to arm and
+check it on both paths.
+
+**Divergence 2: `comp.done` in a value context returned Undefined** —
+and this one runs the other way, the **virtual** path being the wrong one.
+`blockUntilComponentState` returned `runtime.Undefined` on the scheduler
+path, which is harmless for the statement form but reads as false in
+`if (q.done)`:
+
+    virtual -> fail ("done read as false/undefined in a value context")
+    --live  -> pass
+
+Pre-existing, and confirmed so against a binary built before the §1y work.
+It sits on the path the conformance corpus runs, and no fixture catches it
+because the corpus does not use `.done` as a value this way. A reminder
+that the gate protects the corpus, not the language.
+
+Both fixed; `TestBothClocks_DefaultReassertingVerdictIsDetected` and
+`TestBothClocks_DoneInValueContextReturnsBool` run one source under both
+clocks and require the same verdict. Reverting either fix fails its test,
+on the clock it belongs to. Gate unchanged: 4754, exit 0.
+
+### T2. Timer-only defaults never fire — SCOPED, not started
+
+Found alongside §1u and deliberately separated: it behaves the **same on
+both clocks**, so no probe of clock substitution can distinguish it.
+
+`invokeDefaults` skips any activated default whose only alternative is a
+timer timeout, justified by the comment *"we have no real clock so we can't
+know whether the timer has actually timed out"*. That is false under
+`--live`, where the clock is real, and questionable under the virtual
+clock, where the timer fires virtually. The classic safety-net default —
+*"if this hangs longer than N seconds, fail"* — therefore never fires:
+
+    altstep safety() runs on C { [] tsafe.timeout { setverdict(inconc); } }
+    activate(safety()); tsafe.start(0.1);
+    alt { [] p.receive("never") { } [] tlong.timeout { /* this wins */ } }
+
+ETSI 20.5.1 invokes an activated default when no alternative of the alt
+matches, and with the timer expired the default's alternative does match.
+The skip was introduced to stop conformance safety nets firing spuriously;
+removing it needs the per-file measurement that change deserves, which is
+why this is scoped rather than folded into §1u.
+
 ### T1. `any timer.timeout` does not clear the fired timer — SCOPED, not started
 
 Found 2026-09-14 alongside §1v, but unrelated to the two-clock work: it

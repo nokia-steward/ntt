@@ -741,3 +741,79 @@ func TestLiveClock_ToAddressUnicasts(t *testing.T) {
 		})
 	}
 }
+
+// TestBothClocks_DefaultReassertingVerdictIsDetected covers ETSI 20.5.1 on
+// the real clock. A fired default branch was detected two ways: directly,
+// via a flag armed around the altstep evaluation, and indirectly, by the
+// testcase verdict changing. Only the indirect test ran on the real clock,
+// and it misses a default whose branch re-asserts a verdict that is
+// already set — so the alt did not learn the default had fired and waited
+// until its own guard timer expired.
+func TestBothClocks_DefaultReassertingVerdictIsDetected(t *testing.T) {
+	src := `module M {
+		type port P message { inout charstring }
+		type component C { port P p; timer tlong }
+		altstep reassert() runs on C {
+			[] p.receive("wake") { setverdict(pass, "default branch took"); }
+		}
+		function waker() runs on C { p.send("wake"); }
+		testcase tc() runs on C system C {
+			setverdict(pass);                     // already pass: no change to detect
+			var default d := activate(reassert());
+			var C q := C.create;
+			connect(self:p, q:p);
+			q.start(waker());
+			tlong.start(3.0);
+			alt {
+				[] p.receive("other") { setverdict(fail, "wrong branch"); }
+				[] tlong.timeout { setverdict(fail, "alt timed out: default branch not detected"); }
+			}
+		}
+	}`
+	assertSameVerdictBothClocks(t, src, runtime.PassVerdict)
+}
+
+// TestBothClocks_DoneInValueContextReturnsBool covers `comp.done` used as a
+// VALUE rather than a statement. The blocking helper returned Undefined on
+// the scheduler path, which reads as false in `if (q.done)` — so the
+// virtual clock, the one the conformance corpus runs on, reported a
+// completed component as not done. No fixture catches it, because the
+// corpus does not use `.done` in a value context this way.
+func TestBothClocks_DoneInValueContextReturnsBool(t *testing.T) {
+	src := `module M {
+		type component C { timer tg }
+		type component W { }
+		function naps() runs on W { timer d := 0.4; d.start; d.timeout; }
+		testcase tc() runs on C system C {
+			var W q := W.create;
+			q.start(naps());
+			tg.start(1.2);
+			tg.timeout;
+			if (q.done) { setverdict(pass, "done is true in a value context"); }
+			else { setverdict(fail, "done read as false/undefined in a value context"); }
+		}
+	}`
+	assertSameVerdictBothClocks(t, src, runtime.PassVerdict)
+}
+
+// assertSameVerdictBothClocks runs one source under the virtual and real
+// clocks and requires the same, expected, verdict from each. The pairing is
+// the point: these tests exist because the two clocks disagreed.
+func assertSameVerdictBothClocks(t *testing.T, src string, want runtime.Verdict) {
+	t.Helper()
+	for _, k := range []struct {
+		name string
+		opts interpreter.TestcaseOptions
+	}{
+		{"virtual", interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true}},
+		{"live", interpreter.TestcaseOptions{}},
+	} {
+		v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", k.opts)
+		if err != nil {
+			t.Fatalf("%s: RunTestcaseWith: %v", k.name, err)
+		}
+		if v != want {
+			t.Fatalf("%s clock: verdict = %s (%s), want %s", k.name, v, reason, want)
+		}
+	}
+}

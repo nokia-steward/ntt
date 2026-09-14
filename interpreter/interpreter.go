@@ -9239,7 +9239,6 @@ func runDefaults(env runtime.Scope) (runtime.Object, bool) {
 	defer defaultCtx.leave()
 	defs := exec.Defaults()
 	pre := exec.GetVerdict()
-	sched := deterministicSchedulerEnabled(env)
 	for i := len(defs) - 1; i >= 0; i-- {
 		d := defs[i]
 		ast, ok := d.Body.(*astNode)
@@ -9265,9 +9264,7 @@ func runDefaults(env runtime.Scope) (runtime.Object, bool) {
 		// scoping behave exactly as before); defaultBranchFire, armed only
 		// for this eval, flips the flag when a real guard match fires a
 		// branch. The verdict-change test below is kept as a superset.
-		if sched {
-			defaultBranchArm()
-		}
+		defaultBranchArm()
 		res := eval(ast.n, d.Env)
 		// A default that stops the component, or errors, terminates the
 		// behaviour that invoked it: the statements after the enclosing
@@ -9277,7 +9274,7 @@ func runDefaults(env runtime.Scope) (runtime.Object, bool) {
 		if ctl := defaultUnwind(res); ctl != nil {
 			return ctl, true
 		}
-		if sched && defaultBranchTook() {
+		if defaultBranchTook() {
 			return nil, true
 		}
 		if exec.GetVerdict() != pre {
