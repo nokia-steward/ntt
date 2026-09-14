@@ -214,8 +214,15 @@ func TestExecProfileCapturesMetrics(t *testing.T) {
 	if p.Latency.Count != 5 {
 		t.Fatalf("latency samples = %d, want 5", p.Latency.Count)
 	}
-	if p.Latency.Min <= 0 || p.Latency.Max < p.Latency.Min {
-		t.Fatalf("latency min/max = %s/%s, want a real positive range", p.Latency.Min, p.Latency.Max)
+	// Max must be positive — that is what shows latency is being measured
+	// at all. Min must NOT be required positive: on a platform whose clock
+	// granularity is coarser than a loopback round trip (Windows), a fast
+	// sample legitimately measures exactly zero, and this assertion failed
+	// there with min=0s while max=13ms — the same run proving the clock
+	// works and that one sample rounded to nothing.
+	if p.Latency.Min < 0 || p.Latency.Max <= 0 || p.Latency.Max < p.Latency.Min {
+		t.Fatalf("latency min/max = %s/%s, want max > 0 and 0 <= min <= max",
+			p.Latency.Min, p.Latency.Max)
 	}
 	if p.Throughput <= 0 {
 		t.Fatalf("throughput = %f, want > 0", p.Throughput)
