@@ -358,6 +358,50 @@ give the exec a close-once stop channel, then make `.done` / `.killed` /
 `all component.done` wait on `DoneChan` against it. Both steps are small; the
 ordering is what matters.
 
+### 1x. A PTC body that waits on a timer is skipped under `--live` — SCOPED, not started
+
+Found 2026-09-14 while measuring whether the same suite produces the same
+verdicts under both clocks. It does, for 7 of 8 testcases in a probe suite
+covering connected receive, timer guards, soonest-deadline ordering, alt
+snapshot precedence, boolean guards, undeclared verdicts and interleave.
+The eighth diverges, and the divergence is not a race.
+
+    PTC body: p.send("before"); timer d := 0.05; d.start; d.timeout; p.send("after");
+
+    virtual clock -> pass ("both phases delivered")
+    --live        -> fail ("PTC never ran at all")
+
+Not even the send *before* the timer arrives. A send-only PTC body
+(`p.send("m")`) works under both clocks, so this is keyed on the body's
+shape, not on forking in general.
+
+**Mechanism.** `startBodyBlocksOnComm` (interpreter/interpreter.go) decides
+whether a started PTC gets a real goroutine, and deliberately forks only for
+`getcall` and a blocking `call{...}`. Its reasoning is sound on its own
+terms — forking one half of a pair whose counterpart is not forked makes it
+wait for traffic that never comes. Every other body stays on the synchronous
+model path, which the cooperative scheduler backs with timer modelling. The
+real clock has no such modelling, so a body the model cannot execute
+inline is simply not executed.
+
+**Why it matters more than the fixture count suggests.** "Wait, then act" is
+an ordinary shape for a PTC driving a live SUT — pace a request, retry after
+a backoff, stagger a fan-out. Under `--live` those bodies do nothing, and
+they do it silently: the testcase fails on its own guard timer with no
+indication that the PTC never started. It is the same family as §1y
+(`comp.done` not blocking under `--live`): the live path lacks what the
+cooperative scheduler provides, and the symptom is an unexplained timeout.
+
+**Why it is not fixed here.** Widening the fork predicate is exactly the
+change that measured **-7 files and +0** on 2026-08-10 and was reverted (see
+"The correction"). The naive fix regresses conformance, so this needs the
+virtual-clock and real-clock paths distinguished rather than the predicate
+loosened: under the real clock there is no modelling to fall back on, so the
+argument for skipping does not transfer. Likely shape — fork on the real
+clock whenever the body contains any comm op or timer, and leave the
+virtual-clock predicate exactly as it is, so the conformance corpus cannot
+move. That wants measuring, not assuming.
+
 ### 1z. `decvalue` structured decode — SCOPED, not started
 
 Raised 2026-09-09 by a suite driving a REST service through the built-in
