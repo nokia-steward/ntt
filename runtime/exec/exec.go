@@ -14,6 +14,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/nokia/ntt/runtime/cfg"
@@ -97,6 +98,23 @@ func Run(ctx context.Context, opts Options) (*report.Suite, error) {
 		}
 	}
 	cases := expandSelectors(opts.Selectors, opts.Driver)
+	// A selection that matched nothing is an error, not a reason to fall
+	// through. The fallbacks below exist for the case where the user asked
+	// for no selection at all; reaching them after an explicit --pattern
+	// silently runs the ENTIRE suite instead of the one testcase that was
+	// asked for, which in CI looks like a pattern that worked. A typo, or
+	// a `*` where `**` was needed (single-star does not cross a dot), then
+	// costs a full-suite run and hides itself.
+	if len(cases) == 0 && len(opts.Selectors) > 0 {
+		pats := make([]string, 0, len(opts.Selectors))
+		for _, s := range opts.Selectors {
+			pats = append(pats, s.Name)
+		}
+		known := opts.Driver.List()
+		return nil, fmt.Errorf(
+			"no testcase matches %s (%d known; note `*` does not cross a `.`, use `**` for that)",
+			strings.Join(pats, ", "), len(known))
+	}
 	if len(cases) == 0 && opts.Config != nil {
 		for _, name := range opts.Config.ExecuteList() {
 			cases = append(cases, name)

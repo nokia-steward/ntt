@@ -559,27 +559,54 @@ Both fixed; `TestBothClocks_DefaultReassertingVerdictIsDetected` and
 clocks and require the same verdict. Reverting either fix fails its test,
 on the clock it belongs to. Gate unchanged: 4754, exit 0.
 
-### T2. Timer-only defaults never fire — SCOPED, not started
-
-Found alongside §1u and deliberately separated: it behaves the **same on
-both clocks**, so no probe of clock substitution can distinguish it.
+### T2. Timer-only defaults never fire — SCOPED, attempted 2026-09-21
 
 `invokeDefaults` skips any activated default whose only alternative is a
 timer timeout, justified by the comment *"we have no real clock so we can't
-know whether the timer has actually timed out"*. That is false under
-`--live`, where the clock is real, and questionable under the virtual
-clock, where the timer fires virtually. The classic safety-net default —
-*"if this hangs longer than N seconds, fail"* — therefore never fires:
+know whether the timer has actually timed out. The conformance fixtures
+only use these as safety nets ... without a clock the test never hangs, so
+the safety net should not fire."* The classic *"if this hangs longer than N
+seconds, fail"* default therefore never fires, on either clock, where
+ETSI 20.5.1 invokes an activated default whenever no alternative of the alt
+matches.
+
+**Attempted and reverted.** Two things were measured, and the second is why
+the change is not in the tree.
+
+*The stated justification is not load-bearing.* Removing the skip entirely
+is **conformance-neutral: 0 gained, 0 lost**, measured per-file against
+4754. No fixture depends on safety nets staying silent, so the comment's
+reasoning about the corpus does not hold as an argument for keeping it.
+
+*But removing it introduces a clock divergence.* With the skip gone, a
+timer-only default fires under `--live` and still does not under the
+virtual clock:
 
     altstep safety() runs on C { [] tsafe.timeout { setverdict(inconc); } }
-    activate(safety()); tsafe.start(0.1);
-    alt { [] p.receive("never") { } [] tlong.timeout { /* this wins */ } }
+    activate(safety()); tsafe.start(0.1); tlong.start(3.0);
+    alt { [] p.receive("never") { } [] tlong.timeout { } }
 
-ETSI 20.5.1 invokes an activated default when no alternative of the alt
-matches, and with the timer expired the default's alternative does match.
-The skip was introduced to stop conformance safety nets firing spuriously;
-removing it needs the per-file measurement that change deserves, which is
-why this is scoped rather than folded into §1u.
+    virtual -> pass   (default did not fire)
+    --live  -> inconc (default fired)
+
+So the skip is **masking** a divergence rather than causing the defect. The
+underlying issue is when virtual time advances relative to consulting the
+defaults: under the real clock the safety timer has genuinely expired by
+then, while under the virtual clock it has not, because nothing advanced
+the clock to its deadline. Removing the skip trades "defaults never fire,
+consistently" for "defaults fire inconsistently", which is the worse of the
+two — it breaks the equivalence property the rest of this work established.
+
+**What a real fix needs.** When no alternative matches and an activated
+default has a timer alternative, that timer's deadline has to participate
+in the alt's block step the way an in-line timer guard does, so the virtual
+clock advances to it before the defaults are consulted. That is a change to
+the alt/default interaction rather than a deletion, and it touches the
+block step, so it wants its own slice and its own per-file measurement.
+
+Recorded rather than done because the analysis is not definitive about the
+remedy, only about the diagnosis. The one-line removal is measurably safe
+for conformance and measurably wrong for clock equivalence.
 
 ### T1. `any timer.timeout` was a no-op outside an alt — FIXED 2026-09-21
 

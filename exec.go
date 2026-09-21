@@ -77,7 +77,11 @@ func init() {
 	ExecCommand.Flags().StringVar(&execCfgPath, "cfg", "", "TTCN-3 module configuration file")
 	ExecCommand.Flags().StringVar(&execFormat, "format", "text", "report format: text|json|junit|tap|html|profile")
 	ExecCommand.Flags().StringVar(&execOutDir, "out", "", "directory to write the report file (default: stdout)")
-	ExecCommand.Flags().StringSliceVar(&execPatterns, "pattern", nil, "testcase patterns to run (glob)")
+	ExecCommand.Flags().StringSliceVar(&execPatterns, "pattern", nil,
+		"testcase patterns to run. `*` matches within one name component and "+
+			"does not cross a `.`, so use `**` to span the module prefix "+
+			"(`**tc_smoke`, not `*tc_smoke`). A pattern matching no testcase "+
+			"is an error rather than a silent full-suite run.")
 	ExecCommand.Flags().DurationVar(&execTimeout, "timeout", 0,
 		"per-testcase wall-clock limit (0 = none). A 60s safety default applies "+
 			"when unset.")

@@ -171,3 +171,64 @@ func TestRun_DriverErrorBecomesError(t *testing.T) {
 		t.Errorf("Reason = %v", suite.Cases[0].Reason)
 	}
 }
+
+// TestRun_UnmatchedSelectorIsAnError covers a selection that matches
+// nothing. The fallbacks below the selector expansion exist for the case
+// where the user asked for no selection at all; reaching them after an
+// explicit pattern ran the ENTIRE suite instead of the one testcase asked
+// for, and said nothing about it. In CI a typo'd pattern then looks like a
+// pattern that worked.
+//
+// The single-star/dot rule makes this easy to hit: `*` does not cross a
+// `.`, so `*tc_x` never matches `mod.tc_x` and `**tc_x` is required.
+func TestRun_UnmatchedSelectorIsAnError(t *testing.T) {
+	d := &listDriver{names: []string{"m.tc_a", "m.tc_b"}}
+
+	_, err := exec.Run(context.Background(), exec.Options{
+		SuiteName: "s",
+		Driver:    d,
+		Selectors: []exec.Selector{{Name: "*tc_a", Pattern: true}}, // single star: no match
+	})
+	if err == nil {
+		t.Fatal("a pattern matching nothing must be an error, not a silent full-suite run")
+	}
+	if d.ran != 0 {
+		t.Fatalf("ran %d testcases after an unmatched pattern; want 0", d.ran)
+	}
+
+	// The correct pattern still selects, and only that one.
+	d.ran = 0
+	suite, err := exec.Run(context.Background(), exec.Options{
+		SuiteName: "s",
+		Driver:    d,
+		Selectors: []exec.Selector{{Name: "**tc_a", Pattern: true}},
+	})
+	if err != nil {
+		t.Fatalf("matching pattern: %v", err)
+	}
+	if len(suite.Cases) != 1 || suite.Cases[0].Name != "tc_a" {
+		t.Fatalf("selected %v, want just tc_a", suite.Cases)
+	}
+
+	// No selectors at all: the documented fallback still runs everything.
+	d.ran = 0
+	suite, err = exec.Run(context.Background(), exec.Options{SuiteName: "s", Driver: d})
+	if err != nil {
+		t.Fatalf("no selectors: %v", err)
+	}
+	if len(suite.Cases) != 2 {
+		t.Fatalf("ran %d cases with no selector; want all 2", len(suite.Cases))
+	}
+}
+
+// listDriver is a minimal Driver whose testcases all pass.
+type listDriver struct {
+	names []string
+	ran   int
+}
+
+func (d *listDriver) List() []string { return d.names }
+func (d *listDriver) Run(_ context.Context, name string) (report.Verdict, string, error) {
+	d.ran++
+	return report.Pass, "", nil
+}
