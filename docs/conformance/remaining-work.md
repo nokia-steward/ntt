@@ -597,12 +597,56 @@ the clock to its deadline. Removing the skip trades "defaults never fire,
 consistently" for "defaults fire inconsistently", which is the worse of the
 two — it breaks the equivalence property the rest of this work established.
 
-**What a real fix needs.** When no alternative matches and an activated
-default has a timer alternative, that timer's deadline has to participate
-in the alt's block step the way an in-line timer guard does, so the virtual
-clock advances to it before the defaults are consulted. That is a change to
-the alt/default interaction rather than a deletion, and it touches the
-block step, so it wants its own slice and its own per-file measurement.
+**Plan for the correct fix.** The defect is not the skip; it is that an
+activated default's timer is invisible to the alt's block step. ETSI 20.5.1
+makes an activated default an additional set of alternatives for every alt,
+so its timer guard should influence when the alt wakes exactly as an
+in-line guard does. It does not, so the virtual clock never advances to the
+default's deadline, the timer is never expired when defaults are consulted,
+and the default cannot fire. The real clock advances regardless, which is
+why the two disagree once the skip is lifted.
+
+*Two coordinated changes, in this order.*
+
+1. **Let an activated default's timers participate in the deadline scan.**
+   `nextAltTimerVirtualDeadline` (virtual) and `nextAltTimerDeadlineLenient`
+   (real) each scan only `n.Body.Stmts` — the alt's own clauses. Both must
+   also scan the body of every entry from `TestcaseExec.Defaults()`
+   (`Default{Id, Body, Env}`).
+
+   The machinery already exists. `considerComm` in the virtual scanner
+   walks an altstep-call guard `[] a()` into the altstep's body precisely
+   so a timer inside it advances the clock — the same shape as a default.
+   The one refactor needed is threading the scope through `considerComm`
+   instead of closing over it, because a default's timers must resolve in
+   its own `Env`, not the alt's.
+
+   Both scanners must change together. Changing only one manufactures a new
+   clock divergence, which is the failure this entry is about.
+
+2. **Then remove the `isTimerOnlyDefault` skip** in `invokeDefaults`.
+   Measured on its own, that removal is conformance-neutral (0 gained, 0
+   lost), so it carries no corpus risk by itself — but it is inert without
+   step 1 under the virtual clock, and actively harmful before it, since it
+   is what exposes the divergence.
+
+*Blast radius, measured.* 108 corpus files activate a default; **54** pair
+an altstep with a `.timeout`, of which **49 currently match**. Those 49 are
+what a per-file diff has to hold. The risk is not the skip removal — it is
+step 1 changing *when the virtual clock advances*, which can reorder which
+alternative wins in any alt that has both its own timer guard and an
+activated default with a sooner one. That reordering is ETSI-correct, and
+it is still a behaviour change that fixtures may encode.
+
+*Verification.* Per-file diff, not the aggregate, against all 4948. The
+probe in this entry must flip to firing on **both** clocks, and the
+existing two-clock probe suite must stay at full agreement — a fix that
+restores conformance while splitting the clocks is not a fix. `-race`
+matters here too: the deadline scan runs on the alt hot path.
+
+*Why it is not done here.* The diagnosis is definitive; the remedy is a
+behaviour change on the alt hot path with 49 matching fixtures in range,
+and it deserves its own slice rather than being appended to an audit.
 
 Recorded rather than done because the analysis is not definitive about the
 remedy, only about the diagnosis. The one-line removal is measurably safe
