@@ -6672,13 +6672,19 @@ func evalTimerAggregate(kind string, sel syntax.Expr, env runtime.Scope) (runtim
 		}
 		return runtime.Undefined, true
 	case "timeout":
-		// `any/all timer.timeout` only makes sense as an alt guard: it
-		// must not block here (the alt scheduler parks on the soonest
-		// deadline and re-enters). Report whether the timeout list is
-		// satisfied right now, consuming the matched timer(s) (ETSI
-		// 23.6/23.7).
+		// As an alt guard this must not block: the alt scheduler parks on
+		// the soonest deadline and re-enters, so report whether the
+		// timeout list is satisfied right now and consume the matched
+		// timer(s) (ETSI 23.6/23.7).
+		//
+		// OUTSIDE an alt it must block, exactly as the singular
+		// `T.timeout` does — ETSI 23.7 draws no distinction between the
+		// named and aggregate forms here. This branch used to return
+		// false and do nothing, making a standalone `any timer.timeout`
+		// a silent no-op: it neither waited nor consumed a timeout, and
+		// the timer it should have fired stayed running.
 		if !altCtx.active() {
-			return runtime.NewBool(false), true
+			return timerAggregateBlockingTimeout(timers, anyKind, env), true
 		}
 		if anyKind {
 			// Earliest-deadline expired timer wins; mark it timed out.
@@ -11869,4 +11875,56 @@ func evalJSONDefaultExpr(expr string, env runtime.Scope) runtime.Object {
 		return nil
 	}
 	return eval(nodes, env)
+}
+
+// timerAggregateBlockingTimeout implements `any timer.timeout` /
+// `all timer.timeout` used as a statement rather than an alt guard, where
+// ETSI 23.7 requires it to block until the timeout can be taken.
+//
+// It mirrors the singular `T.timeout` non-alt path: advance the virtual
+// clock to the deadline so a later `.read` is exact, wait out the real
+// remainder when the clock is real, then mark the fired timer(s). `any`
+// waits for the earliest deadline among running timers and consumes that
+// one; `all` waits for the latest and consumes every running timer.
+//
+// With no running timer there is nothing to wait for and nothing to
+// consume, which is reported as false rather than blocking forever.
+func timerAggregateBlockingTimeout(timers []*runtime.TimerHandle, anyKind bool, env runtime.Scope) runtime.Object {
+	var target *runtime.TimerHandle
+	var running []*runtime.TimerHandle
+	for _, th := range timers {
+		if th == nil || !th.Running {
+			continue
+		}
+		running = append(running, th)
+		if target == nil {
+			target = th
+			continue
+		}
+		// `any` fires on the earliest deadline, `all` only once the
+		// latest has passed.
+		sooner := th.StartedAtVirtual+th.Duration < target.StartedAtVirtual+target.Duration
+		if sooner == anyKind {
+			target = th
+		}
+	}
+	if target == nil {
+		return runtime.NewBool(false)
+	}
+	if exec := runtime.FindTestcaseExec(env); exec != nil && target.Duration > 0 {
+		exec.AdvanceVirtualClock(target.StartedAtVirtual + target.Duration)
+	}
+	if !deterministicClockEnabled(env) {
+		waitForTimerTimeout(target, env)
+	}
+	if anyKind {
+		target.Ticks = target.MaxTicks
+		target.Running = false
+	} else {
+		for _, th := range running {
+			th.Ticks = th.MaxTicks
+			th.Running = false
+		}
+	}
+	return runtime.NewBool(true)
 }

@@ -817,3 +817,53 @@ func assertSameVerdictBothClocks(t *testing.T, src string, want runtime.Verdict)
 		}
 	}
 }
+
+// TestBothClocks_AggregateTimeoutBlocksOutsideAlt covers ETSI 23.7 for the
+// aggregate timeout forms used as a statement rather than an alt guard.
+//
+// `any timer.timeout` / `all timer.timeout` were implemented only for the
+// alt-guard case; outside an alt the evaluator returned false and did
+// nothing. A standalone `any timer.timeout` was therefore a silent no-op —
+// it neither waited for the timeout nor consumed it, and the timer it
+// should have fired was left running. The singular `T.timeout` has always
+// blocked in that position, and ETSI draws no distinction between the
+// named and aggregate forms.
+func TestBothClocks_AggregateTimeoutBlocksOutsideAlt(t *testing.T) {
+	// `any`: the earliest deadline fires and that timer is consumed.
+	assertSameVerdictBothClocks(t, `module M {
+		type component C {}
+		testcase tc() runs on C system C {
+			timer t := 0.05;
+			t.start;
+			any timer.timeout;
+			if (t.running) { setverdict(fail, "timer still running after any timer.timeout"); }
+			else { setverdict(pass); }
+		}
+	}`, runtime.PassVerdict)
+
+	// `all`: every running timer is consumed once the last has expired.
+	assertSameVerdictBothClocks(t, `module M {
+		type component C {}
+		testcase tc() runs on C system C {
+			timer a := 0.05;
+			timer b := 0.08;
+			a.start; b.start;
+			all timer.timeout;
+			if (a.running or b.running) { setverdict(fail, "a timer survived all timer.timeout"); }
+			else { setverdict(pass); }
+		}
+	}`, runtime.PassVerdict)
+
+	// With nothing running there is nothing to wait for: it must report
+	// false rather than block forever.
+	assertSameVerdictBothClocks(t, `module M {
+		type component C {}
+		testcase tc() runs on C system C {
+			timer g := 2.0;
+			g.start;
+			g.stop;
+			any timer.timeout;
+			setverdict(pass, "returned with no running timer");
+		}
+	}`, runtime.PassVerdict)
+}

@@ -581,22 +581,51 @@ The skip was introduced to stop conformance safety nets firing spuriously;
 removing it needs the per-file measurement that change deserves, which is
 why this is scoped rather than folded into §1u.
 
-### T1. `any timer.timeout` does not clear the fired timer — SCOPED, not started
+### T1. `any timer.timeout` was a no-op outside an alt — FIXED 2026-09-21
 
-Found 2026-09-14 alongside §1v, but unrelated to the two-clock work: it
-behaves identically on both clocks, so no fixture or probe of clock
-substitution can distinguish it.
+**The original description of this entry was wrong, and correcting it is
+the interesting part.** It read: *"`any timer.timeout` blocks correctly —
+0.41 s for a 0.4 s timer, the same as a named `t.timeout` — but leaves the
+fired timer running."* The first half was false. The 0.41 s was **not** the
+statement blocking; it was testcase teardown waiting out a still-running
+timer. A control testcase containing no timeout statement at all took the
+same 0.41 s, which is what settled it. The timing had also been taken with
+`--pattern`, which was not filtering — three testcases were running where
+one was intended — so the figure was a whole-file total attributed to a
+single statement. Two measurement errors pointing the same way.
 
-`any timer.timeout` blocks correctly — 0.41 s for a 0.4 s timer, the same
-as a named `t.timeout` — but leaves the fired timer `running`:
+What it actually did: `evalTimerAggregate` implemented `timeout` only for
+the alt-guard case and returned `false` outside an alt —
 
-    timer t := 0.05; t.start; t.timeout;            -> t.running is false  (correct)
-    timer t := 0.05; t.start; any timer.timeout;    -> t.running is TRUE   (wrong)
+    if !altCtx.active() {
+        return runtime.NewBool(false), true
+    }
 
-Per ETSI ES 201 873-1 §23.5 the timeout operation removes the timeout event
-and the timer becomes inactive, so `.running` must be false either way. The
-practical consequence is a loop that re-arms or re-checks timers seeing a
-timer that has already fired as still pending.
+— so a standalone `any timer.timeout` was a **silent no-op**. It did not
+wait, did not consume a timeout, and left the timer running. That is worse
+than the entry claimed: not a missing side effect but a missing operation.
+
+ETSI 23.7 draws no distinction between the named and aggregate forms here,
+and the singular `T.timeout` has always blocked in that position, with the
+implementation of that blocking sitting a few hundred lines away. The fix
+mirrors it: advance the virtual clock to the deadline so a later `.read` is
+exact, wait out the real remainder when the clock is real, then consume —
+`any` on the earliest deadline, consuming that timer; `all` on the latest,
+consuming every running timer. No running timer means nothing to wait for,
+reported as false rather than blocking forever.
+
+Conformance-neutral, and measured per-file rather than by the aggregate:
+**0 gained, 0 lost**, 4754 unchanged. 68 corpus files use an aggregate
+timeout outside an alt, so this was worth checking rather than assuming.
+
+Verified by `TestBothClocks_AggregateTimeoutBlocksOutsideAlt` across `any`,
+`all` and the no-running-timer case, each under both clocks. Restoring the
+early return fails it.
+
+Method note, since two independent measurement errors produced one
+confident wrong sentence: **a duration attributed to a statement needs a
+control that omits the statement.** Both errors here were caught by running
+one — the wall clock cannot tell you what it was waiting for.
 
 ### 1z. `decvalue` structured decode — SCOPED, not started
 
