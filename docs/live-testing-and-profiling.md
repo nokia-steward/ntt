@@ -33,6 +33,7 @@ HTTPS, with `TransportError` handling).
 
 ## Contents
 
+- [Which clock should I use?](#which-clock-should-i-use)
 - [Two clocks: functional vs live](#two-clocks-functional-vs-live)
 - [Measuring elapsed time in a testcase (`t.read`)](#measuring-elapsed-time-in-a-testcase-tread)
 - [The built-in TCP test port](#the-built-in-tcp-test-port)
@@ -41,6 +42,78 @@ HTTPS, with `TransportError` handling).
 - [A complete example](#a-complete-example)
 - [Embedding the port from Go](#embedding-the-port-from-go)
 - [Limitations and notes](#limitations-and-notes)
+
+## Which clock should I use?
+
+**If you do not want to think about this: don't pass anything.** The
+default is the right choice for functional testing, and `ntt` switches to
+the real clock by itself when your `.cfg` wires an external transport or
+you ask for `--profile`. Most suites never name a clock at all.
+
+| You are… | Use | Why |
+| --- | --- | --- |
+| writing or running functional tests | **the default** | reproducible, and a 30-second timer costs microseconds |
+| running tests in CI as a regression gate | **the default** | a verdict that changes between runs is useless as a gate |
+| driving a real SUT over a network | **`--live`** (usually automatic) | real timers must pace real I/O |
+| measuring latency or throughput | **`--profile`** | implies `--live`; latency on a virtual clock is meaningless |
+
+### Why the default is the default
+
+On the virtual clock, time advances only when every component is parked,
+and then jumps straight to the soonest deadline. Two consequences worth
+having:
+
+- **It is fast.** The full 4,948-file ETSI conformance suite — guard timers
+  and all — runs in roughly 20 seconds on a 12-core workstation (measured
+  17–25 s depending on load). A testcase with a 30-second safety timer
+  costs microseconds, because the clock jumps to the deadline instead of
+  waiting for it.
+- **It is reproducible.** Verdicts were identical across 29,688
+  file-executions, including runs under `GOMAXPROCS=1` with the machine
+  deliberately loaded. Nothing in a verdict depends on how the scheduler
+  felt that day.
+
+That is what you want for anything whose job is to answer "is this
+correct?" — which is most tests, most of the time.
+
+### When you actually need `--live`
+
+Only when something outside the engine has its own clock: a real service,
+a socket, a process you are timing. Then real timers have to pace real
+I/O, and `t.read` has to report wall-clock time.
+
+You will usually get it without asking. `ntt exec` switches to the real
+clock automatically when a `.cfg` declares an external transport
+(`transport := "tcp"` / `"http"`), and `--profile` implies `--live`. Pass
+`--live` by hand only when you are driving a SUT through a port you wired
+up in Go.
+
+Two things change when you do, and both are inherent rather than
+implementation details:
+
+- **Verdicts stop being reproducible by construction.** They now depend on
+  a real service and a real network. Keep your regression gate on the
+  default clock and run live suites as their own job.
+- **Bound the run** with `--timeout`. A 60-second per-testcase safety
+  timeout applies if you do not, which is a backstop rather than a plan.
+
+### Can I run the same suite under both?
+
+Largely yes, and that is the point of one engine with two clocks — but
+"largely" is measured rather than assumed. A 24-shape probe covering
+connected receive, timer guards, deadline ordering, `alt` snapshot
+precedence, procedure call/reply, `to`-addressed unicast, activated
+defaults and component completion reports **identical verdicts on both
+clocks**. Getting there took fixing six root causes, each a place where
+the cooperative scheduler supplied something implicitly that the real
+clock did not; they are recorded in
+[remaining-work](conformance/remaining-work.md).
+
+The practical reading: write the suite once, run it on the default clock
+in CI, and point the same source at a real SUT when you want to know how
+fast it is. If you find a shape where the two disagree, that is a bug in
+`ntt` — please report it, because it is exactly the class of defect the
+conformance gate cannot catch on its own.
 
 ## Two clocks: functional vs live
 
