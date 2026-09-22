@@ -935,3 +935,29 @@ func TestBothClocks_NoDefaultsInsideCallBlock(t *testing.T) {
 		}
 	}`, runtime.PassVerdict)
 }
+
+// TestBothClocks_DoneWaitsForModelledPTC covers `.done` on a component
+// whose body does no port communication. Such a PTC is never forked; its
+// completion is modelled from the body's duration.
+//
+// The cooperative scheduler parks and advances the virtual clock to that
+// modelled deadline. The real clock had no goroutine to wait on, so it
+// returned immediately and reported the component as not done — the last
+// divergence of the family where behaviour the scheduler supplies
+// implicitly has no real-clock counterpart. ETSI 21.3.7 makes `.done`
+// blocking, so the real clock now waits out the remaining real time.
+func TestBothClocks_DoneWaitsForModelledPTC(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		type component C { timer el }
+		type component W { }
+		function naps() runs on W { timer d := 0.3; d.start; d.timeout; }
+		testcase tc() runs on C system C {
+			var W q := W.create;
+			el.start(10.0);
+			q.start(naps());
+			q.done;
+			if (el.read >= 0.3) { setverdict(pass, "waited for the modelled duration"); }
+			else { setverdict(fail, "returned before the modelled duration elapsed"); }
+		}
+	}`, runtime.PassVerdict)
+}

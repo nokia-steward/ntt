@@ -400,6 +400,28 @@ func waitPTCDoneRealClock(exec *runtime.TestcaseExec, refs []*runtime.ComponentR
 			}
 			exit := exec.PTCExit(r.ID)
 			if exit == nil {
+				// No goroutine to wait on: this PTC was not forked, so its
+				// completion is MODELLED from its body's duration. The
+				// cooperative scheduler parks and advances the virtual clock
+				// to that deadline; on the real clock the equivalent is to
+				// wait out the remaining real time, otherwise `.done`
+				// answers "not done" for a component the other clock
+				// reports as finished.
+				if d := modelledRemaining(r); d > 0 {
+					t := time.NewTimer(d)
+					select {
+					case <-t.C:
+					case <-stop:
+						t.Stop()
+						return
+					case <-exec.StopChan():
+						t.Stop()
+						return
+					}
+					continue
+				}
+				// Nothing to wait on and nothing modelled: leave the
+				// caller with the non-blocking answer rather than hang.
 				return
 			}
 			wait = exit.DoneChan
@@ -416,4 +438,18 @@ func waitPTCDoneRealClock(exec *runtime.TestcaseExec, refs []*runtime.ComponentR
 			return
 		}
 	}
+}
+
+// modelledRemaining reports how much real time is left before a PTC whose
+// body was modelled rather than forked is considered complete, or 0 when
+// nothing is modelled or the duration has already elapsed.
+func modelledRemaining(ref *runtime.ComponentRef) time.Duration {
+	if ref == nil || !ref.Started || ref.ModeledDuration <= 0 || ref.StartedAt.IsZero() {
+		return 0
+	}
+	total := time.Duration(ref.ModeledDuration * float64(time.Second))
+	if remaining := total - time.Since(ref.StartedAt); remaining > 0 {
+		return remaining
+	}
+	return 0
 }

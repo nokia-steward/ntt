@@ -663,6 +663,37 @@ confident wrong sentence: **a duration attributed to a statement needs a
 control that omits the statement.** Both errors here were caught by running
 one — the wall clock cannot tell you what it was waiting for.
 
+### 1t. `.done` on a modelled PTC diverged — FIXED 2026-09-22
+
+The last of the family. A PTC whose body does no port communication is
+never forked; its completion is modelled from the body's duration. The
+cooperative scheduler parks and advances the virtual clock to that modelled
+deadline. The real clock had no goroutine to wait on, so it returned
+immediately and reported the component as not done:
+
+    var W q := W.create;  q.start(naps());   // naps() = a 0.3s timer, no port comm
+    q.done;
+
+    virtual -> waited for the modelled duration
+    --live  -> returned before the modelled duration elapsed
+
+Pre-existing, and confirmed so against a binary built before the
+`comp.done` work — though the shape of it is partly mine: the early return
+when a component has no registered exit was written conservatively during
+§1y, to avoid hanging on something with nothing to wait for. It is right
+that a component with nothing modelled and no goroutine should not block;
+it was wrong to treat a *modelled* component the same way.
+
+ETSI 21.3.7 makes `.done` blocking, so the real clock now waits out the
+remaining real time to the modelled completion, bounded by the same stop
+channels as the forked case. Conformance-neutral, per-file: 0 gained, 0
+lost, 4754 unchanged.
+
+Verified by `TestBothClocks_DoneWaitsForModelledPTC`, which asserts on
+elapsed time rather than on the verdict alone — a probe that only asked
+"is it done now" cannot tell waiting from answering early. Reverting fails
+it on the live clock.
+
 ### 1z. `decvalue` structured decode — SCOPED, not started
 
 Raised 2026-09-09 by a suite driving a REST service through the built-in
