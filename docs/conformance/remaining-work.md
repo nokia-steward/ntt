@@ -559,98 +559,63 @@ Both fixed; `TestBothClocks_DefaultReassertingVerdictIsDetected` and
 clocks and require the same verdict. Reverting either fix fails its test,
 on the clock it belongs to. Gate unchanged: 4754, exit 0.
 
-### T2. Timer-only defaults never fire — SCOPED, attempted 2026-09-21
+### T2. Timer-only defaults never fire — FIXED 2026-09-22
 
-`invokeDefaults` skips any activated default whose only alternative is a
-timer timeout, justified by the comment *"we have no real clock so we can't
-know whether the timer has actually timed out. The conformance fixtures
-only use these as safety nets ... without a clock the test never hangs, so
-the safety net should not fire."* The classic *"if this hangs longer than N
-seconds, fail"* default therefore never fires, on either clock, where
-ETSI 20.5.1 invokes an activated default whenever no alternative of the alt
-matches.
+`invokeDefaults` skipped any activated default whose only alternative was a
+timer timeout, so the classic *"if this hangs longer than N seconds, fail"*
+safety net never fired on either clock. ETSI 20.5.1 invokes an activated
+default whenever no alternative of the alt matches.
 
-**Attempted and reverted.** Two things were measured, and the second is why
-the change is not in the tree.
+The skip was the symptom. The cause was that an activated default's timer
+was **invisible to the alt's block step**: a default supplies alternatives
+to every alt, so its timer guard must influence when the alt wakes. It did
+not, so the virtual clock never advanced to the default's deadline, the
+timer was never expired when defaults were consulted, and the default could
+not fire. The real clock advances regardless, which is why removing the
+skip on its own made the two disagree.
 
-*The stated justification is not load-bearing.* Removing the skip entirely
-is **conformance-neutral: 0 gained, 0 lost**, measured per-file against
-4754. No fixture depends on safety nets staying silent, so the comment's
-reasoning about the corpus does not hold as an argument for keeping it.
+**Built in four steps, measured per-file after each. The step-by-step
+measurement is what found the real problem.**
 
-*But removing it introduces a clock divergence.* With the skip gone, a
-timer-only default fires under `--live` and still does not under the
-virtual clock:
+| step | change | per-file result |
+| --- | --- | --- |
+| A | thread scope through `considerComm` (pure refactor) | 0 changed |
+| B | virtual scanner considers activated defaults | **-5, all timeouts** |
+| B+D | …and remove the `isTimerOnlyDefault` skip | **-1** |
+| B+C+D | …and implement ETSI 22.3.1 | **0** |
+| +lenient | real-clock scanner too | **0** |
 
-    altstep safety() runs on C { [] tsafe.timeout { setverdict(inconc); } }
-    activate(safety()); tsafe.start(0.1); tlong.start(3.0);
-    alt { [] p.receive("never") { } [] tlong.timeout { } }
+Step B alone losing five files to timeouts is the ordering dependency: the
+clock advances to a default's deadline while the default is still skipped,
+so nothing fires and the alt spins. B and D belong together.
 
-    virtual -> pass   (default did not fire)
-    --live  -> inconc (default fired)
+**Step C is the discovery.** With B+D applied, one fixture regressed —
+`Sem_220301_CallOperation_008`, whose stated purpose is *"verify that
+defaults are not executed in response and exception handling part of a call
+operation"*. ETSI 22.3.1: the response part of a `call` "is executed like
+an alt statement without any active default." **The engine never
+implemented that rule.** It went unnoticed because the only fixture
+covering it uses a timer-only default, which the skip happened to suppress
+— so the skip was masking a second missing rule, and removing it exposed
+that rule as a regression rather than causing one.
 
-So the skip is **masking** a divergence rather than causing the defect. The
-underlying issue is when virtual time advances relative to consulting the
-defaults: under the real clock the safety timer has genuinely expired by
-then, while under the virtual clock it has not, because nothing advanced
-the clock to its deadline. Removing the skip trades "defaults never fire,
-consistently" for "defaults fire inconsistently", which is the worse of the
-two — it breaks the equivalence property the rest of this work established.
+`runDefaults` now returns early inside a call response block
+(`currentCallSignature(env) != ""`), and the deadline scanners skip
+defaults there too, since parking on a deadline that cannot fire would hang
+the block until its own call timeout.
 
-**Plan for the correct fix.** The defect is not the skip; it is that an
-activated default's timer is invisible to the alt's block step. ETSI 20.5.1
-makes an activated default an additional set of alternatives for every alt,
-so its timer guard should influence when the alt wakes exactly as an
-in-line guard does. It does not, so the virtual clock never advances to the
-default's deadline, the timer is never expired when defaults are consulted,
-and the default cannot fire. The real clock advances regardless, which is
-why the two disagree once the skip is lifted.
+**Verification.** Per-file diff against all 4948: 0 gained, 0 lost, 4754
+unchanged, gate exit 0. The probe fires on **both** clocks. Every two-clock
+probe suite still agrees. `go test ./...` and `-race` green. Both new tests
+are A/B-proven: reverting the 22.3.1 guard fails the call-block test on the
+live clock, reverting the scanner change fails the safety-net test on the
+virtual clock.
 
-*Two coordinated changes, in this order.*
-
-1. **Let an activated default's timers participate in the deadline scan.**
-   `nextAltTimerVirtualDeadline` (virtual) and `nextAltTimerDeadlineLenient`
-   (real) each scan only `n.Body.Stmts` — the alt's own clauses. Both must
-   also scan the body of every entry from `TestcaseExec.Defaults()`
-   (`Default{Id, Body, Env}`).
-
-   The machinery already exists. `considerComm` in the virtual scanner
-   walks an altstep-call guard `[] a()` into the altstep's body precisely
-   so a timer inside it advances the clock — the same shape as a default.
-   The one refactor needed is threading the scope through `considerComm`
-   instead of closing over it, because a default's timers must resolve in
-   its own `Env`, not the alt's.
-
-   Both scanners must change together. Changing only one manufactures a new
-   clock divergence, which is the failure this entry is about.
-
-2. **Then remove the `isTimerOnlyDefault` skip** in `invokeDefaults`.
-   Measured on its own, that removal is conformance-neutral (0 gained, 0
-   lost), so it carries no corpus risk by itself — but it is inert without
-   step 1 under the virtual clock, and actively harmful before it, since it
-   is what exposes the divergence.
-
-*Blast radius, measured.* 108 corpus files activate a default; **54** pair
-an altstep with a `.timeout`, of which **49 currently match**. Those 49 are
-what a per-file diff has to hold. The risk is not the skip removal — it is
-step 1 changing *when the virtual clock advances*, which can reorder which
-alternative wins in any alt that has both its own timer guard and an
-activated default with a sooner one. That reordering is ETSI-correct, and
-it is still a behaviour change that fixtures may encode.
-
-*Verification.* Per-file diff, not the aggregate, against all 4948. The
-probe in this entry must flip to firing on **both** clocks, and the
-existing two-clock probe suite must stay at full agreement — a fix that
-restores conformance while splitting the clocks is not a fix. `-race`
-matters here too: the deadline scan runs on the alt hot path.
-
-*Why it is not done here.* The diagnosis is definitive; the remedy is a
-behaviour change on the alt hot path with 49 matching fixtures in range,
-and it deserves its own slice rather than being appended to an audit.
-
-Recorded rather than done because the analysis is not definitive about the
-remedy, only about the diagnosis. The one-line removal is measurably safe
-for conformance and measurably wrong for clock equivalence.
+Method note: the plan predicted two changes and the build needed three. The
+third was found only because the steps were measured separately — a single
+combined change would have shown -1 with no indication which part caused
+it, and the tempting read of a one-file regression is that the fixture is
+stale. It was not; it was the only thing testing a rule we did not have.
 
 ### T1. `any timer.timeout` was a no-op outside an alt — FIXED 2026-09-21
 

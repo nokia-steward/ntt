@@ -9241,6 +9241,15 @@ func runDefaults(env runtime.Scope) (runtime.Object, bool) {
 	if defaultCtx.active() {
 		return nil, false
 	}
+	// ETSI 22.3.1: the response and exception handling part of a `call`
+	// operation "is executed like an alt statement without any active
+	// default", so an activated default must not fire inside it
+	// (Sem_220301_CallOperation_008). The engine never implemented this;
+	// it went unnoticed because the only fixture covering it uses a
+	// timer-only default, which a separate skip happened to suppress.
+	if currentCallSignature(env) != "" {
+		return nil, false
+	}
 	defaultCtx.enter()
 	defer defaultCtx.leave()
 	defs := exec.Defaults()
@@ -9251,15 +9260,15 @@ func runDefaults(env runtime.Scope) (runtime.Object, bool) {
 		if !ok || ast == nil {
 			continue
 		}
-		// Skip purely timer-driven defaults: we have no real
-		// clock so we can't know whether the timer has actually
-		// timed out. The conformance fixtures only use these as
-		// safety nets ("if the testcase hangs longer than N
-		// seconds, fail"); without a clock the test never hangs,
-		// so the safety net should not fire.
-		if isTimerOnlyDefault(ast.n, d.Env) {
-			continue
-		}
+		// A purely timer-driven default used to be skipped here, on the
+		// grounds that without a clock we cannot know whether its timer
+		// expired. Both clocks can now answer that: the alt's deadline
+		// scan includes activated defaults, so the virtual clock advances
+		// to a default's deadline before we are consulted, and the real
+		// clock has of course already passed it. Skipping would now mean
+		// a safety-net default that can never fire on either clock
+		// (ETSI 20.5.1 invokes an activated default whenever no
+		// alternative of the alt matches).
 		// Under the scheduler, also detect a fired default by whether it
 		// actually TAKES an alternative, not only by a verdict change. The
 		// change heuristic misses a default that re-asserts an already-set

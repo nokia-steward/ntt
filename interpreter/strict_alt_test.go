@@ -867,3 +867,71 @@ func TestBothClocks_AggregateTimeoutBlocksOutsideAlt(t *testing.T) {
 		}
 	}`, runtime.PassVerdict)
 }
+
+// TestBothClocks_TimerOnlyDefaultFires covers ETSI 20.5.1 for the classic
+// safety-net default — "if this hangs longer than N seconds, fail".
+//
+// Such a default never fired, on either clock. The proximate cause was a
+// skip in the default walker, but the real one was that an activated
+// default's timer was invisible to the alt's block step: a default supplies
+// alternatives to every alt, so its timer guard has to influence when the
+// alt wakes. It did not, so the virtual clock never advanced to the
+// default's deadline, the timer was never expired when defaults were
+// consulted, and the default could not fire. Removing the skip alone made
+// the clocks disagree, because only the real clock advances on its own.
+func TestBothClocks_TimerOnlyDefaultFires(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		type port P message { inout charstring }
+		type component C { port P p; timer tsafe; timer tlong }
+		altstep safety() runs on C {
+			[] tsafe.timeout { setverdict(pass, "safety net fired"); }
+		}
+		testcase tc() runs on C system C {
+			var default d := activate(safety());
+			tsafe.start(0.1);
+			tlong.start(3.0);
+			alt {
+				[] p.receive("never") { setverdict(fail, "impossible"); }
+				[] tlong.timeout { setverdict(fail, "long guard won: the default never fired"); }
+			}
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_NoDefaultsInsideCallBlock covers ETSI 22.3.1: the response
+// and exception handling part of a `call` operation "is executed like an
+// alt statement without any active default".
+//
+// The engine never implemented this. It went unnoticed because the only
+// conformance fixture covering it (Sem_220301_CallOperation_008) uses a
+// timer-only default, which the skip above happened to suppress — so
+// removing that skip exposed the missing rule as a regression. The two
+// belong together: making defaults able to fire requires also knowing
+// where they must not.
+func TestBothClocks_NoDefaultsInsideCallBlock(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		signature S();
+		type port P procedure { inout S }
+		type component C { port P p; timer tsafe }
+		altstep safety() runs on C {
+			[] tsafe.timeout { setverdict(fail, "default fired inside a call block"); }
+		}
+		function responder() runs on C {
+			timer d := 0.4;
+			p.getcall(S:?);
+			d.start; d.timeout;
+			p.reply(S:{});
+		}
+		testcase tc() runs on C system C {
+			var C q := C.create;
+			connect(self:p, q:p);
+			q.start(responder());
+			tsafe.start(0.1);                 // expires during the call block
+			var default dflt := activate(safety());
+			p.call(S:{}, 4.0) {
+				[] p.getreply(S:?) { setverdict(pass, "reply received, default stayed inactive"); }
+				[] p.catch(timeout) { setverdict(fail, "call timed out"); }
+			}
+		}
+	}`, runtime.PassVerdict)
+}

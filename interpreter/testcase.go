@@ -2228,13 +2228,15 @@ func nextAltTimerVirtualDeadline(n *syntax.AltStmt, env runtime.Scope) (float64,
 	// otherwise no deadline is found and the run blocks forever. `depth`
 	// bounds mutually-recursive altsteps. Timers resolve in the current env,
 	// which reaches component-scope timers (the common case).
-	var considerComm func(comm syntax.Node, depth int)
-	considerComm = func(comm syntax.Node, depth int) {
+	// scope is threaded rather than closed over: an activated default's
+	// timers resolve in the scope it was activated in, not the alt's.
+	var considerComm func(comm syntax.Node, depth int, scope runtime.Scope)
+	considerComm = func(comm syntax.Node, depth int, scope runtime.Scope) {
 		// `[] p.catch(timeout)` contributes the enclosing call block's
 		// timeout deadline, so the block-step advances the virtual clock to
 		// it when no getreply arrives and the catch(timeout) then fires.
 		if isCatchTimeoutGuard(comm) {
-			consider(callTimeoutTimer(env))
+			consider(callTimeoutTimer(scope))
 			return
 		}
 		es, ok := comm.(*syntax.ExprStmt)
@@ -2252,10 +2254,10 @@ func nextAltTimerVirtualDeadline(n *syntax.AltStmt, env runtime.Scope) (float64,
 				return
 			}
 			if rn := recvIdent.String(); rn == "any timer" || rn == "all timer" {
-				for _, th := range collectScopeTimers(env) {
+				for _, th := range collectScopeTimers(scope) {
 					consider(th)
 				}
-			} else if v, ok := env.Get(rn); ok {
+			} else if v, ok := scope.Get(rn); ok {
 				if th, ok := v.(*runtime.TimerHandle); ok {
 					consider(th)
 				}
@@ -2268,7 +2270,7 @@ func nextAltTimerVirtualDeadline(n *syntax.AltStmt, env runtime.Scope) (float64,
 			if !ok {
 				return
 			}
-			v, ok := env.Get(id.String())
+			v, ok := scope.Get(id.String())
 			if !ok {
 				return
 			}
@@ -2278,7 +2280,7 @@ func nextAltTimerVirtualDeadline(n *syntax.AltStmt, env runtime.Scope) (float64,
 			}
 			for _, s := range fn.Body.Stmts {
 				if cc, ok := s.(*syntax.CommClause); ok && cc.Else == nil && cc.Comm != nil {
-					considerComm(cc.Comm, depth-1)
+					considerComm(cc.Comm, depth-1, scope)
 				}
 			}
 		}
@@ -2288,7 +2290,23 @@ func nextAltTimerVirtualDeadline(n *syntax.AltStmt, env runtime.Scope) (float64,
 		if !ok || cc.Else != nil || cc.Comm == nil {
 			continue
 		}
-		considerComm(cc.Comm, 4)
+		considerComm(cc.Comm, 4, env)
+	}
+	// An activated default supplies additional alternatives to EVERY alt
+	// (ETSI 20.5.1), so its timer guards must influence when this alt
+	// wakes, exactly as an in-line guard does. Without this the virtual
+	// clock never advances to a default's deadline, its timer is never
+	// expired when the defaults are consulted, and a timer-driven default
+	// can never fire. A default's body is the altstep CallExpr it was
+	// activated with, which is the shape considerComm already walks — but
+	// its timers resolve in the scope it was activated in, not this alt's.
+	// ... except inside a `call` response block, where ETSI 22.3.1 says no
+	// default is active. Parking on a deadline belonging to a default that
+	// cannot fire there would hang the block until its own call timeout.
+	if currentCallSignature(env) == "" {
+		for _, d := range activatedDefaultCalls(env) {
+			considerComm(&syntax.ExprStmt{Expr: d.call}, 4, d.scope)
+		}
 	}
 	return soonest, have
 }
@@ -2436,10 +2454,95 @@ func nextAltTimerDeadlineLenient(n *syntax.AltStmt, env runtime.Scope) (time.Dur
 			have = true
 		}
 	}
+	// Activated defaults contribute alternatives to every alt (ETSI
+	// 20.5.1), so their timer guards bound this wait too — except inside a
+	// `call` response block, where 22.3.1 says no default is active. On
+	// the real clock the wall clock advances regardless, so omitting this
+	// does not hang; it just leaves an alt with no other deadline spinning
+	// until the default's timer happens to expire, rather than sleeping
+	// until it does.
+	if currentCallSignature(env) == "" {
+		for _, dc := range activatedDefaultCalls(env) {
+			for _, th := range defaultTimerHandles(dc) {
+				if th == nil || !th.Running || th.StartedAt.IsZero() {
+					continue
+				}
+				remaining := th.StartedAt.Add(time.Duration(th.Duration * float64(time.Second))).Sub(now)
+				if remaining <= 0 {
+					continue
+				}
+				if !have || remaining < soonest {
+					soonest, have = remaining, true
+				}
+			}
+		}
+	}
 	if !have {
 		return 0, false
 	}
 	return soonest, true
+}
+
+// defaultTimerHandles resolves the timers named by a default altstep's
+// direct `<timer>.timeout` guards, in the scope the default was activated
+// in. Aggregate `any timer` / `all timer` guards contribute every timer in
+// that scope. Nested altstep calls are not followed: the virtual scanner
+// walks those via considerComm, and the real clock does not need the
+// deadline to be exact — only to exist, so the alt sleeps rather than
+// spins.
+func defaultTimerHandles(dc defaultCall) []*runtime.TimerHandle {
+	v, ok := dc.scope.Get(nameOfCallee(dc.call))
+	if !ok {
+		return nil
+	}
+	fn, ok := v.(*runtime.Function)
+	if !ok || !fn.IsAltstep || fn.Body == nil {
+		return nil
+	}
+	var out []*runtime.TimerHandle
+	for _, stmt := range fn.Body.Stmts {
+		cc, ok := stmt.(*syntax.CommClause)
+		if !ok || cc.Else != nil || cc.Comm == nil {
+			continue
+		}
+		es, ok := cc.Comm.(*syntax.ExprStmt)
+		if !ok {
+			continue
+		}
+		sel, ok := es.Expr.(*syntax.SelectorExpr)
+		if !ok {
+			continue
+		}
+		recv, ok := sel.X.(*syntax.Ident)
+		if !ok {
+			continue
+		}
+		if op, ok := sel.Sel.(*syntax.Ident); !ok || op.String() != "timeout" {
+			continue
+		}
+		if rn := recv.String(); rn == "any timer" || rn == "all timer" {
+			out = append(out, collectScopeTimers(dc.scope)...)
+			continue
+		}
+		if tv, ok := dc.scope.Get(recv.String()); ok {
+			if th, ok := tv.(*runtime.TimerHandle); ok {
+				out = append(out, th)
+			}
+		}
+	}
+	return out
+}
+
+// nameOfCallee returns the identifier a default's altstep call names, or
+// "" when the callee is not a plain identifier.
+func nameOfCallee(ce *syntax.CallExpr) string {
+	if ce == nil {
+		return ""
+	}
+	if id, ok := ce.Fun.(*syntax.Ident); ok {
+		return id.String()
+	}
+	return ""
 }
 
 // waitForAltTimerDeadline sleeps until d elapses or the testcase
@@ -2898,4 +3001,34 @@ func bindComponentMembers(env runtime.Scope, body *syntax.BlockStmt) {
 			env.Set(name, runtime.Undefined)
 		}
 	}
+}
+
+// defaultCall pairs an activated default's altstep invocation with the
+// scope it was activated in, which is where its timers resolve.
+type defaultCall struct {
+	call  *syntax.CallExpr
+	scope runtime.Scope
+}
+
+// activatedDefaultCalls returns the currently activated defaults in a form
+// the alt deadline scanners can walk. Entries whose body is not an altstep
+// invocation are skipped rather than guessed at.
+func activatedDefaultCalls(env runtime.Scope) []defaultCall {
+	exec := runtime.FindTestcaseExec(env)
+	if exec == nil {
+		return nil
+	}
+	var out []defaultCall
+	for _, d := range exec.Defaults() {
+		ast, ok := d.Body.(*astNode)
+		if !ok || ast == nil {
+			continue
+		}
+		call, ok := ast.n.(*syntax.CallExpr)
+		if !ok {
+			continue
+		}
+		out = append(out, defaultCall{call: call, scope: d.Env})
+	}
+	return out
 }
