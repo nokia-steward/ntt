@@ -1206,6 +1206,73 @@ func TestBothClocks_DeactivateClearsOnlyOwnDefaults(t *testing.T) {
 	}`, runtime.PassVerdict)
 }
 
+// TestBothClocks_EchoPTCRuns covers the most ordinary PTC there is, one
+// that answers a request: `alt { [] p.receive("ping") { p.send("pong") } }`.
+// On the real clock a port-communicating body was forked only when it would
+// otherwise have been skipped. This one is not skipped, so it ran inline on
+// the MTC's goroutine, and the MTC sat in the PTC's alt waiting for the
+// "ping" it had not yet sent: no verdict, after the full timeout.
+func TestBothClocks_EchoPTCRuns(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		function echo() runs on C {
+			alt {
+				[] p.receive("ping") { p.send("pong"); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C e := C.create("echo");
+			connect(self:p, e:p);
+			e.start(echo());
+			p.send("ping");
+			timer t := 2.0; t.start;
+			alt {
+				[] p.receive("pong") { setverdict(pass); }
+				[] t.timeout { setverdict(fail, "no echo"); }
+			}
+			e.done;
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_FinishedPTCIsKilled covers a non-alive PTC whose body has
+// ended: the component ends with it (ETSI 21.3.2), so it is killed as well
+// as done (21.3.8). A forked body only recorded done, so `.killed` stayed
+// false for good — the statement form blocked until the testcase timed out,
+// the guard form never matched — while an inline body got it right.
+func TestBothClocks_FinishedPTCIsKilled(t *testing.T) {
+	const decls = `
+		type port P message { inout charstring }
+		type component C { port P p }
+		function sends() runs on C { p.send("x"); }`
+	t.Run("statement", func(t *testing.T) {
+		assertSameVerdictBothClocks(t, `module M {`+decls+`
+			testcase tc() runs on C system C {
+				var C c := C.create;
+				connect(c:p, self:p);
+				c.start(sends());
+				c.killed;
+				setverdict(pass);
+			}
+		}`, runtime.PassVerdict)
+	})
+	t.Run("guard after done", func(t *testing.T) {
+		assertSameVerdictBothClocks(t, `module M {`+decls+`
+			testcase tc() runs on C system C {
+				var C c := C.create;
+				connect(c:p, self:p);
+				c.start(sends());
+				c.done;
+				alt {
+					[] c.killed { setverdict(pass); }
+					[else] { setverdict(fail, "a finished non-alive PTC is not killed"); }
+				}
+			}
+		}`, runtime.PassVerdict)
+	})
+}
+
 // TestBothClocks_DoneWaitsForModelledPTC covers `.done` on a component
 // whose body does no port communication. Such a PTC is never forked; its
 // completion is modelled from the body's duration.

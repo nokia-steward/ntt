@@ -7707,7 +7707,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		if op == "start" && ref != nil && !ref.AliveModifier {
 			if deterministicSchedulerEnabled(env) {
 				forkComm = startBodyDoesPortComm(body, env)
-			} else if skip {
+			} else {
 				// Real clock: the narrow getcall-only predicate used to
 				// apply here, on the reasoning that forking one half of a
 				// pair whose counterpart is not forked leaves it waiting
@@ -7726,6 +7726,13 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				// So the real clock uses the same broad predicate as the
 				// scheduler. The conformance corpus runs under the
 				// scheduler, so this branch cannot move it.
+				//
+				// It applies whether or not the body would be skipped. A
+				// body that is not skipped and not forked runs inline, on
+				// the starting component's goroutine: an echo PTC
+				// (`alt { [] p.receive(req) { p.send(rsp) } }`) then blocks
+				// the MTC in the PTC's alt, waiting for the request the MTC
+				// has not sent yet, and the testcase ends with no verdict.
 				forkComm = startBodyDoesPortComm(body, env)
 			}
 		}
@@ -7913,6 +7920,15 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 					// see the .stop case below and
 					if ref != nil {
 						ref.SetDone(true)
+						// A non-alive component ends with its behaviour
+						// (ETSI 21.3.2), so it is killed, not merely done
+						// (21.3.8) — as the inline and deferred paths
+						// already record. Leaving it alive kept `.killed`
+						// false for good: a `c.killed` statement then
+						// blocked until the testcase timed out.
+						if !ref.AliveModifier {
+							ref.SetAlive(false)
+						}
 					}
 				}()
 				// Start-barrier: park the parent until the

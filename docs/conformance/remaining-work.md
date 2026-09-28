@@ -377,6 +377,16 @@ Regressions, fixed:
 Per-file against all 4948: 0 gained, 0 lost, 4754 unchanged. `go test
 -race ./...` green.
 
+**Found while building TCI-TL test logging, and fixed (2026-09-28):** under
+`--live` an echo PTC — `alt { [] p.receive(req) { p.send(rsp) } }` — ran
+inline on the MTC's goroutine and blocked it, so the testcase ended with
+no verdict. On the real clock a port-communicating body was forked only
+when it would otherwise be skipped; a body that is neither skipped nor
+forked runs inline. It now forks as it does under the scheduler, which is
+what made the done-but-not-killed gap above reachable on the real clock
+too. `TestBothClocks_EchoPTCRuns`. A test comparing each component's logged
+operations across the two clocks hung on its first run.
+
 **Found along the way, older than this work, not fixed:**
 
 - **A PTC body with a timer and no port communication never runs**, on
@@ -387,8 +397,11 @@ Per-file against all 4948: 0 gained, 0 lost, 4754 unchanged. `go test
   (it was -7 / +0 in August). Three of the four are the next item, and the
   fourth came from also forking `while (true) {}`, which a real change
   would not do.
-- **A forked non-alive PTC is done but never killed** on the virtual clock:
-  `compKilled` ignores `IsDone`. ETSI 21.3.8; `--live` is right.
+- *Fixed 2026-09-28.* **A forked non-alive PTC is done but never killed.**
+  A forked body recorded only done; the inline path also recorded the
+  component as no longer alive (ETSI 21.3.2, 21.3.8). `.killed` stayed
+  false for good, so the statement form deadlocked.
+  `TestBothClocks_FinishedPTCIsKilled`.
 - **A two-way handshake ends in `none` on the virtual clock** — PTC sends,
   MTC receives and replies, PTC receives — with no defaults involved.
 - **Under `--live`, the snapshot guard `c.done` is true for a PTC still
