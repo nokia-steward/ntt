@@ -486,8 +486,10 @@ func TestStrictComp_ModeledDoneUsesVirtualClock(t *testing.T) {
 			p.start(f());
 			g.start;
 			g.timeout;
-			if (p.done) { setverdict(pass); }
-			else { setverdict(fail, "modelled PTC not done after the virtual observation window"); }
+			alt {
+				[] p.done { setverdict(pass); }
+				[else] { setverdict(fail, "modelled PTC not done after the virtual observation window"); }
+			}
 		}
 	}`
 	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)

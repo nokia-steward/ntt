@@ -651,11 +651,14 @@ func (t *TestcaseExec) SeedRnd(seed int64) {
 // (typed as Object so the runtime package stays free of syntax
 // imports); Env is the activation-site scope so identifier lookups
 // resolve where the user wrote `activate(a())`. Id is a monotonic
-// handle the deactivate operation uses to remove the entry.
+// handle the deactivate operation uses to remove the entry. Owner is the
+// component that activated it: a default belongs to that component alone
+// (ETSI 20.5), and only that component's alts may invoke it.
 type Default struct {
-	Id   int
-	Body Object
-	Env  Scope
+	Id    int
+	Body  Object
+	Env   Scope
+	Owner int64
 }
 
 // AddDefault registers an activated altstep and returns the handle
@@ -691,6 +694,35 @@ func (t *TestcaseExec) Defaults() []Default {
 	out := make([]Default, len(t.defaults))
 	copy(out, t.defaults)
 	return out
+}
+
+// DefaultsOf returns a copy of the defaults component owner activated, in
+// activation order.
+func (t *TestcaseExec) DefaultsOf(owner int64) []Default {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	var out []Default
+	for _, d := range t.defaults {
+		if d.Owner == owner {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// ClearDefaultsOf removes every default component owner activated. It
+// backs the bare `deactivate;` statement, which deactivates all defaults
+// of the test component executing it (ETSI 20.5.3) and no other's.
+func (t *TestcaseExec) ClearDefaultsOf(owner int64) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	kept := t.defaults[:0]
+	for _, d := range t.defaults {
+		if d.Owner != owner {
+			kept = append(kept, d)
+		}
+	}
+	t.defaults = kept
 }
 
 // ClearDefaults removes every activated default. It backs the bare

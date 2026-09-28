@@ -2015,7 +2015,7 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		// unless the alt is marked `@nodefault`. A default that stopped the
 		// component hands back its unwinding result, which has to travel
 		// past this alt statement.
-		if n.NoDefault == nil {
+		if !defaultsSuppressed(n) {
 			if ctl, fired := runDefaults(env); fired {
 				return ctl
 			}
@@ -2133,7 +2133,7 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 		}
 		// No alternative matched. Activated defaults are appended after the
 		// remaining alternatives (20.5); one that fires leaves the interleave.
-		if n.NoDefault == nil {
+		if !defaultsSuppressed(n) {
 			if ctl, fired := runDefaults(env); fired {
 				return ctl
 			}
@@ -2213,11 +2213,17 @@ func nextAltTimerVirtualDeadline(n *syntax.AltStmt, env runtime.Scope) (float64,
 	}
 	var soonest float64
 	have := false
+	// floor excludes deadlines at or before it; see the default loop below.
+	floor := math.Inf(-1)
 	consider := func(th *runtime.TimerHandle) {
 		if th == nil || !th.Running || th.Duration <= 0 {
 			return
 		}
-		if dl := th.StartedAtVirtual + th.Duration; !have || dl < soonest {
+		dl := th.StartedAtVirtual + th.Duration
+		if dl <= floor {
+			return
+		}
+		if !have || dl < soonest {
 			soonest, have = dl, true
 		}
 	}
@@ -2300,10 +2306,20 @@ func nextAltTimerVirtualDeadline(n *syntax.AltStmt, env runtime.Scope) (float64,
 	// can never fire. A default's body is the altstep CallExpr it was
 	// activated with, which is the shape considerComm already walks — but
 	// its timers resolve in the scope it was activated in, not this alt's.
-	// ... except inside a `call` response block, where ETSI 22.3.1 says no
-	// default is active. Parking on a deadline belonging to a default that
-	// cannot fire there would hang the block until its own call timeout.
-	if currentCallSignature(env) == "" {
+	// ... except where no default is active: an `@nodefault` alt, and a
+	// `call` response block (ETSI 22.3.1). Parking on a deadline belonging
+	// to a default that cannot fire there would hang the alt until some
+	// other guard ends it.
+	//
+	// Only a default deadline still in the future counts. The defaults were
+	// consulted before this alt blocked, so a default timer that has already
+	// expired has had its chance and was not taken — its guard is false, or
+	// the altstep resolves the timer somewhere else. Parking on that
+	// deadline wakes at once to the same state and livelocks the scheduler.
+	if !defaultsSuppressed(n) {
+		if exec := runtime.FindTestcaseExec(env); exec != nil {
+			floor = exec.VirtualClock()
+		}
 		for _, d := range activatedDefaultCalls(env) {
 			considerComm(&syntax.ExprStmt{Expr: d.call}, 4, d.scope)
 		}
@@ -2455,13 +2471,15 @@ func nextAltTimerDeadlineLenient(n *syntax.AltStmt, env runtime.Scope) (time.Dur
 		}
 	}
 	// Activated defaults contribute alternatives to every alt (ETSI
-	// 20.5.1), so their timer guards bound this wait too — except inside a
-	// `call` response block, where 22.3.1 says no default is active. On
+	// 20.5.1), so their timer guards bound this wait too — except where no
+	// default is active (`@nodefault`, or a `call` response block per
+	// 22.3.1). An expired default timer is skipped for the same reason as
+	// in nextAltTimerVirtualDeadline. On
 	// the real clock the wall clock advances regardless, so omitting this
 	// does not hang; it just leaves an alt with no other deadline spinning
 	// until the default's timer happens to expire, rather than sleeping
 	// until it does.
-	if currentCallSignature(env) == "" {
+	if !defaultsSuppressed(n) {
 		for _, dc := range activatedDefaultCalls(env) {
 			for _, th := range defaultTimerHandles(dc) {
 				if th == nil || !th.Running || th.StartedAt.IsZero() {
@@ -3003,6 +3021,28 @@ func bindComponentMembers(env runtime.Scope, body *syntax.BlockStmt) {
 	}
 }
 
+// callResponseAlts holds the synthetic alt a blocking `call`'s response
+// block is evaluated as, for as long as it runs. ETSI 22.3.1 executes that
+// block "like an alt statement without any active default", which is what
+// `@nodefault` means, so it is marked by node rather than by anything in
+// scope: a scope marker is inherited by every PTC started beneath it, and
+// by every alt nested in the block's branch bodies, none of which lose
+// their defaults.
+var callResponseAlts sync.Map // *syntax.AltStmt -> struct{}
+
+// defaultsSuppressed reports whether activated defaults take no part in
+// alt n: it is marked `@nodefault`, or it is a call response block.
+func defaultsSuppressed(n *syntax.AltStmt) bool {
+	if n == nil {
+		return false
+	}
+	if n.NoDefault != nil {
+		return true
+	}
+	_, ok := callResponseAlts.Load(n)
+	return ok
+}
+
 // defaultCall pairs an activated default's altstep invocation with the
 // scope it was activated in, which is where its timers resolve.
 type defaultCall struct {
@@ -3010,16 +3050,16 @@ type defaultCall struct {
 	scope runtime.Scope
 }
 
-// activatedDefaultCalls returns the currently activated defaults in a form
-// the alt deadline scanners can walk. Entries whose body is not an altstep
-// invocation are skipped rather than guessed at.
+// activatedDefaultCalls returns the defaults the current component
+// activated, in a form the alt deadline scanners can walk. Entries whose
+// body is not an altstep invocation are skipped rather than guessed at.
 func activatedDefaultCalls(env runtime.Scope) []defaultCall {
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil {
 		return nil
 	}
 	var out []defaultCall
-	for _, d := range exec.Defaults() {
+	for _, d := range exec.DefaultsOf(currentCompID(exec)) {
 		ast, ok := d.Body.(*astNode)
 		if !ok || ast == nil {
 			continue

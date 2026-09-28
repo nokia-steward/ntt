@@ -2,6 +2,7 @@ package interpreter_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -773,14 +774,46 @@ func TestBothClocks_DefaultReassertingVerdictIsDetected(t *testing.T) {
 	assertSameVerdictBothClocks(t, src, runtime.PassVerdict)
 }
 
-// TestBothClocks_DoneInValueContextReturnsBool covers `comp.done` used as a
-// VALUE rather than a statement. The blocking helper returned Undefined on
-// the scheduler path, which reads as false in `if (q.done)` — so the
-// virtual clock, the one the conformance corpus runs on, reported a
-// completed component as not done. No fixture catches it, because the
-// corpus does not use `.done` in a value context this way.
-func TestBothClocks_DoneInValueContextReturnsBool(t *testing.T) {
-	src := `module M {
+// TestBothClocks_DoneIsNotAValue covers `comp.done` / `comp.killed` outside
+// the two positions the grammar allows them — a statement and an alt guard
+// (ETSI ES 201 873-1 BNF 268/507). `if (q.done)` is not TTCN-3, and was
+// answered anyway: first by blocking and reading the result as false, then
+// as a boolean computed after blocking, which a scheduler deadlock release
+// could turn into `true` for a component still waiting on a port. It is now
+// an error on both clocks, naming the forms that do exist.
+func TestBothClocks_DoneIsNotAValue(t *testing.T) {
+	for _, expr := range []string{"q.done", "q.killed", "all component.done", "any component.killed"} {
+		t.Run(expr, func(t *testing.T) {
+			src := `module M {
+				type port P message { inout charstring }
+				type component C { port P p }
+				function waits() runs on C { p.receive; }
+				testcase tc() runs on C system C {
+					var C q := C.create;
+					connect(self:p, q:p);
+					q.start(waits());
+					if (` + expr + `) { setverdict(fail, "answered true"); }
+					else { setverdict(fail, "answered false"); }
+				}
+			}`
+			for _, k := range clocks {
+				v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", k.opts)
+				if err != nil {
+					t.Fatalf("%s: RunTestcaseWith: %v", k.name, err)
+				}
+				if v != runtime.ErrorVerdict || !strings.Contains(reason, "not a value") {
+					t.Fatalf("%s clock: verdict = %s (%s), want error naming the construct", k.name, v, reason)
+				}
+			}
+		})
+	}
+}
+
+// TestBothClocks_DoneSnapshotSeesCompletedPTC is the legal form of a
+// non-blocking `.done` check: an alt guard with an `[else]`. A component
+// that has finished must be seen as done on both clocks.
+func TestBothClocks_DoneSnapshotSeesCompletedPTC(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
 		type component C { timer tg }
 		type component W { }
 		function naps() runs on W { timer d := 0.4; d.start; d.timeout; }
@@ -789,11 +822,21 @@ func TestBothClocks_DoneInValueContextReturnsBool(t *testing.T) {
 			q.start(naps());
 			tg.start(1.2);
 			tg.timeout;
-			if (q.done) { setverdict(pass, "done is true in a value context"); }
-			else { setverdict(fail, "done read as false/undefined in a value context"); }
+			alt {
+				[] q.done { setverdict(pass); }
+				[else] { setverdict(fail, "a finished component was not seen as done"); }
+			}
 		}
-	}`
-	assertSameVerdictBothClocks(t, src, runtime.PassVerdict)
+	}`, runtime.PassVerdict)
+}
+
+// clocks are the two execution modes every two-clock test runs under.
+var clocks = []struct {
+	name string
+	opts interpreter.TestcaseOptions
+}{
+	{"virtual", interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true}},
+	{"live", interpreter.TestcaseOptions{}},
 }
 
 // assertSameVerdictBothClocks runs one source under the virtual and real
@@ -801,13 +844,7 @@ func TestBothClocks_DoneInValueContextReturnsBool(t *testing.T) {
 // the point: these tests exist because the two clocks disagreed.
 func assertSameVerdictBothClocks(t *testing.T, src string, want runtime.Verdict) {
 	t.Helper()
-	for _, k := range []struct {
-		name string
-		opts interpreter.TestcaseOptions
-	}{
-		{"virtual", interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true}},
-		{"live", interpreter.TestcaseOptions{}},
-	} {
+	for _, k := range clocks {
 		v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", k.opts)
 		if err != nil {
 			t.Fatalf("%s: RunTestcaseWith: %v", k.name, err)
@@ -932,6 +969,239 @@ func TestBothClocks_NoDefaultsInsideCallBlock(t *testing.T) {
 				[] p.getreply(S:?) { setverdict(pass, "reply received, default stayed inactive"); }
 				[] p.catch(timeout) { setverdict(fail, "call timed out"); }
 			}
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_ExpiredDefaultTimerDoesNotStallTheAlt covers a default
+// whose timer has expired but which does not take it — its guard is false,
+// or the alt is `@nodefault`. The alt must keep waiting on its own guards.
+//
+// Letting default timers bound the alt's wait (ETSI 20.5.1, so a timer-only
+// default can fire) first counted every running default timer, expired or
+// not. The alt then parked until a deadline already in the past, woke at
+// once to the same state, and did it again: the virtual clock never moved,
+// a core spun, and the testcase ended with no verdict after seconds.
+func TestBothClocks_ExpiredDefaultTimerDoesNotStallTheAlt(t *testing.T) {
+	t.Run("guard false", func(t *testing.T) {
+		assertSameVerdictBothClocks(t, `module M {
+			type port P message { inout charstring }
+			type component C { port P m; timer tsafe := 0.1; var boolean armed := false }
+			altstep guarded() runs on C {
+				[armed] tsafe.timeout { setverdict(fail, "a false guard fired"); }
+			}
+			testcase tc() runs on C system C {
+				connect(self:m, self:m);
+				var default d := activate(guarded());
+				tsafe.start;
+				timer tlong := 0.5; tlong.start;
+				alt {
+					[] m.receive("never") {}
+					[] tlong.timeout { setverdict(pass); }
+				}
+			}
+		}`, runtime.PassVerdict)
+	})
+	t.Run("nodefault alt", func(t *testing.T) {
+		assertSameVerdictBothClocks(t, `module M {
+			type port P message { inout charstring }
+			type component C { port P m; timer tsafe := 0.1 }
+			altstep safety() runs on C {
+				[] tsafe.timeout { setverdict(fail, "a default fired in a @nodefault alt"); }
+			}
+			testcase tc() runs on C system C {
+				connect(self:m, self:m);
+				var default d := activate(safety());
+				tsafe.start;
+				timer tlong := 0.5; tlong.start;
+				alt @nodefault {
+					[] m.receive("never") {}
+					[] tlong.timeout { setverdict(pass); }
+				}
+			}
+		}`, runtime.PassVerdict)
+	})
+}
+
+// TestBothClocks_CallBlockKeepsOtherComponentsDefaults covers the reach of
+// ETSI 22.3.1. A call's response block runs without active defaults, and
+// only that block: a PTC started earlier keeps its own defaults while the
+// MTC waits for a reply.
+//
+// The rule was first keyed on the call signature being set in scope. A
+// PTC's scope inherits from the scope that started it, so every PTC saw the
+// MTC's in-flight call and lost its defaults for as long as the call ran.
+func TestBothClocks_CallBlockKeepsOtherComponentsDefaults(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		type port P message { inout charstring }
+		signature S();
+		type port SP procedure { inout S }
+		type component E { port P m; port SP sp }
+		altstep poked() runs on E { [] m.receive("poke") { m.send("fired"); } }
+		function ptc() runs on E {
+			var default d := activate(poked());
+			timer t := 0.5; t.start;
+			alt {
+				[] m.receive("never") {}
+				[] t.timeout { setverdict(fail, "the PTC's default was suppressed"); }
+			}
+		}
+		testcase tc() runs on E system E {
+			var E c := E.create;
+			connect(c:m, self:m);
+			connect(self:sp, self:sp);
+			c.start(ptc());
+			m.send("poke");
+			sp.call(S:{}, 1.0) {
+				[] m.receive("fired") { setverdict(pass); }
+				[] sp.catch(timeout) { setverdict(fail, "no reply from the PTC's default"); }
+			}
+			c.done;
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_NestedAltInCallBlockKeepsDefaults covers the other edge
+// of 22.3.1: an alt statement inside a branch body of the response block is
+// an ordinary alt, and the activated defaults take part in it.
+func TestBothClocks_NestedAltInCallBlockKeepsDefaults(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		signature S();
+		type port P procedure { inout S }
+		type port Q message { inout charstring }
+		type component C { port P p; port Q m }
+		altstep poked() runs on C { [] m.receive("poke") { setverdict(pass); } }
+		function responder() runs on C { p.getcall(S:?); p.reply(S:{}); }
+		testcase tc() runs on C system C {
+			var C q := C.create;
+			connect(self:p, q:p);
+			connect(self:m, self:m);
+			q.start(responder());
+			var default d := activate(poked());
+			p.call(S:{}, 4.0) {
+				[] p.getreply(S:?) {
+					m.send("poke");
+					timer t2 := 0.5; t2.start;
+					alt {
+						[] m.receive("never") {}
+						[] t2.timeout { setverdict(fail, "the default was suppressed in a nested alt"); }
+					}
+				}
+				[] p.catch(timeout) { setverdict(fail, "call timed out"); }
+			}
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_AnyComponentDoneReturnsOnFirst covers `any component.done`
+// over PTCs that finish at different times: it is satisfied by the first to
+// finish (ETSI 21.3.7). The real-clock wait took the first unfinished PTC in
+// creation order and waited out that one alone, so with a slow PTC created
+// first it returned only when the slow one finished.
+func TestBothClocks_AnyComponentDoneReturnsOnFirst(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		type component W { }
+		function naps(float d) runs on W { timer t := d; t.start; t.timeout; }
+		testcase tc() runs on W system W {
+			var W slow := W.create;
+			var W quick := W.create;
+			slow.start(naps(1.5));
+			quick.start(naps(0.1));
+			timer g := 0.8; g.start;
+			any component.done;
+			if (g.running) { setverdict(pass); }
+			else { setverdict(fail, "any component.done waited for the slower PTC"); }
+			all component.done;
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_AggregateTimeoutLetsEarlierEventsHappen covers a
+// standalone `any timer.timeout` while another component has something due
+// sooner. Blocking must let that happen first (ETSI 23.7), as the named
+// `T.timeout` does. Under the scheduler the aggregate form jumped the
+// virtual clock to its own deadline instead of parking, and with a forked
+// PTC live it then also slept the whole duration in real time.
+func TestBothClocks_AggregateTimeoutLetsEarlierEventsHappen(t *testing.T) {
+	src := `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		function early() runs on C { timer d := 0.2; d.start; d.timeout; p.send("early"); }
+		testcase tc() runs on C system C {
+			var C q := C.create;
+			connect(self:p, q:p);
+			q.start(early());
+			timer a := 2.0; a.start;
+			any timer.timeout;
+			alt {
+				[] p.receive("early") { setverdict(pass); }
+				[else] { setverdict(fail, "the PTC's earlier send had not happened"); }
+			}
+			q.done;
+		}
+	}`
+	assertSameVerdictBothClocks(t, src, runtime.PassVerdict)
+	start := time.Now()
+	if v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", clocks[0].opts); err != nil || v != runtime.PassVerdict {
+		t.Fatalf("virtual clock: verdict = %s (%s), err %v", v, reason, err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("virtual clock took %v for a 2s timer; it must not sleep in real time", elapsed)
+	}
+}
+
+// TestBothClocks_DefaultsBelongToTheirComponent covers ETSI 20.5: a default
+// is activated by, and belongs to, one component. The defaults were one
+// list per testcase, so a component's alt could invoke another component's
+// default. Once timer-only defaults were no longer skipped, the MTC's
+// safety-net timer ended a PTC's alt and consumed the MTC's timer.
+func TestBothClocks_DefaultsBelongToTheirComponent(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		type port P message { inout charstring }
+		type component C { port P m; timer tg := 0.1 }
+		altstep mtcSafety() runs on C { [] tg.timeout { log("MTC safety net"); } }
+		function ptc() runs on C {
+			timer t := 0.5; t.start;
+			alt {
+				[] m.receive("never") {}
+				[] t.timeout { setverdict(pass); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C c := C.create;
+			connect(c:m, self:m);
+			var default d := activate(mtcSafety());
+			tg.start;
+			c.start(ptc());
+			c.done;
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_DeactivateClearsOnlyOwnDefaults covers the bare
+// `deactivate;`, which deactivates all defaults "of the test component"
+// executing it (ETSI 20.5.3). It cleared every component's.
+func TestBothClocks_DeactivateClearsOnlyOwnDefaults(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		type port P message { inout charstring }
+		type component C { port P m }
+		altstep ptcDefault() runs on C { [] m.receive("x") { setverdict(pass); } }
+		function ptc() runs on C {
+			var default d := activate(ptcDefault());
+			timer t := 0.5; t.start;
+			alt {
+				[] m.receive("never") {}
+				[] t.timeout { setverdict(fail, "the MTC's deactivate cleared the PTC's default"); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C c := C.create;
+			connect(c:m, self:m);
+			c.start(ptc());
+			timer w := 0.1; w.start; w.timeout;
+			deactivate;
+			m.send("x");
+			c.done;
 		}
 	}`, runtime.PassVerdict)
 }

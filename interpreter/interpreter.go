@@ -199,7 +199,10 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			defer restoreCallTimeout()
 		}
 		if n.Body != nil {
-			return evalAltStmtStrict(&syntax.AltStmt{Body: n.Body}, env)
+			alt := &syntax.AltStmt{Body: n.Body}
+			callResponseAlts.Store(alt, struct{}{})
+			defer callResponseAlts.Delete(alt)
+			return evalAltStmtStrict(alt, env)
 		}
 		return nil
 
@@ -458,7 +461,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// default of the running test component (ETSI 20.5.3).
 		if name == "deactivate" {
 			if exec := runtime.FindTestcaseExec(env); exec != nil {
-				exec.ClearDefaults()
+				exec.ClearDefaultsOf(currentCompID(exec))
 			}
 			return runtime.Undefined
 		}
@@ -547,6 +550,10 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		if id, ok := n.X.(*syntax.Ident); ok {
 			switch id.String() {
 			case "all component", "any component":
+				if op := strings.ToLower(syntax.Name(n.Sel)); (op == "done" || op == "killed") &&
+					!altCtx.active() && !isCompStateStmt(n) {
+					return compStateNotAValue(op)
+				}
 				if v, ok := evalComponentQuery(id.String(), n.Sel, env); ok {
 					return v
 				}
@@ -766,25 +773,25 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				return runtime.NewBool(compAlive(ref, env))
 			case "running":
 				return runtime.NewBool(compRunning(ref, env))
-			case "done":
-				// Standalone `comp.done` is blocking (§21.3.7) on EITHER
-				// clock. Under the cooperative scheduler it parks so the
-				// target PTC is granted the token; on the real clock it
-				// waits on the PTC's exit. This used to be gated on the
-				// scheduler, so a live run answered a snapshot: the MTC ran
-				// on, the testcase ended, and teardown stopped a PTC that
-				// had not finished — losing any verdict it had not yet set.
-				// Inside an alt guard it stays a non-blocking snapshot
-				// check on both clocks (the alt owns the blocking).
-				if !altCtx.active() {
-					return blockUntilComponentState(ref, "done", env)
+			case "done", "killed":
+				// `comp.done` / `comp.killed` is either an alt guard or a
+				// statement; the grammar has no expression form (ETSI
+				// ES 201 873-1 BNF 268/507). Inside an alt guard it is a
+				// non-blocking snapshot on both clocks (the alt owns the
+				// blocking). As a statement it blocks (§21.3.7/§21.3.8) on
+				// EITHER clock: under the cooperative scheduler it parks so
+				// the target PTC is granted the token; on the real clock it
+				// waits on the PTC's exit. Gating the block on the scheduler
+				// let a live run answer a snapshot: the MTC ran on, and
+				// teardown stopped a PTC that had not set its verdict yet.
+				op := strings.ToLower(syntax.Name(n.Sel))
+				if altCtx.active() {
+					return runtime.NewBool(componentStatePredicate(op)(ref, env))
 				}
-				return runtime.NewBool(compDone(ref, env))
-			case "killed":
-				if !altCtx.active() {
-					return blockUntilComponentState(ref, "killed", env)
+				if isCompStateStmt(n) {
+					return blockUntilComponentState(ref, op, env)
 				}
-				return runtime.NewBool(compKilled(ref, env))
+				return compStateNotAValue(op)
 			case "create":
 				return newComponentRef(ref.TypeName, "", env)
 			case "stop", "kill":
@@ -1243,6 +1250,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				}
 			}
 			return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
+		}
+		if sel, ok := n.Expr.(*syntax.SelectorExpr); ok && isCompStateOp(sel) {
+			return evalCompStateStmt(sel, env)
 		}
 		return eval(n.Expr, env)
 
@@ -9162,7 +9172,7 @@ func evalActivate(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	// scope that shadows it, so a subsequent change to that variable
 	// is not seen when the default fires (Sem_200502_002/004).
 	defEnv := snapshotActivateArgs(callExpr, env)
-	id := exec.AddDefault(runtime.Default{Body: &astNode{n: callExpr}, Env: defEnv})
+	id := exec.AddDefault(runtime.Default{Body: &astNode{n: callExpr}, Env: defEnv, Owner: currentCompID(exec)})
 	return runtime.NewInt(id)
 }
 
@@ -9241,18 +9251,13 @@ func runDefaults(env runtime.Scope) (runtime.Object, bool) {
 	if defaultCtx.active() {
 		return nil, false
 	}
-	// ETSI 22.3.1: the response and exception handling part of a `call`
-	// operation "is executed like an alt statement without any active
-	// default", so an activated default must not fire inside it
-	// (Sem_220301_CallOperation_008). The engine never implemented this;
-	// it went unnoticed because the only fixture covering it uses a
-	// timer-only default, which a separate skip happened to suppress.
-	if currentCallSignature(env) != "" {
-		return nil, false
-	}
 	defaultCtx.enter()
 	defer defaultCtx.leave()
-	defs := exec.Defaults()
+	// Only the defaults this component activated (ETSI 20.5). The list is
+	// per testcase, so without the filter one component's defaults ran in
+	// another's alts — once timer-only defaults stopped being skipped, an
+	// MTC's safety-net timer could end a PTC's alt and consume the timer.
+	defs := exec.DefaultsOf(currentCompID(exec))
 	pre := exec.GetVerdict()
 	for i := len(defs) - 1; i >= 0; i-- {
 		d := defs[i]
@@ -9927,12 +9932,21 @@ func portExprName(e syntax.Expr, env runtime.Scope) (string, bool) {
 // broadcast-to-all-peers routing of a plain `p.call` (ETSI 22.3.1). Each
 // target's connected peer endpoint is resolved through the connect graph so a
 // differently-named peer port still routes. Falls back to the default
-// broadcast when the target set can't be resolved. Strict-only (the caller
-// gates it on the scheduler).
+// broadcast when the target set can't be resolved.
 func evalProcedureCallTo(port string, call *syntax.CallExpr, toExpr syntax.Expr, env runtime.Scope) runtime.Object {
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil || call == nil {
 		return runtime.Undefined
+	}
+	// A port bound to a driver is mapped to the system: its `to` address
+	// names something on the far side of the driver's transport, not a
+	// component, so the call goes to the driver exactly as an unaddressed
+	// one does. Routing it among components instead delivered it nowhere —
+	// the SUT never saw the call and nothing reported it.
+	if drv := exec.PortDriver(exec.PortKey(port)); drv != nil {
+		if _, ok := drv.(runtime.PortCaller); ok {
+			return evalProcedurePortOp("call", port, call, env)
+		}
 	}
 	var params runtime.Object
 	var sig string
@@ -11920,11 +11934,29 @@ func timerAggregateBlockingTimeout(timers []*runtime.TimerHandle, anyKind bool, 
 	if target == nil {
 		return runtime.NewBool(false)
 	}
-	if exec := runtime.FindTestcaseExec(env); exec != nil && target.Duration > 0 {
-		exec.AdvanceVirtualClock(target.StartedAtVirtual + target.Duration)
-	}
-	if !deterministicClockEnabled(env) {
-		waitForTimerTimeout(target, env)
+	exec := runtime.FindTestcaseExec(env)
+	if exec != nil && target.Duration > 0 && deterministicSchedulerEnabled(env) {
+		// Under the quiescence scheduler, park until the virtual clock
+		// reaches the deadline, exactly as the named `T.timeout` does, so
+		// an earlier event or timer in another component happens first.
+		// Advancing the clock here instead jumped time forward while
+		// holding the runner token, and with a forked PTC live it then
+		// slept the full duration in real time.
+		deadline := target.StartedAtVirtual + target.Duration
+		stop := currentStopChan(exec)
+		for exec.VirtualClock() < deadline {
+			re, stopped := exec.SchedPark(currentCompID(exec), deadline, true, stop)
+			if stopped || !re {
+				break
+			}
+		}
+	} else {
+		if exec != nil && target.Duration > 0 {
+			exec.AdvanceVirtualClock(target.StartedAtVirtual + target.Duration)
+		}
+		if !deterministicClockEnabled(env) {
+			waitForTimerTimeout(target, env)
+		}
 	}
 	if anyKind {
 		target.Ticks = target.MaxTicks

@@ -3,6 +3,7 @@ package goport_test
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/nokia/ntt/interpreter"
@@ -192,6 +193,48 @@ func TestGoPort_ProcedureCall(t *testing.T) {
 	}`)
 	if v != runtime.PassVerdict {
 		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+}
+
+// countingCallPort counts the procedure calls that reach it.
+type countingCallPort struct {
+	api.Base
+	calls *atomic.Int32
+}
+
+func (p countingCallPort) Call(_ context.Context, _ *port.Envelope) error {
+	p.calls.Add(1)
+	return nil
+}
+
+// TestGoPort_ProcedureCallToAddressReachesDriver covers `p.call(...) to
+// <address>` on a port mapped to the system. The address names something
+// behind the driver's transport, so the call must reach the driver just as
+// an unaddressed call does. Routing `to` among components for every port
+// once sent it nowhere: the driver was never called and the verdict stayed
+// pass.
+func TestGoPort_ProcedureCallToAddressReachesDriver(t *testing.T) {
+	var calls atomic.Int32
+	goport.Register("P", func(string) api.TestPort { return countingCallPort{calls: &calls} })
+	t.Cleanup(goport.Reset)
+
+	v, reason := run(t, "M.tc", `module M {
+		type charstring address;
+		signature S() noblock;
+		type port P procedure { out S }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			var address v_addr := "sut-1";
+			map(self:p, system:p);
+			p.call(S:{}) to v_addr;
+			setverdict(pass);
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("driver saw %d calls, want 1: an addressed call must still reach the system", n)
 	}
 }
 

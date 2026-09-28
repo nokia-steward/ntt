@@ -16,6 +16,9 @@ package interpreter
 // still running) without a full virtual-time scheduler.
 
 import (
+	"reflect"
+	"strings"
+	"sync"
 	"time"
 
 	"github.com/nokia/ntt/runtime"
@@ -179,6 +182,56 @@ func componentCompleted(ref *runtime.ComponentRef, env runtime.Scope) bool {
 	return elapsed >= time.Duration(ref.ModeledDuration*float64(time.Second))
 }
 
+// compStateStmt holds, per goroutine, the `.done` / `.killed` selector
+// currently being evaluated as a statement. The selector's evaluator cannot
+// see its own syntactic position, and the position decides the semantics:
+// a statement blocks, an alt guard is a snapshot, and anywhere else the
+// construct is not TTCN-3 at all. The node itself is recorded, not a flag,
+// so the marker cannot reach a different selector evaluated beneath it.
+var compStateStmt sync.Map // map[uint64]*syntax.SelectorExpr
+
+// isCompStateOp reports whether sel is a `.done` or `.killed` operation.
+func isCompStateOp(sel *syntax.SelectorExpr) bool {
+	switch strings.ToLower(syntax.Name(sel.Sel)) {
+	case "done", "killed":
+		return true
+	}
+	return false
+}
+
+// evalCompStateStmt evaluates sel as the statement it appears as.
+func evalCompStateStmt(sel *syntax.SelectorExpr, env runtime.Scope) runtime.Object {
+	gid := goroutineID()
+	prev, had := compStateStmt.Load(gid)
+	compStateStmt.Store(gid, sel)
+	defer func() {
+		if had {
+			compStateStmt.Store(gid, prev)
+		} else {
+			compStateStmt.Delete(gid)
+		}
+	}()
+	return eval(sel, env)
+}
+
+// isCompStateStmt reports whether sel is the selector being evaluated as a
+// statement on this goroutine.
+func isCompStateStmt(sel *syntax.SelectorExpr) bool {
+	v, ok := compStateStmt.Load(goroutineID())
+	return ok && v.(*syntax.SelectorExpr) == sel
+}
+
+// compStateNotAValue is the error for `.done` / `.killed` used as a value,
+// e.g. `if (c.done)`. It used to be answered — first by blocking and reading
+// the result as false, later as a boolean computed after blocking, which a
+// scheduler deadlock release could turn into `true` for a component still
+// running. Neither answer is TTCN-3's, because the construct is not.
+func compStateNotAValue(op string) runtime.Object {
+	return runtime.Errorf("`.%s` is a statement or an alt guard, not a value (ETSI ES 201 873-1, "+
+		"BNF 268/507); test a component's state in an expression with `.running` or `.alive`, "+
+		"or check without blocking with `alt { [] c.%s {...} [else] {...} }`", op, op)
+}
+
 // blockUntilComponentState blocks the running participant until `ref`
 // reaches the done / killed state (ETSI ES 201 873-1 §21.3.7/21.3.8: the
 // standalone `comp.done` / `comp.killed` statements are blocking). Under
@@ -200,10 +253,7 @@ func blockUntilComponentState(ref *runtime.ComponentRef, op string, env runtime.
 	}
 	stop := currentStopChan(exec)
 	if !exec.SchedulerActive() {
-		// Real clock. Returns the predicate rather than Undefined: with the
-		// scheduler off this path also serves value contexts such as
-		// `if (p.done)`, which previously got a plain non-blocking bool.
-		// Blocking must not cost them their value.
+		// Real clock: wait on the PTC's exit.
 		waitPTCDoneRealClock(exec, []*runtime.ComponentRef{ref},
 			func() bool { return pred(ref, env) }, stop, env, pred)
 		return runtime.NewBool(pred(ref, env))
@@ -383,62 +433,73 @@ func componentStatePredicate(op string) func(*runtime.ComponentRef, runtime.Scop
 // PTC's `setverdict(fail)` was never reached and the testcase reported a
 // pass nothing had earned.
 //
-// It waits on the real event (each forked PTC closes DoneChan on exit) and
-// aborts on the waiter's own stop signal or on the testcase being stopped.
-// A ref with no registered exit cannot be waited on — never started, or
-// already reaped — so it gives up rather than hang, leaving the previous
-// non-blocking answer for that case.
+// Each pass waits on everything that could change the answer, for every
+// ref not yet in the state, and then re-checks the whole predicate — so
+// `any component.done` returns when the FIRST of them finishes, and `all`
+// when the last does. What a ref contributes depends on how it runs:
+//   - a forked PTC: its exit (DoneChan closes when the goroutine ends);
+//   - a modelled PTC (not forked): the real time left until its modelled
+//     completion, which the virtual clock would advance to;
+//   - a PTC that has exited but is not in the state — an `alive` one whose
+//     behaviour ended is done but not killed: nothing announces a later
+//     kill, so a slow poll rather than a spin on the closed channel.
+//
+// A ref that contributes nothing (never forked, nothing modelled) cannot
+// change, so it does not stop the wait on the others; only when no ref
+// contributes anything does the wait give up and leave the caller the
+// non-blocking answer rather than hang. The waiter's own stop signal and
+// the testcase being stopped abort it.
 func waitPTCDoneRealClock(exec *runtime.TestcaseExec, refs []*runtime.ComponentRef,
 	done func() bool, stop <-chan struct{}, env runtime.Scope,
 	pred func(*runtime.ComponentRef, runtime.Scope) bool) {
 
 	for !done() {
-		var wait <-chan struct{}
+		cases := []reflect.SelectCase{
+			{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(stop)},
+			{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(exec.StopChan())},
+		}
+		const aborts = 2
+		var soonest time.Duration
 		for _, r := range refs {
 			if r == nil || pred(r, env) {
 				continue
 			}
-			exit := exec.PTCExit(r.ID)
-			if exit == nil {
-				// No goroutine to wait on: this PTC was not forked, so its
-				// completion is MODELLED from its body's duration. The
-				// cooperative scheduler parks and advances the virtual clock
-				// to that deadline; on the real clock the equivalent is to
-				// wait out the remaining real time, otherwise `.done`
-				// answers "not done" for a component the other clock
-				// reports as finished.
-				if d := modelledRemaining(r); d > 0 {
-					t := time.NewTimer(d)
-					select {
-					case <-t.C:
-					case <-stop:
-						t.Stop()
-						return
-					case <-exec.StopChan():
-						t.Stop()
-						return
+			if exit := exec.PTCExit(r.ID); exit != nil {
+				select {
+				case <-exit.DoneChan:
+					if soonest == 0 || realClockStatePoll < soonest {
+						soonest = realClockStatePoll
 					}
-					continue
+				default:
+					cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(exit.DoneChan)})
 				}
-				// Nothing to wait on and nothing modelled: leave the
-				// caller with the non-blocking answer rather than hang.
-				return
+				continue
 			}
-			wait = exit.DoneChan
-			break
+			if d := modelledRemaining(r); d > 0 && (soonest == 0 || d < soonest) {
+				soonest = d
+			}
 		}
-		if wait == nil {
+		var t *time.Timer
+		if soonest > 0 {
+			t = time.NewTimer(soonest)
+			cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(t.C)})
+		}
+		if len(cases) == aborts {
 			return
 		}
-		select {
-		case <-wait:
-		case <-stop:
-			return
-		case <-exec.StopChan():
+		chosen, _, _ := reflect.Select(cases)
+		if t != nil {
+			t.Stop()
+		}
+		if chosen < aborts {
 			return
 		}
 	}
 }
+
+// realClockStatePoll is how often waitPTCDoneRealClock re-checks a PTC
+// whose state can change without any event to wait on.
+const realClockStatePoll = 5 * time.Millisecond
 
 // modelledRemaining reports how much real time is left before a PTC whose
 // body was modelled rather than forked is considered complete, or 0 when
