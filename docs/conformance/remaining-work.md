@@ -195,7 +195,7 @@ worse than a red one.
 
 ### Newly found, not yet fixed
 
-- **An injected message never reaches a driver-bound PTC.** The path a real
+- *Fixed 2026-08-18.* **An injected message never reaches a driver-bound PTC.** The path a real
   C/C++ test port uses. Diagnosed precisely: the daemon body runs, the
   message lands in the queue under exactly the key its receive reads, it is
   still there unconsumed at the end, the alt re-polls every 2ms for the
@@ -219,7 +219,8 @@ worse than a red one.
 - **Timer-only PTC bodies still do not run.** Dropping `timeout` from the
   skip predicate is now possible in principle (the virtual clock removed
   the original excuse) but measured **-7 / +0**, so it is out. Reverted
-  rather than absorbed.
+  rather than absorbed. Re-measured 2026-09-28 as **-4 / +5**, with the
+  cause of most of the -4 identified; see §1s.
 
 ## The executed-but-wrong slice (2026-08-04)
 
@@ -322,6 +323,84 @@ contradictory/runtime clusters alone. See buckets + slice notes below.
 These are worth doing; each is a multi-hour focused slice with real
 regression risk on a load-bearing path. Listed by ROI.
 
+### 1s. Regressions in §1t–§1y, T1 and T2, found by review — FIXED 2026-09-28
+
+A double-check of the commits from §1x to T2 found that several
+of them broke things on the **default** clock, the one the corpus runs on.
+The gate stayed at 0/0 throughout because no fixture has these shapes. Two
+methods found them: probing the shapes *next to* each fix's motivating case,
+and an independent review of the diff aimed at breaking it rather than
+confirming it.
+Every item below was reproduced against a binary built before the change and
+one built after, and has a test that fails when the fix is reverted.
+
+Regressions, fixed:
+
+- **Expired default timers livelocked the virtual clock** (T2). The alt
+  deadline scan counted a default timer that had already expired but that
+  the default did not take (a false guard, an `@nodefault` alt, an altstep
+  that resolves the timer elsewhere). The alt parked until a deadline in the
+  past, woke at once to the same state, and repeated while holding the
+  runner token: a core pegged for seconds, verdict `none`, where it had been
+  an instant pass. The defaults are consulted before the alt blocks, so an
+  expired default timer has had its chance; only future default deadlines
+  count now. `TestBothClocks_ExpiredDefaultTimerDoesNotStallTheAlt`.
+- **ETSI 22.3.1 reached too far** (T2): a PTC lost its defaults while the
+  MTC was in a call block, and so did an alt nested in a branch body.
+  `TestBothClocks_CallBlockKeepsOtherComponentsDefaults`,
+  `TestBothClocks_NestedAltInCallBlockKeepsDefaults`.
+- **`if (c.done)` said `true` for a running component** (§1u). Now an error;
+  see the correction under §1u. `TestBothClocks_DoneIsNotAValue`.
+- **`p.call(...) to <address>` never reached the port driver** (§1v). On a
+  port mapped to the system the address names something behind the
+  driver's transport; the call is sent to the driver again, as an unaddressed
+  one is. `TestGoPort_ProcedureCallToAddressReachesDriver`.
+- **The real-clock `.done` / `.killed` wait** (§1y, §1t) took the first
+  unfinished PTC and waited on it alone, so `any component.done` returned
+  when the *slowest* PTC finished; it busy-spun on `.killed` of an `alive`
+  PTC whose behaviour had ended; and it gave up on every PTC as soon as one
+  had nothing to wait on, which could lose the others' verdicts. It now
+  waits on all of them at once and re-checks.
+  `TestBothClocks_AnyComponentDoneReturnsOnFirst`,
+  `TestLiveClock_KilledOnExitedAliveComponentDoesNotSpin`.
+- **A standalone `any timer.timeout` jumped the virtual clock** (T1)
+  instead of parking as `T.timeout` does, so another component's earlier
+  event happened late, and with a forked PTC live it slept in real time.
+  `TestBothClocks_AggregateTimeoutLetsEarlierEventsHappen`.
+- **Defaults were per testcase, not per component** (made visible by T2).
+  One component's alt could invoke another's default — the MTC's safety-net
+  timer ended a PTC's alt — and a bare `deactivate;` cleared every
+  component's (ETSI 20.5, 20.5.3). A default now records its owner.
+  `TestBothClocks_DefaultsBelongToTheirComponent`,
+  `TestBothClocks_DeactivateClearsOnlyOwnDefaults`.
+
+Per-file against all 4948: 0 gained, 0 lost, 4754 unchanged. `go test
+-race ./...` green.
+
+**Found along the way, older than this work, not fixed:**
+
+- **A PTC body with a timer and no port communication never runs**, on
+  either clock: `startBodyShouldSkip` treats any `.timeout` as a reason to
+  skip the whole body and model only its duration, so a `setverdict(fail)`
+  in it — even one before the timer — is lost and the testcase reports
+  `pass`. Running such bodies on the scheduler now measures **-4 / +5**
+  (it was -7 / +0 in August). Three of the four are the next item, and the
+  fourth came from also forking `while (true) {}`, which a real change
+  would not do.
+- **A forked non-alive PTC is done but never killed** on the virtual clock:
+  `compKilled` ignores `IsDone`. ETSI 21.3.8; `--live` is right.
+- **A two-way handshake ends in `none` on the virtual clock** — PTC sends,
+  MTC receives and replies, PTC receives — with no defaults involved.
+- **Under `--live`, the snapshot guard `c.done` is true for a PTC still
+  blocked on a port.**
+- **`c.done -> value v;` as a statement does not block.**
+- **An inline `[false] T.timeout` guard livelocks the scheduler** the same
+  way expired default timers did; the fix above was kept to defaults.
+- **Restarting a stopped `alive` component** gives `none` on the virtual
+  clock and `pass` under `--live` (see "Newly found").
+- **The call signature still leaks into PTCs** for the unqualified
+  `getreply` / `catch` rule (22.3.1 h), which reads it from scope.
+
 ### 1y. `comp.done` does not block on the real clock — FIXED 2026-09-14
 
 Found 2026-09-09 by a Windows CI failure in a test of the built-in TCP port,
@@ -379,6 +458,11 @@ value contexts such as `if (p.done)` that previously got a plain
 non-blocking bool, and returning `Undefined` broke
 `TestStrictComp_ModeledDoneUsesVirtualClock`. Blocking must not cost those
 contexts their value.
+
+*Superseded 2026-09-28 (§1s).* There are no such contexts: the grammar has
+`.done` only as a statement and as an alt guard (ES 201 873-1 BNF 268/507),
+so `if (p.done)` is not TTCN-3. It is now an error, and the test above uses
+the legal non-blocking form, `alt { [] p.done {…} [else] {…} }`.
 
 Verified by `TestLiveClock_DoneBlocksAndPreservesPTCVerdict`, which runs one
 source under both clocks and requires the PTC's `fail` to survive in both.
@@ -559,6 +643,15 @@ Both fixed; `TestBothClocks_DefaultReassertingVerdictIsDetected` and
 clocks and require the same verdict. Reverting either fix fails its test,
 on the clock it belongs to. Gate unchanged: 4754, exit 0.
 
+*Correction 2026-09-28 (§1s): Divergence 2 was misdiagnosed and its fix
+made things worse.* The answer was wrong, but so was the question: `.done`
+has no value form. The fix returned the predicate after blocking, and a
+value context has nothing to block for — with the PTC waiting on a port,
+the scheduler's deadlock release decided the answer, and `if (q.done)` said
+`true` for a component still running (it had said `false`, correctly by
+accident). The test only covered a PTC that had already finished. A value
+context is now an error; the test is `TestBothClocks_DoneIsNotAValue`.
+
 ### T2. Timer-only defaults never fire — FIXED 2026-09-22
 
 `invokeDefaults` skipped any activated default whose only alternative was a
@@ -603,6 +696,15 @@ that rule as a regression rather than causing one.
 (`currentCallSignature(env) != ""`), and the deadline scanners skip
 defaults there too, since parking on a deadline that cannot fire would hang
 the block until its own call timeout.
+
+*Superseded 2026-09-28 (§1s).* Both halves of this change regressed the
+default clock in shapes no fixture has. The call signature is a scope
+marker, inherited by every PTC started beneath the call and by every alt
+nested in the block's branch bodies, so those lost their defaults too. The
+response block is now marked by node, as the synthetic alt it is evaluated
+as, and treated exactly like `@nodefault`. Separately, the scanners counted
+default timers that had already expired; see §1s for the livelock that
+caused.
 
 **Verification.** Per-file diff against all 4948: 0 gained, 0 lost, 4754
 unchanged, gate exit 0. The probe fires on **both** clocks. Every two-clock
@@ -993,11 +1095,12 @@ What remains:
    bodies now run; what still fails is a client/server pair completing a
    call/reply, which is matching and routing. This is the largest single
    block of honest misses in the suite and the highest-value item here.
-3. **The three newly-found defects** under "The correction", each with a
-   tripwire test carrying its diagnosis: the injected message that never
-   reaches a driver-bound PTC (user-facing, the C/C++ test-port path, so
-   arguably ahead of item 2), the stopped `alive` component that cannot be
-   restarted, and interleave not suspending a blocked branch.
+3. **The newly-found defects** under "The correction", each with a
+   tripwire test carrying its diagnosis: the stopped `alive` component that
+   cannot be restarted, and interleave not suspending a blocked branch. (The
+   injected message that never reached a driver-bound PTC was fixed on
+   2026-08-18.) §1s adds eight more, the first two of which — timer-only PTC
+   bodies and `compKilled` — are one change that closes a false `pass`.
 4. **Bucket 3 clusters**, one precise, narrowly-scoped analysis pass at a
    time. 102 of the 178 real misses expect `reject`, so the remaining
    match-rate does live here — but see the 2026-06-17 triage above: none of

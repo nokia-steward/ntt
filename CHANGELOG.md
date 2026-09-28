@@ -98,6 +98,18 @@ single functional test doubles as a performance probe. See
   instead of answering a non-blocking snapshot, so a forked PTC's body
   actually runs and its verdict is recorded — a failing PTC can no longer
   leave the testcase `pass`.
+- **`.done` / `.killed` used as a value is an error.** `if (c.done)`,
+  `x := c.killed` and the `all/any component` forms are not TTCN-3: the
+  grammar has these operations only as a statement and as an `alt` guard
+  (ES 201 873-1 BNF 268/507). They were answered anyway, and the answer
+  could be wrong — `false` for a finished component, and for a while `true`
+  for one still running. The error says what to use instead.
+  **Upgrade note:** write `c.running` / `c.alive` in an expression, or check
+  without blocking with `alt { [] c.done {...} [else] {...} }`.
+- **A default belongs to the component that activated it** (ETSI 20.5). The
+  activated defaults were one list per testcase, so one component's `alt`
+  could invoke another component's default, and a bare `deactivate;`
+  cleared every component's defaults rather than its own (20.5.3).
 - Conformance baseline moved **4747 → 4754 (96.53%)**, net **+7 with zero
   per-file regressions**. The baseline is a measurement, not a high-water
   mark; the `--regress` gate is the ratchet.
@@ -125,19 +137,18 @@ fail. That is the fix working, not a new defect.
   did not block, so the main component ran on and teardown stopped a PTC
   before it reached its `setverdict`. A testcase could report `pass` while
   the component it started would have reported `fail`.
-- **A PTC whose body waits on a timer now runs under `--live`.** Such
-  bodies were never started at all — not even statements before the timer
-  — and the testcase died on its own guard timer with no indication why.
-  "Wait, then act" is an ordinary shape for pacing a live SUT.
+- **A PTC whose body waits on a timer and also uses a port now runs under
+  `--live`.** Such bodies were never started at all — not even statements
+  before the timer — and the testcase died on its own guard timer with no
+  indication why. "Wait, then act" is an ordinary shape for pacing a live
+  SUT. A body that waits on a timer and uses *no* port is still not run, on
+  either clock; see Known issues.
 - **`comp.done` on a component whose body does no port communication waits
   for its modelled completion under `--live`**, rather than reporting it
   as unfinished while the virtual clock reports it as done.
 - **An activated default whose branch re-asserts an already-set verdict is
   detected under `--live`.** Only a verdict *change* was noticed there, so
   the `alt` never learned the default had fired and waited out its guard.
-- **`comp.done` used as a value** (`if (c.done)`) answers with a boolean
-  instead of an undefined value. This one affected the **default** clock,
-  the one the corpus runs on — no fixture uses `.done` that way.
 
 Independent of the two clocks:
 
@@ -149,7 +160,8 @@ Independent of the two clocks:
   hangs longer than N seconds, fail" safety net never fired, because an
   activated default's timer was invisible to the `alt`'s block step.
 - **Defaults are not invoked inside a `call` response block** (ETSI
-  22.3.1), which was never implemented.
+  22.3.1), which was never implemented. Only in that block: an `alt`
+  nested in one of its branches, and other components, keep their defaults.
 
 - An injected message now reaches a **driver-bound PTC** — an external test
   port's inbound traffic is delivered to a PTC's `receive`, not just the MTC's.
@@ -172,5 +184,20 @@ Independent of the two clocks:
   no default duration (invalid per ETSI 12). Every TTCN-3 snippet in the docs
   now passes `ntt check`, and the walkthrough was replayed verbatim to confirm
   its commands and output.
+
+### Known issues
+
+These are older than this release and are recorded, with their diagnosis,
+in [`docs/conformance/remaining-work.md`](docs/conformance/remaining-work.md)
+§1s. The first can report a `pass` nothing earned.
+
+- **A PTC body that waits on a timer and uses no port is not executed**, on
+  either clock. Its duration is modelled, so `.done` waits the right time,
+  but none of its statements run — a `setverdict(fail)` in it is lost.
+- On the default clock, a forked PTC that has finished is `done` but never
+  `killed`, and a two-way message handshake between the MTC and a PTC can
+  end with verdict `none`.
+- Under `--live`, the `alt` guard `c.done` can be true for a PTC that is
+  still blocked on a port.
 
 [0.24.0]: https://github.com/nokia/ntt/compare/v0.23.2...ntt-titan
