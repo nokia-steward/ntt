@@ -2,7 +2,11 @@
 // traversal.
 package syntax
 
-import "github.com/hashicorp/go-multierror"
+import (
+	"sync/atomic"
+
+	"github.com/hashicorp/go-multierror"
+)
 
 //go:generate go run ./internal/gen
 
@@ -53,13 +57,15 @@ type Root struct {
 	// Position() call. Most LSP traversals visit tokens in source
 	// order, so the next position lands either on the same line or
 	// shortly after - both cases short-circuit the binary search.
-	// Concurrent reads are tolerated because the cache only stores
-	// a hint; a stale read produces the correct answer via the
-	// fallback search below.
-	lineCacheLine int
-	lineCacheLo   int // first byte of the cached line
-	lineCacheHi   int // first byte of the next line (or len(src))
-	lineCacheOk   bool
+	//
+	// Only the line index is cached, plus one so that zero means
+	// empty; the line's byte range is read from lines, which does not
+	// change once scanning is done. One atomic word cannot be seen
+	// half-written. The cache used to be four fields written one after
+	// another, which a reader on another goroutine - a test component
+	// resolving a source position while another does the same - could
+	// see half-updated, and answer with the wrong line.
+	lineCache atomic.Int64
 }
 
 func (n *Root) Err() error {
@@ -85,8 +91,9 @@ func (n *Root) Position(offset int) Position {
 // happens when the LSP walks a tree from start to end) collapses to a
 // single bounds check on the cache.
 func (n *Root) searchLines(pos int) int {
-	if n.lineCacheOk && pos >= n.lineCacheLo && pos < n.lineCacheHi {
-		return n.lineCacheLine
+	if c := int(n.lineCache.Load()) - 1; c >= 0 && c < len(n.lines) && pos >= n.lines[c] &&
+		(c+1 == len(n.lines) || pos < n.lines[c+1]) {
+		return c
 	}
 
 	i, j := 0, len(n.lines)
@@ -101,17 +108,9 @@ func (n *Root) searchLines(pos int) int {
 	idx := i - 1
 
 	if idx >= 0 {
-		n.lineCacheLine = idx
-		n.lineCacheLo = n.lines[idx]
-		if idx+1 < len(n.lines) {
-			n.lineCacheHi = n.lines[idx+1]
-		} else {
-			// We don't know the buffer length here, but any
-			// position past the last newline still belongs to
-			// the last line. Mark hi as a sentinel.
-			n.lineCacheHi = 1 << 62
-		}
-		n.lineCacheOk = true
+		// Any position past the last newline still belongs to the last
+		// line, which the lookup above accepts without an upper bound.
+		n.lineCache.Store(int64(idx) + 1)
 	}
 	return idx
 }
