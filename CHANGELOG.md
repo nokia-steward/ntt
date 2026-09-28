@@ -21,6 +21,19 @@ single functional test doubles as a performance probe. See
 
 ### Added
 
+- **Structured test logging, as the TTCN-3 standard defines it** — `ntt exec
+  --log FILE` records every TTCN-3 operation of a run as an event of the
+  TCI-TL logging interface (ETSI ES 201 873-6, clause 7.3.4.1): messages
+  sent, arriving, received and failing to match (with the template), timers,
+  component lifecycle, port configuration, verdicts and alt steps, each with
+  a timestamp, the component and the source line. The file is the
+  standard's XML format (Annex B), or JSON Lines with `--log-format=jsonl`.
+  45 of the 125 operations are logged so far; procedure-based communication
+  and the control part are next. Logs validate against the Annex B schemas:
+  the whole conformance corpus was run with logging on, every event valid
+  and every verdict unchanged. The published schemas do not compile as
+  printed; the seven corrections needed are documented. See
+  [`docs/test-logging.md`](docs/test-logging.md).
 - **`ntt exec --live`** — run the strict engine on the real clock with real
   concurrency, so timers pace real I/O against a live SUT. The virtual-clock
   default (reproducible, deterministic) is unchanged; bound a live run with
@@ -146,6 +159,12 @@ fail. That is the fix working, not a new defect.
 - **`comp.done` on a component whose body does no port communication waits
   for its modelled completion under `--live`**, rather than reporting it
   as unfinished while the virtual clock reports it as done.
+- **A PTC that answers requests runs under `--live`.** A body such as
+  `alt { [] p.receive(req) { p.send(rsp) } }` was run inline on the MTC,
+  which then waited in the PTC's alt for the request it had not sent, and
+  the testcase ended with no verdict. A finished non-alive PTC is also now
+  `killed` as well as `done` on both clocks, so `c.killed` no longer waits
+  forever.
 - **An activated default whose branch re-asserts an already-set verdict is
   detected under `--live`.** Only a verdict *change* was noticed there, so
   the `alt` never learned the default had fired and waited out its guard.
@@ -162,6 +181,9 @@ Independent of the two clocks:
 - **Defaults are not invoked inside a `call` response block** (ETSI
   22.3.1), which was never implemented. Only in that block: an `alt`
   nested in one of its branches, and other components, keep their defaults.
+- **Resolving a source position is safe for concurrent use.** The lookup's
+  cache could be read half-updated from another goroutine and return the
+  wrong line.
 
 - An injected message now reaches a **driver-bound PTC** — an external test
   port's inbound traffic is delivered to a PTC's `receive`, not just the MTC's.
