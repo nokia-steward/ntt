@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/nokia/ntt/runtime"
+	"github.com/nokia/ntt/runtime/tl"
 	"github.com/nokia/ntt/ttcn3"
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
@@ -74,6 +75,11 @@ type TestcaseOptions struct {
 	// so the caller can aggregate it into a report.
 	OnProfile func(map[string]runtime.PortStat)
 
+	// TestLogger, when non-nil, receives the testcase's TCI-TL events
+	// (ETSI ES 201 873-6): one per TTCN-3 operation performed, see
+	// runtime/tl. Nil turns test logging off.
+	TestLogger tl.Logger
+
 	// actualArgs carries actual parameters already evaluated by a
 	// control part's execute(). Nil means "mine them from the control
 	// part statically", which is what a directly-executed testcase does.
@@ -103,6 +109,10 @@ func RunTestcase(trees []*ttcn3.Tree, qname string) (runtime.Verdict, string, er
 // starts, so the override always wins. Unknown keys / unparseable
 // values fire opts.ModuleParamWarning but never abort the run.
 func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (verdict runtime.Verdict, reason string, err error) {
+	// Registered first so it runs last, after the recover below has
+	// settled the verdict of a testcase that panicked.
+	var exec *runtime.TestcaseExec
+	defer func() { tlTestcaseTerminated(exec, verdict, reason) }()
 	// A panic inside the tree-walking interpreter must not kill the
 	// caller. Unmodeled syntax shapes, nil-deref bugs, and the
 	// occasional malformed conformance fixture all surface as
@@ -173,7 +183,7 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 		return runtime.ErrorVerdict, initErr, nil
 	}
 
-	exec := runtime.NewTestcaseExec(qname)
+	exec = runtime.NewTestcaseExec(qname)
 	return runTestcaseIn(env, exec, trees, modNode, module, fnName, tcNode, opts)
 }
 
@@ -326,6 +336,9 @@ func newModuleEnv(trees []*ttcn3.Tree, modNode *syntax.Module, module string, op
 // mined statically from the source.
 func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3.Tree, modNode *syntax.Module, module, fnName string, tcNode *syntax.FuncDecl, opts TestcaseOptions) (verdict runtime.Verdict, reason string, err error) {
 	exec.SetDeterministicClock(opts.DeterministicClock)
+	if opts.TestLogger != nil {
+		exec.SetTestLogger(opts.TestLogger)
+	}
 	// Per-port performance capture (real-clock live runs). Hand the raw
 	// capture back at run end, on every exit path including a recovered
 	// panic, so a partial profile is still reported.
@@ -443,6 +456,15 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 		ctrlEnv := runtime.NewEnv(env)
 		actualArgs := findExecuteArgs(modNode, fnName, ctrlEnv)
 		bindTestcaseParamsWithArgs(tcEnv, tcNode, actualArgs, ctrlEnv)
+	}
+	if lexec := tlExec(tcEnv); lexec != nil {
+		tcID := tlArg("tcId", tl.TestcaseID(module, fnName))
+		pars := tlArg("tciPars", tlTestcaseParams(tcNode, tcEnv))
+		lexec.SetTLTestcase(tcID, pars)
+		tlEmit(lexec, tcNode, "tliTcStart", tcID, pars)
+		tlEmit(lexec, tcNode, "tliTcStarted", tcID, pars)
+		// tliTcTerminated is logged by the caller, once the verdict is
+		// final: a panic or an execute() timeout still changes it here.
 	}
 	r := eval(tcNode.Body, tcEnv)
 	if len(tcNode.Catch) > 0 || tcNode.Finally != nil {
@@ -1003,6 +1025,13 @@ func evalSetverdict(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 		reasonParts = append(reasonParts, a.Inspect())
 	}
 	exec.SetVerdict(verdict, strings.Join(reasonParts, " "))
+	if lexec := tlExec(env); lexec != nil {
+		args := []tl.Arg{tlArg("verdict", tl.Verdict(string(verdict)))}
+		if r := strings.Join(reasonParts, " "); r != "" {
+			args = append(args, tlArg("reason", tl.String(r)))
+		}
+		tlEmit(lexec, n, "tliSetVerdict", args...)
+	}
 	// Also accumulate the verdict on the running component so
 	// `comp.done -> value v` can retrieve that PTC's local verdict
 	// (ETSI 21.3.7 / 22.4.1).
@@ -1019,7 +1048,11 @@ func evalGetverdict(env runtime.Scope) runtime.Object {
 	if exec == nil {
 		return runtime.NoneVerdict
 	}
-	return exec.GetVerdict()
+	v := exec.GetVerdict()
+	if lexec := tlExec(env); lexec != nil {
+		lexec.TLog("tliGetVerdict", "", 0, tlArg("verdict", tl.Verdict(string(v))))
+	}
+	return v
 }
 
 // evalLog implements `log(...)` by joining the inspected forms of all
@@ -1038,6 +1071,9 @@ func evalLog(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	line := strings.Join(parts, " ")
 	if exec := runtime.FindTestcaseExec(env); exec != nil {
 		exec.Log(line)
+		if exec.TestLogger() != nil {
+			tlEmit(exec, n, "tliLog", tlArg("log", tl.String(line)))
+		}
 		return nil
 	}
 	// Fall back to the global builtin (which prints to stdout).
@@ -1922,6 +1958,20 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 	if n.Body == nil {
 		return nil
 	}
+	// Test logging: entering and leaving the alt, and — once per stretch of
+	// rounds that match nothing, so a polling backstop cannot flood the
+	// log — that no alternative matched, that the defaults are consulted
+	// and that the component waits. A default's own altstep is logged as
+	// tliADefaults on the alt that invoked it, not as an alt of its own.
+	lexec := tlExec(env)
+	if lexec != nil && defaultCtx.active() {
+		lexec = nil
+	}
+	if lexec != nil {
+		tlEmit(lexec, n, "tliAEnter")
+		defer tlEmit(lexec, n, "tliALeave")
+	}
+	waiting := false
 	// Bounded only as a backstop against a `repeat` whose state never
 	// changes; genuine blocking is ended by a matching event, this PTC's
 	// stop, or the harness/testcase timeout.
@@ -1994,8 +2044,12 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			altExec.EndAltRound(goroutineID())
 		}
 		if matchedClause != nil {
+			waiting = false
 			if matchedClause.Body != nil {
 				if res := evalAltClauseBody(matchedClause.Body, env); res == runtime.Repeat {
+					if lexec != nil {
+						tlEmit(lexec, n, "tliARepeat")
+					}
 					continue // a body returned Repeat -> re-snapshot
 				} else {
 					return res
@@ -2003,9 +2057,16 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			}
 			return nil
 		}
+		if lexec != nil && !waiting {
+			tlEmit(lexec, n, "tliANomatch")
+		}
 		if elseClause != nil {
 			res := evalAltClauseBody(elseClause.Body, env)
 			if res == runtime.Repeat {
+				if lexec != nil {
+					tlEmit(lexec, n, "tliARepeat")
+				}
+				waiting = false
 				continue
 			}
 			return res
@@ -2016,6 +2077,9 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		// component hands back its unwinding result, which has to travel
 		// past this alt statement.
 		if !defaultsSuppressed(n) {
+			if lexec != nil && !waiting && len(lexec.DefaultsOf(currentCompID(lexec))) > 0 {
+				tlEmit(lexec, n, "tliADefaults")
+			}
 			if ctl, fired := runDefaults(env); fired {
 				return ctl
 			}
@@ -2031,6 +2095,10 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		// No guard fired and no [else]: block on the alt's event sources
 		// and re-snapshot. Crucially, NO verdict-preferring heuristic —
 		// a clause runs only when its guard actually matches.
+		if lexec != nil && !waiting {
+			tlEmit(lexec, n, "tliAWait")
+		}
+		waiting = true
 		if !blockForAltEvents(n, env) {
 			// Nothing to wait for (only boolean / unmodelled guards) or
 			// this PTC was stopped: conclude without fabricating a
@@ -2842,9 +2910,18 @@ func evalPortReceiveBare(port string, env runtime.Scope, consume bool) bool {
 	port = exec.PortKey(port) // real-scheduler: per-PTC port identity (no-op by default; "any port" passes through)
 	if port == "any port" {
 		for _, name := range exec.PortNames() {
-			if _, ok := exec.PeekMessage(name); ok {
+			if head, ok := exec.PeekMessageFull(name); ok {
 				if consume {
-					_, _ = exec.DequeueMessage(name)
+					if deq, okDeq := exec.DequeueMessageFull(name); okDeq {
+						head = deq
+					}
+				}
+				if exec.TestLogger() != nil {
+					ev := "receive"
+					if !consume {
+						ev = "check"
+					}
+					tlReceive(exec, nil, name, head, runtime.Any, nil, ev, false, false)
 				}
 				return true
 			}
@@ -2855,12 +2932,22 @@ func evalPortReceiveBare(port string, env runtime.Scope, consume bool) bool {
 	// otherwise, so behaviour is byte-identical off it): only a message
 	// queued when this alt round began is visible to the guard this round.
 	limit := altReceiveLimit(exec, port)
-	if _, ok := exec.PeekMessageFullLimited(port, limit); !ok {
+	head, ok := exec.PeekMessageFullLimited(port, limit)
+	if !ok {
 		return false
 	}
 	if consume {
-		_, _ = exec.DequeueMessageFullLimited(port, limit)
+		if deq, okDeq := exec.DequeueMessageFullLimited(port, limit); okDeq {
+			head = deq
+		}
 		exec.RecordReceive(port) // profiling: pair with the last send (no-op if off)
+	}
+	if exec.TestLogger() != nil {
+		ev := "receive"
+		if !consume {
+			ev = "check"
+		}
+		tlReceive(exec, nil, port, head, runtime.Any, nil, ev, false, false)
 	}
 	return true
 }

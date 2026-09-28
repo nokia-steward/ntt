@@ -413,6 +413,9 @@ operations across the two clocks hung on its first run.
   clock and `pass` under `--live` (see "Newly found").
 - **The call signature still leaks into PTCs** for the unqualified
   `getreply` / `catch` rule (22.3.1 h), which reads it from scope.
+- **A `send`'s `to` clause is evaluated twice**, once to tag the message
+  and once to route it, so a side effect in it (`to f()`) runs twice.
+  Found by the TCI-TL review; the log itself evaluates nothing again.
 
 ### 1y. `comp.done` does not block on the real clock — FIXED 2026-09-14
 

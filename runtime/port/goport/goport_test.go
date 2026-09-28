@@ -11,6 +11,7 @@ import (
 	"github.com/nokia/ntt/runtime/port"
 	"github.com/nokia/ntt/runtime/port/api"
 	"github.com/nokia/ntt/runtime/port/goport"
+	"github.com/nokia/ntt/runtime/tl"
 	"github.com/nokia/ntt/ttcn3"
 )
 
@@ -393,5 +394,52 @@ func TestGoPort_InterleaveSnapshotSpecificBeatsCatchAll(t *testing.T) {
 	}`)
 	if v != runtime.PassVerdict {
 		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+}
+
+// TestGoPort_TestLogUsesMappedOperations covers the _m side of TCI-TL: a
+// port mapped to the system logs its send, the injected reply's arrival
+// and the receive as tliMSend_m, tliMDetected_m and tliMReceive_m, not the
+// connected-component forms.
+func TestGoPort_TestLogUsesMappedOperations(t *testing.T) {
+	goport.Register("P", func(inst string) api.TestPort { return &echoPort{inst: inst} })
+	t.Cleanup(goport.Reset)
+
+	v := &tl.Validator{}
+	rec := &tl.Recorder{}
+	v.Next = rec
+	verdict, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, `module M {
+		type port P message { inout integer }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 2.0;
+			map(self:p, system:p);
+			p.send(5);
+			g.start;
+			alt {
+				[] p.receive(5) { setverdict(pass); }
+				[] g.timeout { setverdict(fail, "no echo"); }
+			}
+		}
+	}`)}, "M.tc", interpreter.TestcaseOptions{TestLogger: v})
+	if err != nil || verdict != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), err %v", verdict, reason, err)
+	}
+	if n, errs := v.Result(); len(errs) > 0 {
+		t.Fatalf("%d of %d events invalid: %v", len(errs), n, errs)
+	}
+	seen := map[string]bool{}
+	for _, op := range rec.Ops() {
+		seen[op] = true
+	}
+	for _, op := range []string{"tliPMap", "tliMSend_m", "tliMDetected_m", "tliMReceive_m"} {
+		if !seen[op] {
+			t.Errorf("no %s in %v", op, rec.Ops())
+		}
+	}
+	for _, op := range []string{"tliMSend_c", "tliMDetected_c", "tliMReceive_c"} {
+		if seen[op] {
+			t.Errorf("mapped port logged the connected form %s", op)
+		}
 	}
 }

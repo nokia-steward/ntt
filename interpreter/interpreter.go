@@ -16,6 +16,7 @@ import (
 
 	"github.com/nokia/ntt/builtins"
 	"github.com/nokia/ntt/runtime"
+	"github.com/nokia/ntt/runtime/tl"
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
@@ -555,6 +556,11 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 					return compStateNotAValue(op)
 				}
 				if v, ok := evalComponentQuery(id.String(), n.Sel, env); ok {
+					if b, isBool := v.(runtime.Bool); isBool && bool(b) && altCtx.active() {
+						if op := strings.ToLower(syntax.Name(n.Sel)); op == "done" || op == "killed" {
+							tlDoneKilled(env, n, op, id.String(), nil)
+						}
+					}
 					return v
 				}
 				// `all component.kill` / `all component.stop` are
@@ -675,92 +681,11 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// and `running` reflects whether the caller has issued a
 		// `.start` since the last `.stop` (default false).
 		if th, ok := left.(*runtime.TimerHandle); ok {
-			switch syntax.Name(n.Sel) {
-			case "running":
-				return runtime.NewBool(timerStillRunning(th, env))
-			case "read":
-				return timerRead(th, env)
-			case "timeout":
-				det := deterministicClockEnabled(env)
-				schedActive := deterministicSchedulerEnabled(env)
-				// Inside an alt guard the call has to be
-				// non-blocking: the scheduler decides
-				// which clause to wait for. Return a
-				// boolean so commGuardMatches can take
-				// the "this timer has already fired"
-				// branch when applicable. Under either the
-				// deterministic clock or the quiescence
-				// scheduler the alt's block step advances time
-				// to the soonest deadline, so we must NOT
-				// advance here (that would let a later-deadline
-				// timer fire out of order).
-				if altCtx.active() {
-					if !det && !schedActive {
-						if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
-							exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
-						}
-					}
-					expired := timerExpired(th, env)
-					if expired {
-						th.Ticks = th.MaxTicks
-						th.Running = false
-					}
-					return runtime.NewBool(expired)
-				}
-				// Outside an alt, under the quiescence scheduler:
-				// park until the virtual clock reaches this
-				// timer's deadline, letting any earlier event or
-				// timer in another participant fire first.
-				if schedActive {
-					if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
-						deadline := th.StartedAtVirtual + th.Duration
-						stop := currentStopChan(exec)
-						for exec.VirtualClock() < deadline {
-							re, stopped := exec.SchedPark(currentCompID(exec), deadline, true, stop)
-							if stopped || !re {
-								break
-							}
-						}
-					}
-					th.Ticks = th.MaxTicks
-					th.Running = false
-					return runtime.Undefined
-				}
-				// Outside an alt: fast-forward the virtual
-				// clock to this timer's deadline (so a later
-				// `T2.read` is exact), then fire instantly
-				// (deterministic) or sleep the real remaining
-				// time.
-				if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
-					exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
-				}
-				if !det {
-					waitForTimerTimeout(th, env)
-				}
-				th.Ticks = th.MaxTicks
-				th.Running = false
-				return runtime.Undefined
-			case "start":
-				th.Running = true
-				th.Ticks = 0
-				th.MaxTicks = 4
-				th.StartedAt = time.Now()
-				if exec := runtime.FindTestcaseExec(env); exec != nil {
-					th.StartedAtVirtual = exec.VirtualClock()
-				} else {
-					th.StartedAtVirtual = 0
-				}
-				// Bare `T.start;` restores the declared
-				// default duration; see ETSI 23.2.
-				th.Duration = th.DefaultDuration
-				registerStartedTimer(th, env)
-				return runtime.Undefined
-			case "stop":
-				th.Running = false
-				th.StartedAt = time.Time{}
-				return runtime.Undefined
+			res := evalTimerSelector(th, n, env)
+			if lexec := tlExec(env); lexec != nil && !runtime.IsError(res) {
+				tlTimerEvent(lexec, n, th, syntax.Name(n.Sel), res)
 			}
-			return runtime.Undefined
+			return res
 		}
 
 		// `compRef.alive` / `.running` / `.done` / `.killed` /
@@ -786,17 +711,22 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				// teardown stopped a PTC that had not set its verdict yet.
 				op := strings.ToLower(syntax.Name(n.Sel))
 				if altCtx.active() {
-					return runtime.NewBool(componentStatePredicate(op)(ref, env))
+					ok := componentStatePredicate(op)(ref, env)
+					if ok {
+						tlDoneKilled(env, n, op, "", ref)
+					}
+					return runtime.NewBool(ok)
 				}
 				if isCompStateStmt(n) {
 					return blockUntilComponentState(ref, op, env)
 				}
 				return compStateNotAValue(op)
 			case "create":
-				return newComponentRef(ref.TypeName, "", env)
+				return createComponent(ref.TypeName, "", n, env)
 			case "stop", "kill":
 				op := strings.ToLower(syntax.Name(n.Sel))
 				if ref != nil {
+					tlStopKill(env, n, op, ref)
 					ref.SetDone(true)
 					if op == "kill" || !ref.AliveModifier {
 						ref.SetAlive(false)
@@ -865,7 +795,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			// MyComp.create` produces a value `from <ref>` /
 			// `-> sender v` operations can match against.
 			if name == "create" {
-				return newComponentRef(td.Name, "", env)
+				return createComponent(td.Name, "", n, env)
 			}
 			if isAnnexEAttr(name) {
 				if vals, ok := td.Lookup(name); ok {
@@ -1514,7 +1444,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 									}
 								}
 							}
-							return newComponentRef(td.Name, name, env)
+							return createComponent(td.Name, name, n, env)
 						}
 						if ref, ok := recv.(*runtime.ComponentRef); ok {
 							if res, handled := evalComponentMethod(ref, op.String(), n, env); handled {
@@ -2392,6 +2322,12 @@ func evalRecordAssignmentList(exprs []syntax.Expr, env runtime.Scope) runtime.Ob
 }
 
 func evalUnary(n *syntax.UnaryExpr, env runtime.Scope) runtime.Object {
+	// `C.create alive` applies `alive` after the create call; mark the
+	// evaluation so the create logs the component as alive (tliCCreate).
+	if n.Op.Kind() == syntax.ALIVE {
+		aliveCreateCtx.enter()
+		defer aliveCreateCtx.leave()
+	}
 	val := eval(n.X, env)
 	if runtime.IsError(val) {
 		return val
@@ -5703,14 +5639,24 @@ func evalAnyAllFromMsg(n *syntax.FromExpr, sel *syntax.SelectorExpr, call *synta
 			if !ok {
 				break
 			}
-			if call != nil && !portReceiveMatches(head.Payload, call, env) {
-				if isTrigger {
-					exec.DequeueKind(pn, runtime.MsgMessage)
-					continue
+			var tmpl runtime.Object = runtime.Any
+			if call != nil {
+				var matched bool
+				if matched, tmpl = portReceiveMatch(head.Payload, call, env); !matched {
+					if exec.TestLogger() != nil {
+						tlReceive(exec, call, pn, head, tmpl, nil, "mismatch", false, !isTrigger)
+					}
+					if isTrigger {
+						exec.DequeueKind(pn, runtime.MsgMessage)
+						continue
+					}
+					break
 				}
-				break
 			}
 			exec.DequeueKind(pn, runtime.MsgMessage)
+			if exec.TestLogger() != nil {
+				tlReceive(exec, call, pn, head, tmpl, nil, "receive", false, false)
+			}
 			if redirect != nil {
 				applyRedirect(redirect, head, env)
 				bindProcIndex(redirect, pn, name, env)
@@ -6654,6 +6600,19 @@ func registerStartedTimer(th *runtime.TimerHandle, env runtime.Scope) {
 // `*.timeout` is deferred (it needs alt integration). Returns (_, false)
 // when op is not an aggregate timer operation so the caller falls back.
 func evalTimerAggregate(kind string, sel syntax.Expr, env runtime.Scope) (runtime.Object, bool) {
+	res, ok := evalTimerAggregateOp(kind, sel, env)
+	if lexec := tlExec(env); lexec != nil && ok && syntax.Name(sel) == "timeout" {
+		if b, isBool := res.(runtime.Bool); isBool && bool(b) {
+			tlEmit(lexec, sel, "tliTTimeout", tlArg("timer", tl.TimerID(kind, "", "")),
+				tlArg("timerTmpl", tlTimerTemplate(kind, nil)))
+		}
+	}
+	return res, ok
+}
+
+// evalTimerAggregateOp performs `any timer.<op>` / `all timer.<op>`;
+// evalTimerAggregate logs a timeout that happened.
+func evalTimerAggregateOp(kind string, sel syntax.Expr, env runtime.Scope) (runtime.Object, bool) {
 	op := strings.ToLower(syntax.Name(sel))
 	switch op {
 	case "running", "stop", "timeout":
@@ -6748,6 +6707,110 @@ func evalTimerAggregate(kind string, sel syntax.Expr, env runtime.Scope) (runtim
 // start/stop so guards like `if (t.running)` produce the answers the
 // fixture expects.
 func evalTimerMethod(th *runtime.TimerHandle, sel syntax.Expr, n *syntax.CallExpr, env runtime.Scope) runtime.Object {
+	res := evalTimerOp(th, sel, n, env)
+	if exec := tlExec(env); exec != nil && !runtime.IsError(res) {
+		var at syntax.Node = sel
+		if n != nil {
+			at = n
+		}
+		tlTimerEvent(exec, at, th, syntax.Name(sel), res)
+	}
+	return res
+}
+
+// evalTimerSelector performs a parameter-less timer operation (`t.start`,
+// `t.stop`, `t.timeout`, `t.running`, `t.read`).
+func evalTimerSelector(th *runtime.TimerHandle, n *syntax.SelectorExpr, env runtime.Scope) runtime.Object {
+	switch syntax.Name(n.Sel) {
+	case "running":
+		return runtime.NewBool(timerStillRunning(th, env))
+	case "read":
+		return timerRead(th, env)
+	case "timeout":
+		det := deterministicClockEnabled(env)
+		schedActive := deterministicSchedulerEnabled(env)
+		// Inside an alt guard the call has to be
+		// non-blocking: the scheduler decides
+		// which clause to wait for. Return a
+		// boolean so commGuardMatches can take
+		// the "this timer has already fired"
+		// branch when applicable. Under either the
+		// deterministic clock or the quiescence
+		// scheduler the alt's block step advances time
+		// to the soonest deadline, so we must NOT
+		// advance here (that would let a later-deadline
+		// timer fire out of order).
+		if altCtx.active() {
+			if !det && !schedActive {
+				if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
+					exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
+				}
+			}
+			expired := timerExpired(th, env)
+			if expired {
+				th.Ticks = th.MaxTicks
+				th.Running = false
+			}
+			return runtime.NewBool(expired)
+		}
+		// Outside an alt, under the quiescence scheduler:
+		// park until the virtual clock reaches this
+		// timer's deadline, letting any earlier event or
+		// timer in another participant fire first.
+		if schedActive {
+			if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
+				deadline := th.StartedAtVirtual + th.Duration
+				stop := currentStopChan(exec)
+				for exec.VirtualClock() < deadline {
+					re, stopped := exec.SchedPark(currentCompID(exec), deadline, true, stop)
+					if stopped || !re {
+						break
+					}
+				}
+			}
+			th.Ticks = th.MaxTicks
+			th.Running = false
+			return runtime.Undefined
+		}
+		// Outside an alt: fast-forward the virtual
+		// clock to this timer's deadline (so a later
+		// `T2.read` is exact), then fire instantly
+		// (deterministic) or sleep the real remaining
+		// time.
+		if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
+			exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
+		}
+		if !det {
+			waitForTimerTimeout(th, env)
+		}
+		th.Ticks = th.MaxTicks
+		th.Running = false
+		return runtime.Undefined
+	case "start":
+		th.Running = true
+		th.Ticks = 0
+		th.MaxTicks = 4
+		th.StartedAt = time.Now()
+		if exec := runtime.FindTestcaseExec(env); exec != nil {
+			th.StartedAtVirtual = exec.VirtualClock()
+		} else {
+			th.StartedAtVirtual = 0
+		}
+		// Bare `T.start;` restores the declared
+		// default duration; see ETSI 23.2.
+		th.Duration = th.DefaultDuration
+		registerStartedTimer(th, env)
+		return runtime.Undefined
+	case "stop":
+		th.Running = false
+		th.StartedAt = time.Time{}
+		return runtime.Undefined
+	}
+	return runtime.Undefined
+}
+
+// evalTimerOp performs a timer operation; evalTimerMethod logs it.
+func evalTimerOp(th *runtime.TimerHandle, sel syntax.Expr, n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	op := syntax.Name(sel)
 	switch op {
 	case "start":
@@ -7649,6 +7712,14 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 			return runtime.Undefined, true
 		}
 		body := n.Args.List[0]
+		if lexec := tlExec(env); lexec != nil && ref != nil {
+			tlOp := "tliCStart"
+			if op == "call" {
+				tlOp = "tliCCall"
+			}
+			mod, fn := tlQualified(body, env)
+			tlEmit(lexec, n, tlOp, tlArg("comp", lexec.TLComponent(ref).Content()), tlArg("name", tl.BehaviourID(mod, fn)))
+		}
 		// Record that behaviour was started on this component (even
 		// when the body is skipped below). `all component.done` /
 		// `.killed` consider only ever-started PTCs (ETSI 21.3.7).
@@ -7851,6 +7922,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 							} else {
 								_ = eval(body, runEnv)
 							}
+							tlTerminated(exec, ref)
 							ref.SetDone(true)
 							if !ref.AliveModifier {
 								ref.SetAlive(false)
@@ -7908,6 +7980,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 					} else {
 						_ = eval(body, runEnv)
 					}
+					tlTerminated(exec, ref)
 					// Don't drain port maps on natural
 					// body exit: a daemon-style PTC
 					// that "completes" by returning
@@ -8014,6 +8087,17 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 			}
 		}
 		if ref != nil {
+			if lexec := tlExec(env); lexec != nil {
+				if op == "call" {
+					args := []tl.Arg{tlArg("verdict", tl.Verdict(tlVerdict(ref.GetVerdict())))}
+					if !stopped && result != nil && result != runtime.Undefined {
+						args = append(args, tlArg("returnValue", runtime.TLValue(result).AsValue()))
+					}
+					lexec.TLog("tliCCallTerminated", "", 0, args...)
+				} else {
+					tlTerminated(lexec, ref)
+				}
+			}
 			// if exec := runtime.FindTestcaseExec(env); exec != nil {
 			//     drainComponentPortMaps(exec, ref.ID)
 			// }
@@ -8049,6 +8133,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		return runtime.NewBool(compKilled(ref, env)), true
 	case "stop", "kill":
 		if ref != nil {
+			tlStopKill(env, n, op, ref)
 			ref.SetDone(true)
 			if op == "kill" || !ref.AliveModifier {
 				ref.SetAlive(false)
@@ -8091,7 +8176,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				}
 			}
 		}
-		return newComponentRef(ref.TypeName, name, env), true
+		return createComponent(ref.TypeName, name, n, env), true
 	}
 	return nil, false
 }
@@ -9189,6 +9274,12 @@ func evalActivate(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	// is not seen when the default fires (Sem_200502_002/004).
 	defEnv := snapshotActivateArgs(callExpr, env)
 	id := exec.AddDefault(runtime.Default{Body: &astNode{n: callExpr}, Env: defEnv, Owner: currentCompID(exec)})
+	if lexec := tlExec(env); lexec != nil {
+		mod, name := tlQualified(callExpr, env)
+		tlEmit(lexec, n, "tliAActivate",
+			tlArg("name", tl.QualifiedName(mod, name)),
+			tlArg("ref", tl.Value{Kind: "default", Text: strconv.Itoa(id)}.AsValue()))
+	}
 	return runtime.NewInt(id)
 }
 
@@ -9233,6 +9324,9 @@ func evalDeactivate(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	v := eval(n.Args.List[0], env)
 	if i, ok := v.(runtime.Int); ok && i.Int != nil && i.IsInt64() {
 		exec.RemoveDefault(int(i.Int64()))
+		if lexec := tlExec(env); lexec != nil {
+			tlEmit(lexec, n, "tliADeactivate", tlArg("ref", tl.Value{Kind: "default", Text: i.Int.String()}.AsValue()))
+		}
 	}
 	return runtime.Undefined
 }
@@ -11061,6 +11155,13 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 	// Profiling: count the send and stamp it so the next receive on this
 	// port can sample the round-trip latency (no-op unless profiling is on).
 	exec.RecordSend(port)
+	if exec.TestLogger() != nil {
+		var destVal runtime.Object
+		if dest != nil {
+			destVal = sender
+		}
+		tlSend(exec, n, bareName, destVal, payload)
+	}
 	// External port-driver path: when the testcase has a driver
 	// bound to this port instance (typically a C/C++ test port
 	// registered via the cabi/cgo bridge), route the payload
@@ -11382,7 +11483,11 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 		// however, is independent of the signature template and ETSI
 		// 22.3 honours it for procedure ops too (e.g.
 		// `p.getcall(S:?) from v_ptc`), so always evaluate it.
-		payloadOk := isProc || info.call == nil || portReceiveMatches(head.Payload, info.call, env)
+		payloadOk := true
+		var tmpl runtime.Object = runtime.Any
+		if !isProc && info.call != nil {
+			payloadOk, tmpl = portReceiveMatch(head.Payload, info.call, env)
+		}
 		// Honour the procedure signature template (parameter record +
 		// `value`/exception) rather than the lenient "any envelope of
 		// this kind" match above, so e.g.
@@ -11405,8 +11510,12 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 				payloadOk = false
 			}
 		}
-		fromOk := fromAddrMatches(head.Sender, info.from, env)
+		fromOk, fromTmpl := fromAddrMatch(head.Sender, info.from, env)
 		if !payloadOk || !fromOk {
+			if !isProc && exec.TestLogger() != nil {
+				// A trigger drops this head: every drop is an event.
+				tlReceive(exec, info.call, port, head, tmpl, fromTmpl, "mismatch", payloadOk, !isTrigger)
+			}
 			if isTrigger {
 				// trigger drops a non-matching head and retries; it consumed
 				// one frozen entry, so shrink the snapshot window to match.
@@ -11439,6 +11548,13 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 		// pairs a message send with its response.
 		if consume && !isProc {
 			exec.RecordReceive(port)
+		}
+		if !isProc && exec.TestLogger() != nil {
+			ev := "receive"
+			if !consume {
+				ev = "check"
+			}
+			tlReceive(exec, info.call, port, head, tmpl, fromTmpl, ev, false, false)
 		}
 		return runtime.NewBool(true)
 	}
@@ -11646,11 +11762,19 @@ func decodeCachedFor(env runtime.Scope, blob runtime.Object) runtime.Object {
 // sender - we treat them as matching only when no constraint was
 // requested, otherwise the receive blocks.
 func fromAddrMatches(sender runtime.Object, addr syntax.Expr, env runtime.Scope) bool {
+	ok, _ := fromAddrMatch(sender, addr, env)
+	return ok
+}
+
+// fromAddrMatch is fromAddrMatches that also returns the `from` template it
+// evaluated (nil when it evaluated none), so a log can show it without
+// evaluating the clause a second time.
+func fromAddrMatch(sender runtime.Object, addr syntax.Expr, env runtime.Scope) (bool, runtime.Object) {
 	if addr == nil {
-		return true
+		return true, nil
 	}
 	if sender == nil {
-		return false
+		return false, nil
 	}
 	// `from P.address:(20..40)` - the address-type qualifier carries
 	// no semantic information at this point; the range template is
@@ -11660,16 +11784,16 @@ func fromAddrMatches(sender runtime.Object, addr syntax.Expr, env runtime.Scope)
 	}
 	tmpl := eval(addr, env)
 	if runtime.IsError(tmpl) || tmpl == nil {
-		return true
+		return true, nil
 	}
 	if tmpl == runtime.Any || tmpl == runtime.AnyOrNone {
-		return true
+		return true, tmpl
 	}
 	res := builtins.Match(sender, tmpl)
 	if b, ok := res.(runtime.Bool); ok {
-		return bool(b)
+		return bool(b), tmpl
 	}
-	return true
+	return true, tmpl
 }
 
 // evalPortTrigger implements `port.trigger [(template)]`. Per TTCN-3
@@ -11687,8 +11811,15 @@ func evalPortTrigger(port string, n *syntax.CallExpr, env runtime.Scope) runtime
 	if !ok {
 		return runtime.Undefined
 	}
-	matches := portReceiveMatches(head.Payload, n, env)
+	matches, tmpl := portReceiveMatch(head.Payload, n, env)
 	_, _ = exec.DequeueMessage(port)
+	if exec.TestLogger() != nil {
+		ev := "receive"
+		if !matches {
+			ev = "mismatch"
+		}
+		tlReceive(exec, n, port, head, tmpl, nil, ev, false, false)
+	}
 	if !matches {
 		return runtime.Undefined
 	}
@@ -11727,12 +11858,20 @@ func evalPortCheck(port string, n *syntax.CallExpr, env runtime.Scope) runtime.O
 // any message; calls with a single template argument compare it via
 // the same `match` builtin used by user-level `match()` expressions.
 func portReceiveMatches(head runtime.Object, n *syntax.CallExpr, env runtime.Scope) bool {
+	ok, _ := portReceiveMatch(head, n, env)
+	return ok
+}
+
+// portReceiveMatch is portReceiveMatches that also returns the template it
+// matched against (runtime.Any when the operation has none), so a logged
+// receive or mismatch shows the template actually used.
+func portReceiveMatch(head runtime.Object, n *syntax.CallExpr, env runtime.Scope) (bool, runtime.Object) {
 	if n.Args == nil || len(n.Args.List) == 0 {
-		return true
+		return true, runtime.Any
 	}
 	first := n.Args.List[0]
 	if first == nil {
-		return true
+		return true, runtime.Any
 	}
 	// `receive(MyType: <template>)` is the type-prefixed value
 	// notation - strip the type prefix and match against the RHS.
@@ -11743,7 +11882,7 @@ func portReceiveMatches(head runtime.Object, n *syntax.CallExpr, env runtime.Sco
 	}
 	tmpl := eval(first, env)
 	if runtime.IsError(tmpl) || tmpl == nil {
-		return true
+		return true, runtime.Any
 	}
 	// Coerce a POSITIONAL record/set template to its declared named fields.
 	// A runtime.Record is an unordered map, so matching a positional list
@@ -11771,7 +11910,7 @@ func portReceiveMatches(head runtime.Object, n *syntax.CallExpr, env runtime.Sco
 		}
 	}
 	if tmpl == runtime.Any || tmpl == runtime.AnyOrNone {
-		return true
+		return true, tmpl
 	}
 	if td := receiveTemplateTypeDesc(first, env); td != nil && isJSONEncodedType(td) {
 		head = materialiseJSONDefaultFields(head, td, env)
@@ -11781,9 +11920,9 @@ func portReceiveMatches(head runtime.Object, n *syntax.CallExpr, env runtime.Sco
 	}
 	res := builtins.Match(head, tmpl)
 	if b, ok := res.(runtime.Bool); ok {
-		return bool(b)
+		return bool(b), tmpl
 	}
-	return true
+	return true, tmpl
 }
 
 // receiveTemplateTypeDesc returns the declared type of a receive template

@@ -145,6 +145,7 @@ func evalConnectOp(op string, n *syntax.CallExpr, env runtime.Scope) runtime.Obj
 		b, _, okB := resolvePortEndpoint(args[1], env)
 		if okA && okB {
 			exec.ConnectPorts(a, b)
+			tlPortConfig(exec, n, "tliPConnect", a, b)
 		}
 	case "disconnect":
 		if len(args) == 0 {
@@ -160,6 +161,7 @@ func evalConnectOp(op string, n *syntax.CallExpr, env runtime.Scope) runtime.Obj
 		if len(args) >= 2 {
 			if b, _, okB := resolvePortEndpoint(args[1], env); okB {
 				exec.DisconnectPorts(a, b)
+				tlPortConfig(exec, n, "tliPDisconnect", a, b)
 			}
 		} else if isAllComponentArg(args[0]) {
 			// `disconnect(all component:all port)` - release every
@@ -170,6 +172,11 @@ func evalConnectOp(op string, n *syntax.CallExpr, env runtime.Scope) runtime.Obj
 			// every port on component c.
 			exec.DisconnectComponent(a.Comp)
 		} else {
+			if exec.TestLogger() != nil {
+				for _, b := range exec.ConnectedPeers(a) {
+					tlPortConfig(exec, n, "tliPDisconnect", a, b)
+				}
+			}
 			exec.DisconnectAll(a)
 		}
 	}
@@ -199,6 +206,7 @@ func recordPortMapState(op string, n *syntax.CallExpr, env runtime.Scope) bool {
 		if len(args) >= 2 {
 			if b, _, okB := resolvePortEndpoint(args[1], env); okB {
 				exec.MapPorts(a, b)
+				tlPortConfig(exec, n, "tliPMap", a, b)
 			}
 		}
 		return true
@@ -210,6 +218,7 @@ func recordPortMapState(op string, n *syntax.CallExpr, env runtime.Scope) bool {
 	if len(args) >= 2 {
 		if b, _, okB := resolvePortEndpoint(args[1], env); okB {
 			exec.UnmapPorts(a, b)
+			tlPortConfig(exec, n, "tliPUnmap", a, b)
 		}
 	} else if isAllComponentArg(args[0]) {
 		exec.ClearAllMappings()

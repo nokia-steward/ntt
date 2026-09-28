@@ -145,6 +145,13 @@ over HTTPS):
 	# request/response against a live SUT, with a per-port latency report
 	ntt exec --cfg app.cfg --profile --format=profile app.ttcn
 
+To record **every TTCN-3 operation** of a run — each message sent,
+received or failing to match its template, each timer, component and
+verdict — as the structured test log the standard defines (TCI-TL, ETSI
+ES 201 873-6), add `--log`. See [docs/test-logging.md](docs/test-logging.md):
+
+	ntt exec --log run.xml app.ttcn
+
 Suites that need to drive a real System Under Test through a Titan-
 style C/C++ test port (e.g. `MyClient_PT.cc`) build a dedicated
 binary that statically links the port via the cgo bridge. See

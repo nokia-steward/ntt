@@ -190,14 +190,15 @@ func runOneExecute(trees []*ttcn3.Tree, modNode *syntax.Module, module, tcName s
 	if initErr != "" {
 		return runtime.ErrorVerdict, initErr
 	}
-	v, r, err := runTestcaseIn(env, runtime.NewTestcaseExec(module+"."+tcName),
-		trees, modNode, module, tcName, tcNode, inner)
+	exec := runtime.NewTestcaseExec(module + "." + tcName)
+	v, r, err := runTestcaseIn(env, exec, trees, modNode, module, tcName, tcNode, inner)
 	if err != nil {
-		return runtime.ErrorVerdict, err.Error()
+		v, r = runtime.ErrorVerdict, err.Error()
+	} else if deadline != nil && deadline.Err() == context.DeadlineExceeded {
+		v, r = runtime.ErrorVerdict, fmt.Sprintf("execute: testcase did not terminate within %gs", timeout)
+		tlTestcaseStopped(exec, r)
 	}
-	if deadline != nil && deadline.Err() == context.DeadlineExceeded {
-		return runtime.ErrorVerdict, fmt.Sprintf("execute: testcase did not terminate within %gs", timeout)
-	}
+	tlTestcaseTerminated(exec, v, r)
 	return v, r
 }
 

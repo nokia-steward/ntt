@@ -243,6 +243,15 @@ func compStateNotAValue(op string) runtime.Object {
 // completion deadline so the clock advances to it. Returns Undefined once
 // the state holds or this participant is stopped.
 func blockUntilComponentState(ref *runtime.ComponentRef, op string, env runtime.Scope) runtime.Object {
+	res := waitComponentState(ref, op, env)
+	if b, ok := res.(runtime.Bool); ok && bool(b) {
+		tlDoneKilled(env, nil, op, "", ref)
+	}
+	return res
+}
+
+// waitComponentState performs blockUntilComponentState's wait.
+func waitComponentState(ref *runtime.ComponentRef, op string, env runtime.Scope) runtime.Object {
 	pred := compDone
 	if op == "killed" {
 		pred = compKilled
@@ -280,26 +289,38 @@ func blockUntilComponentState(ref *runtime.ComponentRef, op string, env runtime.
 // modelled deadline among the still-unsatisfied PTCs; a forked PTC with no
 // modelled duration wakes the park when it finishes.
 func blockUntilComponentsState(kind, op string, refs []*runtime.ComponentRef, env runtime.Scope) runtime.Object {
+	res := waitComponentsState(kind, op, refs, env)
+	if tlExec(env) != nil && componentsInState(kind, componentStatePredicate(op), refs, env) {
+		tlDoneKilled(env, nil, op, kind, nil)
+	}
+	return res
+}
+
+// componentsInState reports whether the any/all predicate holds over refs.
+func componentsInState(kind string, pred func(*runtime.ComponentRef, runtime.Scope) bool, refs []*runtime.ComponentRef, env runtime.Scope) bool {
+	if kind == "any component" {
+		for _, r := range refs {
+			if pred(r, env) {
+				return true
+			}
+		}
+		return false
+	}
+	for _, r := range refs { // all component
+		if !pred(r, env) {
+			return false
+		}
+	}
+	return true
+}
+
+// waitComponentsState performs blockUntilComponentsState's wait.
+func waitComponentsState(kind, op string, refs []*runtime.ComponentRef, env runtime.Scope) runtime.Object {
 	pred := compDone
 	if op == "killed" {
 		pred = compKilled
 	}
-	satisfied := func() bool {
-		if kind == "any component" {
-			for _, r := range refs {
-				if pred(r, env) {
-					return true
-				}
-			}
-			return false
-		}
-		for _, r := range refs { // all component
-			if !pred(r, env) {
-				return false
-			}
-		}
-		return true
-	}
+	satisfied := func() bool { return componentsInState(kind, pred, refs, env) }
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil {
 		return runtime.NewBool(satisfied())

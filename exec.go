@@ -19,6 +19,7 @@ import (
 	"github.com/nokia/ntt/runtime/port/httpport"
 	"github.com/nokia/ntt/runtime/port/tcpport"
 	rreport "github.com/nokia/ntt/runtime/report"
+	"github.com/nokia/ntt/runtime/tl"
 	"github.com/nokia/ntt/ttcn3"
 	"github.com/nokia/ntt/ttcn3/syntax"
 	"github.com/spf13/cobra"
@@ -32,6 +33,8 @@ var (
 	execTimeout  time.Duration
 	execLive     bool
 	execProfile  bool
+	execLog      string
+	execLogFmt   string
 
 	// deterministicSafetyTimeout bounds a testcase when the user gave no
 	// --timeout, so a body the scheduler does not yet fully model can't
@@ -67,7 +70,14 @@ fire virtually, so verdicts are reproducible and free of real-clock races. A
 driving a live system under test (real timers pace real I/O). Verdicts are
 functional, not reproducible-by-construction; use --timeout to bound a run.
 The virtual-clock default is for reproducible conformance; --live is for
-testing (and later profiling) an external SUT over mapped/networked ports.`,
+testing (and later profiling) an external SUT over mapped/networked ports.
+
+--log FILE: record every TTCN-3 operation the run performs as a structured
+test log, per the TCI-TL logging interface of ETSI ES 201 873-6: messages
+sent, detected, received and mismatched (with the template), timers,
+component lifecycle, port configuration, verdicts and alt steps. The log is
+the standard's XML format (Annex B), or with --log-format=jsonl the same
+events one per line. One file covers the whole run.`,
 		RunE: runExec,
 	}
 )
@@ -95,6 +105,43 @@ func init() {
 			"(latency is only meaningful on the real clock). Pair with "+
 			"--format=profile for a metrics table, or --format=json for machine "+
 			"output.")
+	ExecCommand.Flags().StringVar(&execLog, "log", "",
+		"write a TCI-TL test log (ETSI ES 201 873-6) of every TTCN-3 operation to this file")
+	ExecCommand.Flags().StringVar(&execLogFmt, "log-format", "",
+		"test log format: xml (the standard's Annex B format) or jsonl; "+
+			"default from the --log file extension, xml otherwise")
+}
+
+// openTestLog opens the --log file and starts a TCI-TL log in the
+// requested format. The returned close completes the log.
+func openTestLog(path, format string) (tl.Logger, func() error, error) {
+	if format == "" {
+		format = "xml"
+		if ext := strings.ToLower(filepath.Ext(path)); ext == ".jsonl" || ext == ".json" {
+			format = "jsonl"
+		}
+	}
+	var mk func(io.Writer) *tl.Writer
+	switch strings.ToLower(format) {
+	case "xml":
+		mk = tl.NewXMLWriter
+	case "jsonl":
+		mk = tl.NewJSONLWriter
+	default:
+		return nil, nil, fmt.Errorf("--log-format %q: want xml or jsonl", format)
+	}
+	f, err := os.Create(path)
+	if err != nil {
+		return nil, nil, fmt.Errorf("--log: %w", err)
+	}
+	w := mk(f)
+	return w, func() error {
+		err := w.Close()
+		if cerr := f.Close(); err == nil {
+			err = cerr
+		}
+		return err
+	}, nil
 }
 
 func runExec(cmd *cobra.Command, args []string) error {
@@ -111,6 +158,18 @@ func runExec(cmd *cobra.Command, args []string) error {
 	// virtual clock, where timers fire instantly.
 	driver.live = execLive || execProfile
 	driver.profiling = execProfile
+	if execLog != "" {
+		l, closeLog, err := openTestLog(execLog, execLogFmt)
+		if err != nil {
+			return err
+		}
+		driver.testLogger = l
+		defer func() {
+			if err := closeLog(); err != nil {
+				fmt.Fprintf(os.Stderr, "test log: %v\n", err)
+			}
+		}()
+	}
 
 	var cfgFile *cfg.File
 	if execCfgPath != "" {
@@ -429,6 +488,8 @@ type staticDriver struct {
 
 	profiling   bool             // --profile: capture per-port performance metrics
 	lastMetrics *rreport.Metrics // metrics from the most recent Run, for LastMetrics
+
+	testLogger tl.Logger // --log: TCI-TL events of every testcase; nil when off
 }
 
 // SetModuleParameters records the [MODULE_PARAMETERS] map produced
@@ -524,6 +585,7 @@ func (d *staticDriver) Run(ctx context.Context, name string) (rreport.Verdict, s
 		ModuleParamWarning: func(msg string) {
 			fmt.Fprintf(os.Stderr, "module parameter: %s\n", msg)
 		},
+		TestLogger: d.testLogger,
 	}
 	// Default: the deterministic discrete-event scheduler (single-runner
 	// token, virtual time advancing only at quiescence) plus the virtual

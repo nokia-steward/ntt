@@ -9,6 +9,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/nokia/ntt/runtime/tl"
 )
 
 // TestcaseExec is the per-testcase execution context carried by the
@@ -35,6 +37,18 @@ type TestcaseExec struct {
 	// the real clock — had nothing to abort against.
 	stopOnce sync.Once
 	stopCh   chan struct{}
+
+	// tlog receives the testcase's TCI-TL events (see tlog.go); nil when
+	// test logging is off. It is set before the testcase runs and never
+	// changes, so it is read without a lock. tlStart anchors virtual-clock
+	// timestamps, tlTc is the testcase identity its events repeat, and
+	// tlSeen the mismatches already logged (see TLMismatchIsNew).
+	tlog    tl.Logger
+	tlStart time.Time
+	tlTc    []tl.Arg
+	tlMu    sync.Mutex
+	tlSeen  map[string]uint64
+	msgSeq  uint64
 
 	// mtcID is the component ID of the MTC, used by PortKey to keep the
 	// MTC's ports on bare (unqualified) names so the single-MTC path is
@@ -763,6 +777,11 @@ type PortMessage struct {
 	Kind      PortMsgKind
 	Signature string
 
+	// Seq numbers the message in its testcase, in order of arrival.
+	// Assigned when it is queued; it identifies a message where its
+	// content cannot (two equal messages are still two messages).
+	Seq uint64
+
 	// RetValue carries the procedure return value (reply) or the
 	// exception value (raise). Payload holds the signature
 	// parameter record for call/reply (so `-> param` and getcall/
@@ -800,8 +819,11 @@ func (t *TestcaseExec) EnqueueMessageFrom(port string, msg Object, sender Object
 	if t.ports == nil {
 		t.ports = map[string][]PortMessage{}
 	}
-	t.ports[port] = append(t.ports[port], PortMessage{Payload: msg, Sender: sender})
+	t.msgSeq++
+	pm := PortMessage{Payload: msg, Sender: sender, Seq: t.msgSeq}
+	t.ports[port] = append(t.ports[port], pm)
 	t.mu.Unlock()
+	t.tlDetected(port, pm)
 	t.signalMessageReady()
 }
 
@@ -1384,8 +1406,11 @@ func (t *TestcaseExec) EnqueueEnvelope(port string, msg PortMessage) {
 	if t.ports == nil {
 		t.ports = map[string][]PortMessage{}
 	}
+	t.msgSeq++
+	msg.Seq = t.msgSeq
 	t.ports[port] = append(t.ports[port], msg)
 	t.mu.Unlock()
+	t.tlDetected(port, msg)
 	t.signalMessageReady()
 }
 
