@@ -443,3 +443,43 @@ func TestGoPort_TestLogUsesMappedOperations(t *testing.T) {
 		}
 	}
 }
+
+// TestGoPort_TestLogUsesMappedProcedureOperations covers the _m side of the
+// procedure operations: a call through a port driver is tliPrCall_m, and
+// the reply the driver returns arrives and is taken as tliPrGetReply_m.
+func TestGoPort_TestLogUsesMappedProcedureOperations(t *testing.T) {
+	goport.Register("P", func(string) api.TestPort { return callPort{} })
+	t.Cleanup(goport.Reset)
+
+	v := &tl.Validator{}
+	rec := &tl.Recorder{}
+	v.Next = rec
+	verdict, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, `module M {
+		signature S() return integer;
+		type port P procedure { inout S }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			var integer v_ret := 0;
+			map(self:p, system:p);
+			p.call(S:{}) {
+				[] p.getreply(S:?) -> value v_ret { }
+			}
+			if (v_ret == 99) { setverdict(pass); } else { setverdict(fail, "wrong reply", v_ret); }
+		}
+	}`)}, "M.tc", interpreter.TestcaseOptions{TestLogger: v})
+	if err != nil || verdict != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), err %v", verdict, reason, err)
+	}
+	if n, errs := v.Result(); len(errs) > 0 {
+		t.Fatalf("%d of %d events invalid: %v", len(errs), n, errs)
+	}
+	seen := map[string]bool{}
+	for _, op := range rec.Ops() {
+		seen[op] = true
+	}
+	for _, op := range []string{"tliPrCall_m", "tliPrGetReplyDetected_m", "tliPrGetReply_m"} {
+		if !seen[op] {
+			t.Errorf("no %s in %v", op, rec.Ops())
+		}
+	}
+}

@@ -48,6 +48,8 @@
 //     msgValue, and requires it; the abstract operation calls it msg.
 //     The executor holds decoded values, so its octets are given only for
 //     an octetstring payload.
+//   - D7: the getreply events name the reply template replTmpl; the
+//     abstract operations call it replyTmpl.
 //
 // # Errata in the published schemas
 //

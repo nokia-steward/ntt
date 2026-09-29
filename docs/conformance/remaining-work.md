@@ -413,6 +413,10 @@ operations across the two clocks hung on its first run.
   clock and `pass` under `--live` (see "Newly found").
 - **The call signature still leaks into PTCs** for the unqualified
   `getreply` / `catch` rule (22.3.1 h), which reads it from scope.
+- **`any port.getcall` / `getreply` / `catch` as a statement takes
+  nothing** (ETSI 22.5): the name `any port` reaches the procedure path as
+  if it were a port, which has no queue. The call stays queued for a later
+  receive to take. Found by the TCI-TL review.
 - **A `send`'s `to` clause is evaluated twice**, once to tag the message
   and once to route it, so a side effect in it (`to f()`) runs twice.
   Found by the TCI-TL review; the log itself evaluates nothing again.

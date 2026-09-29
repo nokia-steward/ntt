@@ -188,3 +188,37 @@ func (v *Validator) Result() (int, []error) {
 	defer v.mu.Unlock()
 	return v.events, append([]error(nil), v.errs...)
 }
+
+// Monotonic passes events on to Next and keeps a log's timestamps from
+// going backwards. Under the virtual clock a testcase's events run ahead of
+// the wall clock by the virtual time it used, so the next event taken from
+// the wall clock — the next testcase's, or its control part's — would
+// otherwise be earlier than the last. Now reports the time to give such an
+// event: the wall clock, or the latest timestamp logged if that is later.
+type Monotonic struct {
+	Next Logger
+
+	mu   sync.Mutex
+	last int64
+}
+
+func (m *Monotonic) Log(e *Event) {
+	m.mu.Lock()
+	if e.Ts > m.last {
+		m.last = e.Ts
+	}
+	m.mu.Unlock()
+	m.Next.Log(e)
+}
+
+// Now is the timestamp, in microseconds since the Unix epoch, for an event
+// that is not timed by a testcase's clock.
+func (m *Monotonic) Now() int64 {
+	now := time.Now().UnixMicro()
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.last > now {
+		return m.last
+	}
+	return now
+}

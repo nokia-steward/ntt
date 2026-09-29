@@ -458,13 +458,9 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 		bindTestcaseParamsWithArgs(tcEnv, tcNode, actualArgs, ctrlEnv)
 	}
 	if lexec := tlExec(tcEnv); lexec != nil {
-		tcID := tlArg("tcId", tl.TestcaseID(module, fnName))
-		pars := tlArg("tciPars", tlTestcaseParams(tcNode, tcEnv))
-		lexec.SetTLTestcase(tcID, pars)
-		tlEmit(lexec, tcNode, "tliTcStart", tcID, pars)
-		tlEmit(lexec, tcNode, "tliTcStarted", tcID, pars)
 		// tliTcTerminated is logged by the caller, once the verdict is
 		// final: a panic or an execute() timeout still changes it here.
+		tlTestcaseStarted(lexec, tcNode, module, fnName, tcEnv)
 	}
 	r := eval(tcNode.Body, tcEnv)
 	if len(tcNode.Catch) > 0 || tcNode.Finally != nil {
@@ -2781,11 +2777,18 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 								if kind == runtime.MsgReply || kind == runtime.MsgException {
 									if csig := currentCallSignature(env); csig != "" {
 										if head, ok := exec.PeekKindLimited(qkey, kind, limit); ok && head.Signature != "" && head.Signature != csig {
+											if exec.TestLogger() != nil {
+												tlProcReceive(exec, sel, qkey, head, nil, nil, nil, "mismatch",
+													"answers "+head.Signature+", not the called "+csig, true)
+											}
 											return false
 										}
 									}
 								}
-								if _, ok := exec.DequeueKindLimited(qkey, kind, limit); ok {
+								if head, ok := exec.DequeueKindLimited(qkey, kind, limit); ok {
+									if exec.TestLogger() != nil {
+										tlProcReceive(exec, sel, qkey, head, nil, nil, nil, "receive", "", false)
+									}
 									return true
 								}
 							}
@@ -2846,6 +2849,9 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 		if th := callTimeoutTimer(env); th != nil {
 			if timerExpired(th, env) {
 				th.Running = false
+				if exec := tlExec(env); exec != nil {
+					tlCatchTimeout(exec, g, env)
+				}
 				return true
 			}
 			return false

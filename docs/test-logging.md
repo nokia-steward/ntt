@@ -47,7 +47,8 @@ the test specification performs the operation (file and line).
 
 ## What is logged
 
-45 of the 125 TCI-TL operations, covering message-based testing end to end:
+86 of the 125 TCI-TL operations, covering message- and procedure-based testing
+end to end, and the control part:
 
 | Area | Operations |
 |---|---|
@@ -59,16 +60,33 @@ the test specification performs the operation (file and line).
 | Components | `tliCCreate`, `tliCStart`, `tliCCall`, `tliCCallTerminated`, `tliCStop`, `tliCKill`, `tliCDone`, `tliCKilled`, `tliCTerminated` |
 | Ports | `tliPConnect`, `tliPDisconnect`, `tliPMap`, `tliPUnmap` |
 | Alt and defaults | `tliAEnter`, `tliALeave`, `tliANomatch`, `tliARepeat`, `tliADefaults`, `tliAWait`, `tliAActivate`, `tliADeactivate` |
+| Procedure calls | `tliPrCall_c` (and `_MC`, `_BC`), `tliPrCall_m`, `tliPrGetCallDetected`, `tliPrGetCall`, `tliPrGetCallChecked`, `tliPrGetCallMismatch` |
+| Procedure replies | `tliPrReply_c` (and `_MC`, `_BC`), `tliPrReply_m`, `tliPrGetReplyDetected`, `tliPrGetReply`, `tliPrGetReplyChecked`, `tliPrGetReplyMismatch` |
+| Procedure exceptions | `tliPrRaise_c` (and `_MC`, `_BC`), `tliPrRaise_m`, `tliPrCatchDetected`, `tliPrCatch`, `tliPrCatchChecked`, `tliPrCatchMismatch`, `tliPrCatchTimeout` |
+| Control part | `tliCtrlStart`, `tliTcExecute`, `tliCtrlTerminated` |
+| The log itself | `tliInfo`: an empty log, or a failure of the logging (see below) |
 
 A port mapped to the system logs the `_m` forms, whose peer is an SUT
-address; a port connected to other components logs the `_c` forms.
+address; a port connected to other components logs the `_c` forms. The
+receiving operations above exist in both forms, and so do call, reply and
+raise.
 
-**Not logged yet:** procedure-based communication (`tliPrCall_*`,
-`tliPrGetCall_*`, `tliPrReply_*`, `tliPrGetReply_*`, `tliPrRaise_*`,
-`tliPrCatch_*`); the control part (`tliCtrl*`, `tliTcExecute`); codecs (`tliEncode`, `tliDecode`); `match` (`tliMatch`,
+Procedure events carry the signature and its parameters, the reply or
+exception value, and the parameter and value templates a receiving
+operation matched against. Every event of a call — the call, its arrival
+at the server, the getcall, the reply, its arrival back, the getreply — is
+logged in that order.
+
+Control-part events are produced by the control part itself, not by a test
+component; they appear as the component `control`. `ntt exec` runs
+testcases directly, so a log it writes has no control events; they come
+from running a control part through the library (`RunControlWith`).
+
+**Not logged yet:** the control part's parameterised and result forms and
+its stop (`tliCtrlStartWithParameters`, `tliCtrlTerminatedWithResult`,
+`tliCtrlStop`); the multicast and broadcast `_m` forms of send and call; codecs (`tliEncode`, `tliDecode`); `match` (`tliMatch`,
 `tliMatchMismatch`); function and altstep entry (`tliSEnter`, `tliSLeave`);
-and `tliVar`, `tliModulePar`, `tliRnd`, `tliEvaluate`, `tliInfo`,
-`tliAction`, `tliCRunning`, `tliCAlive`, the `Mismatch` forms of done,
+and `tliVar`, `tliModulePar`, `tliRnd`, `tliEvaluate`, `tliAction`, `tliCRunning`, `tliCAlive`, the `Mismatch` forms of done,
 killed and timeout, `tliPStart`/`Stop`/`Halt`/`Clear`, the parameterised
 map forms, and the `check(any)` forms. Also not yet logged: `all
 timer.stop`, and `disconnect` / `unmap` without arguments or over `all
@@ -107,12 +125,18 @@ Two policies keep a log readable without dropping information:
   reported as it is applied and listed in `runtime/tl/doc.go`.
 - **Choices the standard leaves to the tool:** timestamps are microseconds
   since the Unix epoch, declared in the log header; under the virtual clock
-  they are the testcase's start plus the virtual time elapsed. Scalar values
+  they are the testcase's start plus the virtual time elapsed. A log's
+  timestamps never decrease: a virtual-clock testcase runs ahead of the wall
+  clock, so what comes after it — the next testcase, or its control part —
+  starts from its last event, not from the wall clock. Scalar values
   are written in TTCN-3 notation without literal decoration (`5`, `pass`,
   `0A1B` for an octetstring).
 - **The log never changes the test.** Values are logged as the engine
   evaluated them; no clause is evaluated a second time for the log, and no
-  port driver is created to find out whether a port is mapped.
+  port driver is created to find out whether a port is mapped. If logging
+  itself fails — a value it cannot convert, a logger that errors — the
+  failure is recorded in the log as a `tliInfo` event beginning "test
+  logging failed", and the test goes on exactly as with logging off.
 - **What the executor does not know is left out, not invented.** The
   runtime does not always know a value's declared type, so the optional
   `type` attribute is omitted and the value's element is inferred from its

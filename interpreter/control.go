@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nokia/ntt/runtime"
+	"github.com/nokia/ntt/runtime/tl"
 	"github.com/nokia/ntt/ttcn3"
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
@@ -81,6 +82,20 @@ func ControlPartIsLoadBearing(trees []*ttcn3.Tree, module string) bool {
 //
 // A control part that runs no testcase at all yields `none`.
 func RunControlWith(trees []*ttcn3.Tree, module string, opts TestcaseOptions) (verdict runtime.Verdict, reason string, err error) {
+	// Registered first so it runs last, after a panic has been recovered.
+	var control *syntax.ControlPart
+	// One clock for the control part and the testcases it runs, so the
+	// log's timestamps do not go backwards (see tl.Monotonic).
+	if opts.TestLogger != nil {
+		if _, ok := opts.TestLogger.(*tl.Monotonic); !ok {
+			opts.TestLogger = &tl.Monotonic{Next: opts.TestLogger}
+		}
+	}
+	defer func() {
+		if control != nil {
+			tlControl(opts.TestLogger, control, "tliCtrlTerminated")
+		}
+	}()
 	defer func() {
 		if r := recover(); r != nil {
 			verdict = runtime.ErrorVerdict
@@ -97,8 +112,8 @@ func RunControlWith(trees []*ttcn3.Tree, module string, opts TestcaseOptions) (v
 	if modNode == nil {
 		return runtime.ErrorVerdict, "", fmt.Errorf("module %q not found", module)
 	}
-	control := findControlPart(modNode)
-	if control == nil {
+	cp := findControlPart(modNode)
+	if cp == nil {
 		return runtime.ErrorVerdict, "", fmt.Errorf("module %q has no control part", module)
 	}
 
@@ -106,6 +121,8 @@ func RunControlWith(trees []*ttcn3.Tree, module string, opts TestcaseOptions) (v
 	if initErr != "" {
 		return runtime.ErrorVerdict, initErr, nil
 	}
+	control = cp
+	tlControl(opts.TestLogger, control, "tliCtrlStart")
 
 	agg := runtime.NoneVerdict
 	aggReason := ""
@@ -121,6 +138,7 @@ func RunControlWith(trees []*ttcn3.Tree, module string, opts TestcaseOptions) (v
 	// handler, so a testcase body cannot re-enter this.
 	env.Set(executeHandlerKey, executeHandler{
 		run: func(tcName string, args []runtime.Object, timeout float64, hasTimeout bool, host string, hasHost bool) runtime.Verdict {
+			tlExecute(opts.TestLogger, control, modNode, module, tcName, args, timeout, hasTimeout)
 			v, r := runOneExecute(trees, modNode, module, tcName, args, timeout, hasTimeout, host, hasHost, opts)
 			ran = true
 			if verdictRank(v) > verdictRank(agg) {

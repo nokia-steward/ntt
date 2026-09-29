@@ -147,3 +147,7 @@ func Message(hexOctets string) Content {
 	}
 	return Content{Attrs: []Attr{{"val", hexOctets}}}
 }
+
+// Signature is a Types:TriSignatureIdType: the name of a procedure
+// signature.
+func Signature(name string) Content { return Content{Attrs: []Attr{{"val", name}}} }

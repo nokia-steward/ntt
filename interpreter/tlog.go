@@ -2,7 +2,9 @@ package interpreter
 
 import (
 	"fmt"
+	"reflect"
 	"sort"
+	"time"
 
 	"github.com/nokia/ntt/builtins"
 	"github.com/nokia/ntt/runtime"
@@ -25,8 +27,13 @@ func tlExec(env runtime.Scope) *runtime.TestcaseExec {
 }
 
 // tlPos locates n in the test specification for an event's src and line.
+// A nil node of a concrete type — a *syntax.CallExpr that is nil, passed as
+// a syntax.Node — is not a nil interface, so it is checked for explicitly.
 func tlPos(n syntax.Node) (string, int) {
 	if n == nil {
+		return "", 0
+	}
+	if v := reflect.ValueOf(n); v.Kind() == reflect.Ptr && v.IsNil() {
 		return "", 0
 	}
 	src, _ := nodeFilename(n)
@@ -36,8 +43,44 @@ func tlPos(n syntax.Node) (string, int) {
 
 // tlEmit logs op from the current component at n's position.
 func tlEmit(exec *runtime.TestcaseExec, n syntax.Node, op string, args ...tl.Arg) {
+	defer tlRecover(exec)
 	src, line := tlPos(n)
 	exec.TLog(op, src, line, args...)
+}
+
+// tlEmitLazy is tlEmit for an event whose parameters are built by args,
+// inside the protection tlRecover gives: building them evaluates nothing
+// of the test, but converting a value can still fail.
+func tlEmitLazy(exec *runtime.TestcaseExec, n syntax.Node, op string, args func() []tl.Arg) {
+	defer tlRecover(exec)
+	src, line := tlPos(n)
+	exec.TLog(op, src, line, args()...)
+}
+
+// tlTestcaseStarted records the testcase's identity and logs its start
+// (tliTcStart, then tliTcStarted once it runs).
+func tlTestcaseStarted(exec *runtime.TestcaseExec, tc *syntax.FuncDecl, module, name string, env runtime.Scope) {
+	defer tlRecover(exec)
+	tcID := tlArg("tcId", tl.TestcaseID(module, name))
+	pars := tlArg("tciPars", tlTestcaseParams(tc, env))
+	exec.SetTLTestcase(tcID, pars)
+	tlEmit(exec, tc, "tliTcStart", tcID, pars)
+	tlEmit(exec, tc, "tliTcStarted", tcID, pars)
+}
+
+// tlRecover keeps a failure of the logging itself from changing the test:
+// a panic while building or writing an event is recorded in the log, as a
+// tliInfo saying what failed, and the test goes on as if logging were off.
+// Every logging entry point defers it.
+func tlRecover(exec *runtime.TestcaseExec) {
+	if r := recover(); r != nil {
+		// Recording the failure goes through the same logger, which may
+		// be what failed; that must not escape either.
+		defer func() { _ = recover() }()
+		exec.TLog("tliInfo", "", 0,
+			tlArg("level", tl.Integer(0)),
+			tlArg("info", tl.String(fmt.Sprintf("test logging failed: %v", r))))
+	}
 }
 
 // tlArg builds an event parameter.
@@ -119,6 +162,7 @@ func tlTestcaseParams(tc *syntax.FuncDecl, env runtime.Scope) tl.Content {
 // tlPortConfig logs a connect / disconnect / map / unmap between two port
 // endpoints of the connection graph.
 func tlPortConfig(exec *runtime.TestcaseExec, n syntax.Node, op string, a, b runtime.PortEndpoint) {
+	defer tlRecover(exec)
 	if exec.TestLogger() == nil {
 		return
 	}
@@ -131,6 +175,7 @@ func tlPortConfig(exec *runtime.TestcaseExec, n syntax.Node, op string, a, b run
 // running, and a timeout that happened (a timeout guard that did not
 // match is not logged).
 func tlTimerEvent(exec *runtime.TestcaseExec, n syntax.Node, th *runtime.TimerHandle, op string, res runtime.Object) {
+	defer tlRecover(exec)
 	timer := tlArg("timer", tlTimer(th))
 	switch op {
 	case "start":
@@ -182,6 +227,7 @@ func createComponent(typeName, name string, n syntax.Node, env runtime.Scope) *r
 
 // tlTerminated logs, on behalf of a PTC, that its behaviour has ended.
 func tlTerminated(exec *runtime.TestcaseExec, ref *runtime.ComponentRef) {
+	defer tlRecover(exec)
 	if exec == nil || ref == nil {
 		return
 	}
@@ -223,6 +269,7 @@ func tlDoneKilled(env runtime.Scope, n syntax.Node, op, kind string, ref *runtim
 // already evaluated the `to` clause to — never evaluated again here, since a
 // log must not change what the test does.
 func tlSend(exec *runtime.TestcaseExec, n syntax.Node, port string, dest, payload runtime.Object) {
+	defer tlRecover(exec)
 	self := currentCompID(exec)
 	at := tlArg("at", exec.TLPort(self, port).Content())
 	msg := tlArg("msgValue", runtime.TLValue(payload).AsValue())
@@ -323,6 +370,7 @@ func tlTargetIDs(dest runtime.Object) map[int64]bool {
 // against an unchanged queue head is not a new event, but each head a
 // trigger discards is.
 func tlReceive(exec *runtime.TestcaseExec, call syntax.Node, port string, head runtime.PortMessage, tmpl, fromTmpl runtime.Object, ev string, payloadOk, dedupe bool) {
+	defer tlRecover(exec)
 	self := currentCompID(exec)
 	if ev == "mismatch" && dedupe {
 		key := fmt.Sprintf("%d\x00%s\x00%p", self, port, call)
@@ -425,6 +473,7 @@ func tlVerdict(v runtime.Verdict) string {
 // (tliTcTerminated). No-op when logging is off or the testcase never
 // started.
 func tlTestcaseTerminated(exec *runtime.TestcaseExec, v runtime.Verdict, reason string) {
+	defer tlRecover(exec)
 	if exec == nil || exec.TestLogger() == nil || exec.TLTestcase() == nil {
 		return
 	}
@@ -438,9 +487,228 @@ func tlTestcaseTerminated(exec *runtime.TestcaseExec, v runtime.Verdict, reason 
 // tlTestcaseStopped logs that a testcase was stopped from outside, e.g. by
 // its execute() timeout (tliTcStop).
 func tlTestcaseStopped(exec *runtime.TestcaseExec, reason string) {
+	defer tlRecover(exec)
 	if exec == nil || exec.TestLogger() == nil || exec.TLTestcase() == nil {
 		return
 	}
 	exec.TLogFrom(exec.TestLogger(), exec.TLComponentByID(exec.MTCID()), "tliTcStop", "", 0,
 		tlArg("reason", tl.String(reason)))
+}
+
+// tlProcSend logs a call, reply or raise (tliPrCall, tliPrReply,
+// tliPrRaise) as the engine delivered it: through a port driver to the
+// system (_m), or to the queues in keys (_c, with _MC when the operation
+// addressed several components and _BC when it reached several without
+// addressing them). A delivery only to the sending port's own queue is a
+// loopback with no peer to name.
+func tlProcSend(exec *runtime.TestcaseExec, n syntax.Node, op, port string, msg runtime.PortMessage, keys []string, addressed, viaDriver bool) {
+	defer tlRecover(exec)
+	self := currentCompID(exec)
+	name := map[string]string{"call": "tliPrCall", "reply": "tliPrReply", "raise": "tliPrRaise"}[op]
+	at := tlArg("at", exec.TLPort(self, port).Content())
+	body := []tl.Arg{tlArg("signature", tl.Signature(msg.Signature))}
+	switch op {
+	case "call":
+		body = append(body, tlArg("tciPars", runtime.TLParams(msg.Payload)))
+	case "reply":
+		body = append(body, tlArg("tciPars", runtime.TLParams(msg.Payload)))
+		if msg.RetValue != nil {
+			body = append(body, tlArg("replValue", runtime.TLValue(msg.RetValue).AsValue()))
+		}
+	case "raise":
+		if msg.RetValue != nil {
+			body = append(body, tlArg("excValue", runtime.TLValue(msg.RetValue).AsValue()))
+		}
+	}
+	// A port mapped to the system addresses the system, whether or not a
+	// driver carries the operation — as a message send on it does.
+	if viaDriver || exec.TLMapped(self, port) {
+		args := append([]tl.Arg{at, tlArg("to", exec.TLPort(-2, port).Content())}, body...)
+		tlEmit(exec, n, name+"_m", args...)
+		return
+	}
+	// The port's own queue is a destination only when it is connected to
+	// itself; on an unconnected port it is the loopback, with no peer.
+	connected := len(tlConnectedPeers(exec, port)) > 0
+	var to []tl.PortID
+	own := exec.PortKey(port)
+	for _, k := range keys {
+		if k == own && !connected {
+			continue
+		}
+		to = append(to, exec.TLPortForKey(k))
+	}
+	switch {
+	case len(to) == 0:
+		tlEmit(exec, n, name+"_c", append([]tl.Arg{at}, body...)...)
+	case len(to) == 1:
+		tlEmit(exec, n, name+"_c", append([]tl.Arg{at, tlArg("to", to[0].Content())}, body...)...)
+	case addressed:
+		tlEmit(exec, n, name+"_c_MC", append([]tl.Arg{at, tlArg("to", tl.PortIDList(to...))}, body...)...)
+	default:
+		tlEmit(exec, n, name+"_c_BC", append([]tl.Arg{at, tlArg("to", tl.PortIDList(to...))}, body...)...)
+	}
+}
+
+// tlProcReceive logs a procedure receiving operation against the head of a
+// port queue: a getcall, getreply or catch that matched (tliPrGetCall,
+// tliPrGetReply, tliPrCatch), a check that did (the Checked forms), or a
+// head that did not (the Mismatch forms), _c or _m. pars and val are the
+// parameter and value templates the engine matched with, fromTmpl its
+// `from` template; desc, when set, explains a mismatch the templates do
+// not, such as a reply to another signature.
+func tlProcReceive(exec *runtime.TestcaseExec, call syntax.Node, port string, head runtime.PortMessage, pars, val, fromTmpl runtime.Object, ev, desc string, dedupe bool) {
+	defer tlRecover(exec)
+	self := currentCompID(exec)
+	if ev == "mismatch" && dedupe {
+		key := fmt.Sprintf("%d\x00%s\x00%p", self, port, call)
+		if !exec.TLMismatchIsNew(key, head.Seq) {
+			return
+		}
+	}
+	base := map[runtime.PortMsgKind]string{
+		runtime.MsgCall:      "tliPrGetCall",
+		runtime.MsgReply:     "tliPrGetReply",
+		runtime.MsgException: "tliPrCatch",
+	}[head.Kind]
+	if base == "" {
+		return
+	}
+	op := base + map[string]string{"receive": "", "check": "Checked", "mismatch": "Mismatch"}[ev]
+	suffix := "_c"
+	if exec.TLMapped(self, port) {
+		suffix = "_m"
+	}
+	args := []tl.Arg{
+		tlArg("at", exec.TLPort(self, port).Content()),
+		tlArg("signature", tl.Signature(head.Signature)),
+	}
+	switch head.Kind {
+	case runtime.MsgCall, runtime.MsgReply:
+		args = append(args, tlArg("tciPars", runtime.TLParams(head.Payload)))
+		if pars != nil {
+			args = append(args, tlArg("parsTmpl", runtime.TLValue(pars).AsTemplate()))
+		}
+		if head.Kind == runtime.MsgReply {
+			if head.RetValue != nil {
+				args = append(args, tlArg("replValue", runtime.TLValue(head.RetValue).AsValue()))
+			}
+			if val != nil {
+				args = append(args, tlArg("replTmpl", runtime.TLValue(val).AsTemplate()))
+			}
+		}
+	case runtime.MsgException:
+		if head.RetValue != nil {
+			args = append(args, tlArg("excValue", runtime.TLValue(head.RetValue).AsValue()))
+		}
+		if val != nil {
+			args = append(args, tlArg("excTmpl", runtime.TLValue(val).AsTemplate()))
+		}
+	}
+	if ev == "mismatch" {
+		var ds []tl.Diff
+		switch {
+		case desc != "":
+			ds = []tl.Diff{{Val: ".", Tmpl: ".", Desc: desc}}
+		case pars != nil && !matchProcObj(pars, head.Payload):
+			ds = tlDiffs(head.Payload, pars)
+		case val != nil:
+			ds = tlDiffs(head.RetValue, val)
+		}
+		args = append(args, tlArg("diffs", tl.Diffs(ds...)))
+	}
+	if suffix == "_c" {
+		if s, ok := head.Sender.(*runtime.ComponentRef); ok && s != nil {
+			args = append(args, tlArg("from", exec.TLComponent(s).Content()))
+		}
+		if fromTmpl != nil {
+			args = append(args, tlArg("fromTmpl", tl.ValueTemplate(runtime.TLValue(fromTmpl))))
+		}
+	} else if fromTmpl != nil {
+		args = append(args, tlArg("addressTmpl", runtime.TLValue(fromTmpl).AsTemplate()))
+	}
+	tlEmit(exec, call, op+suffix, args...)
+}
+
+// tlCatchTimeout logs the timeout of a blocking call, caught by its
+// `catch(timeout)` guard (tliPrCatchTimeout).
+func tlCatchTimeout(exec *runtime.TestcaseExec, g syntax.Node, env runtime.Scope) {
+	defer tlRecover(exec)
+	es, ok := g.(*syntax.ExprStmt)
+	if !ok {
+		return
+	}
+	info := extractCommOp(es.Expr)
+	if info.call == nil {
+		return
+	}
+	sel, ok := info.call.Fun.(*syntax.SelectorExpr)
+	if !ok {
+		return
+	}
+	port, ok := portExprName(sel.X, env)
+	if !ok {
+		port = syntax.Name(sel.X)
+	}
+	tlEmit(exec, g, "tliPrCatchTimeout",
+		tlArg("at", tlOwnPort(exec, port).Content()),
+		tlArg("signature", tl.Signature(currentCallSignature(env))))
+}
+
+// tlControlComponent stands for the control part, which runs outside any
+// test component, as the producer of its own events.
+var tlControlComponent = tl.ComponentID{Name: "control", ID: "control"}
+
+// tlControl logs a control-part event (tliCtrlStart, tliCtrlTerminated).
+// A control part has no testcase execution, so it logs directly.
+func tlControl(l tl.Logger, n syntax.Node, op string, args ...tl.Arg) {
+	if l == nil {
+		return
+	}
+	defer tlControlRecover(l)
+	src, line := tlPos(n)
+	l.Log(&tl.Event{Op: op, Ts: tlNow(l), Src: src, Line: line, C: tlControlComponent, Args: args})
+}
+
+// tlExecute logs an execute() of the control part (tliTcExecute): the
+// testcase, its actual parameters, and the timeout when one is given.
+func tlExecute(l tl.Logger, n syntax.Node, mod *syntax.Module, module, tcName string, args []runtime.Object, timeout float64, hasTimeout bool) {
+	if l == nil {
+		return
+	}
+	defer tlControlRecover(l)
+	var ps []tl.Param
+	if tc := findTestcase(mod, tcName); tc != nil && tc.Params != nil {
+		for i, fp := range tc.Params.List {
+			if fp == nil || fp.Name == nil || i >= len(args) || args[i] == nil {
+				continue
+			}
+			ps = append(ps, tl.Param{Name: fp.Name.String(), Val: runtime.TLValue(args[i])})
+		}
+	}
+	a := []tl.Arg{tlArg("tcId", tl.TestcaseID(module, tcName)), tlArg("tciPars", tl.Params(ps...))}
+	if hasTimeout {
+		a = append(a, tlArg("dur", tl.Duration(timeout)))
+	}
+	tlControl(l, n, "tliTcExecute", a...)
+}
+
+// tlControlRecover is tlRecover for the control part's events.
+func tlControlRecover(l tl.Logger) {
+	if r := recover(); r != nil {
+		defer func() { _ = recover() }()
+		l.Log(&tl.Event{Op: "tliInfo", Ts: tlNow(l), C: tlControlComponent, Args: []tl.Arg{
+			tlArg("level", tl.Integer(0)),
+			tlArg("info", tl.String(fmt.Sprintf("test logging failed: %v", r))),
+		}})
+	}
+}
+
+// tlNow is the timestamp for an event not timed by a testcase: the log's
+// monotonic clock when it keeps one, the wall clock otherwise.
+func tlNow(l tl.Logger) int64 {
+	if c, ok := l.(interface{ Now() int64 }); ok {
+		return c.Now()
+	}
+	return time.Now().UnixMicro()
 }

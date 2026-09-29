@@ -135,7 +135,9 @@ func openTestLog(path, format string) (tl.Logger, func() error, error) {
 		return nil, nil, fmt.Errorf("--log: %w", err)
 	}
 	w := mk(f)
-	return w, func() error {
+	// Testcases run one after another on the virtual clock each start
+	// from the wall clock; keep the log's timestamps from going backwards.
+	return &tl.Monotonic{Next: w}, func() error {
 		err := w.Close()
 		if cerr := f.Close(); err == nil {
 			err = cerr

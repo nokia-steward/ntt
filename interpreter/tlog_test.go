@@ -180,9 +180,18 @@ func TestTestLog_ValidatesAgainstAnnexB(t *testing.T) {
 	for _, k := range clocks {
 		opts := k.opts
 		opts.TestLogger = w
-		if _, _, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, pingPong)}, "M.tc", opts); err != nil {
-			t.Fatal(err)
+		for _, src := range []string{pingPong, procedureExchange} {
+			if _, _, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", opts); err != nil {
+				t.Fatal(err)
+			}
 		}
+	}
+	if _, _, err := interpreter.RunControlWith([]*ttcn3.Tree{parse(t, `module M {
+		type component C {}
+		testcase a() runs on C system C { setverdict(pass); }
+		control { execute(a(), 2.0); }
+	}`)}, "M", interpreter.TestcaseOptions{TestLogger: w}); err != nil {
+		t.Fatal(err)
 	}
 	if err := w.Close(); err != nil {
 		t.Fatal(err)
@@ -385,6 +394,281 @@ func TestTestLog_AnyPortAndPortArrays(t *testing.T) {
 	for _, e := range rec.Events {
 		if e.Op == "tliMSend_c" && !hasArg(e, "to") {
 			t.Errorf("send on a connected port-array element has no `to`")
+		}
+	}
+}
+
+// procedureExchange is a server answering calls with a reply or an
+// exception, and a caller using both the blocking and the nowait form.
+const procedureExchange = `module M {
+	signature Add(in integer a, in integer b) return integer exception (charstring);
+	type port PP procedure { inout Add }
+	type component C { port PP p }
+	function server() runs on C {
+		var integer x, y;
+		alt {
+			[] p.getcall(Add:{a := ?, b := ?}) -> param (x, y) {
+				if (y == 0) { p.raise(Add, "b is zero"); } else { p.reply(Add:{a := x, b := y} value x + y); }
+				repeat;
+			}
+		}
+	}
+	testcase tc() runs on C system C {
+		var C s := C.create("server");
+		connect(self:p, s:p);
+		s.start(server());
+		p.call(Add:{a := 2, b := 3}, 1.0) {
+			[] p.getreply(Add:{a := ?, b := ?} value 5) { setverdict(pass); }
+			[] p.catch(timeout) { setverdict(fail, "timeout"); }
+		}
+		p.call(Add:{a := 1, b := 0}, nowait);
+		timer t := 1.0; t.start;
+		alt {
+			[] p.catch(Add, "b is zero") {}
+			[] t.timeout { setverdict(fail, "no exception"); }
+		}
+		s.stop;
+	}
+}`
+
+// TestTestLog_ProcedureCommunication covers the tliPr operations: each
+// call, reply and raise, its arrival, and the getcall, getreply or catch
+// that took it, in cause-and-effect order, the same on both clocks.
+func TestTestLog_ProcedureCommunication(t *testing.T) {
+	want := map[string][]string{
+		"mtc":    {"tliPrCall_c", "tliPrGetReply_c", "tliPrCall_c", "tliPrCatch_c"},
+		"server": {"tliPrGetCall_c", "tliPrReply_c", "tliPrGetCall_c", "tliPrRaise_c"},
+	}
+	for _, k := range clocks {
+		rec, _ := runLogged(t, procedureExchange, k.opts)
+		got := map[string][]string{}
+		for _, e := range rec.Events {
+			if err := e.Validate(); err != nil {
+				t.Errorf("%s clock: %v", k.name, err)
+			}
+			if strings.HasPrefix(e.Op, "tliPr") && !strings.Contains(e.Op, "Detected") && !strings.Contains(e.Op, "Mismatch") {
+				got[e.C.Name] = append(got[e.C.Name], e.Op)
+			}
+		}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s clock: procedure operations\n got %v\nwant %v", k.name, got, want)
+		}
+		// Each call is logged before its arrival at the server.
+		call, arrived := -1, -1
+		for i, e := range rec.Events {
+			if e.Op == "tliPrCall_c" && call < 0 {
+				call = i
+			}
+			if e.Op == "tliPrGetCallDetected_c" && arrived < 0 {
+				arrived = i
+			}
+		}
+		if call < 0 || arrived < 0 || call > arrived {
+			t.Errorf("%s clock: call at %d, its arrival at %d", k.name, call, arrived)
+		}
+	}
+}
+
+func TestTestLog_CatchTimeout(t *testing.T) {
+	rec, _ := runLogged(t, `module M {
+		signature S();
+		type port PP procedure { inout S }
+		type component C { port PP p }
+		testcase tc() runs on C system C {
+			connect(self:p, self:p);
+			p.call(S:{}, 0.2) {
+				[] p.getreply(S:{}) { setverdict(fail, "no one replies"); }
+				[] p.catch(timeout) { setverdict(pass); }
+			}
+		}
+	}`, clocks[0].opts)
+	if count(rec, "tliPrCatchTimeout") != 1 {
+		t.Fatalf("no tliPrCatchTimeout in %v", rec.Ops())
+	}
+}
+
+// TestTestLog_ControlPart covers a control part: its start and end frame
+// the testcases it executes, each announced by tliTcExecute with its
+// timeout when execute() gives one.
+func TestTestLog_ControlPart(t *testing.T) {
+	rec := &tl.Recorder{}
+	_, _, err := interpreter.RunControlWith([]*ttcn3.Tree{parse(t, `module M {
+		type component C {}
+		testcase a() runs on C system C { setverdict(pass); }
+		testcase b(integer n) runs on C system C { setverdict(pass); }
+		control {
+			execute(a());
+			execute(b(3), 5.0);
+		}
+	}`)}, "M", interpreter.TestcaseOptions{TestLogger: rec})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ops []string
+	for _, e := range rec.Events {
+		if err := e.Validate(); err != nil {
+			t.Error(err)
+		}
+		switch e.Op {
+		case "tliCtrlStart", "tliCtrlTerminated", "tliTcExecute", "tliTcStart", "tliTcTerminated":
+			ops = append(ops, e.Op)
+		}
+	}
+	want := []string{"tliCtrlStart", "tliTcExecute", "tliTcStart", "tliTcTerminated", "tliTcExecute", "tliTcStart", "tliTcTerminated", "tliCtrlTerminated"}
+	if !reflect.DeepEqual(ops, want) {
+		t.Fatalf("control part:\n got %v\nwant %v", ops, want)
+	}
+	var second *tl.Event
+	for _, e := range rec.Events {
+		if e.Op == "tliTcExecute" {
+			second = e
+		}
+	}
+	if !hasArg(second, "dur") {
+		t.Errorf("execute(b(3), 5.0) logged no duration")
+	}
+}
+
+// panickingLogger fails on every event.
+type panickingLogger struct{}
+
+func (panickingLogger) Log(*tl.Event) { panic("logger failed") }
+
+// TestTestLog_NeverChangesTheVerdict: whatever goes wrong in the logging —
+// here, a logger that fails on every event — the test runs as it does with
+// logging off. A failure used to surface as an interpreter panic, turning
+// the testcase into an error.
+func TestTestLog_NeverChangesTheVerdict(t *testing.T) {
+	for _, src := range []string{pingPong, procedureExchange} {
+		for _, k := range clocks {
+			off, _, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", k.opts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			opts := k.opts
+			opts.TestLogger = panickingLogger{}
+			on, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", opts)
+			if err != nil || on != off {
+				t.Errorf("%s clock: verdict %s (%s) with a failing logger, %s without", k.name, on, reason, off)
+			}
+		}
+	}
+}
+
+// TestTestLog_ReceiveWithoutTemplate: a getcall or getreply with no
+// template (`p.getcall;`) has no call node, which the position lookup must
+// treat as absent rather than dereference.
+func TestTestLog_ReceiveWithoutTemplate(t *testing.T) {
+	rec, _ := runLogged(t, `module M {
+		signature S();
+		type port P procedure { inout S }
+		type component C { port P p }
+		function f() runs on C { p.getcall; p.reply(S:{}); }
+		testcase tc() runs on C system C {
+			var C c := C.create;
+			connect(self:p, c:p);
+			p.call(S:{}, nowait);
+			c.start(f());
+			c.done;
+			alt {
+				[] p.getreply { setverdict(pass); }
+				[else] { setverdict(fail, "no reply"); }
+			}
+		}
+	}`, clocks[0].opts)
+	for _, e := range rec.Events {
+		if e.Op == "tliInfo" {
+			t.Errorf("logging failed: %+v", e.Args)
+		}
+	}
+	if count(rec, "tliPrGetCall_c") != 1 || count(rec, "tliPrGetReply_c") != 1 {
+		t.Errorf("template-less getcall / getreply not logged: %v", rec.Ops())
+	}
+}
+
+// TestTestLog_ProcedureForms covers procedure paths beyond a plain
+// call and getcall: a port mapped to the system, `any from` over a port
+// array, `any port`, and a port connected to itself.
+func TestTestLog_ProcedureForms(t *testing.T) {
+	t.Run("mapped port", func(t *testing.T) {
+		rec, _ := runLogged(t, `module M {
+			signature S();
+			type port P procedure { inout S }
+			type component C { port P p }
+			testcase tc() runs on C system C {
+				map(self:p, system:p);
+				p.call(S:{}, nowait);
+				setverdict(pass);
+			}
+		}`, clocks[0].opts)
+		if count(rec, "tliPrCall_m") != 1 || count(rec, "tliPrCall_c") != 0 {
+			t.Errorf("a call on a mapped port is not logged as tliPrCall_m: %v", rec.Ops())
+		}
+	})
+	t.Run("any from a port array", func(t *testing.T) {
+		rec, _ := runLogged(t, `module M {
+			signature S() return integer;
+			type port P procedure { inout S }
+			type component C { port P p[2] }
+			function f() runs on C { p[1].getcall; p[1].reply(S:{} value 1); }
+			testcase tc() runs on C system C {
+				var C c := C.create;
+				connect(self:p[0], c:p[0]);
+				connect(self:p[1], c:p[1]);
+				p[1].call(S:{}, nowait);
+				c.start(f());
+				c.done;
+				alt {
+					[] any from p.getreply(S:{}) { setverdict(pass); }
+					[else] { setverdict(fail, "no reply"); }
+				}
+			}
+		}`, clocks[0].opts)
+		if n := count(rec, "tliPrGetReply_c"); n != 1 {
+			t.Errorf("any from p.getreply logged %d receives: %v", n, rec.Ops())
+		}
+	})
+	t.Run("connected to itself", func(t *testing.T) {
+		rec, _ := runLogged(t, `module M {
+			signature S();
+			type port P procedure { inout S }
+			type component C { port P q }
+			testcase tc() runs on C system C {
+				connect(self:q, self:q);
+				q.call(S:{}, nowait);
+				q.getcall(S:{});
+				setverdict(pass);
+			}
+		}`, clocks[0].opts)
+		if n := count(rec, "tliPrGetCall_c"); n != 1 {
+			t.Errorf("getcall logged %d receives: %v", n, rec.Ops())
+		}
+		for _, e := range rec.Events {
+			if e.Op == "tliPrCall_c" && !hasArg(e, "to") {
+				t.Errorf("a call on a port connected to itself names no destination")
+			}
+		}
+	})
+}
+
+// TestTestLog_TimestampsNeverGoBack: under the virtual clock a testcase's
+// events run ahead of the wall clock by the virtual time it used. The next
+// testcase, and the control part around them, must not appear to happen
+// before it.
+func TestTestLog_TimestampsNeverGoBack(t *testing.T) {
+	rec := &tl.Recorder{}
+	opts := clocks[0].opts
+	opts.TestLogger = rec
+	if _, _, err := interpreter.RunControlWith([]*ttcn3.Tree{parse(t, `module M {
+		type component C {}
+		testcase a() runs on C system C { timer w := 5.0; w.start; w.timeout; setverdict(pass); }
+		control { execute(a()); execute(a()); }
+	}`)}, "M", opts); err != nil {
+		t.Fatal(err)
+	}
+	for i := 1; i < len(rec.Events); i++ {
+		if rec.Events[i].Ts < rec.Events[i-1].Ts {
+			t.Fatalf("%s at %d comes after %s at %d", rec.Events[i].Op, rec.Events[i].Ts, rec.Events[i-1].Op, rec.Events[i-1].Ts)
 		}
 	}
 }

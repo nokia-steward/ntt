@@ -1,6 +1,7 @@
 package runtime
 
 import (
+	"fmt"
 	"sort"
 	"strconv"
 	"strings"
@@ -18,6 +19,10 @@ import (
 func (t *TestcaseExec) SetTestLogger(l tl.Logger) {
 	t.tlog = l
 	t.tlStart = time.Now()
+	// Start no earlier than the log's latest event (see tl.Monotonic).
+	if c, ok := l.(interface{ Now() int64 }); ok {
+		t.tlStart = time.UnixMicro(c.Now())
+	}
 }
 
 // TestLogger returns the attached logger, or nil.
@@ -176,11 +181,50 @@ func (t *TestcaseExec) boundPortDriver(instance string) bool {
 	return ok && d != nil
 }
 
-// tlDetected logs the arrival of a message in a port queue
-// (tliMDetected_c / _m), on behalf of the receiving component.
+// TLPortForKey identifies the port a queue key belongs to: its owner and
+// its name.
+func (t *TestcaseExec) TLPortForKey(key string) tl.PortID {
+	return t.TLPort(t.portOwner(key), key)
+}
+
+// TLParams is a procedure's parameter record as a TCI parameter list: one
+// parameter per field, in field order. The runtime does not keep the
+// parameters' passing modes, so none is given.
+func TLParams(rec Object) tl.Content {
+	v := TLValue(rec)
+	if v.Kind != "record" && v.Kind != "set" {
+		return tl.Params()
+	}
+	ps := make([]tl.Param, 0, len(v.Elems))
+	for _, e := range v.Elems {
+		name := e.Name
+		e.Name = ""
+		ps = append(ps, tl.Param{Name: name, Val: e})
+	}
+	return tl.Params(ps...)
+}
+
+// tlDetected logs the arrival of a message, call, reply or exception in a
+// port queue (tliMDetected, tliPrGetCallDetected, tliPrGetReplyDetected,
+// tliPrCatchDetected, each _c or _m), on behalf of the receiving
+// component.
 func (t *TestcaseExec) tlDetected(key string, msg PortMessage) {
 	l := t.TestLogger()
-	if l == nil || msg.Kind != MsgMessage {
+	if l == nil {
+		return
+	}
+	// A failure of the logging must not change the test: record it in
+	// the log instead (see the interpreter's tlRecover).
+	defer func() {
+		if r := recover(); r != nil {
+			defer func() { _ = recover() }()
+			t.TLog("tliInfo", "", 0,
+				tl.Arg{Name: "level", Val: tl.Integer(0)},
+				tl.Arg{Name: "info", Val: tl.String(fmt.Sprintf("test logging failed: %v", r))})
+		}
+	}()
+	if msg.Kind != MsgMessage {
+		t.tlProcDetected(l, key, msg)
 		return
 	}
 	owner := t.portOwner(key)
@@ -375,4 +419,57 @@ func padLeft(s string, n int) string {
 		return s
 	}
 	return strings.Repeat("0", n-len(s)) + s
+}
+
+// tlProcDetected logs the arrival of a procedure envelope.
+func (t *TestcaseExec) tlProcDetected(l tl.Logger, key string, msg PortMessage) {
+	owner := t.portOwner(key)
+	at := t.TLPort(owner, key)
+	mapped := t.TLMapped(owner, key)
+	op := map[PortMsgKind]string{
+		MsgCall:      "tliPrGetCallDetected",
+		MsgReply:     "tliPrGetReplyDetected",
+		MsgException: "tliPrCatchDetected",
+	}[msg.Kind]
+	if op == "" {
+		return
+	}
+	args := []tl.Arg{{Name: "at", Val: at.Content()}}
+	if mapped {
+		op += "_m"
+		args = append(args,
+			tl.Arg{Name: "from", Val: tl.PortID{Comp: t.TLComponentByID(-2), Name: at.Name, Index: -1}.Content()},
+			tl.Arg{Name: "signature", Val: tl.Signature(msg.Signature)})
+		// The _m forms carry encoded parameters (TriParameterList), which
+		// the executor does not hold; the decoded ones come with the
+		// receive.
+		t.TLogFrom(l, at.Comp, op, "", 0, args...)
+		return
+	}
+	op += "_c"
+	if s, ok := msg.Sender.(*ComponentRef); ok && s != nil {
+		from := tl.PortID{Comp: t.TLComponent(s), Name: at.Name, Index: -1}
+		for _, p := range t.ConnectedPeers(PortEndpoint{Comp: t.connID(owner), Port: at.Name}) {
+			if p.Comp == s.ID || (p.Comp == 0 && s.ID == t.MTCID()) {
+				from = t.TLPort(s.ID, p.Port)
+				break
+			}
+		}
+		args = append(args, tl.Arg{Name: "from", Val: from.Content()})
+	}
+	args = append(args, tl.Arg{Name: "signature", Val: tl.Signature(msg.Signature)})
+	switch msg.Kind {
+	case MsgCall:
+		args = append(args, tl.Arg{Name: "tciPars", Val: TLParams(msg.Payload)})
+	case MsgReply:
+		args = append(args, tl.Arg{Name: "tciPars", Val: TLParams(msg.Payload)})
+		if msg.RetValue != nil {
+			args = append(args, tl.Arg{Name: "replValue", Val: TLValue(msg.RetValue).AsValue()})
+		}
+	case MsgException:
+		if msg.RetValue != nil {
+			args = append(args, tl.Arg{Name: "excValue", Val: TLValue(msg.RetValue).AsValue()})
+		}
+	}
+	t.TLogFrom(l, at.Comp, op, "", 0, args...)
 }

@@ -5568,10 +5568,17 @@ func evalAnyAllFromProc(n *syntax.FromExpr, sel *syntax.SelectorExpr, call *synt
 				continue
 			}
 			head, ok := exec.PeekKind(pn, kind)
-			if !ok || !procReceiveMatches(op, call, head, env) {
+			if !ok {
+				continue
+			}
+			matched, pars, val := procReceiveMatch(op, call, head, env)
+			if !matched {
 				continue
 			}
 			exec.DequeueKind(pn, kind)
+			if exec.TestLogger() != nil {
+				tlProcReceive(exec, call, pn, head, pars, val, nil, "receive", "", false)
+			}
 			applyRedirectProc(redirect, head, env)
 			bindProcIndex(redirect, pn, name, env)
 			return runtime.NewBool(true), true
@@ -5579,14 +5586,22 @@ func evalAnyAllFromProc(n *syntax.FromExpr, sel *syntax.SelectorExpr, call *synt
 		return runtime.NewBool(false), true
 	case "all":
 		matched := false
+		// The templates each port was matched with, for the log.
+		type matchedTmpl struct{ pars, val runtime.Object }
+		tmpls := map[string]matchedTmpl{}
 		for _, pn := range exec.PortNames() {
 			if !belongs(pn) {
 				continue
 			}
 			head, ok := exec.PeekKind(pn, kind)
-			if !ok || !procReceiveMatches(op, call, head, env) {
+			if !ok {
 				return runtime.NewBool(false), true
 			}
+			okMatch, pars, val := procReceiveMatch(op, call, head, env)
+			if !okMatch {
+				return runtime.NewBool(false), true
+			}
+			tmpls[pn] = matchedTmpl{pars, val}
 			matched = true
 		}
 		if !matched {
@@ -5597,6 +5612,9 @@ func evalAnyAllFromProc(n *syntax.FromExpr, sel *syntax.SelectorExpr, call *synt
 				continue
 			}
 			if head, ok := exec.DequeueKind(pn, kind); ok {
+				if exec.TestLogger() != nil {
+					tlProcReceive(exec, call, pn, head, tmpls[pn].pars, tmpls[pn].val, nil, "receive", "", false)
+				}
 				applyRedirectProc(redirect, head, env)
 			}
 		}
@@ -7717,8 +7735,10 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 			if op == "call" {
 				tlOp = "tliCCall"
 			}
-			mod, fn := tlQualified(body, env)
-			tlEmit(lexec, n, tlOp, tlArg("comp", lexec.TLComponent(ref).Content()), tlArg("name", tl.BehaviourID(mod, fn)))
+			tlEmitLazy(lexec, n, tlOp, func() []tl.Arg {
+				mod, fn := tlQualified(body, env)
+				return []tl.Arg{tlArg("comp", lexec.TLComponent(ref).Content()), tlArg("name", tl.BehaviourID(mod, fn))}
+			})
 		}
 		// Record that behaviour was started on this component (even
 		// when the body is skipped below). `all component.done` /
@@ -8089,11 +8109,13 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		if ref != nil {
 			if lexec := tlExec(env); lexec != nil {
 				if op == "call" {
-					args := []tl.Arg{tlArg("verdict", tl.Verdict(tlVerdict(ref.GetVerdict())))}
-					if !stopped && result != nil && result != runtime.Undefined {
-						args = append(args, tlArg("returnValue", runtime.TLValue(result).AsValue()))
-					}
-					lexec.TLog("tliCCallTerminated", "", 0, args...)
+					tlEmitLazy(lexec, nil, "tliCCallTerminated", func() []tl.Arg {
+						args := []tl.Arg{tlArg("verdict", tl.Verdict(tlVerdict(ref.GetVerdict())))}
+						if !stopped && result != nil && result != runtime.Undefined {
+							args = append(args, tlArg("returnValue", runtime.TLValue(result).AsValue()))
+						}
+						return args
+					})
 				} else {
 					tlTerminated(lexec, ref)
 				}
@@ -8396,7 +8418,10 @@ func evalAnyPortOp(op string, n *syntax.CallExpr, env runtime.Scope) runtime.Obj
 			// envelope; on no-match leave res Undefined so the
 			// scan continues to the next port (TTCN-3 22.5).
 			kind, _ := procKindForOp(op)
-			if _, ok := exec.DequeueKind(port, kind); ok {
+			if head, ok := exec.DequeueKind(port, kind); ok {
+				if exec.TestLogger() != nil {
+					tlProcReceive(exec, n, port, head, nil, nil, nil, "receive", "", false)
+				}
 				return runtime.NewBool(true)
 			}
 			res = runtime.Undefined
@@ -9275,10 +9300,13 @@ func evalActivate(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	defEnv := snapshotActivateArgs(callExpr, env)
 	id := exec.AddDefault(runtime.Default{Body: &astNode{n: callExpr}, Env: defEnv, Owner: currentCompID(exec)})
 	if lexec := tlExec(env); lexec != nil {
-		mod, name := tlQualified(callExpr, env)
-		tlEmit(lexec, n, "tliAActivate",
-			tlArg("name", tl.QualifiedName(mod, name)),
-			tlArg("ref", tl.Value{Kind: "default", Text: strconv.Itoa(id)}.AsValue()))
+		tlEmitLazy(lexec, n, "tliAActivate", func() []tl.Arg {
+			mod, name := tlQualified(callExpr, env)
+			return []tl.Arg{
+				tlArg("name", tl.QualifiedName(mod, name)),
+				tlArg("ref", tl.Value{Kind: "default", Text: strconv.Itoa(id)}.AsValue()),
+			}
+		})
 	}
 	return runtime.NewInt(id)
 }
@@ -10071,27 +10099,30 @@ func evalProcedureCallTo(port string, call *syntax.CallExpr, toExpr syntax.Expr,
 		Signature: sig,
 	}
 	targets := callTargetComponentIDs(toExpr, env)
+	var keys []string
+	addressed := false
 	if targets == nil {
 		// Unresolved target set: fall back to the default broadcast routing.
-		enqueueEnvelopeRouted(exec, exec.PortKey(port), port, msg)
-		exec.RunDeferredResponders()
-		return runtime.Undefined
-	}
-	var curID int64 = -1
-	if cur := exec.CurrentComponent(); cur != nil {
-		curID = cur.ID
-	}
-	delivered := false
-	for _, peer := range exec.ConnectedPeers(runtime.PortEndpoint{Comp: curID, Port: port}) {
-		if !targets[peer.Comp] {
-			continue
+		keys = envelopeRoute(exec, exec.PortKey(port), port)
+	} else {
+		var curID int64 = -1
+		if cur := exec.CurrentComponent(); cur != nil {
+			curID = cur.ID
 		}
-		exec.EnqueueEnvelope(exec.PortKeyFor(peer.Comp, peer.Port), msg)
-		delivered = true
+		for _, peer := range exec.ConnectedPeers(runtime.PortEndpoint{Comp: curID, Port: port}) {
+			if targets[peer.Comp] {
+				keys = append(keys, exec.PortKeyFor(peer.Comp, peer.Port))
+			}
+		}
+		addressed = len(keys) > 0
+		if !addressed {
+			keys = envelopeRoute(exec, exec.PortKey(port), port)
+		}
 	}
-	if !delivered {
-		enqueueEnvelopeRouted(exec, exec.PortKey(port), port, msg)
+	if exec.TestLogger() != nil {
+		tlProcSend(exec, call, "call", port, msg, keys, addressed, false)
 	}
+	deliverEnvelope(exec, keys, msg)
 	exec.RunDeferredResponders()
 	return runtime.Undefined
 }
@@ -10142,6 +10173,10 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 		// keep their deferred-responder behaviour untouched.
 		if drv := exec.PortDriver(port); drv != nil {
 			if caller, ok := drv.(runtime.PortCaller); ok {
+				if exec.TestLogger() != nil {
+					tlProcSend(exec, n, "call", bareName, runtime.PortMessage{
+						Kind: runtime.MsgCall, Payload: params, Signature: sig}, nil, false, true)
+				}
 				reply, err := caller.Call(params, exec.CurrentComponent())
 				if err != nil {
 					return runtime.Errorf("port %q: driver call failed: %v", port, err)
@@ -10157,12 +10192,17 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 				return runtime.Undefined
 			}
 		}
-		enqueueEnvelopeRouted(exec, port, bareName, runtime.PortMessage{
+		callMsg := runtime.PortMessage{
 			Kind:      runtime.MsgCall,
 			Sender:    exec.CurrentComponent(),
 			Payload:   params,
 			Signature: sig,
-		})
+		}
+		keys := envelopeRoute(exec, port, bareName)
+		if exec.TestLogger() != nil {
+			tlProcSend(exec, n, "call", bareName, callMsg, keys, false, false)
+		}
+		deliverEnvelope(exec, keys, callMsg)
 		exec.RunDeferredResponders()
 		return runtime.Undefined
 	case "reply":
@@ -10172,13 +10212,18 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 			params, ret = procSignatureArg(n.Args.List[0], env)
 			sig = procSignatureName(n.Args.List[0])
 		}
-		enqueueEnvelopeRouted(exec, port, bareName, runtime.PortMessage{
+		replyMsg := runtime.PortMessage{
 			Kind:      runtime.MsgReply,
 			Sender:    exec.CurrentComponent(),
 			Payload:   params,
 			RetValue:  ret,
 			Signature: sig,
-		})
+		}
+		keys := envelopeRoute(exec, port, bareName)
+		if exec.TestLogger() != nil {
+			tlProcSend(exec, n, "reply", bareName, replyMsg, keys, false, false)
+		}
+		deliverEnvelope(exec, keys, replyMsg)
 		return runtime.Undefined
 	case "raise":
 		// raise(Signature, <exception value>): arg[0] names the
@@ -10192,20 +10237,35 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 		if n != nil && n.Args != nil && len(n.Args.List) >= 2 {
 			exc = evalExceptionValue(n.Args.List[1], env)
 		}
-		enqueueEnvelopeRouted(exec, port, bareName, runtime.PortMessage{
+		excMsg := runtime.PortMessage{
 			Kind:      runtime.MsgException,
 			Sender:    exec.CurrentComponent(),
 			RetValue:  exc,
 			Signature: sig,
-		})
+		}
+		keys := envelopeRoute(exec, port, bareName)
+		if exec.TestLogger() != nil {
+			tlProcSend(exec, n, "raise", bareName, excMsg, keys, false, false)
+		}
+		deliverEnvelope(exec, keys, excMsg)
 		return runtime.Undefined
 	case "getcall", "getreply", "catch":
 		kind, _ := procKindForOp(op)
 		head, ok := exec.PeekKind(port, kind)
-		if !ok || !procReceiveMatches(op, n, head, env) {
+		if !ok {
+			return runtime.NewBool(false)
+		}
+		matched, pars, val := procReceiveMatch(op, n, head, env)
+		if !matched {
+			if exec.TestLogger() != nil {
+				tlProcReceive(exec, n, port, head, pars, val, nil, "mismatch", "", true)
+			}
 			return runtime.NewBool(false)
 		}
 		exec.DequeueKind(port, kind)
+		if exec.TestLogger() != nil {
+			tlProcReceive(exec, n, port, head, pars, val, nil, "receive", "", false)
+		}
 		return runtime.NewBool(true)
 	}
 	return runtime.Undefined
@@ -10459,8 +10519,18 @@ func procReceiveOpName(call *syntax.CallExpr) string {
 // template match independently; catch matches the exception value
 // against its second argument; getcall matches the parameter record.
 func procReceiveMatches(op string, call *syntax.CallExpr, head runtime.PortMessage, env runtime.Scope) bool {
+	ok, _, _ := procReceiveMatch(op, call, head, env)
+	return ok
+}
+
+// procReceiveMatch is procReceiveMatches that also returns the templates it
+// evaluated: the signature's parameter template (getcall, getreply) and the
+// value template (getreply's `value`, catch's exception template), each nil
+// when the operation has none. A log shows them without evaluating the
+// operation again.
+func procReceiveMatch(op string, call *syntax.CallExpr, head runtime.PortMessage, env runtime.Scope) (ok bool, pars, val runtime.Object) {
 	if call == nil || call.Args == nil || len(call.Args.List) == 0 {
-		return true
+		return true, nil, nil
 	}
 	switch op {
 	case "catch":
@@ -10468,35 +10538,31 @@ func procReceiveMatches(op string, call *syntax.CallExpr, head runtime.PortMessa
 		// template is the second argument. catch(timeout) and the
 		// single-arg forms match unconditionally here.
 		if len(call.Args.List) < 2 {
-			return true
+			return true, nil, nil
 		}
-		return matchProcTemplateExpr(call.Args.List[1], head.RetValue, env)
+		arg := call.Args.List[1]
+		if arg == nil {
+			return true, nil, nil
+		}
+		if b, isBin := arg.(*syntax.BinaryExpr); isBin && b.Op != nil && b.Op.Kind() == syntax.COLON {
+			arg = b.Y
+		}
+		val = eval(arg, env)
+		return matchProcObj(val, head.RetValue), nil, val
 	case "getreply":
 		params, ret := procSignatureArg(call.Args.List[0], env)
 		if !matchProcObj(params, head.Payload) {
-			return false
+			return false, params, ret
 		}
 		if ret != nil && !matchProcObj(ret, head.RetValue) {
-			return false
+			return false, params, ret
 		}
-		return true
+		return true, params, ret
 	case "getcall":
 		params, _ := procSignatureArg(call.Args.List[0], env)
-		return matchProcObj(params, head.Payload)
+		return matchProcObj(params, head.Payload), params, nil
 	}
-	return true
-}
-
-// matchProcTemplateExpr evaluates a template AST argument (stripping a
-// `Type:` prefix) and matches it against a runtime value.
-func matchProcTemplateExpr(arg syntax.Expr, val runtime.Object, env runtime.Scope) bool {
-	if arg == nil {
-		return true
-	}
-	if b, ok := arg.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.COLON {
-		arg = b.Y
-	}
-	return matchProcObj(eval(arg, env), val)
+	return true, nil, nil
 }
 
 // matchProcObj matches an already-evaluated template object against a
@@ -11045,47 +11111,52 @@ func splitPortIndex(name string) (base, suffix string) {
 	return name, ""
 }
 
-// enqueueEnvelopeRouted delivers a procedure envelope (call/reply/raise)
-// the way a message send is routed: under the strict profile a CONNECTED
-// port delivers to the peer(s)' queue(s); otherwise (and for
-// self-connect / no peer) it enqueues on the given qualified port key.
-func enqueueEnvelopeRouted(exec *runtime.TestcaseExec, port, bareName string, msg runtime.PortMessage) {
+// envelopeRoute returns the queues a procedure envelope (call / reply /
+// raise) is delivered to, the way a message send is routed: a CONNECTED
+// port delivers to the peer(s)' queue(s); otherwise (and for self-connect
+// / no peer) the envelope goes on the given qualified port key. Routing and
+// delivery (deliverEnvelope) are separate so a delivery can be logged
+// before it happens, and a log's order follows cause and effect.
+func envelopeRoute(exec *runtime.TestcaseExec, port, bareName string) []string {
 	if targets := strictConnectedTargets(exec, bareName); targets != nil {
-		for _, key := range targets {
-			exec.EnqueueEnvelope(key, msg)
-		}
-		return
+		return targets
 	}
-	exec.EnqueueEnvelope(port, msg)
+	return []string{port}
 }
 
-// routeProcEnvelopeTo delivers a procedure reply/exception envelope to
-// ONLY the components named by toExpr (a `reply ... to c` / `raise ... to
-// (a,b)` clause), mirroring evalProcedureCallTo's per-component routing.
-// Falls back to the default broadcast routing (enqueueEnvelopeRouted) when
-// the target set can't be resolved or matches no connected peer, so a
-// mis-typed target degrades to the old behaviour rather than vanishing.
-func routeProcEnvelopeTo(exec *runtime.TestcaseExec, bareName string, toExpr syntax.Expr, msg runtime.PortMessage, env runtime.Scope) {
+// deliverEnvelope enqueues msg on each of keys.
+func deliverEnvelope(exec *runtime.TestcaseExec, keys []string, msg runtime.PortMessage) {
+	for _, key := range keys {
+		exec.EnqueueEnvelope(key, msg)
+	}
+}
+
+// routeProcEnvelopeTo returns the queues a procedure reply/exception
+// envelope goes to: ONLY those of the components named by toExpr (a
+// `reply ... to c` / `raise ... to (a,b)` clause), mirroring
+// evalProcedureCallTo's per-component routing, with addressed set. Falls
+// back to the default broadcast routing (envelopeRoute) when the target set
+// can't be resolved or matches no connected peer, so a mis-typed target
+// degrades to the old behaviour rather than vanishing. The caller delivers.
+func routeProcEnvelopeTo(exec *runtime.TestcaseExec, bareName string, toExpr syntax.Expr, env runtime.Scope) (keys []string, addressed bool) {
 	targets := callTargetComponentIDs(toExpr, env)
 	if targets == nil {
-		enqueueEnvelopeRouted(exec, exec.PortKey(bareName), bareName, msg)
-		return
+		return envelopeRoute(exec, exec.PortKey(bareName), bareName), false
 	}
 	curID := int64(-1)
 	if cur := exec.CurrentComponent(); cur != nil {
 		curID = cur.ID
 	}
-	delivered := false
 	for _, peer := range exec.ConnectedPeers(runtime.PortEndpoint{Comp: curID, Port: bareName}) {
 		if !targets[peer.Comp] {
 			continue
 		}
-		exec.EnqueueEnvelope(exec.PortKeyFor(peer.Comp, peer.Port), msg)
-		delivered = true
+		keys = append(keys, exec.PortKeyFor(peer.Comp, peer.Port))
 	}
-	if !delivered {
-		enqueueEnvelopeRouted(exec, exec.PortKey(bareName), bareName, msg)
+	if len(keys) == 0 {
+		return envelopeRoute(exec, exec.PortKey(bareName), bareName), false
 	}
+	return keys, true
 }
 
 // evalProcedureReplyRaiseTo handles `p.reply(...) to <dest>` and
@@ -11121,7 +11192,11 @@ func evalProcedureReplyRaiseTo(op, bareName string, call *syntax.CallExpr, toExp
 	default:
 		return evalProcedurePortOp(op, bareName, call, env)
 	}
-	routeProcEnvelopeTo(exec, bareName, toExpr, msg, env)
+	keys, addressed := routeProcEnvelopeTo(exec, bareName, toExpr, env)
+	if exec.TestLogger() != nil {
+		tlProcSend(exec, call, op, bareName, msg, keys, addressed, false)
+	}
+	deliverEnvelope(exec, keys, msg)
 	return runtime.Undefined
 }
 
@@ -11494,9 +11569,11 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 		// `check(getreply(S:{p:=(100..200)} value ?))` does NOT match a
 		// reply whose p is out of range (2204 check fixtures). The `from`
 		// filter below still applies independently.
+		var parsTmpl, valTmpl runtime.Object
 		if isProc && info.call != nil {
-			payloadOk = procReceiveMatches(procReceiveOpName(info.call), info.call, head, env)
+			payloadOk, parsTmpl, valTmpl = procReceiveMatch(procReceiveOpName(info.call), info.call, head, env)
 		}
+		mismatchDesc := ""
 		// ETSI 22.3.1 h: an *unqualified* getreply / catch inside a
 		// blocking `call(S,...) { ... }` response block treats only the
 		// called procedure's reply / exception. When both the enclosing
@@ -11508,13 +11585,21 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 			procReceiveIsUnqualified(info.call) && head.Signature != "" {
 			if csig := currentCallSignature(env); csig != "" && csig != head.Signature {
 				payloadOk = false
+				mismatchDesc = "answers " + head.Signature + ", not the called " + csig
 			}
 		}
 		fromOk, fromTmpl := fromAddrMatch(head.Sender, info.from, env)
 		if !payloadOk || !fromOk {
-			if !isProc && exec.TestLogger() != nil {
+			if exec.TestLogger() != nil {
 				// A trigger drops this head: every drop is an event.
-				tlReceive(exec, info.call, port, head, tmpl, fromTmpl, "mismatch", payloadOk, !isTrigger)
+				if !isProc {
+					tlReceive(exec, info.call, port, head, tmpl, fromTmpl, "mismatch", payloadOk, !isTrigger)
+				} else {
+					if payloadOk && mismatchDesc == "" {
+						mismatchDesc = "sender does not match the from clause"
+					}
+					tlProcReceive(exec, info.call, port, head, parsTmpl, valTmpl, fromTmpl, "mismatch", mismatchDesc, !isTrigger)
+				}
 			}
 			if isTrigger {
 				// trigger drops a non-matching head and retries; it consumed
@@ -11549,12 +11634,16 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 		if consume && !isProc {
 			exec.RecordReceive(port)
 		}
-		if !isProc && exec.TestLogger() != nil {
+		if exec.TestLogger() != nil {
 			ev := "receive"
 			if !consume {
 				ev = "check"
 			}
-			tlReceive(exec, info.call, port, head, tmpl, fromTmpl, ev, false, false)
+			if !isProc {
+				tlReceive(exec, info.call, port, head, tmpl, fromTmpl, ev, false, false)
+			} else {
+				tlProcReceive(exec, info.call, port, head, parsTmpl, valTmpl, fromTmpl, ev, "", false)
+			}
 		}
 		return runtime.NewBool(true)
 	}
