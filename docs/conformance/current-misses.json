@@ -1,14 +1,14 @@
 {
- "summary": "ran 4948 files: 4782 matched, 23 skipped (97.10% match rate)",
- "source": "/tmp/claude-1000/-home-rdiniz-programs-ntt/735de3fb-56f8-493f-b29c-b428a203445d/scratchpad/off5.json",
- "miss_count": 166,
+ "summary": "ran 4948 files: 4787 matched, 23 skipped (97.20% match rate)",
+ "source": "/tmp/claude-1000/-home-rdiniz-programs-ntt/735de3fb-56f8-493f-b29c-b428a203445d/scratchpad/off6.json",
+ "miss_count": 161,
  "outcomes": {
   "reject->pass": 77,
   "reject->none": 24,
   "->": 23,
   "pass->error": 17,
-  "pass->none": 13,
   "pass->fail": 10,
+  "pass->none": 8,
   "pass->parse-error": 2
  },
  "chapters": [
@@ -81,14 +81,6 @@
    }
   },
   {
-   "chapter": "core_language/21_configuration_operations",
-   "misses": 7,
-   "outcomes": {
-    "reject->pass": 2,
-    "pass->none": 5
-   }
-  },
-  {
    "chapter": "core_language/11_variables",
    "misses": 4,
    "outcomes": {
@@ -131,6 +123,13 @@
    "misses": 2,
    "outcomes": {
     "->": 2
+   }
+  },
+  {
+   "chapter": "core_language/21_configuration_operations",
+   "misses": 2,
+   "outcomes": {
+    "reject->pass": 2
    }
   },
   {
@@ -1002,46 +1001,6 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/NegSem_210101_connect_and_map_operations_018.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/21_configuration_operations",
-   "expected": "pass",
-   "actual": "none",
-   "outcome": "pass->none",
-   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/Sem_210101_connect_and_map_operations_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/21_configuration_operations",
-   "expected": "pass",
-   "actual": "none",
-   "outcome": "pass->none",
-   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/Sem_210101_connect_and_map_operations_002.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/21_configuration_operations",
-   "expected": "pass",
-   "actual": "none",
-   "outcome": "pass->none",
-   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/Sem_210101_connect_and_map_operations_003.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/21_configuration_operations",
-   "expected": "pass",
-   "actual": "none",
-   "outcome": "pass->none",
-   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/Sem_210101_connect_and_map_operations_004.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/21_configuration_operations",
-   "expected": "pass",
-   "actual": "none",
-   "outcome": "pass->none",
-   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210102_disconnect_and_unmap_operations/Sem_210102_disconnect_operation_001.ttcn",
    "message": ""
   },
   {

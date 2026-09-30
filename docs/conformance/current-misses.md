@@ -1,9 +1,9 @@
 # Current Conformance Misses
 
-Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/735de3fb-56f8-493f-b29c-b428a203445d/scratchpad/off5.json` using the current workspace runner.
+Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/735de3fb-56f8-493f-b29c-b428a203445d/scratchpad/off6.json` using the current workspace runner.
 
-- Summary: `ran 4948 files: 4782 matched, 23 skipped (97.10% match rate)`
-- Misses: `166`
+- Summary: `ran 4948 files: 4787 matched, 23 skipped (97.20% match rate)`
+- Misses: `161`
 
 ## Misses By Outcome
 
@@ -11,8 +11,8 @@ Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/735de3fb-56f8-493f-b2
 - `reject->none`: `24`
 - `->`: `23`
 - `pass->error`: `17`
-- `pass->none`: `13`
 - `pass->fail`: `10`
+- `pass->none`: `8`
 - `pass->parse-error`: `2`
 
 ## Misses By Chapter
@@ -24,13 +24,13 @@ Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/735de3fb-56f8-493f-b2
 - `core_language/09_test_configurations`: `8` (`pass->error`=1, `reject->none`=4, `reject->pass`=3)
 - `core_language/16_functions_altsteps_testcases`: `8` (`->`=1, `pass->error`=1, `pass->none`=1, `reject->none`=1, `reject->pass`=4)
 - `core_language/20_statement_and_operations_for_alt`: `8` (`pass->error`=1, `pass->fail`=1, `pass->none`=3, `reject->pass`=3)
-- `core_language/21_configuration_operations`: `7` (`pass->none`=5, `reject->pass`=2)
 - `core_language/11_variables`: `4` (`->`=2, `pass->error`=2)
 - `core_language/26_module_control`: `3` (`->`=3)
 - `core_language/B_matching_incoming_values`: `3` (`reject->none`=2, `reject->pass`=1)
 - `oo/501_classes_and_objects`: `3` (`pass->parse-error`=2, `reject->pass`=1)
 - `core_language/07_expressions`: `2` (`reject->pass`=2)
 - `core_language/08_modules`: `2` (`->`=2)
+- `core_language/21_configuration_operations`: `2` (`reject->pass`=2)
 - `core_language/27_specifying_attributes`: `2` (`->`=1, `reject->none`=1)
 - `core_language/19_basic_program_statements`: `1` (`pass->none`=1)
 - `core_language/C_predefined_functions`: `1` (`pass->none`=1)
