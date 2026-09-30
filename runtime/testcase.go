@@ -48,8 +48,11 @@ type TestcaseExec struct {
 	tlTc    []tl.Arg
 	tlMu    sync.Mutex
 	tlSeen  map[string]uint64
+	tlAlt   map[int64]uint64 // per component, its alt rounds (see TLAltEpoch)
+	tlScans map[int64]*tlScan
 	msgSeq  uint64
-	tlEnded atomic.Bool // tliTcTerminated has been logged
+	tlEnded atomic.Bool  // tliTcTerminated has been logged
+	tlEndMu sync.RWMutex // orders events against tlEnded (see TLEnd)
 
 	// mtcID is the component ID of the MTC, used by PortKey to keep the
 	// MTC's ports on bare (unqualified) names so the single-MTC path is

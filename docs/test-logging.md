@@ -47,22 +47,25 @@ the test specification performs the operation (file and line).
 
 ## What is logged
 
-86 of the 125 TCI-TL operations, covering message- and procedure-based testing
-end to end, and the control part:
+112 of the 125 TCI-TL operations, covering message- and procedure-based
+testing end to end, behaviour, variables, codecs and the control part:
 
 | Area | Operations |
 |---|---|
 | Testcase | `tliTcStart`, `tliTcStarted`, `tliTcStop` (an `execute()` timeout), `tliTcTerminated` |
 | Verdict and log | `tliSetVerdict`, `tliGetVerdict`, `tliLog` |
-| Messages to components | `tliMSend_c` (and `_MC` multicast, `_BC` broadcast), `tliMDetected_c`, `tliMReceive_c`, `tliMChecked_c`, `tliMMismatch_c` |
-| Messages to the system | `tliMSend_m`, `tliMDetected_m`, `tliMReceive_m`, `tliMChecked_m`, `tliMMismatch_m` |
-| Timers | `tliTStart`, `tliTStop`, `tliTRead`, `tliTRunning`, `tliTTimeout` |
-| Components | `tliCCreate`, `tliCStart`, `tliCCall`, `tliCCallTerminated`, `tliCStop`, `tliCKill`, `tliCDone`, `tliCKilled`, `tliCTerminated` |
-| Ports | `tliPConnect`, `tliPDisconnect`, `tliPMap`, `tliPUnmap` |
+| Messages to components | `tliMSend_c` (and `_MC` multicast, `_BC` broadcast), `tliMDetected_c`, `tliMReceive_c`, `tliMChecked_c`, `tliMMismatch_c`, `tliCheckedAny_c`, `tliCheckAnyMismatch_c` |
+| Messages to the system | `tliMSend_m` (and `_MC` multicast), `tliMDetected_m`, `tliMReceive_m`, `tliMChecked_m`, `tliMMismatch_m`, `tliCheckedAny_m`, `tliCheckAnyMismatch_m` |
+| Timers | `tliTStart`, `tliTStop`, `tliTRead`, `tliTRunning`, `tliTTimeoutDetected`, `tliTTimeout`, `tliTTimeoutMismatch` |
+| Components | `tliCCreate`, `tliCStart`, `tliCCall`, `tliCCallTerminated`, `tliCStop`, `tliCKill`, `tliCRunning`, `tliCAlive`, `tliCDone`, `tliCDoneMismatch`, `tliCKilled`, `tliCKilledMismatch`, `tliCTerminated` |
+| Ports | `tliPConnect`, `tliPDisconnect`, `tliPMap`, `tliPUnmap`, `tliPStart`, `tliPStop`, `tliPHalt`, `tliPClear` |
+| Behaviour | `tliSEnter`, `tliSLeave` (testcases, functions and altsteps, with their parameters and result, and the control part) |
+| Values | `tliVar` (an assignment), `tliModulePar` (a module parameter read), `tliEvaluate` (a `@lazy` or `@fuzzy` parameter evaluated), `tliRnd`, `tliMatch`, `tliMatchMismatch` |
+| Codecs | `tliEncode` (`encvalue`), `tliDecode` (`decvalue`) |
 | Alt and defaults | `tliAEnter`, `tliALeave`, `tliANomatch`, `tliARepeat`, `tliADefaults`, `tliAWait`, `tliAActivate`, `tliADeactivate` |
 | Procedure calls | `tliPrCall_c` (and `_MC`, `_BC`), `tliPrCall_m`, `tliPrGetCallDetected`, `tliPrGetCall`, `tliPrGetCallChecked`, `tliPrGetCallMismatch` |
 | Procedure replies | `tliPrReply_c` (and `_MC`, `_BC`), `tliPrReply_m`, `tliPrGetReplyDetected`, `tliPrGetReply`, `tliPrGetReplyChecked`, `tliPrGetReplyMismatch` |
-| Procedure exceptions | `tliPrRaise_c` (and `_MC`, `_BC`), `tliPrRaise_m`, `tliPrCatchDetected`, `tliPrCatch`, `tliPrCatchChecked`, `tliPrCatchMismatch`, `tliPrCatchTimeout` |
+| Procedure exceptions | `tliPrRaise_c` (and `_MC`, `_BC`), `tliPrRaise_m`, `tliPrCatchDetected`, `tliPrCatch`, `tliPrCatchChecked`, `tliPrCatchMismatch`, `tliPrCatchTimeoutDetected`, `tliPrCatchTimeout` |
 | Control part | `tliCtrlStart`, `tliTcExecute`, `tliCtrlTerminated` |
 | The log itself | `tliInfo`: an empty log, or a failure of the logging (see below) |
 
@@ -80,25 +83,52 @@ logged in that order.
 Control-part events are produced by the control part itself, not by a test
 component; they appear as the component `control`. `ntt exec` runs
 testcases directly, so a log it writes has no control events; they come
-from running a control part through the library (`RunControlWith`).
+from running a control part through the library (`RunControlWith`). A
+control part logs its start and end, its own `tliSEnter` and `tliSLeave`,
+and each testcase it executes; the functions it calls, its assignments and
+the module parameters it reads are not logged.
 
-**Not logged yet:** the control part's parameterised and result forms and
-its stop (`tliCtrlStartWithParameters`, `tliCtrlTerminatedWithResult`,
-`tliCtrlStop`); the multicast and broadcast `_m` forms of send and call; codecs (`tliEncode`, `tliDecode`); `match` (`tliMatch`,
-`tliMatchMismatch`); function and altstep entry (`tliSEnter`, `tliSLeave`);
-and `tliVar`, `tliModulePar`, `tliRnd`, `tliEvaluate`, `tliAction`, `tliCRunning`, `tliCAlive`, the `Mismatch` forms of done,
-killed and timeout, `tliPStart`/`Stop`/`Halt`/`Clear`, the parameterised
-map forms, and the `check(any)` forms. Also not yet logged: `all
-timer.stop`, and `disconnect` / `unmap` without arguments or over `all
-component`. An imported behaviour started or activated by its unqualified
-name is reported in the current module.
+**Not logged:**
+
+- `tliAction`: the engine does not implement `action()`.
+- The control part's parameterised and result forms and its stop
+  (`tliCtrlStartWithParameters`, `tliCtrlTerminatedWithResult`,
+  `tliCtrlStop`): a control part has no parameters and no result, and the
+  engine has no operation that stops one.
+- The parameterised map forms (`tliPMapParam`, `tliPUnmapParam`): the
+  engine does not evaluate a `param` clause, which only a port driver would
+  use, so the operation is logged as `tliPMap` or `tliPUnmap`. Logging the
+  parameters would mean evaluating them for the log alone.
+- The multicast and broadcast `_m` forms of call, reply and raise, and
+  `tliMSend_m_BC`: a procedure operation on a mapped port is logged in its
+  unicast `_m` form, without its addresses.
+
+Some operations are logged in a narrower sense than the standard's:
+
+- `tliVar` is logged for an assignment statement, with the variable's whole
+  new value (for `r.f[1] := x`, all of `r`). A declaration's initial value,
+  a value redirect (`-> value v`) and an `out` parameter written back also
+  change a variable, and are not logged as `tliVar`.
+- `tliModulePar` is logged when a module parameter is read by name inside
+  a testcase, with the module that declares it.
+- `tliEncode` and `tliDecode` log what the engine's codec did. It has no
+  general encoder: `encvalue` returns a placeholder that a later
+  `decvalue` in the same testcase recognises, and the log shows that
+  placeholder as the encoded message. The executor knows no codec name, so
+  none is given.
+- `tliTTimeoutDetected` and `tliPrCatchTimeoutDetected` are logged
+  together with the timeout they detect: the executor finds an expired
+  timer when it looks at it.
+- Also not yet logged: `all timer.stop`, and `disconnect` / `unmap`
+  without arguments or over `all component`. An imported behaviour started
+  or activated by its unqualified name is reported in the current module.
 
 A PTC whose body the engine models rather than runs — a body that waits on
 a timer and uses no port — gets its `tliCStart` and no `tliCTerminated`:
 its statements are not executed, and the log does not pretend they were
 (see Known issues in the changelog).
 
-Two policies keep a log readable without dropping information:
+These policies keep a log readable without dropping information:
 
 - A mismatch is logged once per message and receiving operation. On the
   real clock an alt re-checks its guards on a short polling backstop; each
@@ -106,7 +136,14 @@ Two policies keep a log readable without dropping information:
   A different message at the head of the queue is logged again, and so is
   every message a `trigger` discards.
 - `tliANomatch`, `tliADefaults` and `tliAWait` are logged once per stretch
-  of alt rounds that match nothing, for the same reason.
+  of alt rounds that match nothing, for the same reason, and so is a
+  `done`, `killed` or `timeout` guard that does not match.
+- More generally, an alt that waits evaluates its guards and defaults again
+  each time it looks — reading the same module parameter, entering the
+  same default altstep. What such a scan repeats is logged once per alt
+  round; what it finds new — a receive that now matches, a component whose
+  state has changed — is logged when it happens. So the two clocks log the
+  same operations.
 
 ## Standard compliance
 
@@ -128,7 +165,9 @@ Two policies keep a log readable without dropping information:
   they are the testcase's start plus the virtual time elapsed. A log's
   timestamps never decrease: a virtual-clock testcase runs ahead of the wall
   clock, so what comes after it — the next testcase, or its control part —
-  starts from its last event, not from the wall clock. Scalar values
+  starts from its last event, not from the wall clock. On the real clock
+  components time their events concurrently; an event that reaches the
+  log after a later one is given that one's timestamp. Scalar values
   are written in TTCN-3 notation without literal decoration (`5`, `pass`,
   `0A1B` for an octetstring).
 - **The log never changes the test.** Values are logged as the engine
@@ -178,19 +217,22 @@ is not:
   time, so each component's own sequence is compared, not the interleaved
   log. Components are matched by the name they were created with —
   numbered in creation order when several share one, so two workers both
-  created as `"w"` are told apart — and the MTC, the system and a control
-  part by their roles. Their numeric ids, which two runs may assign
+  created as `"w"` are told apart, and named under their creator
+  (`a/w`) when a component other than the MTC created them, since two
+  components may create theirs in either order — and the MTC, the system
+  and a control part by their roles. Their numeric ids, which two runs may assign
   differently, are not compared, and a value that refers to a component is
   compared as that component.
 - **Actions, not arrivals.** Some events record when something arrived
   relative to what a component was doing, and differ between correct runs:
   arrivals (`tliMDetected_*`, `tliPrGetCallDetected_*` and the other
   `Detected` forms), mismatches, which depend on what was at the head of a
-  queue, and alt rounds that found nothing (`tliANomatch`, `tliADefaults`,
+  queue or whether a component or timer had finished yet (every
+  `Mismatch` form), and alt rounds that found nothing (`tliANomatch`, `tliADefaults`,
   `tliAWait`). These are left out. So is the elapsed time a timer read
   reports, which measures the clock.
 - **Everything else must agree:** every send and receive with its value and
-  template, every call, reply and exception, every verdict and reason,
+  template (a broadcast's or multicast's destinations as a set), every call, reply and exception, every verdict and reason,
   timer, component and port operation, every alt entered and left, and
   where in the test specification each was performed: the file, by its
   base name since it may sit at different paths, and the line.

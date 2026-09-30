@@ -52,6 +52,16 @@
 //     an octetstring payload.
 //   - D7: the getreply events name the reply template replTmpl; the
 //     abstract operations call it replyTmpl.
+//   - D8: tliRnd names the seed "from"; the abstract operation calls it
+//     seed.
+//   - D9: tliVar and tliModulePar name the value "val"; the abstract
+//     operations call it varValue and parValue.
+//   - D10: tliPStart, tliPStop, tliPHalt and tliPClear have an optional
+//     stat element, the port's state, which the abstract operations do
+//     not; the log gives the state after the operation.
+//   - D11: tliEncode carries either the encoded message or the encoder
+//     failure, and tliDecode either the decoded value or the decoder
+//     failure; the abstract operations carry both.
 //
 // # Errata in the published schemas
 //

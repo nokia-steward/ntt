@@ -46,6 +46,34 @@ func (env *Env) Get(name string) (Object, bool) {
 	return nil, false
 }
 
+// Owner returns the scope in the chain that binds name, or nil. Builtins,
+// which no scope binds, have none.
+func (env *Env) Owner(name string) *Env {
+	for e := env; e != nil; {
+		e.mu.RLock()
+		_, ok := e.store[name]
+		e.mu.RUnlock()
+		if ok {
+			return e
+		}
+		outer, isEnv := e.outer.(*Env)
+		if !isEnv {
+			return nil
+		}
+		e = outer
+	}
+	return nil
+}
+
+// Binds reports whether this scope itself, not an enclosing one, binds
+// name.
+func (env *Env) Binds(name string) bool {
+	env.mu.RLock()
+	defer env.mu.RUnlock()
+	_, ok := env.store[name]
+	return ok
+}
+
 func (env *Env) Set(name string, val Object) Object {
 	env.mu.Lock()
 	env.store[name] = val

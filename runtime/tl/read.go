@@ -53,25 +53,37 @@ func ReadLog(r io.Reader) (*Log, error) {
 	}
 }
 
-func readJSONL(r io.Reader) (*Log, error) {
-	sc := bufio.NewScanner(r)
-	sc.Buffer(nil, 64<<20)
+func readJSONL(r *bufio.Reader) (*Log, error) {
 	l := &Log{}
 	line := 0
 	// A line that does not parse is an error, unless it is the last one:
-	// the log of a killed run ends in a line cut short.
+	// the log of a killed run ends in a line cut short. Lines are as long
+	// as their event: a value may be megabytes.
 	var pending error
-	for sc.Scan() {
+	for {
+		b, rerr := r.ReadBytes('\n')
+		if rerr != nil && rerr != io.EOF {
+			return nil, fmt.Errorf("tl: line %d: %w", line+1, rerr)
+		}
+		if len(b) == 0 && rerr == io.EOF {
+			break
+		}
 		line++
-		if len(bytes.TrimSpace(sc.Bytes())) == 0 {
+		if len(bytes.TrimSpace(b)) == 0 {
+			if rerr == io.EOF {
+				break
+			}
 			continue
 		}
 		if pending != nil {
 			return nil, pending
 		}
 		var j jsonNode
-		if err := json.Unmarshal(sc.Bytes(), &j); err != nil {
+		if err := json.Unmarshal(b, &j); err != nil {
 			pending = fmt.Errorf("tl: line %d: %w", line, err)
+			if rerr == io.EOF {
+				break
+			}
 			continue
 		}
 		n, err := j.node()
@@ -86,9 +98,9 @@ func readJSONL(r io.Reader) (*Log, error) {
 			continue
 		}
 		l.Events = append(l.Events, n)
-	}
-	if err := sc.Err(); err != nil {
-		return nil, fmt.Errorf("tl: after line %d: %w", line, err)
+		if rerr == io.EOF {
+			break
+		}
 	}
 	if l.Header == nil {
 		if pending != nil {
@@ -122,7 +134,8 @@ func (j *jsonNode) node() (*Node, error) {
 }
 
 func readXML(r io.Reader) (*Log, error) {
-	d := xml.NewDecoder(r)
+	er := &eofReader{r: r}
+	d := xml.NewDecoder(er)
 	var stack []*Node
 	var root *Node
 	truncated := false
@@ -135,8 +148,12 @@ func readXML(r io.Reader) (*Log, error) {
 			break
 		}
 		if err != nil {
-			// A log cut off by a killed run ends inside an element.
-			if se, ok := err.(*xml.SyntaxError); ok && strings.Contains(se.Msg, "unexpected EOF") && root != nil {
+			// A log cut off by a killed run ends inside an element — or
+			// inside a character, which the decoder reports as invalid
+			// UTF-8 — so an error once all the input is read, after the
+			// log began, is the log's end.
+			if se, ok := err.(*xml.SyntaxError); ok && root != nil && len(stack) > 0 &&
+				(strings.Contains(se.Msg, "unexpected EOF") || er.eof && strings.Contains(se.Msg, "invalid UTF-8")) {
 				truncated = true
 				break
 			}
@@ -193,6 +210,20 @@ func readXML(r io.Reader) (*Log, error) {
 		trimLayout(e)
 	}
 	return l, nil
+}
+
+// eofReader records that its reader reached the end of the input.
+type eofReader struct {
+	r   io.Reader
+	eof bool
+}
+
+func (e *eofReader) Read(p []byte) (int, error) {
+	n, err := e.r.Read(p)
+	if err == io.EOF {
+		e.eof = true
+	}
+	return n, err
 }
 
 func trimLayout(n *Node) {

@@ -1,6 +1,7 @@
 package tl
 
 import (
+	"math"
 	"strconv"
 )
 
@@ -109,7 +110,16 @@ func Integer(n int64) Content { return Content{Text: strconv.FormatInt(n, 10)} }
 
 func Boolean(b bool) Content { return Content{Text: strconv.FormatBool(b)} }
 
+// Duration is a Types:TriTimerDuration, an xsd:float.
 func Duration(seconds float64) Content {
+	switch {
+	case math.IsInf(seconds, 1):
+		return Content{Text: "INF"}
+	case math.IsInf(seconds, -1):
+		return Content{Text: "-INF"}
+	case math.IsNaN(seconds):
+		return Content{Text: "NaN"}
+	}
 	return Content{Text: strconv.FormatFloat(seconds, 'g', -1, 64)}
 }
 
@@ -130,6 +140,10 @@ const (
 	TimerInactive = "inactiveT"
 	TimerExpired  = "expiredT"
 	TimerNull     = "nullT"
+
+	PortStarted = "startedP"
+	PortHalted  = "haltedP"
+	PortStopped = "stoppedP"
 )
 
 // Verdict is a Values:VerdictValue: "none", "pass", "inconc", "fail" or
@@ -146,6 +160,17 @@ func Message(hexOctets string) Content {
 		return Content{}
 	}
 	return Content{Attrs: []Attr{{"val", hexOctets}}}
+}
+
+// EncodedMessage is a Types:TriMessageType holding an encoding known in
+// full, possibly empty: its octets in hex and the number of unused bits
+// that pad its last octet.
+func EncodedMessage(hexOctets string, paddingBits int) Content {
+	c := Content{Attrs: []Attr{{"val", hexOctets}}}
+	if paddingBits > 0 {
+		c.Attrs = append(c.Attrs, Attr{"paddingBits", strconv.Itoa(paddingBits)})
+	}
+	return c
 }
 
 // Signature is a Types:TriSignatureIdType: the name of a procedure

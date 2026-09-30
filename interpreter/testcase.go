@@ -296,6 +296,7 @@ func newModuleEnv(trees []*ttcn3.Tree, modNode *syntax.Module, module string, op
 				bindDeclNameScoped(env, d, fd.scopes)
 			}
 			recordDefKindAttrs(env, d, fd.scopes)
+			annotateDef(env, d, syntax.Name(modNode.Name))
 		}
 	}
 
@@ -462,9 +463,17 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 		// final: a panic or an execute() timeout still changes it here.
 		tlTestcaseStarted(lexec, tcNode, module, fnName, tcEnv)
 	}
+	if lexec := tlExec(tcEnv); lexec != nil {
+		tlScope(lexec, tcNode, "tliSEnter", module, fnName, "testcase", tcNode.Params, tcEnv, nil)
+	}
 	r := eval(tcNode.Body, tcEnv)
 	if len(tcNode.Catch) > 0 || tcNode.Finally != nil {
 		r = runExceptionHandlers(r, tcNode.Catch, tcNode.Finally, tcEnv)
+	}
+	// The testcase is left once its exception handlers have run, as a
+	// function is.
+	if lexec := tlExec(tcEnv); lexec != nil {
+		tlScope(lexec, tcNode, "tliSLeave", module, fnName, "testcase", tcNode.Params, tcEnv, nil)
 	}
 	if runtime.IsError(r) {
 		err, _ := r.(*runtime.Error)
@@ -1554,6 +1563,66 @@ func collectWithAttrs(ws *syntax.WithSpec, out map[string][]string, outOv, outLo
 	}
 }
 
+// moduleParKey names the env binding that marks name, bound in the same
+// scope, as a module parameter, so a read of it can be logged as one
+// (tliModulePar). The NUL prefix keeps it out of the user identifier
+// namespace.
+func moduleParKey(name string) string { return "\x00modulepar:" + name }
+
+// annotateDef records, for the test log, the module that declares what d
+// binds, the definitions of all modules sharing one scope: the module of a
+// function or altstep, and of a module parameter, whose name it marks as
+// one (see moduleParKey). A later definition of the same name that is not
+// a module parameter removes the mark.
+func annotateDef(env runtime.Scope, d *syntax.ModuleDef, module string) {
+	var pars, others []string
+	names := func(vd *syntax.ValueDecl) (out []string) {
+		if vd == nil {
+			return nil
+		}
+		for _, dec := range vd.Decls {
+			if dec != nil && dec.Name != nil {
+				out = append(out, dec.Name.String())
+			}
+		}
+		return out
+	}
+	switch n := d.Def.(type) {
+	case *syntax.FuncDecl:
+		if n.Name == nil {
+			return
+		}
+		others = append(others, n.Name.String())
+		if v, ok := env.Get(n.Name.String()); ok {
+			if f, ok := v.(*runtime.Function); ok && f.Body == n.Body {
+				f.Module = module
+			}
+		}
+	case *syntax.ValueDecl:
+		if n.KindTok != nil && n.KindTok.Kind() == syntax.MODULEPAR {
+			pars = names(n)
+		} else {
+			others = names(n)
+		}
+	case *syntax.ModuleParameterGroup:
+		for _, vd := range n.Decls {
+			pars = append(pars, names(vd)...)
+		}
+	case *syntax.TemplateDecl:
+		if n.Name != nil {
+			others = append(others, n.Name.String())
+		}
+	}
+	for _, name := range pars {
+		env.Set(moduleParKey(name), runtime.NewCharstring(module))
+	}
+	for _, name := range others {
+		if e, ok := env.(*runtime.Env); ok && e.Binds(moduleParKey(name)) {
+			env.Set(moduleParKey(name), runtime.Undefined)
+		}
+	}
+}
+
 // defAttrKey names the env binding recording the attributes that
 // enclosing kind-selector with clauses attach to a single definition.
 // The NUL prefix keeps it out of the user identifier namespace.
@@ -1781,6 +1850,7 @@ func initModuleDefs(env runtime.Scope, mod *syntax.Module) {
 			if isTypeDecl(d.Def) {
 				bindDeclNameScoped(env, d, fd.scopes)
 			}
+			annotateDef(env, d, syntax.Name(mod.Name))
 		}
 	}
 }
@@ -1964,8 +2034,12 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		lexec = nil
 	}
 	if lexec != nil {
+		lexec.TLAltBump(currentCompID(lexec))
 		tlEmit(lexec, n, "tliAEnter")
 		defer tlEmit(lexec, n, "tliALeave")
+		// However the alt is left — a default that fired, a stop — its
+		// guard scan is over.
+		defer lexec.TLScanEnd(currentCompID(lexec))
 	}
 	waiting := false
 	// Bounded only as a backstop against a `repeat` whose state never
@@ -1998,6 +2072,9 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		var elseClause *syntax.CommClause
 		var matchedClause *syntax.CommClause
 		altExec := runtime.FindTestcaseExec(env)
+		if lexec != nil {
+			lexec.TLScanBegin(currentCompID(lexec), waiting)
+		}
 		freeze := altExec != nil && !deterministicSchedulerEnabled(env)
 		if freeze {
 			altExec.BeginAltRound(goroutineID())
@@ -2041,6 +2118,14 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		}
 		if matchedClause != nil {
 			waiting = false
+			// The scan is over: the body — of this alt, or of the default
+			// this alt is — logs everything it does.
+			if altExec != nil && altExec.TestLogger() != nil {
+				altExec.TLScanEnd(currentCompID(altExec))
+			}
+			if lexec != nil {
+				lexec.TLAltBump(currentCompID(lexec))
+			}
 			if matchedClause.Body != nil {
 				if res := evalAltClauseBody(matchedClause.Body, env); res == runtime.Repeat {
 					if lexec != nil {
@@ -2057,6 +2142,9 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			tlEmit(lexec, n, "tliANomatch")
 		}
 		if elseClause != nil {
+			if lexec != nil {
+				lexec.TLScanEnd(currentCompID(lexec))
+			}
 			res := evalAltClauseBody(elseClause.Body, env)
 			if res == runtime.Repeat {
 				if lexec != nil {
@@ -2091,8 +2179,11 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		// No guard fired and no [else]: block on the alt's event sources
 		// and re-snapshot. Crucially, NO verdict-preferring heuristic —
 		// a clause runs only when its guard actually matches.
-		if lexec != nil && !waiting {
-			tlEmit(lexec, n, "tliAWait")
+		if lexec != nil {
+			lexec.TLScanEnd(currentCompID(lexec))
+			if !waiting {
+				tlEmit(lexec, n, "tliAWait")
+			}
 		}
 		waiting = true
 		if !blockForAltEvents(n, env) {
@@ -2141,6 +2232,17 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 	}
 	taken := make([]bool, len(clauses))
 	remaining := len(clauses)
+	// Test logging: each branch taken begins a new round, and a scan after
+	// waiting logs only what is new in its round (see evalAltStmtStrict).
+	lexec := tlExec(env)
+	if lexec != nil && defaultCtx.active() {
+		lexec = nil
+	}
+	if lexec != nil {
+		lexec.TLAltBump(currentCompID(lexec))
+		defer lexec.TLScanEnd(currentCompID(lexec))
+	}
+	waiting := false
 	const maxRounds = 1 << 20
 	for round := 0; round < maxRounds && remaining > 0; round++ {
 		// Alt-local declarations are re-evaluated each round (ETSI 20.2).
@@ -2160,6 +2262,9 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 		freeze := altExec != nil && !deterministicSchedulerEnabled(env)
 		if freeze {
 			altExec.BeginAltRound(goroutineID())
+		}
+		if lexec != nil {
+			lexec.TLScanBegin(currentCompID(lexec), waiting)
 		}
 		matchedIdx := -1
 		for i, cc := range clauses {
@@ -2184,6 +2289,13 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 		if matchedIdx >= 0 {
 			taken[matchedIdx] = true
 			remaining--
+			waiting = false
+			if altExec != nil && altExec.TestLogger() != nil {
+				altExec.TLScanEnd(currentCompID(altExec))
+			}
+			if lexec != nil {
+				lexec.TLAltBump(currentCompID(lexec))
+			}
 			if body := clauses[matchedIdx].Body; body != nil {
 				res := evalAltClauseBody(body, env)
 				// `repeat` is not permitted in interleave (20.4); ignore
@@ -2208,6 +2320,10 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 			return nil
 		}
 		// Block on the remaining branch event sources and re-snapshot.
+		if lexec != nil {
+			lexec.TLScanEnd(currentCompID(lexec))
+		}
+		waiting = true
 		if !blockForAltEvents(n, env) {
 			return nil
 		}
@@ -2737,11 +2853,11 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 				if op, ok := sel.Sel.(*syntax.Ident); ok {
 					switch op.String() {
 					case "receive":
-						return evalPortReceiveBare(portIdent.String(), env, true)
+						return evalPortReceiveBare(sel, portIdent.String(), env, true)
 					case "check":
-						return evalPortReceiveBare(portIdent.String(), env, false)
+						return evalPortReceiveBare(sel, portIdent.String(), env, false)
 					case "trigger":
-						return evalPortReceiveBare(portIdent.String(), env, true)
+						return evalPortReceiveBare(sel, portIdent.String(), env, true)
 					case "getreply", "getcall", "catch":
 						// Procedure-based comm (TTCN-3 22.3): a
 						// bare `[] p.getreply` matches when a
@@ -2798,7 +2914,7 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 						// fixtures that use a bare procedure guard
 						// as a generic "did anything arrive" check
 						// keep working.
-						return evalPortReceiveBare(portIdent.String(), env, true)
+						return evalPortReceiveBare(sel, portIdent.String(), env, true)
 					}
 				}
 			}
@@ -2907,8 +3023,9 @@ func waitForAltCombined(dur time.Duration, haveTimer bool, env runtime.Scope) bo
 // path used in alt-guard expressions. Consumes the head if consume is
 // true and a message is available; returns true on success. The
 // special port name `any port` (TTCN-3 22.5) succeeds when any known
-// queue is non-empty and dequeues from the first match.
-func evalPortReceiveBare(port string, env runtime.Scope, consume bool) bool {
+// queue is non-empty and dequeues from the first match. n is the guard,
+// which the test log locates the operation by.
+func evalPortReceiveBare(n syntax.Node, port string, env runtime.Scope, consume bool) bool {
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil {
 		return false
@@ -2927,7 +3044,7 @@ func evalPortReceiveBare(port string, env runtime.Scope, consume bool) bool {
 					if !consume {
 						ev = "check"
 					}
-					tlReceive(exec, nil, name, head, runtime.Any, nil, ev, false, false)
+					tlReceive(exec, n, name, head, runtime.Any, nil, ev, false, false)
 				}
 				return true
 			}
@@ -2953,7 +3070,7 @@ func evalPortReceiveBare(port string, env runtime.Scope, consume bool) bool {
 		if !consume {
 			ev = "check"
 		}
-		tlReceive(exec, nil, port, head, runtime.Any, nil, ev, false, false)
+		tlReceive(exec, n, port, head, runtime.Any, nil, ev, false, false)
 	}
 	return true
 }

@@ -1,10 +1,14 @@
 package runtime
 
 import (
+	"encoding/hex"
 	"fmt"
+	"math"
+	"math/big"
 	"sort"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/nokia/ntt/runtime/tl"
@@ -14,9 +18,21 @@ import (
 // reports each TTCN-3 operation it performs to the logger attached here;
 // with none attached, every call below returns at the nil check.
 
+// tlEverActive is set once any testcase in the process has had a logger.
+// The hottest interpreter paths — reading an identifier, assigning — test
+// it before looking for their testcase, so logging costs them one atomic
+// load when it is off.
+var tlEverActive atomic.Bool
+
+// TLActive reports whether test logging may be on for some testcase.
+func TLActive() bool { return tlEverActive.Load() }
+
 // SetTestLogger attaches l to the testcase. Call before the testcase runs,
 // before any of its components start: the logger is read without a lock.
 func (t *TestcaseExec) SetTestLogger(l tl.Logger) {
+	if l != nil {
+		tlEverActive.Store(true)
+	}
 	t.tlog = l
 	t.tlStart = time.Now()
 	// Start no earlier than the log's latest event (see tl.Monotonic).
@@ -58,6 +74,92 @@ func (t *TestcaseExec) TLMismatchIsNew(key string, seq uint64) bool {
 	return true
 }
 
+// TLAltEpoch numbers component comp's current alt round: one that begins
+// afresh, on entering an alt or after one matched. A guard that does not
+// match — a done, killed or timeout — is logged once per round, keyed on
+// it (see TLMismatchIsNew), where a waiting alt re-checks its guards many
+// times within one round.
+func (t *TestcaseExec) TLAltEpoch(comp int64) uint64 {
+	t.tlMu.Lock()
+	defer t.tlMu.Unlock()
+	return t.tlAlt[comp]
+}
+
+// TLAltBump begins a new alt round for component comp.
+func (t *TestcaseExec) TLAltBump(comp int64) {
+	t.tlMu.Lock()
+	defer t.tlMu.Unlock()
+	if t.tlAlt == nil {
+		t.tlAlt = map[int64]uint64{}
+	}
+	t.tlAlt[comp]++
+	if s := t.tlScans[comp]; s != nil {
+		s.seen = nil
+	}
+}
+
+// An alt's guard scan: the evaluation of its guards and of the defaults
+// after them. An alt that finds nothing waits and scans again, on the real
+// clock every few milliseconds, and each scan performs the operations of
+// the last one again — the same module parameter read, the same default
+// altstep entered. The log records such an operation the first time in an
+// alt round (see TLAltEpoch); a scan after waiting logs what is new: a
+// receive that now matches, a component whose state has changed.
+type tlScan struct {
+	active, again bool
+	seen          map[string]bool
+}
+
+// TLScanBegin begins a guard scan of component comp's alt; again is set
+// for a scan after waiting.
+func (t *TestcaseExec) TLScanBegin(comp int64, again bool) {
+	t.tlMu.Lock()
+	defer t.tlMu.Unlock()
+	if t.tlScans == nil {
+		t.tlScans = map[int64]*tlScan{}
+	}
+	s := t.tlScans[comp]
+	if s == nil {
+		s = &tlScan{}
+		t.tlScans[comp] = s
+	}
+	s.active, s.again = true, again
+}
+
+// TLScanEnd ends component comp's guard scan: an alternative matched and
+// its body runs, or the alt waits.
+func (t *TestcaseExec) TLScanEnd(comp int64) {
+	t.tlMu.Lock()
+	defer t.tlMu.Unlock()
+	if s := t.tlScans[comp]; s != nil {
+		s.active = false
+	}
+}
+
+// TLScanRepeats reports whether e, logged by component comp during a guard
+// scan after waiting, repeats an operation logged in the same alt round,
+// and records it.
+func (t *TestcaseExec) TLScanRepeats(comp int64, e *tl.Event) bool {
+	t.tlMu.Lock()
+	s := t.tlScans[comp]
+	active := s != nil && s.active
+	t.tlMu.Unlock()
+	if !active {
+		return false
+	}
+	key := e.Key()
+	t.tlMu.Lock()
+	defer t.tlMu.Unlock()
+	if s.seen == nil {
+		s.seen = map[string]bool{}
+	}
+	if s.seen[key] {
+		return s.again
+	}
+	s.seen[key] = true
+	return false
+}
+
 // TLTime is the timestamp of an event logged now, in microseconds since
 // the Unix epoch: the wall clock, or under the virtual clock the
 // testcase's start plus the virtual time elapsed, so a log reflects the
@@ -91,6 +193,10 @@ func (t *TestcaseExec) TLog(op, src string, line int, args ...tl.Arg) {
 // to.
 func (t *TestcaseExec) TLogFrom(l tl.Logger, c tl.ComponentID, op, src string, line int, args ...tl.Arg) {
 	e := &tl.Event{Op: op, Ts: t.TLTime(), Src: src, Line: line, C: c, Args: args}
+	// Held across the check and the logging, so no event checked before
+	// the end is logged after it (see TLEnd).
+	t.tlEndMu.RLock()
+	defer t.tlEndMu.RUnlock()
 	if t.tlEnded.Load() && op != "tliTcTerminated" {
 		e = &tl.Event{Op: "tliInfo", Ts: e.Ts, Src: src, Line: line,
 			C: tl.ComponentID{Name: c.Name, ID: tl.LateID, Type: c.Type},
@@ -103,7 +209,12 @@ func (t *TestcaseExec) TLogFrom(l tl.Logger, c tl.ComponentID, op, src string, l
 }
 
 // TLEnd records that the testcase's end has been logged (see TLogFrom).
-func (t *TestcaseExec) TLEnd() { t.tlEnded.Store(true) }
+// Events being logged when it is called are logged first.
+func (t *TestcaseExec) TLEnd() {
+	t.tlEndMu.Lock()
+	defer t.tlEndMu.Unlock()
+	t.tlEnded.Store(true)
+}
 
 // TLCurrent identifies the component running on the calling goroutine.
 func (t *TestcaseExec) TLCurrent() tl.ComponentID {
@@ -304,21 +415,21 @@ func TLValue(o Object) tl.Value {
 	case Int:
 		return tl.Value{Kind: "integer", Text: v.Int.String()}
 	case Float:
-		return tl.Value{Kind: "float", Text: strconv.FormatFloat(float64(v), 'g', -1, 64)}
+		return tl.Value{Kind: "float", Text: ttcnFloat(float64(v))}
 	case Bool:
 		return tl.Value{Kind: "boolean", Text: strconv.FormatBool(bool(v))}
 	case Verdict:
 		return tl.Value{Kind: "verdicttype", Text: string(v)}
 	case *String:
-		if v.IsPattern {
-			return tl.Value{Kind: "charstring", Match: &tl.Matching{Symbol: "pattern", Pattern: string(v.Value)}}
-		}
 		kind := "charstring"
 		for _, r := range v.Value {
 			if r > 127 {
 				kind = "universal_charstring"
 				break
 			}
+		}
+		if v.IsPattern {
+			return tl.Value{Kind: kind, Match: &tl.Matching{Symbol: "pattern", Pattern: string(v.Value)}}
 		}
 		return tl.Value{Kind: kind, Text: string(v.Value)}
 	case *Binarystring:
@@ -422,15 +533,54 @@ func TLValue(o Object) tl.Value {
 	return tl.Value{Kind: "charstring", Text: o.Inspect()}
 }
 
+// TLEncoded is an encoded value — what encvalue returns, or decvalue is
+// given — as a Types:TriMessageType: a bitstring's bits left-aligned in
+// octets, a hexstring's digits two to an octet, a character string's
+// UTF-8 octets. Ok is false for anything else.
+func TLEncoded(o Object) (tl.Content, bool) {
+	switch v := o.(type) {
+	case *Binarystring:
+		if v.Value == nil || v.Value.Sign() < 0 || v.Length < 0 {
+			return tl.Content{}, false
+		}
+		bits := v.Length * int(v.Unit)
+		octets := (bits + 7) / 8
+		if octets == 0 {
+			return tl.EncodedMessage("", 0), true
+		}
+		pad := octets*8 - bits
+		aligned := new(big.Int).Lsh(v.Value, uint(pad))
+		return tl.EncodedMessage(padLeft(strings.ToUpper(aligned.Text(16)), octets*2), pad), true
+	case *String:
+		return tl.EncodedMessage(strings.ToUpper(hex.EncodeToString([]byte(string(v.Value)))), 0), true
+	}
+	return tl.Content{}, false
+}
+
+// ttcnFloat is f in TTCN-3 notation, the special values included.
+func ttcnFloat(f float64) string {
+	switch {
+	case math.IsInf(f, 1):
+		return "infinity"
+	case math.IsInf(f, -1):
+		return "-infinity"
+	case math.IsNaN(f):
+		return "not_a_number"
+	}
+	return strconv.FormatFloat(f, 'g', -1, 64)
+}
+
 func tlBinary(b *Binarystring) tl.Value {
 	kind := map[Unit]string{Bit: "bitstring", Octet: "octetstring"}[b.Unit]
 	if kind == "" {
 		kind = "hexstring"
 	}
 	if b.Value == nil || b.Value.Sign() < 0 {
-		// A template literal: keep the source digits, wildcards included.
+		// A template literal: its source digits, wildcards included, in
+		// the form a value's digits take — no layout, upper case.
 		s := strings.TrimSuffix(strings.TrimSuffix(strings.TrimSuffix(b.String, "B"), "O"), "H")
-		return tl.Value{Kind: kind, Text: strings.Trim(s, "'")}
+		s = strings.Join(strings.Fields(strings.Trim(s, "'")), "")
+		return tl.Value{Kind: kind, Text: strings.ToUpper(s)}
 	}
 	var s string
 	switch b.Unit {

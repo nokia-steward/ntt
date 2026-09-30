@@ -76,13 +76,13 @@ func TestTestLog_EventsAreValidAndInOrder(t *testing.T) {
 	got := perComponent(rec)
 	want := map[string][]string{
 		"mtc": {
-			"tliTcStart", "tliTcStarted", "tliCCreate", "tliPConnect", "tliCStart",
-			"tliMSend_c", "tliTStart", "tliAEnter", "tliANomatch", "tliAWait",
+			"tliTcStart", "tliTcStarted", "tliSEnter", "tliCCreate", "tliPConnect", "tliCStart",
+			"tliMSend_c", "tliTStart", "tliAEnter", "tliTTimeoutMismatch", "tliANomatch", "tliAWait",
 			"tliMDetected_c", "tliMMismatch_c", "tliMReceive_c", "tliSetVerdict",
-			"tliALeave", "tliCDone", "tliTcTerminated",
+			"tliALeave", "tliCDone", "tliSLeave", "tliTcTerminated",
 		},
 		"echo": {
-			"tliMDetected_c", "tliAEnter", "tliMReceive_c", "tliMSend_c", "tliALeave", "tliCTerminated",
+			"tliMDetected_c", "tliSEnter", "tliAEnter", "tliMReceive_c", "tliMSend_c", "tliALeave", "tliSLeave", "tliCTerminated",
 		},
 	}
 	if !reflect.DeepEqual(got, want) {
@@ -118,7 +118,7 @@ func componentActions(rec *tl.Recorder) map[string][]string {
 	for c, ops := range perComponent(rec) {
 		for _, op := range ops {
 			switch {
-			case strings.HasPrefix(op, "tliMDetected"), strings.HasPrefix(op, "tliMMismatch"),
+			case strings.Contains(op, "Detected"), strings.Contains(op, "Mismatch"),
 				op == "tliANomatch", op == "tliADefaults", op == "tliAWait":
 				continue
 			}
@@ -180,7 +180,7 @@ func TestTestLog_ValidatesAgainstAnnexB(t *testing.T) {
 	for _, k := range clocks {
 		opts := k.opts
 		opts.TestLogger = w
-		for _, src := range []string{pingPong, procedureExchange} {
+		for _, src := range []string{pingPong, procedureExchange, everyOperation} {
 			if _, _, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", opts); err != nil {
 				t.Fatal(err)
 			}
@@ -539,7 +539,7 @@ func (panickingLogger) Log(*tl.Event) { panic("logger failed") }
 // logging off. A failure used to surface as an interpreter panic, turning
 // the testcase into an error.
 func TestTestLog_NeverChangesTheVerdict(t *testing.T) {
-	for _, src := range []string{pingPong, procedureExchange} {
+	for _, src := range []string{pingPong, procedureExchange, everyOperation} {
 		for _, k := range clocks {
 			off, _, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", k.opts)
 			if err != nil {
@@ -686,7 +686,7 @@ func TestTestLog_ClocksCompareTheSame(t *testing.T) {
 		}
 		opts := k.opts
 		opts.TestLogger = w
-		for _, src := range []string{pingPong, procedureExchange} {
+		for _, src := range []string{pingPong, procedureExchange, everyOperation} {
 			if _, _, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", opts); err != nil {
 				t.Fatal(err)
 			}
@@ -701,8 +701,8 @@ func TestTestLog_ClocksCompareTheSame(t *testing.T) {
 		logs[i] = l
 	}
 	res := tl.Compare(logs[0], logs[1])
-	if len(res) != 2 {
-		t.Fatalf("%d testcases compared, want 2", len(res))
+	if len(res) != 3 {
+		t.Fatalf("%d testcases compared, want 3", len(res))
 	}
 	for _, r := range res {
 		if !r.Same() {
@@ -721,4 +721,203 @@ func summary(n *tl.Node) string {
 		return "(none)"
 	}
 	return tl.Summary(n)
+}
+
+// everyOperation performs, once each, the operations the second TCI-TL
+// slice logs: function entry and exit with parameters and a result, a
+// @lazy parameter evaluated, assignments, a module parameter read, rnd,
+// match both ways, a codec round trip, component and port state, the
+// Mismatch forms of done and timeout, a check with no receiving operation
+// and one whose from clause fails, and a multicast to system addresses.
+const everyOperation = `module M {
+	modulepar integer LIMIT := 3;
+	type port P message { inout integer, charstring } with { extension "address" }
+	type component C { port P p; port P q; timer t_never := 100.0 }
+	type record R { integer a, integer b }
+	function twice(in integer x, @lazy integer y) return integer {
+		return x + y + y;
+	}
+	function idle() runs on C { timer w := 0.5; w.start; w.timeout; }
+	testcase tc() runs on C system C {
+		var integer v := 0;
+		v := twice(LIMIT, 2);
+		var R r := { a := 1, b := 2 };
+		r.b := 5;
+		var float f := rnd(1.5);
+		if (not match(r, R:{ a := 1, b := 5 })) { setverdict(fail, "match"); }
+		if (match(v, (0..2))) { setverdict(fail, "range"); }
+		var bitstring enc := encvalue(r);
+		var R back;
+		if (decvalue(enc, back) != 0) { setverdict(fail, "decode"); }
+		var C c := C.create("idler");
+		if (c.running or not c.alive) { setverdict(fail, "fresh ptc"); }
+		c.start(idle());
+		connect(self:q, self:q);
+		q.stop;
+		q.start;
+		q.send(1);
+		q.clear;
+		q.halt;
+		q.start;
+		q.send(2);
+		t_never.start;
+		alt {
+			[] c.done { setverdict(fail, "not yet"); }
+			[] t_never.timeout { setverdict(fail, "never"); }
+			[] q.check(from c) { setverdict(fail, "from mtc"); }
+			[] q.check { setverdict(pass); }
+		}
+		c.done;
+		timer t := 0.1; t.start; t.timeout;
+		map(self:p, system:p);
+		p.send(7) to (1, 2);
+	}
+}`
+
+func TestTestLog_EveryOperation(t *testing.T) {
+	want := []string{
+		"tliSEnter", "tliSLeave", "tliEvaluate", "tliVar", "tliModulePar", "tliRnd",
+		"tliMatch", "tliMatchMismatch", "tliEncode", "tliDecode", "tliCRunning", "tliCAlive",
+		"tliPStart", "tliPStop", "tliPHalt", "tliPClear", "tliCDoneMismatch",
+		"tliTTimeoutMismatch", "tliCheckAnyMismatch_c", "tliCheckedAny_c",
+		"tliTTimeoutDetected", "tliTTimeout", "tliMSend_m_MC",
+	}
+	for _, k := range clocks {
+		rec, _ := runLogged(t, everyOperation, k.opts)
+		for _, e := range rec.Events {
+			if err := e.Validate(); err != nil {
+				t.Errorf("%s clock: %v", k.name, err)
+			}
+			if e.Op == "tliInfo" {
+				t.Errorf("%s clock: %s", k.name, e.Summary())
+			}
+		}
+		for _, op := range want {
+			if count(rec, op) == 0 {
+				t.Errorf("%s clock: no %s in %v", k.name, op, rec.Ops())
+			}
+		}
+	}
+}
+
+// TestTestLog_DestinationsInOneOrder: the connection graph is a map; a
+// broadcast's and a multicast's destinations are still logged in one
+// order, so two runs of a testcase log them alike.
+func TestTestLog_DestinationsInOneOrder(t *testing.T) {
+	src := `module M {
+		type port P message { inout integer }
+		type component C { port P p }
+		function sink() runs on C { timer w := 1.0; w.start; alt { [] p.receive { repeat; } [] w.timeout {} } }
+		testcase tc() runs on C system C {
+			var C a := C.create("a"), b := C.create("b"), c := C.create("c"), d := C.create("d");
+			connect(self:p, a:p); connect(self:p, b:p); connect(self:p, c:p); connect(self:p, d:p);
+			p.send(1) to all component;
+			p.send(2) to (a, b, c);
+			setverdict(pass);
+		}
+	}`
+	var first []string
+	for i := 0; i < 8; i++ {
+		_, _, rec := logOps(t, src, clocks[0].opts)
+		var got []string
+		for _, e := range rec.Events {
+			if strings.HasPrefix(e.Op, "tliMSend_c_") {
+				got = append(got, e.Summary())
+			}
+		}
+		if len(got) != 2 {
+			t.Fatalf("sends: %v", rec.Ops())
+		}
+		if first == nil {
+			first = got
+		} else if !reflect.DeepEqual(got, first) {
+			t.Fatalf("run %d logged\n%v\nfirst\n%v", i, got, first)
+		}
+	}
+}
+
+// TestTestLog_ComponentAndPortOperations: the component and port fixes
+// behave alike with logging on.
+func TestTestLog_ComponentAndPortOperations(t *testing.T) {
+	for name, src := range componentAndPortOps {
+		for _, k := range clocks {
+			opts := k.opts
+			opts.TestLogger = &tl.Recorder{}
+			v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", opts)
+			if err != nil || v != runtime.PassVerdict {
+				t.Errorf("%s, %s clock: %s (%s) %v", name, k.name, v, reason, err)
+			}
+		}
+	}
+}
+
+// TestTestLog_ImportedDefinitions: a function and module parameters are
+// logged with the module that declares them, not the one importing them.
+func TestTestLog_ImportedDefinitions(t *testing.T) {
+	a := parse(t, `module A {
+		modulepar integer mpA := 7;
+		modulepar { integer mpG := 1 }
+		function getA() return integer { return mpA; }
+	}`)
+	m := parse(t, `module M {
+		import from A all;
+		type component C {}
+		testcase tc() runs on C {
+			var integer v := mpG + getA();
+			if (v == 8) { setverdict(pass) }
+		}
+	}`)
+	rec := &tl.Recorder{}
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{m, a}, "M.tc", interpreter.TestcaseOptions{TestLogger: rec})
+	if err != nil || v != runtime.PassVerdict {
+		t.Fatalf("%s (%s) %v", v, reason, err)
+	}
+	var got []string
+	for _, e := range rec.Events {
+		if e.Op != "tliModulePar" && e.Op != "tliSEnter" {
+			continue
+		}
+		for _, a := range e.Args {
+			if a.Name == "name" {
+				got = append(got, e.Op+" "+a.Val.Attrs[0].Value+"."+a.Val.Attrs[1].Value)
+			}
+		}
+	}
+	want := []string{"tliSEnter M.tc", "tliModulePar A.mpG", "tliSEnter A.getA", "tliModulePar A.mpA"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("got %v\nwant %v", got, want)
+	}
+}
+
+// TestTestLog_WaitingAltLogsOnce: an alt that waits scans its guards and
+// defaults again and again — on the real clock every few milliseconds. What
+// a scan repeats is logged once per alt round, so both clocks log the same.
+func TestTestLog_WaitingAltLogsOnce(t *testing.T) {
+	src := `module M {
+		type component C { timer tg := 5.0 }
+		modulepar boolean ON := true;
+		function late() runs on C { timer t := 0.3; t.start; t.timeout; }
+		altstep guardA() runs on C { [] tg.timeout { setverdict(fail, "guard") } }
+		testcase tc() runs on C system C {
+			var C w := C.create("w");
+			w.start(late());
+			tg.start;
+			var default d := activate(guardA());
+			alt { [ON] w.done { setverdict(pass) } }
+		}
+	}`
+	var per [2]map[string][]string
+	for i, k := range clocks {
+		rec, _ := runLogged(t, src, k.opts)
+		if n := count(rec, "tliSEnter"); n != 2 {
+			t.Errorf("%s clock: tliSEnter %d times, want the testcase's and the default's once: %v", k.name, n, rec.Ops())
+		}
+		if n := count(rec, "tliModulePar"); n != 1 {
+			t.Errorf("%s clock: the guard's module parameter read logged %d times", k.name, n)
+		}
+		per[i] = componentActions(rec)
+	}
+	if !reflect.DeepEqual(per[0], per[1]) {
+		t.Errorf("the clocks logged different operations:\nvirtual %v\n   live %v", per[0], per[1])
+	}
 }

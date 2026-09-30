@@ -11,6 +11,7 @@ import (
 	"strings"
 
 	"github.com/nokia/ntt/runtime"
+	"github.com/nokia/ntt/runtime/tl"
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
@@ -347,7 +348,7 @@ func isPortLifecycleOp(op string) bool {
 
 // applyPortLifecycle records the new operational state of a port
 // instance after a p.start / p.stop / p.halt operation.
-func applyPortLifecycle(op, port string, env runtime.Scope) {
+func applyPortLifecycle(n syntax.Node, op, port string, env runtime.Scope) {
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil || port == "" {
 		return
@@ -360,6 +361,11 @@ func applyPortLifecycle(op, port string, env runtime.Scope) {
 		state = "halted"
 	}
 	exec.SetPortLifecycle(runtime.PortEndpoint{Comp: currentComponentID(exec), Port: port}, state)
+	if exec.TestLogger() != nil {
+		tlEmitLazy(exec, n, "tliP"+strings.ToUpper(op[:1])+op[1:], func() []tl.Arg {
+			return []tl.Arg{tlArg("port", tlOwnPort(exec, port).Content()), tlArg("stat", tl.String(tlPortStatus(exec, port)))}
+		})
+	}
 	// Forward start/stop/halt to a bound port driver that opts into the
 	// PortController interface (a pure-Go or C test port). Gated on a
 	// driver being present, so loopback ports are unaffected.

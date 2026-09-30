@@ -7,6 +7,11 @@ Usage:
 XSDDIR is the output of extract_xsd.py. For each event element of the Log
 schema's Body, lists the child elements its Events type declares, in schema
 order, following extension bases up to Events:Event.
+
+An element inside an xsd:choice is one alternative of it. Every choice in
+the Events schema has an alternative that may be empty (an optional
+encoder-failure or decoder-failure), so each of its elements is optional
+by itself; what the schema forbids is elements of two alternatives.
 """
 import sys
 import xml.etree.ElementTree as ET
@@ -28,7 +33,10 @@ package tl
 type Field struct {
 	Name     string // element name
 	Type     string // schema type, prefixed with its schema
-	Optional bool   // minOccurs="0"
+	Optional bool   // minOccurs="0", or one alternative of a choice
+	// Choice numbers the event's xsd:choice the element is an alternative
+	// of, from 1; 0 outside any. Alt numbers the alternative, from 1.
+	Choice, Alt int
 }
 
 // Schema lists each event's fields in the order the schema requires.
@@ -50,19 +58,33 @@ def main():
             if base != "Event":
                 out += fields(base)
             seq = ext.find(X + "sequence")
-        if seq is not None:
-            for e in seq.iter(X + "element"):
-                out.append((e.get("name").strip(), e.get("type").replace(" ", ""),
-                            e.get("minOccurs", "1") == "0"))
+        if seq is None:
+            return out
+        choice = 0
+        for c in seq:
+            if c.tag == X + "element":
+                out.append(field(c, 0, 0))
+            elif c.tag == X + "choice":
+                choice += 1
+                for alt, a in enumerate(c, 1):
+                    for e in ([a] if a.tag == X + "element" else a.iter(X + "element")):
+                        out.append(field(e, choice, alt))
+            else:
+                sys.exit("unexpected %s in %s" % (c.tag, name))
         return out
+
+    def field(e, choice, alt):
+        opt = choice > 0 or e.get("minOccurs", "1") == "0"
+        return (e.get("name").strip(), e.get("type").replace(" ", ""), opt, choice, alt)
 
     log = ET.parse(d + "/Log_v4_10_1.xsd").getroot()
     body = next(c for c in log.findall(X + "complexType") if c.get("name") == "Body")
     print(HEADER)
     for e in body.iter(X + "element"):
         print('\t"%s": {' % e.get("name"))
-        for n, t, opt in fields(e.get("type").split(":")[1]):
-            print('\t\t{Name: "%s", Type: "%s", Optional: %s},' % (n, t, "true" if opt else "false"))
+        for n, t, opt, choice, alt in fields(e.get("type").split(":")[1]):
+            extra = ", Choice: %d, Alt: %d" % (choice, alt) if choice else ""
+            print('\t\t{Name: "%s", Type: "%s", Optional: %s%s},' % (n, t, "true" if opt else "false", extra))
         print("\t},")
     print("}")
 

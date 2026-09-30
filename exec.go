@@ -74,8 +74,9 @@ testing (and later profiling) an external SUT over mapped/networked ports.
 
 --log FILE: record every TTCN-3 operation the run performs as a structured
 test log, per the TCI-TL logging interface of ETSI ES 201 873-6: messages
-sent, detected, received and mismatched (with the template), timers,
-component lifecycle, port configuration, verdicts and alt steps. The log is
+sent, detected, received and mismatched (with the template), procedure
+calls, timers, component and port operations, verdicts, alt steps, function
+calls, assignments and codecs. The log is
 the standard's XML format (Annex B), or with --log-format=jsonl the same
 events one per line. One file covers the whole run.`,
 		RunE: runExec,
@@ -125,7 +126,7 @@ func openTestLog(path, format string) (tl.Logger, func() error, error) {
 	switch strings.ToLower(format) {
 	case "xml":
 		mk = tl.NewXMLWriter
-	case "jsonl":
+	case "jsonl", "json":
 		mk = tl.NewJSONLWriter
 	default:
 		return nil, nil, fmt.Errorf("--log-format %q: want xml or jsonl", format)
@@ -146,7 +147,7 @@ func openTestLog(path, format string) (tl.Logger, func() error, error) {
 	}, nil
 }
 
-func runExec(cmd *cobra.Command, args []string) error {
+func runExec(cmd *cobra.Command, args []string) (err error) {
 	// Build the driver: discover testcases in args (or the working
 	// directory), run the semantic analyzer per case as a stand-in for
 	// real execution. This is the M4 baseline driver.
@@ -166,9 +167,14 @@ func runExec(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		driver.testLogger = l
+		// A log that could not be written in full fails the run, even
+		// one whose testcases passed.
 		defer func() {
-			if err := closeLog(); err != nil {
-				fmt.Fprintf(os.Stderr, "test log: %v\n", err)
+			if cerr := closeLog(); cerr != nil {
+				fmt.Fprintf(os.Stderr, "test log: %v\n", cerr)
+				if err == nil {
+					err = fmt.Errorf("test log %s: %w", execLog, cerr)
+				}
 			}
 		}()
 	}

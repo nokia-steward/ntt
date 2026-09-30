@@ -387,7 +387,48 @@ what made the done-but-not-killed gap above reachable on the real clock
 too. `TestBothClocks_EchoPTCRuns`. A test comparing each component's logged
 operations across the two clocks hung on its first run.
 
+**Found while logging the rest of TCI-TL, and fixed (2026-09-30):**
+
+- **`p.clear` was a no-op.** The selector fell through to nothing and the
+  queue kept its messages (ETSI 22.5.1). No fixture clears a queue and then
+  receives from it, so the corpus never showed it.
+- **`c.running` was true for a component never started.** It tested only
+  that the component was alive and not done (ETSI 21.3.5 says inactive).
+- **A list value holding a mixed list was written as a uniform list**, so
+  its log failed the schema: the kind of each element was decided before
+  the element itself was resolved to a record. Found by logging `tliVar`
+  over the corpus.
+
+Per-file against all 4948: 0 gained, 0 lost; with logging on, every
+verdict the same and every event valid.
+
 **Found along the way, older than this work, not fixed:**
+
+- **A receiving operation used as a statement does not wait** (ETSI
+  20.1). `p.receive(t);` with nothing queued yet returns at once and ends
+  the behaviour, so a plain request/response exchange — MTC sends, PTC
+  receives and answers, MTC receives — ends with verdict `none` on both
+  clocks; written as `alt { [] p.receive(t) {} }` it passes. This is the
+  handshake item above. Evaluating the statement as the one-alternative
+  alt the standard defines measures **-24** (33 lost, 9 gained); on the
+  MTC only, **-23**. The losses rest on two further defects, to be fixed
+  first: the alt guard `[] any port.getreply` (bare, a procedure operation
+  on `any port`) never matches, and a PTC body the engine runs inline
+  deadlocks the MTC once its own standalone `getcall` waits.
+- **A field assignment to a record initialised positionally is lost.**
+  After `var R r := {1, 2}`, `r.a := 3` leaves `r.a` at 1; initialised as
+  `{a := 1, b := 2}` it works.
+- **A port index expression is evaluated twice** in `pa[f()].send(1)` and
+  `pa[f()].receive(1)`: `f()` runs twice.
+- **A restarted `alive` component reports `.running` false**, and under
+  `--live` so does a PTC blocked in a receive.
+- **An altstep used as an alt branch** (`[] a()`) deadlocks on the
+  virtual clock.
+- **`p.check(from system)` on a mapped port never matches.**
+- **`action()` is not implemented** ("identifier not found"). The corpus's
+  eleven `action` fixtures are all negative-syntax or negative-semantic
+  ones, which match only because the engine fails on them. `tliAction` is
+  therefore never logged.
 
 - **A PTC body with a timer and no port communication never runs**, on
   either clock: `startBodyShouldSkip` treats any `.timeout` as a reason to

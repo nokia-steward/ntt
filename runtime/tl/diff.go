@@ -24,22 +24,31 @@ import (
 // timer read reports is left out too: it measures the clock.
 //
 // Components are matched by the name they were created with, numbered in
-// creation order when several share it; the MTC, the system and a control
-// part by their roles. Their numeric ids, which two runs may assign
+// creation order when several share it, and — when a component other than
+// the MTC created them — under the key of their creator, since components
+// creating others concurrently may do so in either order; the MTC, the
+// system and a control part by their roles. Their numeric ids, which two runs may assign
 // differently, are left out, and a value that refers to a component is
 // compared as that component. A component whose behaviour outlived its
 // testcase is compared with the other events outside any testcase.
 
 // ArrivalTiming reports whether op records when something arrived, not what
-// a component did, so that it may differ between correct runs.
+// a component did, so that it may differ between correct runs: an arrival
+// or its detection, a receiving operation or alt guard failing on what had
+// or had not arrived yet, an alt round that found nothing. A match() that
+// fails, tliMatchMismatch, is an action and is compared.
 func ArrivalTiming(op string) bool {
-	switch {
-	case strings.Contains(op, "Detected"), strings.Contains(op, "Mismatch"):
-		return true
-	case op == "tliANomatch", op == "tliADefaults", op == "tliAWait":
-		return true
-	}
-	return false
+	return arrivalTiming[strings.TrimSuffix(strings.TrimSuffix(op, "_c"), "_m")]
+}
+
+var arrivalTiming = map[string]bool{
+	"tliMDetected": true, "tliMMismatch": true, "tliCheckAnyMismatch": true,
+	"tliPrGetCallDetected": true, "tliPrGetCallMismatch": true,
+	"tliPrGetReplyDetected": true, "tliPrGetReplyMismatch": true,
+	"tliPrCatchDetected": true, "tliPrCatchMismatch": true, "tliPrCatchTimeoutDetected": true,
+	"tliTTimeoutDetected": true, "tliTTimeoutMismatch": true,
+	"tliCDoneMismatch": true, "tliCKilledMismatch": true,
+	"tliANomatch": true, "tliADefaults": true, "tliAWait": true,
 }
 
 // Run is one testcase of a log: each component's events in order.
@@ -94,15 +103,22 @@ func (l *Log) Runs() []*Run {
 
 // add files e under its component's key. A tliCCreate names the component
 // it creates: its key is the name it was created with, or "(unnamed)",
-// numbered from the second component of that name on, in creation order.
-// The MTC, the system and a control part, which are not created, keep their
-// role names, which no created component can take.
+// numbered from the second component of that name on, in creation order,
+// and prefixed with its creator's key and a slash when a component other
+// than the MTC or a control part created it. Each creator creates in its
+// own order, whatever the order between creators. The MTC, the system and a
+// control part, which are not created, keep their role names, which no
+// created component can take. A key is the name as XML can hold it (see
+// Compare).
 func (r *Run) add(e *Node) {
 	if e.Tag == "tliCCreate" {
 		if id, _ := compID(e.Kid("comp")); id != "" {
 			base := "(unnamed)"
 			if n := e.Kid("name"); n != nil && n.Text != "" {
-				base = n.Text
+				base = xmlText(n.Text)
+			}
+			if creator := r.key(e.Attr("id"), e.Attr("name")); creator != "mtc" && creator != "control" {
+				base = creator + "/" + base
 			}
 			key := base
 			for i := 2; r.used[key]; i++ {
@@ -121,7 +137,7 @@ func (r *Run) key(id, name string) string {
 	if k, ok := r.keys[id]; ok {
 		return k
 	}
-	return name
+	return xmlText(name)
 }
 
 // compID returns the id and name a Types:TriComponentIdType identifies.
@@ -267,7 +283,11 @@ func canonical(e *Node, r *Run, lossy bool) string {
 	var b strings.Builder
 	b.WriteString(e.Tag)
 	b.WriteString("@")
-	b.WriteString(path.Base(strings.ReplaceAll(e.Attr("src"), `\`, "/")))
+	src := path.Base(strings.ReplaceAll(e.Attr("src"), `\`, "/"))
+	if lossy {
+		src = xmlText(src)
+	}
+	b.WriteString(src)
 	b.WriteString(":")
 	b.WriteString(e.Attr("line"))
 	for _, k := range e.Kids {
@@ -309,9 +329,22 @@ func canon(b *strings.Builder, n *Node, r *Run, lossy bool) {
 		}
 		b.WriteString(" " + strconv.Quote(t))
 	}
+	kids := make([]string, len(n.Kids))
+	same := true
+	for i, k := range n.Kids {
+		var kb strings.Builder
+		canon(&kb, k, r, lossy)
+		kids[i] = kb.String()
+		same = same && k.Tag == n.Kids[0].Tag
+	}
+	// A multicast's or broadcast's destinations (a Types:TriPortIdListType)
+	// are a set: the order a run lists them in is not compared.
+	if n.Tag == "to" && len(kids) > 1 && same {
+		sort.Strings(kids)
+	}
 	b.WriteByte('(')
-	for _, k := range n.Kids {
-		canon(b, k, r, lossy)
+	for _, k := range kids {
+		b.WriteString(k)
 	}
 	b.WriteByte(')')
 }
@@ -370,7 +403,11 @@ func brief(n *Node) string {
 	case "tciPars":
 		var ps []string
 		for _, par := range n.Kids {
-			ps = append(ps, par.Attr("name")+" := "+brief(par.Kid("val")))
+			v := "-"
+			if val := par.Kid("val"); val != nil {
+				v = brief(val)
+			}
+			ps = append(ps, par.Attr("name")+" := "+v)
 		}
 		if len(ps) == 0 {
 			return ""

@@ -1,6 +1,8 @@
 package runtime_test
 
 import (
+	"math"
+	"math/big"
 	"strings"
 	"testing"
 
@@ -52,5 +54,32 @@ func TestTLValueOfAMapIsInKeyOrder(t *testing.T) {
 	}
 	if got := m.Inspect(); !strings.HasPrefix(got, `{["a"] := "va", ["b"]`) {
 		t.Errorf("map text not in key order: %s", got)
+	}
+}
+
+// TestTLValueNotation: values in TTCN-3 notation, the special floats and
+// template digits included.
+func TestTLValueNotation(t *testing.T) {
+	for _, tc := range []struct {
+		v    runtime.Object
+		want string
+	}{
+		{runtime.Float(math.Inf(1)), "infinity"},
+		{runtime.Float(math.Inf(-1)), "-infinity"},
+		{runtime.Float(math.NaN()), "not_a_number"},
+		{runtime.Float(1.5), "1.5"},
+		{&runtime.Binarystring{String: "'1 0?'B", Unit: runtime.Bit, Value: big.NewInt(-1)}, "10?"},
+		{&runtime.Binarystring{String: "'ab*'O", Unit: runtime.Octet, Value: big.NewInt(-1)}, "AB*"},
+	} {
+		if got := runtime.TLValue(tc.v).Text; got != tc.want {
+			t.Errorf("TLValue(%v) = %q, want %q", tc.v, got, tc.want)
+		}
+	}
+	if got := tl.Duration(math.Inf(1)).Text; got != "INF" {
+		t.Errorf("an infinite duration is %q, want the xsd:float INF", got)
+	}
+	p := runtime.TLValue(&runtime.String{Value: []rune("ä*"), IsPattern: true})
+	if p.Kind != "universal_charstring" {
+		t.Errorf("a pattern of non-ASCII characters is a %s", p.Kind)
 	}
 }

@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"reflect"
 	"sort"
+	"strconv"
+	"sync"
 	"time"
 
 	"github.com/nokia/ntt/builtins"
@@ -41,10 +43,16 @@ func tlPos(n syntax.Node) (string, int) {
 	return src, line
 }
 
-// tlEmit logs op from the current component at n's position.
+// tlEmit logs op from the current component at n's position — unless it
+// repeats, in a guard scan after waiting, what an earlier scan of the same
+// alt round logged (see runtime.TLScanRepeats). Arrivals and mismatches
+// have their own rules, and are passed on.
 func tlEmit(exec *runtime.TestcaseExec, n syntax.Node, op string, args ...tl.Arg) {
 	defer tlRecover(exec)
 	src, line := tlPos(n)
+	if !tl.ArrivalTiming(op) && exec.TLScanRepeats(currentCompID(exec), &tl.Event{Op: op, Src: src, Line: line, Args: args}) {
+		return
+	}
 	exec.TLog(op, src, line, args...)
 }
 
@@ -53,8 +61,7 @@ func tlEmit(exec *runtime.TestcaseExec, n syntax.Node, op string, args ...tl.Arg
 // of the test, but converting a value can still fail.
 func tlEmitLazy(exec *runtime.TestcaseExec, n syntax.Node, op string, args func() []tl.Arg) {
 	defer tlRecover(exec)
-	src, line := tlPos(n)
-	exec.TLog(op, src, line, args()...)
+	tlEmit(exec, n, op, args()...)
 }
 
 // tlTestcaseStarted records the testcase's identity and logs its start
@@ -197,6 +204,11 @@ func tlTimerEvent(exec *runtime.TestcaseExec, n syntax.Node, th *runtime.TimerHa
 		tlEmit(exec, n, "tliTRunning", timer, tlArg("status", tl.String(status)))
 	case "timeout":
 		if b, ok := res.(runtime.Bool); ok && !bool(b) {
+			// A timeout guard that did not match: once per alt round
+			// (see TLAltEpoch), not on every re-check of a waiting alt.
+			if exec.TLMismatchIsNew(fmt.Sprintf("%d\x00%p", currentCompID(exec), n), exec.TLAltEpoch(currentCompID(exec))) {
+				tlEmit(exec, n, "tliTTimeoutMismatch", timer, tlArg("timerTmpl", tlTimerTemplate("", th)))
+			}
 			return
 		}
 		// A blocking timeout that returned because the testcase or this
@@ -204,6 +216,9 @@ func tlTimerEvent(exec *runtime.TestcaseExec, n syntax.Node, th *runtime.TimerHa
 		if exec.Stopped() || componentStopRequested(exec) {
 			return
 		}
+		// The executor finds an expired timer when it looks, so the
+		// detection and the timeout are logged together.
+		tlEmit(exec, n, "tliTTimeoutDetected", timer)
 		tlEmit(exec, n, "tliTTimeout", timer, tlArg("timerTmpl", tlTimerTemplate("", th)))
 	}
 }
@@ -275,6 +290,15 @@ func tlSend(exec *runtime.TestcaseExec, n syntax.Node, port string, dest, payloa
 	msg := tlArg("msgValue", runtime.TLValue(payload).AsValue())
 	if exec.TLMapped(self, port) {
 		args := []tl.Arg{at, tlArg("to", exec.TLPort(-2, port).Content()), msg}
+		if l, ok := dest.(*runtime.List); ok && l.ListType == runtime.VALUE_LIST {
+			// `to (a1, a2)`: a multicast to the listed addresses.
+			addrs := tl.Value{Kind: "record"}
+			for _, a := range l.Elements {
+				addrs.Elems = append(addrs.Elems, runtime.TLValue(a))
+			}
+			tlEmit(exec, n, "tliMSend_m_MC", append(args, tlArg("addrValues", addrs.AsTyped()))...)
+			return
+		}
 		if dest != nil {
 			args = append(args, tlArg("addrValue", runtime.TLValue(dest).AsValue()))
 		}
@@ -312,6 +336,22 @@ func tlSend(exec *runtime.TestcaseExec, n syntax.Node, port string, dest, payloa
 	}
 }
 
+// sortPortIDs orders ports by component id, then name and index, so that
+// two runs log a set of destinations alike.
+func sortPortIDs(ps []tl.PortID) {
+	num := func(id string) int64 { n, _ := strconv.ParseInt(id, 10, 64); return n }
+	sort.Slice(ps, func(i, j int) bool {
+		a, b := ps[i], ps[j]
+		if a.Comp.ID != b.Comp.ID {
+			return num(a.Comp.ID) < num(b.Comp.ID)
+		}
+		if a.Name != b.Name {
+			return a.Name < b.Name
+		}
+		return a.Index < b.Index
+	})
+}
+
 // tlConnectedPeers returns the endpoints port of the current component is
 // connected to, the way the engine routes to them: an element of a port
 // array is connected under the array's name, and its peer is the same
@@ -321,17 +361,25 @@ func tlConnectedPeers(exec *runtime.TestcaseExec, port string) []runtime.PortEnd
 	if c := exec.CurrentComponent(); c != nil {
 		cur = c.ID
 	}
-	if peers := exec.ConnectedPeers(runtime.PortEndpoint{Comp: cur, Port: port}); len(peers) > 0 {
-		return peers
+	peers := exec.ConnectedPeers(runtime.PortEndpoint{Comp: cur, Port: port})
+	if len(peers) == 0 {
+		base, suffix := splitPortIndex(port)
+		if suffix == "" {
+			return nil
+		}
+		peers = exec.ConnectedPeers(runtime.PortEndpoint{Comp: cur, Port: base})
+		for i := range peers {
+			peers[i].Port += suffix
+		}
 	}
-	base, suffix := splitPortIndex(port)
-	if suffix == "" {
-		return nil
-	}
-	peers := exec.ConnectedPeers(runtime.PortEndpoint{Comp: cur, Port: base})
-	for i := range peers {
-		peers[i].Port += suffix
-	}
+	// The connection graph is a map: list the peers in one order, so that
+	// two runs log a broadcast alike.
+	sort.Slice(peers, func(i, j int) bool {
+		if peers[i].Comp != peers[j].Comp {
+			return peers[i].Comp < peers[j].Comp
+		}
+		return peers[i].Port < peers[j].Port
+	})
 	return peers
 }
 
@@ -385,12 +433,14 @@ func tlReceive(exec *runtime.TestcaseExec, call syntax.Node, port string, head r
 	if tmpl == nil {
 		tmpl = runtime.Any
 	}
-	args := []tl.Arg{
-		tlArg("at", exec.TLPort(self, port).Content()),
-		tlArg("msgValue", runtime.TLValue(head.Payload).AsValue()),
-		tlArg("msgTmpl", runtime.TLValue(tmpl).AsTemplate()),
+	checkAny := ev != "receive" && tlIsCheckAny(call, ev)
+	args := []tl.Arg{tlArg("at", exec.TLPort(self, port).Content())}
+	if !checkAny {
+		args = append(args,
+			tlArg("msgValue", runtime.TLValue(head.Payload).AsValue()),
+			tlArg("msgTmpl", runtime.TLValue(tmpl).AsTemplate()))
 	}
-	if ev == "mismatch" {
+	if ev == "mismatch" && !checkAny {
 		ds := tlDiffs(head.Payload, tmpl)
 		if payloadOk {
 			ds = []tl.Diff{{Val: ".", Tmpl: ".", Desc: "sender does not match the from clause"}}
@@ -413,7 +463,57 @@ func tlReceive(exec *runtime.TestcaseExec, call syntax.Node, port string, head r
 		}
 	}
 	op := map[string]string{"receive": "tliMReceive", "check": "tliMChecked", "mismatch": "tliMMismatch"}[ev] + suffix
+	if checkAny {
+		// A check with no receiving operation (`p.check`,
+		// `p.check(from c)`) checks for anything at the head of the
+		// queue, message or not.
+		op = map[string]string{"check": "tliCheckedAny", "mismatch": "tliCheckAnyMismatch"}[ev] + suffix
+	}
+	if orig, ok := checkAnyCalls.Load(call); ok {
+		// Locate the check itself, not the call standing in for it.
+		call = orig.(syntax.Node)
+	}
 	tlEmit(exec, call, op, args...)
+}
+
+// checkAnyCalls maps each check with no receiving operation to the
+// nameless call the engine matches it by, and back: one per check in the
+// source, so that a mismatch of it is recognised as the same one on the
+// next pass of an alt, and logged where the check is.
+var checkAnyCalls sync.Map
+
+// checkAnyCall returns the nameless call standing in for check n: with
+// test logging off, a new one, as only the log tells the calls apart.
+func checkAnyCall(n *syntax.CallExpr, env runtime.Scope) *syntax.CallExpr {
+	if tlExec(env) == nil {
+		return &syntax.CallExpr{Fun: &syntax.Ident{}}
+	}
+	if c, ok := checkAnyCalls.Load(n); ok {
+		return c.(*syntax.CallExpr)
+	}
+	c, loaded := checkAnyCalls.LoadOrStore(n, &syntax.CallExpr{Fun: &syntax.Ident{}})
+	if !loaded {
+		checkAnyCalls.Store(c, n)
+	}
+	return c.(*syntax.CallExpr)
+}
+
+// tlIsCheckAny reports whether the receiving operation logged as call is a
+// check with no receiving operation of its own: a bare `p.check` guard
+// (logged with no call), `p.check` or `p.check()`, or `p.check(from c)`,
+// for which the engine synthesises a call with no name.
+func tlIsCheckAny(call syntax.Node, ev string) bool {
+	c, ok := call.(*syntax.CallExpr)
+	if !ok || c == nil {
+		return ev == "check"
+	}
+	switch f := c.Fun.(type) {
+	case *syntax.Ident:
+		return f == nil || f.Tok == nil || f.String() == "check"
+	case *syntax.SelectorExpr:
+		return syntax.Name(f.Sel) == "check"
+	}
+	return false
 }
 
 // tlDiffs locates where a value fails a record template: one difference
@@ -541,6 +641,7 @@ func tlProcSend(exec *runtime.TestcaseExec, n syntax.Node, op, port string, msg 
 		}
 		to = append(to, exec.TLPortForKey(k))
 	}
+	sortPortIDs(to)
 	switch {
 	case len(to) == 0:
 		tlEmit(exec, n, name+"_c", append([]tl.Arg{at}, body...)...)
@@ -653,9 +754,13 @@ func tlCatchTimeout(exec *runtime.TestcaseExec, g syntax.Node, env runtime.Scope
 	if !ok {
 		port = syntax.Name(sel.X)
 	}
-	tlEmit(exec, g, "tliPrCatchTimeout",
-		tlArg("at", tlOwnPort(exec, port).Content()),
-		tlArg("signature", tl.Signature(currentCallSignature(env))))
+	at := tlArg("at", tlOwnPort(exec, port).Content())
+	sig := tlArg("signature", tl.Signature(currentCallSignature(env)))
+	// As with a timer's timeout, the executor finds the call timer
+	// expired when it looks: the detection and the catch are logged
+	// together.
+	tlEmit(exec, g, "tliPrCatchTimeoutDetected", at, sig)
+	tlEmit(exec, g, "tliPrCatchTimeout", at, sig)
 }
 
 // tlControlComponent stands for the control part, which runs outside any
@@ -714,4 +819,244 @@ func tlNow(l tl.Logger) int64 {
 		return c.Now()
 	}
 	return time.Now().UnixMicro()
+}
+
+// tlScope logs entering or leaving a scope (tliSEnter, tliSLeave): a
+// function, altstep or testcase, with its parameters as bound in env and,
+// on leaving, the value it returns.
+func tlScope(exec *runtime.TestcaseExec, n syntax.Node, op, module, name, kind string, params *syntax.FormalPars, env runtime.Scope, ret runtime.Object) {
+	defer tlRecover(exec)
+	args := []tl.Arg{tlArg("name", tl.QualifiedName(module, name))}
+	if params != nil && len(params.List) > 0 {
+		var ps []tl.Param
+		for _, fp := range params.List {
+			if fp == nil || fp.Name == nil {
+				continue
+			}
+			mode := "in"
+			if fp.Direction != nil {
+				mode = fp.Direction.String()
+			}
+			v, _ := env.Get(fp.Name.String())
+			if t, ok := v.(*runtime.LazyThunk); ok {
+				// A @lazy or @fuzzy parameter: its value once
+				// evaluated; logging must not evaluate it.
+				v = runtime.Undefined
+				if t.Once && !t.Fuzzy {
+					v = t.Cached
+				}
+			}
+			ps = append(ps, tl.Param{Name: fp.Name.String(), Mode: mode, Val: runtime.TLValue(v)})
+		}
+		args = append(args, tlArg("tciPars", tl.Params(ps...)))
+	}
+	if op == "tliSLeave" {
+		if rv, ok := ret.(*runtime.ReturnValue); ok && !rv.Stopped && rv.Value != nil && rv.Value != runtime.Undefined {
+			args = append(args, tlArg("returnValue", runtime.TLValue(rv.Value).AsValue()))
+		}
+	}
+	args = append(args, tlArg("kind", tl.String(kind)))
+	tlEmit(exec, n, op, args...)
+}
+
+// tlCompStatus is a component's state as TCI-TL's ComponentStatusType
+// names it, consistent with the answer the operation op gave: running
+// (tliCRunning) or alive (tliCAlive).
+func tlCompStatus(ref *runtime.ComponentRef, env runtime.Scope, op string, answer bool) string {
+	switch {
+	case ref == nil:
+		return tl.ComponentNull
+	case op == "tliCRunning" && answer:
+		return tl.ComponentRunning
+	case op == "tliCAlive" && !answer:
+		return tl.ComponentKilled
+	case op == "tliCRunning" && compKilled(ref, env):
+		return tl.ComponentKilled
+	case op == "tliCAlive" && compRunning(ref, env):
+		return tl.ComponentRunning
+	case ref.Started:
+		return tl.ComponentStopped
+	}
+	return tl.ComponentInactive
+}
+
+// tlCompQuery logs a running or alive operation on ref (tliCRunning,
+// tliCAlive) with the component's status, given the answer it gave.
+func tlCompQuery(env runtime.Scope, n syntax.Node, op string, ref *runtime.ComponentRef, answer bool) {
+	exec := tlExec(env)
+	if exec == nil || ref == nil {
+		return
+	}
+	tlEmitLazy(exec, n, op, func() []tl.Arg {
+		return []tl.Arg{tlArg("comp", exec.TLComponent(ref).Content()), tlArg("status", tl.String(tlCompStatus(ref, env, op, answer)))}
+	})
+}
+
+// tlDoneKilledMismatch logs a done or killed guard that did not match
+// (tliCDoneMismatch, tliCKilledMismatch), once per alt round.
+func tlDoneKilledMismatch(env runtime.Scope, n syntax.Node, op string, ref *runtime.ComponentRef) {
+	exec := tlExec(env)
+	if exec == nil || ref == nil {
+		return
+	}
+	if !exec.TLMismatchIsNew(fmt.Sprintf("%d\x00%p", currentCompID(exec), n), exec.TLAltEpoch(currentCompID(exec))) {
+		return
+	}
+	tlOp := "tliCDoneMismatch"
+	if op == "killed" {
+		tlOp = "tliCKilledMismatch"
+	}
+	tlEmitLazy(exec, n, tlOp, func() []tl.Arg {
+		return []tl.Arg{tlArg("comp", exec.TLComponent(ref).Content()), tlArg("compTmpl", tlCompTemplate(exec, "", ref))}
+	})
+}
+
+// tlPortStatus is the state of the current component's port as TCI-TL's
+// PortStatusType names it; a port no operation has stopped or halted is
+// started.
+func tlPortStatus(exec *runtime.TestcaseExec, port string) string {
+	s, _ := exec.PortLifecycle(runtime.PortEndpoint{Comp: currentComponentID(exec), Port: port})
+	switch s {
+	case "stopped":
+		return tl.PortStopped
+	case "halted":
+		return tl.PortHalted
+	}
+	return tl.PortStarted
+}
+
+// tlEncode logs an encvalue (tliEncode): the value and what it was
+// encoded to. The executor's encoder does not fail, and which codec it
+// used is not known to it, so neither is given.
+func tlEncode(exec *runtime.TestcaseExec, n syntax.Node, val, res runtime.Object) {
+	defer tlRecover(exec)
+	msg, ok := runtime.TLEncoded(res)
+	if !ok {
+		return
+	}
+	tlEmit(exec, n, "tliEncode", tlArg("val", runtime.TLValue(val).AsValue()), tlArg("msg", msg))
+}
+
+// tlDecode logs a decvalue (tliDecode): the encoded value it was given
+// and either the decoded value — the variable it was decoded into, as it
+// is after the call — or that it failed to decode. Annex B has one or the
+// other.
+func tlDecode(exec *runtime.TestcaseExec, n *syntax.CallExpr, enc, res runtime.Object, env runtime.Scope) {
+	defer tlRecover(exec)
+	msg, ok := runtime.TLEncoded(enc)
+	if !ok {
+		return
+	}
+	if r, ok := res.(runtime.Int); !ok || r.Int.Sign() != 0 {
+		tlEmit(exec, n, "tliDecode", tlArg("msg", msg), tlArg("decoder-failure", tl.String(tl.TciError)))
+		return
+	}
+	var val runtime.Object = runtime.Undefined
+	if id, ok := n.Args.List[1].(*syntax.Ident); ok {
+		if v, ok := env.Get(id.String()); ok {
+			val = v
+		}
+	}
+	tlEmit(exec, n, "tliDecode", tlArg("msg", msg), tlArg("val", runtime.TLValue(val).AsValue()))
+}
+
+// tlRnd logs an rnd (tliRnd): the number drawn and the seed it was given,
+// null when it was given none.
+func tlRnd(exec *runtime.TestcaseExec, n syntax.Node, args []runtime.Object, res runtime.Object) {
+	defer tlRecover(exec)
+	f, ok := res.(runtime.Float)
+	if !ok {
+		return
+	}
+	from := tl.Value{Kind: "float", Null: true}
+	if len(args) > 0 {
+		if seed, ok := args[0].(runtime.Float); ok {
+			from = runtime.TLValue(seed)
+		}
+	}
+	tlEmit(exec, n, "tliRnd", tlArg("val", runtime.TLValue(f).AsTyped()), tlArg("from", from.AsTyped()))
+}
+
+// tlMatch logs a match (tliMatch, tliMatchMismatch) with the value, the
+// template and, for a mismatch, where they differ.
+func tlMatch(exec *runtime.TestcaseExec, n syntax.Node, val, tmpl, res runtime.Object) {
+	b, ok := res.(runtime.Bool)
+	if !ok {
+		return
+	}
+	defer tlRecover(exec)
+	expr := tlArg("expr", runtime.TLValue(val).AsValue())
+	t := tlArg("tmpl", runtime.TLValue(tmpl).AsTemplate())
+	if bool(b) {
+		tlEmit(exec, n, "tliMatch", expr, t)
+		return
+	}
+	tlEmit(exec, n, "tliMatchMismatch", expr, t, tlArg("diffs", tl.Diffs(tlDiffs(val, tmpl)...)))
+}
+
+// tlVar logs an assignment (tliVar): the variable assigned, and its whole
+// value after the assignment — for `v.f[1] := x`, the new value of v.
+func tlVar(exec *runtime.TestcaseExec, lhs syntax.Expr, env runtime.Scope) {
+	defer tlRecover(exec)
+	root := lhs
+	for {
+		switch x := root.(type) {
+		case *syntax.IndexExpr:
+			root = x.X
+			continue
+		case *syntax.SelectorExpr:
+			root = x.X
+			continue
+		}
+		break
+	}
+	id, ok := root.(*syntax.Ident)
+	if !ok {
+		return
+	}
+	name := id.String()
+	v, ok := env.Get(name)
+	if !ok {
+		return
+	}
+	module := moduleNameFromEnv(env)
+	if e, ok := env.(*runtime.Env); ok {
+		if owner := e.Owner(name); owner != nil {
+			module = moduleNameFromEnv(owner)
+		}
+	}
+	tlEmit(exec, lhs, "tliVar", tlArg("name", tl.QualifiedName(module, name)), tlArg("val", runtime.TLValue(v).AsValue()))
+}
+
+// tlModulePar logs a read of a module parameter (tliModulePar) with its
+// value: a read of a name whose binding is marked as one, with the module
+// that declares it (see annotateDef).
+func tlModulePar(env runtime.Scope, n syntax.Node, name string, val runtime.Object) {
+	exec := tlExec(env)
+	if exec == nil {
+		return
+	}
+	defer tlRecover(exec)
+	e, ok := env.(*runtime.Env)
+	if !ok {
+		return
+	}
+	owner := e.Owner(name)
+	if owner == nil {
+		return
+	}
+	mark, _ := owner.Get(moduleParKey(name))
+	module, ok := mark.(*runtime.String)
+	if !ok || !owner.Binds(moduleParKey(name)) {
+		return
+	}
+	tlEmit(exec, n, "tliModulePar", tlArg("name", tl.QualifiedName(string(module.Value), name)), tlArg("val", runtime.TLValue(val).AsValue()))
+}
+
+// tlEvaluate logs the evaluation of a @lazy or @fuzzy parameter
+// (tliEvaluate): a @lazy one's first read, each read of a @fuzzy one.
+func tlEvaluate(exec *runtime.TestcaseExec, n syntax.Node, t *runtime.LazyThunk, val runtime.Object) {
+	defer tlRecover(exec)
+	tlEmit(exec, n, "tliEvaluate", tlArg("name", tl.QualifiedName(t.Module, t.Name)),
+		tlArg("evalResult", runtime.TLValue(val).AsValue()))
 }

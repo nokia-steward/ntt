@@ -195,6 +195,11 @@ func (v *Validator) Result() (int, []error) {
 // the wall clock — the next testcase's, or its control part's — would
 // otherwise be earlier than the last. Now reports the time to give such an
 // event: the wall clock, or the latest timestamp logged if that is later.
+//
+// On the real clock, components time their events concurrently and the log
+// takes them one at a time, so an event can reach the log after a later
+// one; it is given the later one's timestamp. Events pass to Next in the
+// order they are stamped.
 type Monotonic struct {
 	Next Logger
 
@@ -204,10 +209,11 @@ type Monotonic struct {
 
 func (m *Monotonic) Log(e *Event) {
 	m.mu.Lock()
-	if e.Ts > m.last {
-		m.last = e.Ts
+	defer m.mu.Unlock()
+	if e.Ts < m.last {
+		e.Ts = m.last
 	}
-	m.mu.Unlock()
+	m.last = e.Ts
 	m.Next.Log(e)
 }
 

@@ -39,11 +39,12 @@ that found nothing — are not compared, nor is the elapsed time a timer read
 reports. Every send and receive with its value and template, every verdict,
 timer, component and port operation and every alt step is, with where in the
 test specification it was performed. Components are matched by the name they
-were created with, numbered in creation order when several share one; their
-numeric ids are not compared.
+were created with, numbered in creation order when several share one, and
+named under their creator when a component other than the MTC created them;
+their numeric ids are not compared, and a broadcast's destinations are a set.
 
 Either log format may be given, in any combination.`,
-		Args: cobra.ExactArgs(2),
+		Args: usageExit2(2),
 		RunE: runLogDiff,
 	}
 )
@@ -51,6 +52,23 @@ Either log format may be given, in any combination.`,
 func init() {
 	RootCommand.AddCommand(LogCommand)
 	LogCommand.AddCommand(logDiffCommand)
+	logDiffCommand.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(2)
+		return nil
+	})
+}
+
+// usageExit2 requires n arguments and, as diff(1) does, exits 2 on a usage
+// error, which 1 — the logs differ — must not be mistaken for.
+func usageExit2(n int) cobra.PositionalArgs {
+	return func(cmd *cobra.Command, args []string) error {
+		if len(args) != n {
+			fmt.Fprintf(os.Stderr, "usage: ntt %s %s\n", cmd.Parent().Name(), cmd.Use)
+			os.Exit(2)
+		}
+		return nil
+	}
 }
 
 // runLogDiff exits the way diff(1) does: 0 when the runs agree, 1 when

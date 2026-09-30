@@ -106,6 +106,9 @@ type LazyThunk struct {
 	Fuzzy  bool
 	Once   bool
 	Cached Object
+	// Name is the parameter the thunk stands for, and Module the module
+	// of its function, for the test log's tliEvaluate.
+	Name, Module string
 }
 
 func (l *LazyThunk) Type() ObjectType { return LAZY_THUNK }
@@ -1374,6 +1377,12 @@ type Function struct {
 	// call path looks up in the external-function registry.
 	IsExternal bool
 	Name       string
+
+	// Module and Kind identify the function or altstep for the test log's
+	// scope events: its module, and "function" or "altstep" prefixed by
+	// its modifiers (ES 201 873-6 tliSEnter).
+	Module string
+	Kind   string
 
 	// Catch and Finally carry the object-oriented exception handlers
 	// declared after the body (ETSI 5.2): `... } catch (T e) { ... }

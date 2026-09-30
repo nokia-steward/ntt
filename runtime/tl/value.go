@@ -92,10 +92,12 @@ func (v Value) normalized() Value {
 	if v.Kind != "record_of" && v.Kind != "set_of" {
 		return v
 	}
+	// An element's kind is the one it is written as, which normalizing
+	// it may change: a mixed list inside the list becomes a record.
 	kinds := map[string]bool{}
 	for _, e := range v.Elems {
 		if e.Kind != "" {
-			kinds[e.Kind] = true
+			kinds[e.normalized().Kind] = true
 		}
 	}
 	if len(kinds) > 1 {
@@ -221,6 +223,13 @@ func (m *Matching) node() *Node {
 // valueContent returns v as the content of an element of type Values:Value.
 func (v Value) valueContent() Content {
 	return Content{Kids: []*Node{v.node()}}
+}
+
+// AsTyped returns v as the content of a parameter whose type is v's own
+// (Values:FloatValue for a float, say) rather than the Value group.
+func (v Value) AsTyped() Content {
+	v = v.normalized()
+	return Content{Attrs: v.attrs(), Kids: v.body()}
 }
 
 // AsValue returns v as the content of a Values:Value parameter.

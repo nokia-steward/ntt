@@ -3,6 +3,7 @@ package tl
 import (
 	"fmt"
 	"strconv"
+	"strings"
 )
 
 // Event is one TCI-TL logging operation (ES 201 873-6 clause 7.3.4.1): Op
@@ -37,7 +38,8 @@ type Logger interface {
 
 // Validate checks e against the Annex B event it names: the operation must
 // exist, every parameter must be one the schema declares for it and appear
-// at most once, and every parameter the schema requires must be present.
+// at most once, every parameter the schema requires must be present, and
+// no two may be alternatives of one choice.
 func (e *Event) Validate() error {
 	fields, ok := Schema[e.Op]
 	if !ok {
@@ -60,10 +62,18 @@ func (e *Event) Validate() error {
 			return fmt.Errorf("tl: %s has no parameter %q", e.Op, a.Name)
 		}
 	}
+	chosen := map[int]Field{}
 	for _, f := range fields {
 		if !f.Optional && !seen[f.Name] {
 			return fmt.Errorf("tl: %s: required parameter %q missing", e.Op, f.Name)
 		}
+		if f.Choice == 0 || !seen[f.Name] {
+			continue
+		}
+		if c, ok := chosen[f.Choice]; ok && c.Alt != f.Alt {
+			return fmt.Errorf("tl: %s: parameters %q and %q are alternatives", e.Op, c.Name, f.Name)
+		}
+		chosen[f.Choice] = f
 	}
 	return nil
 }
@@ -97,6 +107,30 @@ func (e *Event) node() *Node {
 // testcase had ended (see runtime.TestcaseExec.TLogFrom). Comparisons file
 // such events outside any testcase, wherever they fall in the log.
 const LateID = "late"
+
+// Key identifies what e records — its operation, where it was performed
+// and its content — leaving out when (its timestamp) and who (the
+// producing component).
+func (e *Event) Key() string {
+	var b strings.Builder
+	b.WriteString(e.Op + "@" + e.Src + ":" + strconv.Itoa(e.Line))
+	for _, k := range e.node().Kids {
+		writeKey(&b, k)
+	}
+	return b.String()
+}
+
+func writeKey(b *strings.Builder, n *Node) {
+	b.WriteString("<" + n.Tag)
+	for _, a := range n.Attrs {
+		b.WriteString(" " + a.Name + "=" + strconv.Quote(a.Value))
+	}
+	b.WriteString(">" + strconv.Quote(n.Text))
+	for _, k := range n.Kids {
+		writeKey(b, k)
+	}
+	b.WriteString("</>")
+}
 
 // Summary renders e in one line, as Summary does its element.
 func (e *Event) Summary() string { return Summary(e.node()) }

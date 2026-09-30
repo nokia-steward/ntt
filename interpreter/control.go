@@ -147,6 +147,8 @@ func RunControlWith(trees []*ttcn3.Tree, module string, opts TestcaseOptions) (v
 			return v
 		}})
 
+	tlControl(opts.TestLogger, control, "tliSEnter", tlArg("name", tl.QualifiedName(module, "control")), tlArg("kind", tl.String("control")))
+	defer tlControl(opts.TestLogger, control, "tliSLeave", tlArg("name", tl.QualifiedName(module, "control")), tlArg("kind", tl.String("control")))
 	if res := eval(control.Body, ctrlEnv); runtime.IsError(res) {
 		e, _ := res.(*runtime.Error)
 		return runtime.ErrorVerdict, "control: " + e.Inspect(), nil

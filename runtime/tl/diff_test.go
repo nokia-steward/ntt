@@ -309,3 +309,113 @@ func TestSummaryShowsWhatTellsValuesApart(t *testing.T) {
 		}
 	}
 }
+
+// TestReadLogToleratesAnyCut: a killed run's XML log may end anywhere,
+// inside a multi-byte character included.
+func TestReadLogToleratesAnyCut(t *testing.T) {
+	var buf bytes.Buffer
+	w := tl.NewXMLWriter(&buf)
+	for _, e := range run("tc", "grüße — ☃", "2", true) {
+		w.Log(e)
+	}
+	_ = w.Close()
+	full := buf.String()
+	// From inside the first event: before it, the log has no content.
+	start := strings.Index(full, "tliTcStart")
+	if start < 0 {
+		t.Fatal("no first event")
+	}
+	for i := start + 1; i < len(full); i++ {
+		if _, err := tl.ReadLog(strings.NewReader(full[:i])); err != nil {
+			t.Fatalf("cut at %d of %d: %v", i, len(full), err)
+		}
+	}
+}
+
+func TestReadLogReadsLongLines(t *testing.T) {
+	if testing.Short() {
+		t.Skip("writes a 65 MB value")
+	}
+	mtc := tl.ComponentID{Name: "mtc", ID: "1"}
+	var buf bytes.Buffer
+	w := tl.NewJSONLWriter(&buf)
+	w.Log(&tl.Event{Op: "tliLog", C: mtc, Args: []tl.Arg{{"log", tl.String(strings.Repeat("x", 65<<20))}}})
+	_ = w.Close()
+	l, err := tl.ReadLog(&buf)
+	if err != nil || len(l.Events) != 1 {
+		t.Fatalf("read %v, err %v", l, err)
+	}
+}
+
+func TestArrivalTimingIsNotAMatch(t *testing.T) {
+	for op, want := range map[string]bool{
+		"tliMMismatch_c": true, "tliPrGetReplyDetected_m": true, "tliCDoneMismatch": true,
+		"tliTTimeoutMismatch": true, "tliCheckAnyMismatch_m": true, "tliAWait": true,
+		"tliMatchMismatch": false, "tliMatch": false, "tliMReceive_c": false, "tliTTimeout": false,
+	} {
+		if tl.ArrivalTiming(op) != want {
+			t.Errorf("ArrivalTiming(%s) = %v", op, !want)
+		}
+	}
+}
+
+// TestCompareKeysComponentsByCreator: two PTCs each create an unnamed
+// helper; which creates first differs between correct runs.
+func TestCompareKeysComponentsByCreator(t *testing.T) {
+	mtc := tl.ComponentID{Name: "mtc", ID: "1", Type: "C"}
+	a := tl.ComponentID{Name: "a", ID: "2", Type: "C"}
+	b := tl.ComponentID{Name: "b", ID: "3", Type: "C"}
+	tcID := tl.Arg{Name: "tcId", Val: tl.TestcaseID("M", "tc")}
+	create := func(by, c tl.ComponentID, name string) *tl.Event {
+		return &tl.Event{Op: "tliCCreate", C: by, Args: []tl.Arg{{"comp", c.Content()}, {"name", tl.String(name)}, {"alive", tl.Boolean(false)}}}
+	}
+	logf := func(v string) *tl.Event {
+		return &tl.Event{Op: "tliLog", Args: []tl.Arg{{"log", tl.String(v)}}}
+	}
+	build := func(aFirst bool) []*tl.Event {
+		ha, hb := tl.ComponentID{ID: "4"}, tl.ComponentID{ID: "5"}
+		if !aFirst {
+			ha.ID, hb.ID = "5", "4"
+		}
+		ea, eb := logf("A"), logf("B")
+		ea.C, eb.C = ha, hb
+		evs := []*tl.Event{{Op: "tliTcStart", C: mtc, Args: []tl.Arg{tcID}}, create(mtc, a, "a"), create(mtc, b, "b")}
+		if aFirst {
+			evs = append(evs, create(a, ha, ""), create(b, hb, ""))
+		} else {
+			evs = append(evs, create(b, hb, ""), create(a, ha, ""))
+		}
+		return append(evs, ea, eb, &tl.Event{Op: "tliTcTerminated", C: mtc, Args: []tl.Arg{tcID, {"verdict", tl.Verdict("pass")}}})
+	}
+	for _, r := range tl.Compare(logOf(t, true, build(true)), logOf(t, true, build(false))) {
+		if !r.Same() {
+			t.Errorf("%s differs: %+v", r.Testcase, r.Differences)
+		}
+	}
+}
+
+// TestCompareTakesDestinationsAsASet: a broadcast's destinations may be
+// listed in any order.
+func TestCompareTakesDestinationsAsASet(t *testing.T) {
+	mtc := tl.ComponentID{Name: "mtc", ID: "1", Type: "C"}
+	tcID := tl.Arg{Name: "tcId", Val: tl.TestcaseID("M", "tc")}
+	ports := []tl.PortID{{Comp: tl.ComponentID{Name: "x", ID: "2"}, Name: "p", Index: -1}, {Comp: tl.ComponentID{Name: "y", ID: "3"}, Name: "p", Index: -1}}
+	build := func(to ...tl.PortID) []*tl.Event {
+		return []*tl.Event{{Op: "tliTcStart", C: mtc, Args: []tl.Arg{tcID}},
+			{Op: "tliMSend_c_BC", C: mtc, Args: []tl.Arg{{"at", tl.PortID{Comp: mtc, Name: "p", Index: -1}.Content()},
+				{"to", tl.PortIDList(to...)}, {"msgValue", tl.Value{Kind: "integer", Text: "1"}.AsValue()}}},
+			{Op: "tliTcTerminated", C: mtc, Args: []tl.Arg{tcID, {"verdict", tl.Verdict("pass")}}}}
+	}
+	for _, r := range tl.Compare(logOf(t, true, build(ports[0], ports[1])), logOf(t, true, build(ports[1], ports[0]))) {
+		if !r.Same() {
+			t.Errorf("%s differs: %+v", r.Testcase, r.Differences)
+		}
+	}
+}
+
+func TestSummaryOfAParameterWithoutValue(t *testing.T) {
+	n := &tl.Node{Tag: "tliSEnter", Kids: []*tl.Node{{Tag: "tciPars", Kids: []*tl.Node{{Tag: "par", Attrs: []tl.Attr{{Name: "name", Value: "x"}}}}}}}
+	if got := tl.Summary(n); !strings.Contains(got, "x := -") {
+		t.Errorf("summary: %s", got)
+	}
+}

@@ -28,9 +28,11 @@ single functional test doubles as a performance probe. See
   component lifecycle, port configuration, verdicts and alt steps, each with
   a timestamp, the component and the source line. The file is the
   standard's XML format (Annex B), or JSON Lines with `--log-format=jsonl`.
-  86 of the 125 operations are logged, procedure-based communication
-  (call, getcall, reply, getreply, raise, catch, and a call's timeout) and
-  the control part included. Logs validate against the Annex B schemas:
+  112 of the 125 operations are logged: procedure-based communication
+  (call, getcall, reply, getreply, raise, catch, and a call's timeout),
+  function, altstep and testcase entry and exit with their parameters and
+  result, assignments, module parameters, `@lazy` evaluation, `encvalue` /
+  `decvalue`, `match`, `rnd`, and the control part. Logs validate against the Annex B schemas:
   the whole conformance corpus was run with logging on, every event valid
   and every verdict unchanged. The published schemas do not compile as
   printed; the seven corrections needed are documented. See

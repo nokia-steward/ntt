@@ -486,6 +486,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		}
 		if val, ok := env.Get(name); ok {
 			val = forceThunk(val)
+			if runtime.TLActive() {
+				tlModulePar(env, n, name, val)
+			}
 			// Bare reference to a parametric template that has
 			// defaults for every formal: TTCN-3 5.4.2 allows
 			// omitting the `(...)` so we auto-apply the template
@@ -558,7 +561,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// passed as a parameter to its originating instance.
 		if op, ok := n.Sel.(*syntax.Ident); ok && isPortLifecycleOp(op.String()) {
 			if pname, isPort := resolvePortName(n.X, env); isPort {
-				applyPortLifecycle(op.String(), pname, env)
+				applyPortLifecycle(n, op.String(), pname, env)
 				return runtime.Undefined
 			}
 		}
@@ -715,9 +718,13 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		if ref, ok := left.(*runtime.ComponentRef); ok {
 			switch strings.ToLower(syntax.Name(n.Sel)) {
 			case "alive":
-				return runtime.NewBool(compAlive(ref, env))
+				ok := compAlive(ref, env)
+				tlCompQuery(env, n, "tliCAlive", ref, ok)
+				return runtime.NewBool(ok)
 			case "running":
-				return runtime.NewBool(compRunning(ref, env))
+				ok := compRunning(ref, env)
+				tlCompQuery(env, n, "tliCRunning", ref, ok)
+				return runtime.NewBool(ok)
 			case "done", "killed":
 				// `comp.done` / `comp.killed` is either an alt guard or a
 				// statement; the grammar has no expression form (ETSI
@@ -734,6 +741,8 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 					ok := componentStatePredicate(op)(ref, env)
 					if ok {
 						tlDoneKilled(env, n, op, "", ref)
+					} else {
+						tlDoneKilledMismatch(env, n, op, ref)
 					}
 					return runtime.NewBool(ok)
 				}
@@ -1265,9 +1274,16 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			Body:    n.Body,
 			Catch:   n.Catch,
 			Finally: n.Finally,
+			Name:    n.Name.String(),
+			Module:  moduleNameFromEnv(env),
+			Kind:    "function",
 		}
 		if n.KindTok.Kind() == syntax.ALTSTEP {
 			f.IsAltstep = true
+			f.Kind = "altstep"
+		}
+		if n.Modif != nil && n.Modif.Kind() != syntax.ILLEGAL {
+			f.Kind = n.Modif.String() + " " + f.Kind
 		}
 		env.Set(n.Name.String(), f)
 		return nil
@@ -1641,7 +1657,23 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// non-testcase path (the conformance gate itself doesn't
 		// run under a TestcaseExec when seeding metadata).
 		if id, ok := n.Fun.(*syntax.Ident); ok && id.String() == "rnd" {
-			return builtins.RndWithScope(env, args...)
+			res := builtins.RndWithScope(env, args...)
+			if lexec := tlExec(env); lexec != nil {
+				tlRnd(lexec, n, args, res)
+			}
+			return res
+		}
+
+		// `match(value, template)` is a builtin; the executor logs it
+		// (tliMatch, tliMatchMismatch) with the operands it evaluated.
+		if _, ok := f.(*runtime.Builtin); ok && len(args) == 2 {
+			if id, ok := n.Fun.(*syntax.Ident); ok && id.String() == "match" {
+				res := apply(f, args)
+				if lexec := tlExec(env); lexec != nil {
+					tlMatch(lexec, n, args[0], args[1], res)
+				}
+				return res
+			}
 		}
 
 		// User-defined functions/altsteps may declare inout / out
@@ -3671,10 +3703,19 @@ func evalExprList(exprs []syntax.Expr, env runtime.Scope) []runtime.Object {
 	return result
 }
 
-func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) runtime.Object {
+func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtime.Object) {
 	val := eval(rhs, env)
 	if runtime.IsError(val) {
 		return val
+	}
+	if runtime.TLActive() {
+		if lexec := tlExec(env); lexec != nil {
+			defer func() {
+				if !runtime.IsError(res) {
+					tlVar(lexec, lhs, env)
+				}
+			}()
+		}
 	}
 
 	// Type-directed coercion on assignment to a record/set/array
@@ -5762,9 +5803,11 @@ func evalCallArgsLazy(fn *runtime.Function, callArgs []syntax.Expr, env runtime.
 		modif := modOf[formalOf[i]]
 		if modif == "@lazy" || modif == "@fuzzy" {
 			out[i] = &runtime.LazyThunk{
-				Expr:  argExpr,
-				Env:   env,
-				Fuzzy: modif == "@fuzzy",
+				Expr:   argExpr,
+				Env:    env,
+				Fuzzy:  modif == "@fuzzy",
+				Name:   formalOf[i],
+				Module: fn.Module,
 			}
 			continue
 		}
@@ -5921,9 +5964,11 @@ func applyFunctionStopped(fn *runtime.Function, args []runtime.Object) (runtime.
 				// re-evaluated on every read.
 				if modif == "@lazy" || modif == "@fuzzy" {
 					fenv.Set(param.Name.String(), &runtime.LazyThunk{
-						Expr:  param.Value,
-						Env:   fenv,
-						Fuzzy: modif == "@fuzzy",
+						Expr:   param.Value,
+						Env:    fenv,
+						Fuzzy:  modif == "@fuzzy",
+						Name:   param.Name.String(),
+						Module: fn.Module,
 					})
 					continue
 				}
@@ -5940,6 +5985,12 @@ func applyFunctionStopped(fn *runtime.Function, args []runtime.Object) (runtime.
 		}
 	}
 	var raw runtime.Object
+	if runtime.TLActive() && fn.Name != "" {
+		if lexec := tlExec(fenv); lexec != nil {
+			tlScope(lexec, fn.Body, "tliSEnter", fn.Module, fn.Name, fn.Kind, fn.Params, fenv, nil)
+			defer func() { tlScope(lexec, fn.Body, "tliSLeave", fn.Module, fn.Name, fn.Kind, fn.Params, fenv, raw) }()
+		}
+	}
 	if fn.IsAltstep && fn.Body != nil {
 		raw = evalAltstepBody(fn.Body, fenv)
 		// `break` in an altstep terminates the altstep and the alt
@@ -6048,6 +6099,11 @@ func forceThunk(v runtime.Object) runtime.Object {
 	if !t.Fuzzy {
 		t.Cached = val
 		t.Once = true
+	}
+	if runtime.TLActive() && t.Name != "" && !runtime.IsError(val) {
+		if lexec := tlExec(t.Env); lexec != nil {
+			tlEvaluate(lexec, expr, t, val)
+		}
 	}
 	return val
 }
@@ -8164,9 +8220,13 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		// `comp.running` is true only between `.start` and `.done`.
 		// The Done flag flips once the synchronous body exits; a
 		// modelled finite-timer body completes after its duration.
-		return runtime.NewBool(compRunning(ref, env)), true
+		ok := compRunning(ref, env)
+		tlCompQuery(env, n, "tliCRunning", ref, ok)
+		return runtime.NewBool(ok), true
 	case "alive":
-		return runtime.NewBool(compAlive(ref, env)), true
+		ok := compAlive(ref, env)
+		tlCompQuery(env, n, "tliCAlive", ref, ok)
+		return runtime.NewBool(ok), true
 	case "done":
 		// `comp.done` is true once the body finished, regardless
 		// of the alive modifier.
@@ -8536,13 +8596,16 @@ func recallEncoded(env runtime.Scope, bs *runtime.Binarystring) (runtime.Object,
 	return v, ok
 }
 
-func evalDecValue(fn string, n *syntax.CallExpr, env runtime.Scope) runtime.Object {
+func evalDecValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime.Object) {
 	if n.Args == nil || len(n.Args.List) < 2 {
 		return runtime.NewInt(1)
 	}
 	enc := eval(n.Args.List[0], env)
 	if runtime.IsError(enc) {
 		return enc
+	}
+	if lexec := tlExec(env); lexec != nil {
+		defer func() { tlDecode(lexec, n, enc, res, env) }()
 	}
 	if enc == runtime.Undefined {
 		return runtime.NewInt(1)
@@ -8957,13 +9020,16 @@ func evalObjidComponent(c syntax.Expr, env runtime.Scope) runtime.Object {
 // sequence without a real codec implementation; the round-trip is
 // only enough for the conformance fixtures that just compose
 // encvalue + decvalue.
-func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) runtime.Object {
+func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime.Object) {
 	if n.Args == nil || len(n.Args.List) < 1 {
 		return runtime.Undefined
 	}
 	v := eval(n.Args.List[0], env)
 	if runtime.IsError(v) {
 		return v
+	}
+	if lexec := tlExec(env); lexec != nil {
+		defer func() { tlEncode(lexec, n, v, res) }()
 	}
 	// Raw ints get a placeholder byte filled with their low byte:
 	// a number of fixtures compare the encoded blob byte-for-byte
@@ -11955,7 +12021,7 @@ func evalPortCheck(port string, n *syntax.CallExpr, env runtime.Scope) runtime.O
 		// filter on the sender / receiver alone (or just stash
 		// the head's sender into the redirect target).
 		if info.call == nil && (info.from != nil || info.to != nil || info.redirect != nil) {
-			info.call = &syntax.CallExpr{Fun: &syntax.Ident{}}
+			info.call = checkAnyCall(n, env)
 			return evalPortReceiveInfo(port, info, env, false)
 		}
 	}
@@ -12237,4 +12303,9 @@ func timerAggregateBlockingTimeout(timers []*runtime.TimerHandle, anyKind bool, 
 // clearPort empties the current component's port pname (ETSI 22.5.1).
 func clearPort(exec *runtime.TestcaseExec, n syntax.Node, pname string) {
 	exec.ClearPort(exec.PortKey(pname))
+	if exec.TestLogger() != nil {
+		tlEmitLazy(exec, n, "tliPClear", func() []tl.Arg {
+			return []tl.Arg{tlArg("port", tlOwnPort(exec, pname).Content()), tlArg("stat", tl.String(tlPortStatus(exec, pname)))}
+		})
+	}
 }

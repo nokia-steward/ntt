@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 
@@ -54,6 +55,12 @@ func sample() []*tl.Event {
 		{Kind: "record_of", Name: "mixed", Elems: []tl.Value{{Kind: "integer", Text: "1"}, {Kind: "float", Text: "2.5"}, {Kind: "charstring", Text: "x"}}},
 		{Kind: "record_of", Name: "uniform", Elems: []tl.Value{{Kind: "integer", Text: "1"}, {Match: &tl.Matching{Symbol: "any_value"}}}},
 		{Kind: "set_of", Name: "wild", Elems: []tl.Value{{Omit: true}, {Match: &tl.Matching{Symbol: "any_value"}}}},
+		// A list of lists, one of them mixed: that one is a record, so the
+		// outer list is not uniform either.
+		{Kind: "record_of", Name: "nested", Elems: []tl.Value{
+			{Kind: "record_of", Elems: []tl.Value{{Kind: "integer", Text: "0"}, {Kind: "integer", Text: "1"}}},
+			{Kind: "record_of", Elems: []tl.Value{{Kind: "record_of", Elems: []tl.Value{{Kind: "integer", Text: "10"}}}, {Kind: "integer", Text: "3"}}},
+		}},
 	}}
 	return []*tl.Event{
 		{Op: "tliTcStart", Ts: 1, C: mtc, Args: []tl.Arg{{"tcId", tl.TestcaseID("M", "tc")},
@@ -115,6 +122,8 @@ func TestValidateRejects(t *testing.T) {
 		{tl.Event{Op: "tliLog"}, `required parameter "log" missing`},
 		{tl.Event{Op: "tliLog", Args: []tl.Arg{{"log", tl.String("a")}, {"log", tl.String("b")}}}, "given twice"},
 		{tl.Event{Op: "tliLog", Args: []tl.Arg{{"log", tl.String("a")}, {"reason", tl.String("b")}}}, `no parameter "reason"`},
+		{tl.Event{Op: "tliDecode", Args: []tl.Arg{{"msg", tl.EncodedMessage("00", 0)}, {"decoder-failure", tl.String(tl.TciError)},
+			{"val", tl.Value{Kind: "integer", Text: "1"}.AsValue()}}}, "are alternatives"},
 	} {
 		err := tc.e.Validate()
 		if err == nil || !strings.Contains(err.Error(), tc.want) {
@@ -200,5 +209,22 @@ func TestJSONLMirrorsXML(t *testing.T) {
 		if got := lines[i+1]; got.Tag != e.Op || got.Attrs["ts"] == "" || got.Attrs["name"] != e.C.Name {
 			t.Errorf("line %d = %s %v, want %s from %s", i+2, got.Tag, got.Attrs, e.Op, e.C.Name)
 		}
+	}
+}
+
+// TestMonotonicOrdersTheLog: an event stamped before the last one logged
+// takes its timestamp, so the log never goes back in time.
+func TestMonotonicOrdersTheLog(t *testing.T) {
+	rec := &tl.Recorder{}
+	m := &tl.Monotonic{Next: rec}
+	for _, ts := range []int64{10, 30, 20, 40} {
+		m.Log(&tl.Event{Op: "tliLog", Ts: ts})
+	}
+	var got []int64
+	for _, e := range rec.Events {
+		got = append(got, e.Ts)
+	}
+	if !reflect.DeepEqual(got, []int64{10, 30, 30, 40}) {
+		t.Fatalf("timestamps %v", got)
 	}
 }
