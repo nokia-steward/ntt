@@ -531,6 +531,26 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			}
 		}
 
+		// `p.clear` removes every entry from the port's queue (ETSI
+		// 22.5.1), `all port.clear` from each of the component's. It used
+		// to fall through to nothing, leaving the queue as it was.
+		if op, ok := n.Sel.(*syntax.Ident); ok && op.String() == "clear" {
+			if syntax.Name(n.X) == "all port" {
+				if exec := runtime.FindTestcaseExec(env); exec != nil {
+					for _, pname := range exec.CurrentComponentPortNames() {
+						clearPort(exec, n, pname)
+					}
+				}
+				return runtime.Undefined
+			}
+			if pname, isPort := resolvePortName(n.X, env); isPort {
+				if exec := runtime.FindTestcaseExec(env); exec != nil {
+					clearPort(exec, n, pname)
+				}
+				return runtime.Undefined
+			}
+		}
+
 		// Port lifecycle ops `p.stop` / `p.start` / `p.halt` (no
 		// parentheses, ETSI 22.1). The base resolving to a PortRef
 		// distinguishes these from the component (`c.stop`) and timer
@@ -12212,4 +12232,9 @@ func timerAggregateBlockingTimeout(timers []*runtime.TimerHandle, anyKind bool, 
 		}
 	}
 	return runtime.NewBool(true)
+}
+
+// clearPort empties the current component's port pname (ETSI 22.5.1).
+func clearPort(exec *runtime.TestcaseExec, n syntax.Node, pname string) {
+	exec.ClearPort(exec.PortKey(pname))
 }

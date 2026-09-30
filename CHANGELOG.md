@@ -179,6 +179,12 @@ fail. That is the fix working, not a new defect.
 
 Independent of the two clocks:
 
+- **`p.clear` and `all port.clear` empty the queue** (ETSI 22.5.1). They
+  did nothing, so a message they should have discarded was still received
+  afterwards.
+- **`c.running` is false for a component that was never started** (ETSI
+  21.3.5); it answered true from the moment the component was created.
+
 - **`any timer.timeout` / `all timer.timeout` block when used as a
   statement** (ETSI 23.7), as the named `T.timeout` always has. Outside an
   `alt` they previously did nothing at all: no wait, no timeout consumed,

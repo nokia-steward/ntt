@@ -1398,6 +1398,18 @@ func (t *TestcaseExec) HasPendingCalls() bool {
 	return false
 }
 
+// ClearPort removes every entry from the port's queue (ETSI 22.5.1
+// clear): messages, calls, replies and exceptions alike.
+func (t *TestcaseExec) ClearPort(port string) {
+	t.mu.Lock()
+	// Emptied, not removed: the port stays one of the queues PortNames
+	// lists.
+	if _, ok := t.ports[port]; ok {
+		t.ports[port] = nil
+	}
+	t.mu.Unlock()
+}
+
 // EnqueueEnvelope appends a full envelope (of any PortMsgKind) to the
 // named port's queue and arms the alt wake-up, exactly like
 // EnqueueMessageFrom does for messages. It is the enqueue entry point

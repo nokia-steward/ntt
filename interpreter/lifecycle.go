@@ -370,7 +370,23 @@ func compAlive(ref *runtime.ComponentRef, env runtime.Scope) bool {
 }
 
 func compRunning(ref *runtime.ComponentRef, env runtime.Scope) bool {
-	return ref != nil && ref.IsAlive() && !ref.IsDone() && !componentCompleted(ref, env)
+	if ref == nil {
+		return false
+	}
+	// A component no behaviour was started on is inactive, not running
+	// (ETSI 21.3.5). The MTC runs from the testcase's start, and a
+	// component asking about itself is running a behaviour — one it was
+	// given by call rather than start included.
+	if !ref.Started {
+		exec := runtime.FindTestcaseExec(env)
+		if exec == nil {
+			return false
+		}
+		if cur := exec.CurrentComponent(); ref.ID != exec.MTCID() && (cur == nil || cur.ID != ref.ID) {
+			return false
+		}
+	}
+	return ref.IsAlive() && !ref.IsDone() && !componentCompleted(ref, env)
 }
 
 func compDone(ref *runtime.ComponentRef, env runtime.Scope) bool {
