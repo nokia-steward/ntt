@@ -16,7 +16,9 @@
 // NewJSONLWriter writes the same element trees as JSON Lines, a header line
 // and then one event per line, each element an object with tag, attrs,
 // text and kids. Namespaces are implicit, since Annex B fixes each
-// element's by its position. It converts losslessly to the XML form.
+// element's by its position. It converts to the XML form without loss,
+// except for characters XML 1.0 cannot carry, such as most control
+// characters, which XML writes as U+FFFD; JSON Lines keeps them.
 //
 // # Choices the standard leaves to the tool
 //

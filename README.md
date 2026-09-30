@@ -152,6 +152,13 @@ ES 201 873-6), add `--log`. See [docs/test-logging.md](docs/test-logging.md):
 
 	ntt exec --log run.xml app.ttcn
 
+and compare what each component did in two runs — for instance on the two
+clocks — with `ntt log diff`:
+
+	ntt exec --log virtual.jsonl app.ttcn
+	ntt exec --live --log live.jsonl app.ttcn
+	ntt log diff virtual.jsonl live.jsonl
+
 Suites that need to drive a real System Under Test through a Titan-
 style C/C++ test port (e.g. `MyClient_PT.cc`) build a dedicated
 binary that statically links the port via the cgo bridge. See

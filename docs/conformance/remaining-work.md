@@ -410,7 +410,10 @@ operations across the two clocks hung on its first run.
 - **An inline `[false] T.timeout` guard livelocks the scheduler** the same
   way expired default timers did; the fix above was kept to defaults.
 - **Restarting a stopped `alive` component** gives `none` on the virtual
-  clock and `pass` under `--live` (see "Newly found").
+  clock and `pass` under `--live` (see "Newly found"). Under `--live` the
+  stopped behaviour also keeps running past the end of its testcase: its
+  timer fires and it terminates during the next testcase, which
+  `ntt log diff` over two logs of the same suite showed.
 - **The call signature still leaks into PTCs** for the unqualified
   `getreply` / `catch` rule (22.3.1 h), which reads it from scope.
 - **`any port.getcall` / `getreply` / `catch` as a statement takes

@@ -672,3 +672,53 @@ func TestTestLog_TimestampsNeverGoBack(t *testing.T) {
 		}
 	}
 }
+
+// TestTestLog_ClocksCompareTheSame is the comparison the logs are for: the
+// same testcases run on the virtual and the real clock, logged in the two
+// formats, read back and compared, do the same.
+func TestTestLog_ClocksCompareTheSame(t *testing.T) {
+	logs := make([]*tl.Log, 2)
+	for i, k := range clocks {
+		var buf bytes.Buffer
+		w := tl.NewJSONLWriter(&buf)
+		if i == 1 {
+			w = tl.NewXMLWriter(&buf)
+		}
+		opts := k.opts
+		opts.TestLogger = w
+		for _, src := range []string{pingPong, procedureExchange} {
+			if _, _, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", opts); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		l, err := tl.ReadLog(&buf)
+		if err != nil {
+			t.Fatal(err)
+		}
+		logs[i] = l
+	}
+	res := tl.Compare(logs[0], logs[1])
+	if len(res) != 2 {
+		t.Fatalf("%d testcases compared, want 2", len(res))
+	}
+	for _, r := range res {
+		if !r.Same() {
+			for _, d := range r.Differences {
+				t.Errorf("%s: %s differs:\n virtual %s\n    live %s", r.Testcase, d.Component, summary(d.A), summary(d.B))
+			}
+		}
+		if r.Compared < 10 {
+			t.Errorf("%s: only %d events compared", r.Testcase, r.Compared)
+		}
+	}
+}
+
+func summary(n *tl.Node) string {
+	if n == nil {
+		return "(none)"
+	}
+	return tl.Summary(n)
+}

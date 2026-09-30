@@ -110,7 +110,8 @@ func escape(b *strings.Builder, s string) {
 }
 
 // jsonNode is the JSON Lines form of a Node: the same tree, one object per
-// element, so a log converts losslessly between the two formats. Namespaces
+// element, so a log converts between the two formats (XML cannot carry the
+// characters XML 1.0 excludes; see doc.go). Namespaces
 // are left implicit; Annex B fixes each element's namespace by its position.
 type jsonNode struct {
 	Tag   string            `json:"tag"`

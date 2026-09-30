@@ -83,9 +83,27 @@ func (t *TestcaseExec) TLog(op, src string, line int, args ...tl.Arg) {
 }
 
 // TLogFrom logs one event produced by component c.
+//
+// Once the testcase's end has been logged, a component still acting — one
+// whose behaviour outlived its testcase — must not appear to act in
+// whatever testcase the log is in by then. Its event is logged as a
+// tliInfo naming the operation, the component and the testcase it belongs
+// to.
 func (t *TestcaseExec) TLogFrom(l tl.Logger, c tl.ComponentID, op, src string, line int, args ...tl.Arg) {
-	l.Log(&tl.Event{Op: op, Ts: t.TLTime(), Src: src, Line: line, C: c, Args: args})
+	e := &tl.Event{Op: op, Ts: t.TLTime(), Src: src, Line: line, C: c, Args: args}
+	if t.tlEnded.Load() && op != "tliTcTerminated" {
+		e = &tl.Event{Op: "tliInfo", Ts: e.Ts, Src: src, Line: line,
+			C: tl.ComponentID{Name: c.Name, ID: tl.LateID, Type: c.Type},
+			Args: []tl.Arg{
+				{Name: "level", Val: tl.Integer(1)},
+				{Name: "info", Val: tl.String(fmt.Sprintf("after testcase %s ended: %s", t.Name, e.Summary()))},
+			}}
+	}
+	l.Log(e)
 }
+
+// TLEnd records that the testcase's end has been logged (see TLogFrom).
+func (t *TestcaseExec) TLEnd() { t.tlEnded.Store(true) }
 
 // TLCurrent identifies the component running on the calling goroutine.
 func (t *TestcaseExec) TLCurrent() tl.ComponentID {
@@ -336,6 +354,18 @@ func TLValue(o Object) tl.Value {
 		}
 		for _, e := range v.Elements {
 			out.Elems = append(out.Elems, TLValue(e))
+		}
+		return out
+	case *Map:
+		// TCI-TL has no map value; a map is its key/value pairs, in key
+		// order, as a record of records.
+		pairs := v.Pairs()
+		sort.Slice(pairs, func(i, j int) bool { return pairs[i].Key.Inspect() < pairs[j].Key.Inspect() })
+		out := tl.Value{Kind: "record_of", Type: "map"}
+		for _, p := range pairs {
+			k, val := TLValue(p.Key), TLValue(p.Value)
+			k.Name, val.Name = "key", "value"
+			out.Elems = append(out.Elems, tl.Value{Kind: "record", Elems: []tl.Value{k, val}})
 		}
 		return out
 	case *ComponentRef:

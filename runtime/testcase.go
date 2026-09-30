@@ -49,6 +49,7 @@ type TestcaseExec struct {
 	tlMu    sync.Mutex
 	tlSeen  map[string]uint64
 	msgSeq  uint64
+	tlEnded atomic.Bool // tliTcTerminated has been logged
 
 	// mtcID is the component ID of the MTC, used by PortKey to keep the
 	// MTC's ports on bare (unqualified) names so the single-MTC path is

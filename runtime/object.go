@@ -9,6 +9,7 @@ import (
 	"math/big"
 	"reflect"
 	"strconv"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -1614,6 +1615,9 @@ func (m *Map) Inspect() string {
 			pairs = append(pairs, fmt.Sprintf("[%s] := %s", pair.Key.Inspect(), pair.Value.Inspect()))
 		}
 	}
+	// In key order: the storage is a Go map, whose order changes from
+	// run to run, and a map's text should not.
+	sort.Strings(pairs)
 	buf.WriteString("{")
 	buf.WriteString(strings.Join(pairs, ", "))
 	buf.WriteString("}")

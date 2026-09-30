@@ -147,17 +147,64 @@ Two policies keep a log readable without dropping information:
 
 ## Comparing two runs
 
-A log is the natural way to check that the same testcase behaves the same
-on the virtual clock and on the real clock (`--live`), and it is how such
-differences have been found. Compare each component's own operations —
-events grouped by the component that produced them — rather than the
-interleaved log, because components legitimately interleave differently in
-real time.
+`ntt log diff` compares two logs, testcase by testcase and, within a
+testcase, component by component, and reports where each component's actions
+first differ. Like `diff(1)`, it exits 0 when the runs agree, 1 when they
+differ and 2 when a log cannot be read. Its first use is checking
+that a suite behaves the same on both clocks:
 
-Some events record when an arrival happened relative to what a component
-was doing, not what the component did, and differ between correct runs:
-arrivals (`tliMDetected_*`), alt rounds that found nothing (`tliANomatch`,
-`tliADefaults`, `tliAWait`), and mismatches, which depend on which message
-was at the head of a queue. Leave those out and the rest — every send and
-receive with its value, every verdict, timer, component and port operation,
-every alt entered and left — must agree.
+```sh
+ntt exec --log virtual.jsonl suite/
+ntt exec --live --log live.jsonl suite/
+ntt log diff virtual.jsonl live.jsonl
+```
+
+```
+M.tc_echo: same (18 events)
+M.tc_restart: differs
+  PTC, action 1:
+    virtual.jsonl: (nothing: the component did no more)
+    live.jsonl: tliTStart [PTC, line 10] timer=t dur=1
+  mtc, action 8:
+    virtual.jsonl: tliTcTerminated [mtc] tcId=M.tc_restart verdict=none
+    live.jsonl: tliTcTerminated [mtc] tcId=M.tc_restart verdict=pass
+2 testcases: 1 same, 1 differ
+```
+
+Either format may be given, in any combination. What is compared, and what
+is not:
+
+- **Per component.** Components legitimately interleave differently in real
+  time, so each component's own sequence is compared, not the interleaved
+  log. Components are matched by the name they were created with —
+  numbered in creation order when several share one, so two workers both
+  created as `"w"` are told apart — and the MTC, the system and a control
+  part by their roles. Their numeric ids, which two runs may assign
+  differently, are not compared, and a value that refers to a component is
+  compared as that component.
+- **Actions, not arrivals.** Some events record when something arrived
+  relative to what a component was doing, and differ between correct runs:
+  arrivals (`tliMDetected_*`, `tliPrGetCallDetected_*` and the other
+  `Detected` forms), mismatches, which depend on what was at the head of a
+  queue, and alt rounds that found nothing (`tliANomatch`, `tliADefaults`,
+  `tliAWait`). These are left out. So is the elapsed time a timer read
+  reports, which measures the clock.
+- **Everything else must agree:** every send and receive with its value and
+  template, every call, reply and exception, every verdict and reason,
+  timer, component and port operation, every alt entered and left, and
+  where in the test specification each was performed: the file, by its
+  base name since it may sit at different paths, and the line.
+- **Either format, in any combination.** XML 1.0 cannot carry every
+  character; most control characters become U+FFFD in an XML log. When
+  either log is XML, text is compared as XML holds it, so a run compares the
+  same with its own two logs, and two values differing only in such
+  characters are not told apart.
+- **A log cut short** — a killed run's, ending mid-event — is compared up to
+  its last complete event, with a warning.
+
+A component whose behaviour outlives its testcase — still running when the
+testcase has ended — would otherwise appear to act in the next one. What it
+does after its testcase's end is logged as a `tliInfo` naming the operation,
+the component and the testcase, and the comparison groups it with the other
+events outside any testcase, wherever it falls in the log. The tliInfo
+carries a summary of what the component did.

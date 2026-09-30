@@ -481,6 +481,9 @@ func tlTestcaseTerminated(exec *runtime.TestcaseExec, v runtime.Verdict, reason 
 	if reason != "" {
 		args = append(args, tlArg("reason", tl.String(reason)))
 	}
+	// Mark the end first: a component still running must not log after
+	// tliTcTerminated as if the testcase were going on.
+	exec.TLEnd()
 	exec.TLogFrom(exec.TestLogger(), exec.TLComponentByID(exec.MTCID()), "tliTcTerminated", "", 0, args...)
 }
 

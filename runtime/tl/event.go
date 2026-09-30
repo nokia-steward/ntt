@@ -92,3 +92,11 @@ func (e *Event) node() *Node {
 	}
 	return n
 }
+
+// LateID is the component id of an event a component logged after its
+// testcase had ended (see runtime.TestcaseExec.TLogFrom). Comparisons file
+// such events outside any testcase, wherever they fall in the log.
+const LateID = "late"
+
+// Summary renders e in one line, as Summary does its element.
+func (e *Event) Summary() string { return Summary(e.node()) }
