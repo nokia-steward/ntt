@@ -35,6 +35,13 @@ single functional test doubles as a performance probe. See
   and every verdict unchanged. The published schemas do not compile as
   printed; the seven corrections needed are documented. See
   [`docs/test-logging.md`](docs/test-logging.md).
+- **`ntt log diff`** — compares two test logs and reports, per testcase and
+  per component, where the components' actions first differ, exiting 0, 1
+  or 2 as `diff(1)` does. Built to check that a suite behaves the same on the virtual and
+  the real clock: it compares actions — sends and receives with their
+  values and templates, verdicts, timers, component, port and alt
+  operations — and leaves out what legitimately differs between correct
+  runs, the arrival of messages and the alt rounds that found nothing.
 - **`ntt exec --live`** — run the strict engine on the real clock with real
   concurrency, so timers pace real I/O against a live SUT. The virtual-clock
   default (reproducible, deterministic) is unchanged; bound a live run with
