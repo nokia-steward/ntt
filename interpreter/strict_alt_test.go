@@ -422,9 +422,11 @@ func TestStrictProc_PortArrayConnectedRouting(t *testing.T) {
 				p[i].call(S:{}, nowait);
 			}
 			v.start(f());
+			// The responder runs concurrently: wait for its reply, bounded.
+			timer g := 5.0; g.start;
 			alt {
 				[] any from p.getreply { setverdict(pass); }
-				[else] { setverdict(fail, "port-array reply not routed to caller"); }
+				[] g.timeout { setverdict(fail, "port-array reply not routed to caller"); }
 			}
 		}
 	}`)

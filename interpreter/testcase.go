@@ -492,6 +492,10 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 	// suite. Five seconds is a deliberately conservative ceiling;
 	// real tests stop their PTCs explicitly and finish in
 	// milliseconds.
+	// A PTC started but not yet scheduled when the MTC's behaviour ends
+	// has had no turn: it gets one — every PTC that can run runs until it
+	// waits or finishes — before the PTCs still running are stopped.
+	exec.SchedDrain(exec.MTCID())
 	exec.WaitPTCs(5 * time.Second)
 
 	// Release every port the MTC + any PTC mapped before the
@@ -3015,6 +3019,7 @@ func waitForAltCombined(dur time.Duration, haveTimer bool, env runtime.Scope) bo
 	if exec == nil || exec.Stopped() {
 		return false
 	}
+	defer markWaiting(exec)()
 	var stopChan <-chan struct{}
 	if cur := exec.CurrentComponent(); cur != nil {
 		if exit := exec.PTCExit(cur.ID); exit != nil {

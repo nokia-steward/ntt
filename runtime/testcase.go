@@ -291,10 +291,23 @@ type PTCExit struct {
 	// unaffected. Falls back to a timeout for receiver-only PTCs
 	// that never send.
 	SendChan chan struct{}
+	// waiting counts the real-clock waits the behaviour is in: an alt
+	// parked, a timer's timeout, a done or killed (see WaitPTCs).
+	waiting  atomic.Int32
 	stopOnce sync.Once
 	doneOnce sync.Once
 	mapOnce  sync.Once
 	sendOnce sync.Once
+}
+
+// Waiting marks the behaviour as waiting on the real clock until the
+// returned function is called.
+func (p *PTCExit) Waiting() (done func()) {
+	if p == nil {
+		return func() {}
+	}
+	p.waiting.Add(1)
+	return func() { p.waiting.Add(-1) }
 }
 
 // Stop closes StopChan exactly once. Safe to call from any
@@ -476,6 +489,26 @@ func (t *TestcaseExec) WaitPTCs(timeout time.Duration) {
 	t.ptcMu.Unlock()
 	if len(exits) == 0 {
 		return
+	}
+	// A PTC that has not had its turn — on the real clock, one whose
+	// goroutine has not got as far as waiting — gets it first: each runs
+	// until it waits or finishes, as the scheduler's drain gives it on the
+	// virtual clock.
+	if t.sched == nil {
+		settle := time.Now().Add(timeout)
+		for _, p := range exits {
+			for time.Now().Before(settle) {
+				select {
+				case <-p.DoneChan:
+				default:
+					if p.waiting.Load() == 0 {
+						time.Sleep(time.Millisecond)
+						continue
+					}
+				}
+				break
+			}
+		}
 	}
 	// The MTC's testcase body has terminated; per ETSI ES 201 873-1 §21.3
 	// every still-running PTC is implicitly stopped when the testcase ends.
@@ -2133,6 +2166,15 @@ func (t *TestcaseExec) SchedPark(id int64, deadline float64, hasTimer bool, stop
 		t.reportDeadlock()
 	}
 	return re, st
+}
+
+// SchedDrain lets every other participant that can run now run until it
+// waits or finishes, without advancing the clock (see coopScheduler.drain).
+// No-op with the scheduler off.
+func (t *TestcaseExec) SchedDrain(id int64) {
+	if t.sched != nil {
+		t.sched.drain(id, t.StopChan())
+	}
 }
 
 // SchedParkWhileLive parks participant id until participant other has

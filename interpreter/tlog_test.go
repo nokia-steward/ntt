@@ -909,8 +909,8 @@ func TestTestLog_WaitingAltLogsOnce(t *testing.T) {
 	var per [2]map[string][]string
 	for i, k := range clocks {
 		rec, _ := runLogged(t, src, k.opts)
-		if n := count(rec, "tliSEnter"); n != 2 {
-			t.Errorf("%s clock: tliSEnter %d times, want the testcase's and the default's once: %v", k.name, n, rec.Ops())
+		if n := len(filterOps(rec, "mtc", "tliSEnter")); n != 2 {
+			t.Errorf("%s clock: the MTC's tliSEnter %d times, want the testcase's and the default's once: %v", k.name, n, rec.Ops())
 		}
 		if n := count(rec, "tliModulePar"); n != 1 {
 			t.Errorf("%s clock: the guard's module parameter read logged %d times", k.name, n)
@@ -920,4 +920,15 @@ func TestTestLog_WaitingAltLogsOnce(t *testing.T) {
 	if !reflect.DeepEqual(per[0], per[1]) {
 		t.Errorf("the clocks logged different operations:\nvirtual %v\n   live %v", per[0], per[1])
 	}
+}
+
+// filterOps returns the operations op that component comp logged.
+func filterOps(rec *tl.Recorder, comp, op string) []*tl.Event {
+	var out []*tl.Event
+	for _, e := range rec.Events {
+		if e.C.Name == comp && e.Op == op {
+			out = append(out, e)
+		}
+	}
+	return out
 }

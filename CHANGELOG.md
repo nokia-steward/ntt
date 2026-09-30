@@ -220,6 +220,21 @@ Independent of the two clocks:
   would block the branch that could satisfy it.
 - **Starting a component whose behaviour still runs is an error** (ETSI
   21.3.2), where it went ahead.
+- **A started behaviour runs, on either clock** (ETSI 21.3.2). On the
+  default clock a PTC body that waited on a timer and used no port, or ran
+  a `while (true)` loop that breaks, was not executed but modelled: none
+  of its statements ran, a `setverdict(fail)` in it was lost, and a loop
+  that ends was taken for one that does not. Every started body now runs.
+  A loop that never ends and never waits or acts (`while (true) {}`) is
+  recognised where it is entered: on the virtual clock, where computing
+  takes no time, the component waits there until it is stopped, instead
+  of holding everything else up; everything before it, and a branch that
+  does not reach it, runs as written. A PTC started just before the MTC's
+  behaviour ends runs until it waits or finishes before the PTCs still
+  running are stopped. Passing an object reference to a started
+  behaviour, or a value holding one, is an error (ETSI ES 203 790
+  5.1.2.2). On `--live`, a started PTC holds up its starter only when it
+  maps or sends through an external driver.
 - **A stopped `alive` component can be started again** (ETSI 21.3.3), on
   either clock. The new behaviour did not run: `start` left the component
   `done`, so the next `c.done` was satisfied at once; and the stopped
@@ -267,11 +282,8 @@ Independent of the two clocks:
 
 These are older than this release and are recorded, with their diagnosis,
 in [`docs/conformance/remaining-work.md`](docs/conformance/remaining-work.md)
-§1s. The first can report a `pass` nothing earned.
+§1s.
 
-- **A PTC body that waits on a timer and uses no port is not executed**, on
-  either clock. Its duration is modelled, so `.done` waits the right time,
-  but none of its statements run — a `setverdict(fail)` in it is lost.
 - Under `--live`, the `alt` guard `c.done` can be true for a PTC that is
   still blocked on a port.
 

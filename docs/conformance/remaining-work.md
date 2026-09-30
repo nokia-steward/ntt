@@ -432,6 +432,15 @@ verdict the same and every event valid.
     50 ms start barrier.
   - A blocking signature called with no response block and no `nowait`
     is sent without waiting, where the standard makes it an error.
+- **Found reviewing the started-bodies change, not fixed:**
+  - A loop that waits on a zero-length timer for good
+    (`while (true) { t.start(0.0); t.timeout }`) takes no virtual time, so
+    on the virtual clock nothing else ever runs.
+  - `c.call(f())` on a component still models a body that waits on a
+    timer instead of running it.
+  - `ntt exec` does not enforce an `execute()` timeout, and a testcase
+    that runs out the harness budget reports its current verdict rather
+    than `error` (26).
 - **A field assignment to a record initialised positionally is lost.**
   After `var R r := {1, 2}`, `r.a := 3` leaves `r.a` at 1; initialised as
   `{a := 1, b := 2}` it works.
@@ -448,8 +457,9 @@ verdict the same and every event valid.
   ones, which match only because the engine fails on them. `tliAction` is
   therefore never logged.
 
-- **A PTC body with a timer and no port communication never runs**, on
-  either clock: `startBodyShouldSkip` treats any `.timeout` as a reason to
+- *Fixed 2026-09-30: every started body runs except an endless
+  computation, which is modelled; +5, 0 lost.* **A PTC body with a timer
+  and no port communication never runs**, on either clock: `startBodyShouldSkip` treats any `.timeout` as a reason to
   skip the whole body and model only its duration, so a `setverdict(fail)`
   in it — even one before the timer — is lost and the testcase reports
   `pass`. Running such bodies on the scheduler now measures **-4 / +5**

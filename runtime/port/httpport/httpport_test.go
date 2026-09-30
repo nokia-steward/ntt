@@ -7,6 +7,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -296,13 +297,29 @@ func TestHTTPPort_TransportErrorReasons(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer ln.Close()
+	// Held open, answering nothing, and referenced: a connection no longer
+	// referenced may be closed by the garbage collector, and the request
+	// then fails on the close instead of timing out.
+	var (
+		mu   sync.Mutex
+		held []net.Conn
+	)
+	defer func() {
+		mu.Lock()
+		defer mu.Unlock()
+		for _, c := range held {
+			c.Close()
+		}
+	}()
 	go func() {
 		for {
 			c, err := ln.Accept()
 			if err != nil {
 				return
 			}
-			_ = c // hold it open, answer nothing
+			mu.Lock()
+			held = append(held, c)
+			mu.Unlock()
 		}
 	}()
 

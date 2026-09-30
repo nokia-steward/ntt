@@ -524,6 +524,7 @@ func waitPTCDoneRealClock(exec *runtime.TestcaseExec, refs []*runtime.ComponentR
 	done func() bool, stop <-chan struct{}, env runtime.Scope,
 	pred func(*runtime.ComponentRef, runtime.Scope) bool) {
 
+	defer markWaiting(exec)()
 	for !done() {
 		cases := []reflect.SelectCase{
 			{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(stop)},

@@ -1716,6 +1716,11 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return apply(f, args)
 
 	case *syntax.WhileStmt:
+		if alwaysTrue(n.Cond) {
+			if r, parked := parkEndlessLoop(n, n.Body, env); parked {
+				return r
+			}
+		}
 		for {
 			if r := loopStopped(env); r != nil {
 				return r
@@ -1759,6 +1764,11 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		}
 
 	case *syntax.DoWhileStmt:
+		if alwaysTrue(n.Cond) {
+			if r, parked := parkEndlessLoop(n, n.Body, env); parked {
+				return r
+			}
+		}
 		for {
 			if r := loopStopped(env); r != nil {
 				return r
@@ -1793,6 +1803,11 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			val := eval(n.Init, env)
 			if runtime.IsError(val) {
 				return val
+			}
+		}
+		if alwaysTrue(n.Cond) {
+			if r, parked := parkEndlessLoop(n, n.Body, env); parked {
+				return r
 			}
 		}
 
@@ -7073,6 +7088,9 @@ func waitForTimerTimeout(th *runtime.TimerHandle, env runtime.Scope) {
 	if remaining <= 0 {
 		return
 	}
+	if exec := runtime.FindTestcaseExec(env); exec != nil {
+		defer markWaiting(exec)()
+	}
 	exec := runtime.FindTestcaseExec(env)
 	t := time.NewTimer(remaining)
 	defer t.Stop()
@@ -7430,46 +7448,13 @@ func startBodyIsDeferredResponder(body syntax.Node, env runtime.Scope) bool {
 	return hasGetcall && hasResponse && !hasWhileTrue
 }
 
-// startBodyBlocksOnPortReceive reports whether the body of
-// `comp.start(call)` would block forever inside an alt whose only
-// guards are `port.receive(...)` / `.check(...)` / `.trigger(...)`
-// against an empty queue. That's the daemon-style shape from
-// an external test-port deployment: the PTC binds a port, then
-// loops on `alt { [] srv.receive(...) -> value req { ...; repeat;
-// } }` until the MTC stops it.
-//
-// When this predicate fires, the caller forks a goroutine instead
-// of running the body inline so the MTC can continue and
-// eventually deliver the messages the PTC is waiting for (or
-// `.stop` it). Every other PTC shape stays on the synchronous
-// path so the conformance suite's
-// `.start(f); .done; .start(g); .done` fixtures still observe
-// in-order side-effects.
-//
-// We require:
-//   - the body is a function call (resolves to fn.Body);
-//   - the fn body contains at least one AltStmt whose every
-//     non-decl clause is a real port-receive guard, no `[else]`
-//     branch, no timer / done guard, no plain expression guard.
-//
-// If the function reference can't be resolved we conservatively
-// return false (keep the synchronous path).
-// startBodyDoesPortComm reports whether a started PTC body performs ANY
-// port communication — a message send/receive/trigger/check, or a
-// procedure call/getcall/getreply/reply/raise/catch (including a blocking
-// `call { ... }` block) — resolving through called functions. Under the
-// cooperative scheduler such a body must run on its own participant
-// goroutine so senders AND receivers interleave deterministically; running
-// a receiver inline would block the single-runner token on traffic a peer
-// has not produced yet. A purely computational body (no port comm) has no
-// peer interaction and stays inline. Broader than startBodyBlocksOnComm
-// (getcall only), which is the deliberately narrow non-scheduler predicate.
-func startBodyDoesPortComm(body syntax.Node, env runtime.Scope) bool {
-	root := startBodyRoot(body, env)
-	ops := map[string]bool{
-		"send": true, "receive": true, "trigger": true, "check": true,
-		"call": true, "getcall": true, "getreply": true,
-		"reply": true, "raise": true, "catch": true,
+// startBodyUses reports whether a started body — the functions it calls
+// included — performs one of the named operations: a port or component
+// operation (`p.send`) or a predefined one (`map(...)`).
+func startBodyUses(body syntax.Node, env runtime.Scope, names ...string) bool {
+	want := map[string]bool{}
+	for _, n := range names {
+		want[n] = true
 	}
 	found := false
 	visited := map[syntax.Node]bool{}
@@ -7483,26 +7468,169 @@ func startBodyDoesPortComm(body syntax.Node, env runtime.Scope) bool {
 			if n == nil || found {
 				return false
 			}
-			if _, ok := n.(*syntax.CallStmt); ok { // blocking call { ... }
-				found = true
-				return false
-			}
-			if sel, ok := n.(*syntax.SelectorExpr); ok {
-				if id, ok := sel.Sel.(*syntax.Ident); ok && ops[id.String()] {
+			switch x := n.(type) {
+			case *syntax.SelectorExpr:
+				if want[syntax.Name(x.Sel)] {
 					found = true
-					return false
 				}
-			}
-			if ce, ok := n.(*syntax.CallExpr); ok {
-				if fn := calleeFunction(ce.Fun, env); fn != nil && fn.Body != nil {
+			case *syntax.CallExpr:
+				if id, ok := x.Fun.(*syntax.Ident); ok && want[id.String()] {
+					found = true
+				} else if fn := calleeFunction(x.Fun, env); fn != nil && fn.Body != nil {
 					scan(fn.Body)
 				}
 			}
-			return true
+			return !found
 		})
 	}
-	scan(root)
+	scan(startBodyRoot(body, env))
 	return found
+}
+
+// endlessLoops caches, per loop, whether it never ends and never waits
+// (see loopNeverEnds).
+var endlessLoops sync.Map
+
+// loopNeverEnds reports whether a loop whose condition always holds runs
+// for good without waiting or acting: its body — the functions it calls
+// included — neither leaves the loop (a break of this loop, a goto, a
+// return from it, a stop or kill of the component, a raise), nor waits for
+// anything (an alt, a receiving operation, a timeout, a done or killed, a
+// call), nor acts on anything outside the component (a send, call, reply
+// or raise on a port, a start, a verdict). Such a loop does nothing anyone
+// could observe, forever.
+func loopNeverEnds(loop syntax.Node, body *syntax.BlockStmt, env runtime.Scope) bool {
+	if v, ok := endlessLoops.Load(loop); ok {
+		return v.(bool)
+	}
+	ends := false
+	ops := map[string]bool{
+		"timeout": true, "receive": true, "trigger": true, "check": true,
+		"getcall": true, "getreply": true, "catch": true, "done": true,
+		"killed": true, "call": true, "send": true, "reply": true,
+		"raise": true, "start": true,
+	}
+	visited := map[syntax.Node]bool{}
+	// scan walks n; inLoop is set within this loop's own body, outside
+	// any loop nested in it (whose break is its own).
+	var scan func(n syntax.Node, inLoop bool)
+	scan = func(n syntax.Node, inLoop bool) {
+		if n == nil || ends || visited[n] {
+			return
+		}
+		visited[n] = true
+		syntax.Inspect(n, func(x syntax.Node) bool {
+			if ends || x == nil {
+				return false
+			}
+			switch y := x.(type) {
+			case *syntax.WhileStmt, *syntax.ForStmt, *syntax.DoWhileStmt:
+				// A nested loop's break is its own; the rest of what it
+				// holds counts.
+				for _, c := range y.Children() {
+					scan(c, false)
+				}
+				return false
+			case *syntax.BranchStmt:
+				switch y.Tok.Kind() {
+				case syntax.BREAK:
+					ends = ends || inLoop
+				case syntax.GOTO:
+					ends = true
+				}
+			case *syntax.ReturnStmt:
+				ends = ends || inLoop
+			case *syntax.AltStmt, *syntax.CallStmt, *syntax.RaiseStmt:
+				ends = true
+			case *syntax.Ident:
+				if y.Tok != nil && (y.String() == "stop" || y.String() == "setverdict") {
+					ends = true
+				}
+			case *syntax.SelectorExpr:
+				name := syntax.Name(y.Sel)
+				if ops[name] {
+					ends = true
+				}
+				if name == "stop" || name == "kill" {
+					if r := syntax.Name(y.X); r == "self" || r == "mtc" {
+						ends = true
+					}
+				}
+			case *syntax.CallExpr:
+				if fn := calleeFunction(y.Fun, env); fn != nil && fn.Body != nil {
+					// What a callee does counts; its return and break
+					// are its own.
+					scan(fn.Body, false)
+				}
+			}
+			return !ends
+		})
+	}
+	scan(body, true)
+	endlessLoops.Store(loop, !ends)
+	return !ends
+}
+
+// parkEndlessLoop is entered with a loop whose condition always holds. On
+// the virtual clock, where computing takes no time, a loop that never ends
+// and never waits (see loopNeverEnds) would hold the scheduler for good,
+// and no timer anywhere would ever fire; the component waits there instead,
+// doing what the loop does — nothing observable — until it is stopped. On
+// the real clock the loop runs.
+func parkEndlessLoop(loop syntax.Node, body *syntax.BlockStmt, env runtime.Scope) (runtime.Object, bool) {
+	exec := runtime.FindTestcaseExec(env)
+	if exec == nil || !exec.SchedulerActive() || !canWait(env) || !loopNeverEnds(loop, body, env) {
+		return nil, false
+	}
+	for {
+		re, stopped := exec.SchedPark(currentCompID(exec), 0, false, currentStopChan(exec))
+		if stopped || !re || exec.Stopped() || componentStopRequested(exec) {
+			return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}, true
+		}
+	}
+}
+
+// holdsObjectReference reports whether v is, or holds as a field or
+// element, a reference to an object.
+func holdsObjectReference(v runtime.Object) bool {
+	switch x := v.(type) {
+	case *runtime.ClassInstance:
+		return x != nil
+	case *runtime.List:
+		for _, e := range x.Elements {
+			if holdsObjectReference(e) {
+				return true
+			}
+		}
+	case *runtime.Record:
+		for _, f := range x.Fields {
+			if holdsObjectReference(f) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// markWaiting marks the current component's behaviour as waiting on the
+// real clock until the returned function is called (see WaitPTCs).
+func markWaiting(exec *runtime.TestcaseExec) (done func()) {
+	if cur := exec.CurrentComponent(); cur != nil {
+		if exit := exec.PTCExit(cur.ID); exit != nil {
+			return exit.Waiting()
+		}
+	}
+	return func() {}
+}
+
+// alwaysTrue reports whether a loop condition is the literal true, or
+// absent (`for (;;)`).
+func alwaysTrue(cond syntax.Expr) bool {
+	if cond == nil {
+		return true
+	}
+	lit, ok := cond.(*syntax.ValueLiteral)
+	return ok && lit.Tok != nil && lit.Tok.Kind() == syntax.TRUE
 }
 
 // calleeFunction resolves the function a call names — `f()`, or
@@ -7527,60 +7655,6 @@ func calleeFunction(fun syntax.Expr, env runtime.Scope) *runtime.Function {
 	}
 	fn, _ := v.(*runtime.Function)
 	return fn
-}
-
-// altPortReceiveOnly returns true when alt has at least one
-// CommClause and every CommClause is a real-port-receive guard
-// (`receive` / `check` / `trigger`, with or without `-> value`
-// redirect). `[else]`, timer / done guards, and bare expression
-// guards all return false because those make the alt finite in
-// the synchronous model and we don't want to fork a goroutine
-// for them.
-func altPortReceiveOnly(alt *syntax.AltStmt) bool {
-	saw := false
-	for _, s := range alt.Body.Stmts {
-		cc, ok := s.(*syntax.CommClause)
-		if !ok {
-			continue
-		}
-		if cc.Else != nil {
-			return false
-		}
-		if cc.Comm == nil {
-			return false
-		}
-		es, ok := cc.Comm.(*syntax.ExprStmt)
-		if !ok {
-			return false
-		}
-		expr := es.Expr
-		for {
-			r, ok := expr.(*syntax.RedirectExpr)
-			if !ok || r == nil || r.X == nil {
-				break
-			}
-			expr = r.X
-		}
-		call, ok := expr.(*syntax.CallExpr)
-		if !ok {
-			return false
-		}
-		sel, ok := call.Fun.(*syntax.SelectorExpr)
-		if !ok {
-			return false
-		}
-		op, ok := sel.Sel.(*syntax.Ident)
-		if !ok {
-			return false
-		}
-		switch op.String() {
-		case "receive", "check", "trigger":
-			saw = true
-		default:
-			return false
-		}
-	}
-	return saw
 }
 
 // snapshotPTCArgs resolves the function reference inside
@@ -7697,46 +7771,11 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		// time instead of a virtual-clock advance firing a safety timer
 		// prematurely.
 		forkStrict := false
-		// Decide whether this started PTC body must run concurrently.
-		// Under the cooperative scheduler ANY port-comm body forks (senders
-		// and receivers both — running a receiver inline would block the
-		// single-runner token; leaving a sender inline starves a forked
-		// receiver). Without the scheduler we keep the deliberately
-		// narrow getcall-only predicate, and only when the body would
-		// otherwise be skipped.
-		forkComm := false
-		if op == "start" && ref != nil && !ref.AliveModifier {
-			if deterministicSchedulerEnabled(env) {
-				forkComm = startBodyDoesPortComm(body, env)
-			} else {
-				// Real clock: the narrow getcall-only predicate used to
-				// apply here, on the reasoning that forking one half of a
-				// pair whose counterpart is not forked leaves it waiting
-				// for traffic that never comes. That reasoning holds under
-				// the cooperative scheduler, where an unforked body is
-				// still modelled. It does not transfer to the real clock,
-				// where there is no modelling: a body that is not forked
-				// does not run AT ALL, so the choice is not "forked and
-				// maybe blocked" versus "modelled", it is "runs" versus
-				// "silently does nothing". A PTC that waits on a timer and
-				// then sends — an ordinary shape for pacing a live SUT —
-				// delivered nothing, not even the statements before the
-				// timer, and failed the testcase on its own guard timer
-				// with no indication why.
-				//
-				// So the real clock uses the same broad predicate as the
-				// scheduler. The conformance corpus runs under the
-				// scheduler, so this branch cannot move it.
-				//
-				// It applies whether or not the body would be skipped. A
-				// body that is not skipped and not forked runs inline, on
-				// the starting component's goroutine: an echo PTC
-				// (`alt { [] p.receive(req) { p.send(rsp) } }`) then blocks
-				// the MTC in the PTC's alt, waiting for the request the MTC
-				// has not sent yet, and the testcase ends with no verdict.
-				forkComm = startBodyDoesPortComm(body, env)
-			}
-		}
+		// A started behaviour runs as its component, on its own goroutine
+		// (ES 201 873-1 §21.3.2), on either clock: what it does is what it
+		// does, not a model of it. A loop in it that never ends and never
+		// waits is dealt with where it is entered (see parkEndlessLoop).
+		forkComm := op == "start" && ref != nil && !ref.AliveModifier
 		if forkComm {
 			// A body that communicates runs as the component it is, on its
 			// own goroutine. A responder used to be replayed inline on
@@ -7839,6 +7878,14 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				// out-of-bounds read of the zero value.
 				// See above.
 				fn, snapArgs, callArgExprs := snapshotPTCArgs(body, env)
+				// An object lives in the component that created it: a
+				// behaviour started on another component cannot be given
+				// a reference to it (ETSI ES 203 790 5.1.2.2).
+				for _, a := range snapArgs {
+					if holdsObjectReference(a) {
+						return runtime.Errorf("an object reference cannot be passed to a behaviour started on component %s (ETSI ES 203 790 5.1.2.2)", ref.Inspect()), true
+					}
+				}
 				// A restart of an alive component waits for the behaviour
 				// it stopped to unwind: the scheduler knows a component's
 				// behaviours by the component's id, so the old one must be
@@ -7918,14 +7965,19 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				// `ds[i].stop` -> on_unmap pop-front
 				// contract the external test-port suite
 				// depends on.
-				if exit != nil && !exec.SchedulerActive() {
+				// Only a body that maps, or sends through a driver, is
+				// waited for: any other would cost its starter the whole
+				// timeout.
+				if exit != nil && !exec.SchedulerActive() && startBodyUses(body, env, "map", "send") {
 					dbg := os.Getenv("NTT_PORT_DEBUG") != ""
-					select {
-					case <-exit.MapChan:
-					case <-exit.DoneChan:
-					case <-time.After(50 * time.Millisecond):
-						if dbg {
-							fmt.Fprintf(os.Stderr, "[start-barrier] comp=%d MAP phase TIMEOUT\n", ref.ID)
+					if startBodyUses(body, env, "map") {
+						select {
+						case <-exit.MapChan:
+						case <-exit.DoneChan:
+						case <-time.After(50 * time.Millisecond):
+							if dbg {
+								fmt.Fprintf(os.Stderr, "[start-barrier] comp=%d MAP phase TIMEOUT\n", ref.ID)
+							}
 						}
 					}
 					// Second phase: when an external port driver is
@@ -7938,7 +7990,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 					// loopback conformance path has no driver provider
 					// and skips this entirely. Receiver-only PTCs that
 					// never send fall back to the timeout.
-					if runtime.HasPortDriverProvider() {
+					if runtime.HasPortDriverProvider() && startBodyUses(body, env, "send") {
 						select {
 						case <-exit.SendChan:
 							if dbg {

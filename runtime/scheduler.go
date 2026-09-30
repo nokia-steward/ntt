@@ -37,14 +37,16 @@ type parkEntry struct {
 }
 
 type coopScheduler struct {
-	mu       sync.Mutex
-	clock    float64                 // virtual time, seconds; monotonic
-	running  int64                   // participant id holding the token; 0 = none
-	live     map[int64]bool          // live participants (MTC + PTCs)
-	ready    map[int64]bool          // participants that can run now (forked or woken)
-	blocked  map[int64]parkEntry     // parked participants + their deadlines
-	turn     map[int64]chan struct{} // per-participant token-grant channel (buffered 1)
-	deadlock bool                    // terminal: quiescent with no finite deadline
+	mu        sync.Mutex
+	clock     float64                 // virtual time, seconds; monotonic
+	running   int64                   // participant id holding the token; 0 = none
+	live      map[int64]bool          // live participants (MTC + PTCs)
+	ready     map[int64]bool          // participants that can run now (forked or woken)
+	blocked   map[int64]parkEntry     // parked participants + their deadlines
+	turn      map[int64]chan struct{} // per-participant token-grant channel (buffered 1)
+	deadlock  bool                    // terminal: quiescent with no finite deadline
+	drainer   int64                   // participant draining the others (see drain); 0 = none
+	drainLeft int                     // turns the others may still take while draining
 }
 
 func newCoopScheduler(mtc int64) *coopScheduler {
@@ -268,6 +270,62 @@ func (c *coopScheduler) parkWhileLive(id, other int64, stop <-chan struct{}) (st
 	}
 }
 
+// drain lets every other participant that can run now — a PTC started but
+// not yet scheduled, one woken by an event — run until it waits or
+// finishes, then returns to id with the token. The clock does not advance
+// and nothing is a deadlock while draining: the drainer, the MTC at the end
+// of its behaviour, takes the token back when no one else can run. The
+// others get a bounded number of turns, so two exchanging messages for
+// good cannot keep it; and stop ends it.
+func (c *coopScheduler) drain(id int64, stop <-chan struct{}) {
+	c.mu.Lock()
+	if c.running != id {
+		c.mu.Unlock()
+		return
+	}
+	c.drainLeft = 2*len(c.live) + 4
+	c.mu.Unlock()
+	for {
+		c.mu.Lock()
+		others := false
+		for r := range c.ready {
+			if r != id {
+				others = true
+				break
+			}
+		}
+		if !others || c.running != id || c.drainLeft <= 0 {
+			c.mu.Unlock()
+			return
+		}
+		c.drainer = id
+		delete(c.ready, id)
+		c.blocked[id] = parkEntry{}
+		w := c.turnChLocked(id)
+		c.running = 0
+		c.handoffLocked()
+		c.mu.Unlock()
+		select {
+		case <-w:
+			c.mu.Lock()
+			c.running = id
+			c.drainer = 0
+			c.mu.Unlock()
+		case <-stop:
+			c.mu.Lock()
+			c.drainer = 0
+			delete(c.blocked, id)
+			select {
+			case <-w:
+				c.running = id
+			default:
+			}
+			c.mu.Unlock()
+			return
+		}
+	}
+}
+
 // handoffLocked grants the token to the next runnable participant. It is
 // called with running==0. Order: (1) the lowest-id ready participant;
 // (2) else, at quiescence, advance the clock to the soonest finite
@@ -277,12 +335,34 @@ func (c *coopScheduler) handoffLocked() {
 	if c.running != 0 {
 		return
 	}
+	// Draining with the others' turns spent: the drainer takes the token.
+	if d := c.drainer; d != 0 && c.drainLeft <= 0 {
+		if _, parked := c.blocked[d]; parked {
+			delete(c.blocked, d)
+			c.running = d
+			c.grantLocked(d)
+			return
+		}
+	}
 	if id, ok := c.lowestReadyLocked(); ok {
+		if c.drainer != 0 {
+			c.drainLeft--
+		}
 		delete(c.ready, id)
 		delete(c.blocked, id)
 		c.running = id
 		c.grantLocked(id)
 		return
+	}
+	// No one is ready, and a participant is draining the others: it takes
+	// the token back (see drain).
+	if d := c.drainer; d != 0 {
+		if _, parked := c.blocked[d]; parked {
+			delete(c.blocked, d)
+			c.running = d
+			c.grantLocked(d)
+			return
+		}
 	}
 	// No one is ready: quiescent. Advance to the soonest finite deadline.
 	if id, dl, ok := c.soonestDeadlineLocked(); ok {
