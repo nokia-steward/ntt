@@ -1,28 +1,28 @@
 {
- "summary": "ran 4948 files: 4754 matched, 23 skipped (96.53% match rate)",
- "source": "/tmp/claude-1000/-home-rdiniz-programs-ntt/2fb45c04-13fc-4156-b00a-12bcd47feab7/scratchpad/final.json",
- "miss_count": 194,
+ "summary": "ran 4948 files: 4761 matched, 23 skipped (96.67% match rate)",
+ "source": "/tmp/claude-1000/-home-rdiniz-programs-ntt/735de3fb-56f8-493f-b29c-b428a203445d/scratchpad/r1d89.json",
+ "miss_count": 187,
  "outcomes": {
   "reject->pass": 75,
   "pass->none": 34,
   "reject->none": 27,
   "->": 23,
-  "pass->timeout": 15,
-  "pass->error": 13,
-  "pass->fail": 5,
+  "pass->timeout": 12,
+  "pass->error": 8,
+  "pass->fail": 6,
   "pass->parse-error": 2
  },
  "chapters": [
   {
    "chapter": "core_language/22_communication_operations",
-   "misses": 65,
+   "misses": 58,
    "outcomes": {
     "reject->pass": 19,
     "pass->none": 17,
     "reject->none": 2,
-    "pass->error": 7,
+    "pass->error": 3,
     "pass->fail": 5,
-    "pass->timeout": 15
+    "pass->timeout": 12
    }
   },
   {
@@ -85,7 +85,8 @@
    "misses": 8,
    "outcomes": {
     "pass->none": 3,
-    "pass->error": 2,
+    "pass->fail": 1,
+    "pass->error": 1,
     "reject->pass": 3
    }
   },
@@ -952,10 +953,10 @@
   {
    "chapter": "core_language/20_statement_and_operations_for_alt",
    "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
+   "actual": "fail",
+   "outcome": "pass->fail",
    "relpath": "core_language/20_statement_and_operations_for_alt/2004_the_interleave_statement/Sem_2004_InterleaveStatement_001.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
+   "message": ""
   },
   {
    "chapter": "core_language/20_statement_and_operations_for_alt",
@@ -1163,7 +1164,7 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_012.ttcn",
-   "message": ""
+   "message": "Both replies received"
   },
   {
    "chapter": "core_language/22_communication_operations",
@@ -1219,7 +1220,7 @@
    "actual": "fail",
    "outcome": "pass->fail",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_007.ttcn",
-   "message": "\"The any from getcall operation didn't match for some reason\""
+   "message": "The any from getcall operation didn't match for some reason"
   },
   {
    "chapter": "core_language/22_communication_operations",
@@ -1227,7 +1228,7 @@
    "actual": "fail",
    "outcome": "pass->fail",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_010.ttcn",
-   "message": "\"The any from getcall operation didn't match for some reason\""
+   "message": "The any from getcall operation didn't match for some reason"
   },
   {
    "chapter": "core_language/22_communication_operations",
@@ -1235,7 +1236,7 @@
    "actual": "fail",
    "outcome": "pass->fail",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_011.ttcn",
-   "message": "\"The any from getcall operation didn't match for some reason\""
+   "message": "The any from getcall operation didn't match for some reason"
   },
   {
    "chapter": "core_language/22_communication_operations",
@@ -1243,7 +1244,7 @@
    "actual": "fail",
    "outcome": "pass->fail",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_012.ttcn",
-   "message": "\"The any from getcall didn't match for some reason\""
+   "message": "The any from getcall didn't match for some reason"
   },
   {
    "chapter": "core_language/22_communication_operations",
@@ -1251,7 +1252,7 @@
    "actual": "fail",
    "outcome": "pass->fail",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_013.ttcn",
-   "message": "\"The any from getcall didn't match for some reason\""
+   "message": "The any from getcall didn't match for some reason"
   },
   {
    "chapter": "core_language/22_communication_operations",
@@ -1424,22 +1425,6 @@
   {
    "chapter": "core_language/22_communication_operations",
    "expected": "pass",
-   "actual": "timeout",
-   "outcome": "pass->timeout",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_037.ttcn",
-   "message": "control execution exceeded 4s"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "timeout",
-   "outcome": "pass->timeout",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_038.ttcn",
-   "message": "control execution exceeded 4s"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
    "actual": "none",
    "outcome": "pass->none",
    "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_039.ttcn",
@@ -1520,38 +1505,6 @@
   {
    "chapter": "core_language/22_communication_operations",
    "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_061.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_062.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_085.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_086.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
    "actual": "timeout",
    "outcome": "pass->timeout",
    "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_098.ttcn",
@@ -1563,14 +1516,6 @@
    "actual": "timeout",
    "outcome": "pass->timeout",
    "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_102.ttcn",
-   "message": "control execution exceeded 4s"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "timeout",
-   "outcome": "pass->timeout",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_110.ttcn",
    "message": "control execution exceeded 4s"
   },
   {
