@@ -250,3 +250,39 @@ does after its testcase's end is logged as a `tliInfo` naming the operation,
 the component and the testcase, and the comparison groups it with the other
 events outside any testcase, wherever it falls in the log. The tliInfo
 carries a summary of what the component did.
+
+## Profiling a logged run
+
+`ntt log profile` computes from a log the per-port profile that
+`ntt exec --profile` measures while a run is live (see
+[live testing and profiling](live-testing-and-profiling.md)), and reports it
+the same way, as a table or with `--format=json`:
+
+```sh
+ntt exec --live --log run.xml suite/
+ntt log profile run.xml
+```
+
+```
+profile "run": pass (1 cases in 68.913ms)
+
+M.tc  [pass]  68.913ms
+  port                     sent     recv       recv/s        min        p50        p90        p99
+  echo:p                     50       50        725.6      125µs      273µs      370µs    1.811ms
+  p                          50       50        725.6      113µs      247µs      378µs    1.215ms
+```
+
+The model is the live profiler's. A port's sends and receives are its
+`tliMSend_*` and `tliMReceive_*` events, and a send answered by a receive on
+the same port, before the next send, is one latency sample. Throughput is
+receives per second between the testcase's `tliTcStart` and
+`tliTcTerminated`. A port of a component other than the MTC is shown as
+`component:port`. Over the same run the two agree: the same counts, and
+latencies within the few microseconds between where the engine takes its
+time and where it logs the event. Procedure-based operations are not
+counted, as the live profiler does not count them.
+
+A log keeps what a live profile summarises, so a run can be profiled after
+the fact, and again differently, without being run again. Timestamps are the
+log's, in microseconds; a run on the virtual clock gives virtual time.
+

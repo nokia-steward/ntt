@@ -44,6 +44,10 @@ single functional test doubles as a performance probe. See
   values and templates, verdicts, timers, component, port and alt
   operations — and leaves out what legitimately differs between correct
   runs, the arrival of messages and the alt rounds that found nothing.
+- **`ntt log profile`** — the per-port performance profile of a logged run:
+  the sends, receives, throughput and send→receive latency percentiles that
+  `ntt exec --profile` measures live, computed from the log's timestamps
+  and reported in the same table or JSON.
 - **`ntt exec --live`** — run the strict engine on the real clock with real
   concurrency, so timers pace real I/O against a live SUT. The virtual-clock
   default (reproducible, deterministic) is unchanged; bound a live run with

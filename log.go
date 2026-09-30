@@ -4,7 +4,10 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
+	"strings"
 
+	rreport "github.com/nokia/ntt/runtime/report"
 	"github.com/nokia/ntt/runtime/tl"
 	"github.com/spf13/cobra"
 )
@@ -47,11 +50,34 @@ Either log format may be given, in any combination.`,
 		Args: usageExit2(2),
 		RunE: runLogDiff,
 	}
+
+	logProfileCommand = &cobra.Command{
+		Use:   "profile LOG",
+		Short: "Report the per-port performance profile of a logged run",
+		Long: `profile computes, from a TCI-TL test log, the per-port profile that
+ntt exec --profile measures while a run is live, and reports it the same way:
+per testcase, each port's sends and receives, receives per second over the
+testcase, and the send->receive latency percentiles.
+
+	ntt exec --live --log run.xml suite/
+	ntt log profile run.xml
+
+A port's sends and receives are its logged send and receive operations, and
+each send answered by a receive on the same port, before the next send, is
+one latency sample. Timestamps are those of the log, in microseconds; a log
+of a run on the virtual clock gives virtual time. A port of a component other
+than the MTC is shown as component:port. Either log format may be given.`,
+		Args: usageExit2(1),
+		RunE: runLogProfile,
+	}
+	logProfileFormat string
 )
 
 func init() {
 	RootCommand.AddCommand(LogCommand)
 	LogCommand.AddCommand(logDiffCommand)
+	LogCommand.AddCommand(logProfileCommand)
+	logProfileCommand.Flags().StringVar(&logProfileFormat, "format", "profile", "output format: profile (a table) or json")
 	logDiffCommand.SetFlagErrorFunc(func(c *cobra.Command, err error) error {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(2)
@@ -69,6 +95,56 @@ func usageExit2(n int) cobra.PositionalArgs {
 		}
 		return nil
 	}
+}
+
+func runLogProfile(cmd *cobra.Command, args []string) error {
+	if logProfileFormat != "profile" && logProfileFormat != "json" {
+		return fmt.Errorf("unknown format %q: want profile or json", logProfileFormat)
+	}
+	l, err := readTestLog(args[0])
+	if err != nil {
+		return err
+	}
+	if l.Truncated {
+		fmt.Fprintf(os.Stderr, "%s: the log ends mid-event, as a killed run's does; profiling its complete events\n", args[0])
+	}
+	s := profileSuite(strings.TrimSuffix(filepath.Base(args[0]), filepath.Ext(args[0])), l.Profile())
+	if logProfileFormat == "json" {
+		return rreport.RenderJSON(os.Stdout, s)
+	}
+	return rreport.RenderProfile(os.Stdout, s)
+}
+
+// profileSuite shapes a log's profile as the report ntt exec --profile
+// renders.
+func profileSuite(name string, tcs []tl.TestcaseProfile) *rreport.Suite {
+	s := &rreport.Suite{Name: name}
+	for _, tc := range tcs {
+		c := rreport.Case{Name: tc.Name, Module: tc.Module, Duration: tc.Duration, Reason: tc.Reason}
+		if c.Name == "" {
+			c.Name = tc.Testcase
+		}
+		// A testcase the log has no end for has no verdict: none.
+		c.Verdict, _ = rreport.VerdictFromString(tc.Verdict)
+		m := &rreport.Metrics{}
+		for _, p := range tc.Ports {
+			port := p.Port
+			if p.Component != "mtc" {
+				port = p.Component + ":" + p.Port
+			}
+			var thr float64
+			if tc.Duration > 0 {
+				thr = float64(p.Receives) / tc.Duration.Seconds()
+			}
+			m.Ports = append(m.Ports, rreport.PortMetric{Port: port, Sends: p.Sends, Receives: p.Receives,
+				Throughput: thr, Latency: rreport.LatencyStatsFromSamples(p.Latencies)})
+		}
+		if len(m.Ports) > 0 {
+			c.Metrics = m
+		}
+		s.Cases = append(s.Cases, c)
+	}
+	return s
 }
 
 // runLogDiff exits the way diff(1) does: 0 when the runs agree, 1 when

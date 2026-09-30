@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"time"
 
+	rreport "github.com/nokia/ntt/runtime/report"
 	"github.com/nokia/ntt/runtime/tl"
 )
 
@@ -35,5 +37,27 @@ func TestWriteLogDiff(t *testing.T) {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output lacks %q:\n%s", want, out.String())
 		}
+	}
+}
+
+func TestProfileSuite(t *testing.T) {
+	s := profileSuite("run", []tl.TestcaseProfile{{
+		Testcase: "M.tc", Module: "M", Name: "tc", Verdict: "pass", Duration: 2 * time.Second,
+		Ports: []tl.PortProfile{
+			{Component: "echo", Port: "p", Sends: 4, Receives: 4},
+			{Component: "mtc", Port: "p", Sends: 4, Receives: 4, Latencies: []time.Duration{time.Millisecond, 3 * time.Millisecond}},
+		},
+	}, {Testcase: "M.idle", Module: "M", Name: "idle"}})
+	var out bytes.Buffer
+	if err := rreport.RenderProfile(&out, s); err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"M.tc  [pass]  2s", "echo:p", "      2.0", "1ms        3ms"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("profile lacks %q:\n%s", want, out.String())
+		}
+	}
+	if s.Cases[1].Verdict != rreport.None || s.Cases[1].Metrics != nil {
+		t.Errorf("a testcase with no end and no traffic: %+v", s.Cases[1])
 	}
 }
