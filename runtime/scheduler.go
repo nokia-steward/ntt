@@ -118,7 +118,8 @@ func (c *coopScheduler) acquireToken(id int64, stop <-chan struct{}) (stopped bo
 		return false
 	case <-stop:
 		c.mu.Lock()
-		delete(c.live, id)
+		// Still live until it finishes (goDone): a starter may be waiting
+		// for it, and must not take its absence for a deadlock.
 		delete(c.ready, id)
 		delete(c.blocked, id)
 		// If a concurrent handoff granted us the token, drain it and pass
@@ -147,8 +148,11 @@ func (c *coopScheduler) goDone(id int64) {
 	c.wakeAllBlockedLocked()
 	if c.running == id {
 		c.running = 0
-		c.handoffLocked()
 	}
+	// A participant that finishes while unwinding from a stop does not
+	// hold the token; with no one holding it, the woken ones would wait
+	// for good.
+	c.handoffLocked()
 	c.mu.Unlock()
 }
 
@@ -217,6 +221,53 @@ func (c *coopScheduler) park(id int64, deadline float64, hasTimer bool, stop <-c
 	}
 }
 
+// parkWhileLive parks participant id until participant other is no longer
+// live — until it has finished (goDone) — or stop fires. Whether other is
+// live is checked under the scheduler's lock with the park itself, so a
+// finish between a check and a park cannot be missed. Returns stopped on
+// stop, deadlock on a terminal deadlock.
+func (c *coopScheduler) parkWhileLive(id, other int64, stop <-chan struct{}) (stopped, deadlock bool) {
+	for {
+		c.mu.Lock()
+		if !c.live[other] {
+			c.mu.Unlock()
+			return false, false
+		}
+		delete(c.ready, id)
+		c.blocked[id] = parkEntry{}
+		w := c.turnChLocked(id)
+		if c.running == id {
+			c.running = 0
+		}
+		c.handoffLocked()
+		c.mu.Unlock()
+		select {
+		case <-w:
+			c.mu.Lock()
+			dl := c.deadlock
+			c.running = id
+			c.mu.Unlock()
+			if dl {
+				return false, true
+			}
+		case <-stop:
+			c.mu.Lock()
+			delete(c.blocked, id)
+			delete(c.ready, id)
+			select {
+			case <-w:
+			default:
+			}
+			if c.running == id {
+				c.running = 0
+				c.handoffLocked()
+			}
+			c.mu.Unlock()
+			return true, false
+		}
+	}
+}
+
 // handoffLocked grants the token to the next runnable participant. It is
 // called with running==0. Order: (1) the lowest-id ready participant;
 // (2) else, at quiescence, advance the clock to the soonest finite
@@ -250,6 +301,15 @@ func (c *coopScheduler) handoffLocked() {
 	// turns it into an `error` verdict. Releasing without reporting is
 	// what used to let a blocked alt conclude as though it had simply not
 	// matched.
+	// A participant stopped while parked unwinds without the token: live,
+	// but neither parked, ready nor running. Its finish (goDone) is an
+	// event that wakes the parked ones, so while one is unwinding the
+	// system is not deadlocked.
+	for id := range c.live {
+		if _, parked := c.blocked[id]; !parked && !c.ready[id] && id != c.running {
+			return
+		}
+	}
 	if len(c.blocked) > 0 {
 		c.deadlock = true
 		for id := range c.blocked {

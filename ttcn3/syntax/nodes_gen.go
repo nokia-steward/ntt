@@ -2883,6 +2883,9 @@ func (n *ExprStmt) Kind() Kind {
 func (n *ExprStmt) FirstTok() Token {
 	switch {
 
+	case n.NoDefault != nil:
+		return n.NoDefault
+
 	case n.Expr != nil:
 		return n.Expr.FirstTok()
 
@@ -2897,13 +2900,20 @@ func (n *ExprStmt) LastTok() Token {
 	case n.Expr != nil:
 		return n.Expr.LastTok()
 
+	case n.NoDefault != nil:
+		return n.NoDefault
+
 	default:
 		return nil
 	}
 }
 
 func (n *ExprStmt) Children() []Node {
-	ret := make([]Node, 0, 1)
+	ret := make([]Node, 0, 2)
+
+	if n.NoDefault != nil {
+		ret = append(ret, n.NoDefault)
+	}
 
 	if n.Expr != nil {
 		ret = append(ret, n.Expr)

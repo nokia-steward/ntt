@@ -47,6 +47,12 @@ var altBodyCtx altContext
 // guard ever matches.
 var defaultCtx altContext
 
+// interleaveBodyCtx is active while an interleave's branch body runs. A
+// receiving statement there is part of the interleaving (ETSI 20.4), which
+// the engine does not expand; waiting on it would block the branches that
+// could satisfy it, so it keeps not waiting.
+var interleaveBodyCtx altContext
+
 // defaultBranchState tracks, per goroutine, whether an alt guard actually
 // matched while runDefaults was evaluating an activated default. runDefaults
 // arms it before eval-ing each default and reads it after; the alt evaluator
@@ -67,6 +73,23 @@ func defaultBranchArm() {
 func defaultBranchFire() {
 	if v, ok := defaultBranchState.Load(goroutineID()); ok {
 		atomic.CompareAndSwapInt64(v.(*int64), 1, 2)
+	}
+}
+
+// defaultBranchSuspend puts this goroutine's tracker aside until the
+// returned function restores it: a default's branch body may run defaults
+// of its own, which arm and disarm the tracker of theirs.
+func defaultBranchSuspend() (restore func()) {
+	gid := goroutineID()
+	v, ok := defaultBranchState.Load(gid)
+	if !ok {
+		return func() {}
+	}
+	state := atomic.LoadInt64(v.(*int64))
+	defaultBranchState.Delete(gid)
+	return func() {
+		nv, _ := defaultBranchState.LoadOrStore(gid, new(int64))
+		atomic.StoreInt64(nv.(*int64), state)
 	}
 }
 
@@ -100,6 +123,24 @@ func (a *altContext) leave() {
 	c := a.counter(gid)
 	if atomic.AddInt64(c, -1) <= 0 {
 		a.counters.Delete(gid)
+	}
+}
+
+// suspend leaves the context on this goroutine, however deeply it was
+// entered, until the returned function restores it: for a branch body run
+// from within it, which is ordinary behaviour again.
+func (a *altContext) suspend() (restore func()) {
+	gid := goroutineID()
+	v, ok := a.counters.Load(gid)
+	if !ok {
+		return func() {}
+	}
+	n := atomic.SwapInt64(v.(*int64), 0)
+	a.counters.Delete(gid)
+	return func() {
+		if n > 0 {
+			atomic.AddInt64(a.counter(gid), n)
+		}
 	}
 }
 

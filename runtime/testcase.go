@@ -428,6 +428,28 @@ func (t *TestcaseExec) StopPTC(refID int64) {
 	t.signalMessageReady()
 }
 
+// FinishPTCExit is FinishPTC for the behaviour registered with exit: it
+// finishes that one, whatever behaviour the component has been given
+// since.
+func (t *TestcaseExec) FinishPTCExit(refID int64, exit *PTCExit) {
+	if exit != nil {
+		exit.SignalMap()
+		exit.SignalSend()
+		exit.Done()
+	}
+	t.SchedGoDone(refID)
+}
+
+// Stopped reports whether the behaviour's stop was requested.
+func (p *PTCExit) Stopped() bool {
+	select {
+	case <-p.StopChan:
+		return true
+	default:
+		return false
+	}
+}
+
 // FinishPTC closes the matching PTCExit.DoneChan from inside the
 // PTC goroutine. No-op when the id is unknown. Also closes MapChan
 // as a fallback so a PTC body that never calls `map(...)` doesn't
@@ -867,6 +889,20 @@ func (t *TestcaseExec) PeekMessageFullLimited(port string, limit int) (PortMessa
 		}
 	}
 	return PortMessage{}, false
+}
+
+// PeekHeadLimited returns the head of the named port's queue, whatever
+// its kind — message, call, reply or exception — among the first `limit`
+// entries (limit < 0 = all): what a check with no receiving operation
+// observes (ETSI 22.4).
+func (t *TestcaseExec) PeekHeadLimited(port string, limit int) (PortMessage, bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	q := t.ports[port]
+	if len(q) == 0 || limit == 0 {
+		return PortMessage{}, false
+	}
+	return q[0], true
 }
 
 // PortNames lists every port the testcase has interacted with so far
@@ -2177,6 +2213,20 @@ func (t *TestcaseExec) SchedPark(id int64, deadline float64, hasTimer bool, stop
 		t.reportDeadlock()
 	}
 	return re, st
+}
+
+// SchedParkWhileLive parks participant id until participant other has
+// finished, or stop fires (see coopScheduler.parkWhileLive). No-op with the
+// scheduler off.
+func (t *TestcaseExec) SchedParkWhileLive(id, other int64, stop <-chan struct{}) (stopped bool) {
+	if t.sched == nil {
+		return false
+	}
+	st, dl := t.sched.parkWhileLive(id, other, stop)
+	if dl {
+		t.reportDeadlock()
+	}
+	return st
 }
 
 // reportDeadlock records a terminal scheduler deadlock as an `error`

@@ -280,6 +280,40 @@ func waitComponentState(ref *runtime.ComponentRef, op string, env runtime.Scope)
 	return runtime.NewBool(pred(ref, env))
 }
 
+// waitPreviousBehaviour waits until the behaviour last started on ref, if
+// one was stopped and is still unwinding, has finished; on the cooperative
+// scheduler it parks, so that behaviour can run to its end. Starting a
+// component whose behaviour still runs, not stopped, is an error (ETSI
+// 21.3.2).
+func waitPreviousBehaviour(exec *runtime.TestcaseExec, ref *runtime.ComponentRef, env runtime.Scope) runtime.Object {
+	prev := exec.PTCExit(ref.ID)
+	if prev == nil {
+		return nil
+	}
+	select {
+	case <-prev.DoneChan:
+		if !exec.SchedulerActive() {
+			return nil
+		}
+	default:
+		// Done but not yet unwound — its end seen by `c.done` — waits
+		// like a stopped one.
+		if !prev.Stopped() && !ref.IsDone() {
+			return runtime.Errorf("start of component %s, which is still running a behaviour (ETSI ES 201 873-1 21.3.2)", ref.Inspect())
+		}
+	}
+	stop := currentStopChan(exec)
+	if exec.SchedulerActive() {
+		exec.SchedParkWhileLive(currentCompID(exec), ref.ID, stop)
+		return nil
+	}
+	select {
+	case <-prev.DoneChan:
+	case <-stop:
+	}
+	return nil
+}
+
 // blockUntilComponentsState is the `all component.done` / `any
 // component.done` (and `.killed`) analogue of blockUntilComponentState: it
 // parks the MTC on the cooperative scheduler until the aggregate predicate

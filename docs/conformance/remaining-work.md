@@ -404,8 +404,9 @@ verdict the same and every event valid.
 
 **Found along the way, older than this work, not fixed:**
 
-- **A receiving operation used as a statement does not wait** (ETSI
-  20.1). `p.receive(t);` with nothing queued yet returns at once and ends
+- *Fixed 2026-09-30, +17, 0 lost (with the next four defects it
+  uncovered, see CHANGELOG).* **A receiving operation used as a statement
+  did not wait** (ETSI 20.1). `p.receive(t);` with nothing queued yet returns at once and ends
   the behaviour, so a plain request/response exchange — MTC sends, PTC
   receives and answers, MTC receives — ends with verdict `none` on both
   clocks; written as `alt { [] p.receive(t) {} }` it passes. This is the
@@ -416,13 +417,29 @@ verdict the same and every event valid.
   on `any port`) never matched — *fixed 2026-09-30, +7 (Sem_2204 037,
   038, 061, 062, 085, 086, 110), 0 lost* — and a PTC body the engine runs
   inline deadlocks the MTC once its own standalone `getcall` waits.
+- **Found reviewing the standalone-receive fix, older than it, not fixed:**
+  - `p.call(S:{}) to c { ... }`, a blocking call with `to`, is never sent:
+    the call-statement path accepts only a bare call expression.
+  - `-> param (x)` binds a list, which then fails with a type mismatch.
+  - `pa[1].receive` on a port array connected to PTCs never matches, and
+    `any from pa.receive(...) -> @index value i` does not bind `i`.
+  - Under `--live`, a testcase still waiting when `--timeout` expires
+    reports the verdict it had then, where `execute()` with a timeout
+    gives `error`.
+  - A receive inside an `interleave` branch body does not wait: the
+    engine does not expand interleave into its alternatives (20.4).
+  - On `--live`, each `start` of a PTC that blocks costs its starter the
+    50 ms start barrier.
+  - A blocking signature called with no response block and no `nowait`
+    is sent without waiting, where the standard makes it an error.
 - **A field assignment to a record initialised positionally is lost.**
   After `var R r := {1, 2}`, `r.a := 3` leaves `r.a` at 1; initialised as
   `{a := 1, b := 2}` it works.
 - **A port index expression is evaluated twice** in `pa[f()].send(1)` and
   `pa[f()].receive(1)`: `f()` runs twice.
-- **A restarted `alive` component reports `.running` false**, and under
-  `--live` so does a PTC blocked in a receive.
+- *Fixed 2026-09-30, with the restart below.* **A restarted `alive`
+  component reports `.running` false**, and under `--live` so does a PTC
+  blocked in a receive.
 - **An altstep used as an alt branch** (`[] a()`) deadlocks on the
   virtual clock.
 - **`p.check(from system)` on a mapped port never matches.**
@@ -444,14 +461,20 @@ verdict the same and every event valid.
   component as no longer alive (ETSI 21.3.2, 21.3.8). `.killed` stayed
   false for good, so the statement form deadlocked.
   `TestBothClocks_FinishedPTCIsKilled`.
-- **A two-way handshake ends in `none` on the virtual clock** — PTC sends,
+- *Fixed 2026-09-30: a receive used as a statement did not wait (below).*
+  **A two-way handshake ends in `none` on the virtual clock** — PTC sends,
   MTC receives and replies, PTC receives — with no defaults involved.
 - **Under `--live`, the snapshot guard `c.done` is true for a PTC still
   blocked on a port.**
 - **`c.done -> value v;` as a statement does not block.**
 - **An inline `[false] T.timeout` guard livelocks the scheduler** the same
   way expired default timers did; the fix above was kept to defaults.
-- **Restarting a stopped `alive` component** gives `none` on the virtual
+- *Fixed 2026-09-30.* Three layers: `start` did not clear `done`; the
+  stopped behaviour unwinds without the scheduler's token, which the
+  scheduler took for a deadlock (and, when stopped before its first turn,
+  forgot at once); and finishing, it finished the new behaviour by
+  component id. Its defaults also outlived it (21.3.2).
+  **Restarting a stopped `alive` component** gives `none` on the virtual
   clock and `pass` under `--live` (see "Newly found"). Under `--live` the
   stopped behaviour also keeps running past the end of its testcase: its
   timer fires and it terminates during the next testcase, which

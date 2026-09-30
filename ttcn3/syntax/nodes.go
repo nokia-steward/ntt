@@ -445,7 +445,8 @@ type (
 	// An ExprStmt represents a expression used as statement, like an
 	// assignment or function call.
 	ExprStmt struct {
-		Expr Expr
+		NoDefault Token // "@nodefault" before a receiving operation, or nil
+		Expr      Expr
 	}
 
 	// A BranchStmt represents a branch statement.

@@ -2127,7 +2127,13 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 				lexec.TLAltBump(currentCompID(lexec))
 			}
 			if matchedClause.Body != nil {
-				if res := evalAltClauseBody(matchedClause.Body, env); res == runtime.Repeat {
+				// The branch of a default that matched is ordinary
+				// behaviour: an alt in it waits, as any alt does.
+				restore, restoreBranch := defaultCtx.suspend(), defaultBranchSuspend()
+				res := evalAltClauseBody(matchedClause.Body, env)
+				restoreBranch()
+				restore()
+				if res == runtime.Repeat {
 					if lexec != nil {
 						tlEmit(lexec, n, "tliARepeat")
 					}
@@ -2297,7 +2303,9 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 				lexec.TLAltBump(currentCompID(lexec))
 			}
 			if body := clauses[matchedIdx].Body; body != nil {
+				interleaveBodyCtx.enter()
 				res := evalAltClauseBody(body, env)
+				interleaveBodyCtx.leave()
 				// `repeat` is not permitted in interleave (20.4); ignore
 				// it. `break` / `return` / `stop` / `goto` / error leaves
 				// the interleave immediately.
@@ -2464,9 +2472,46 @@ func nextAltTimerVirtualDeadline(n *syntax.AltStmt, env runtime.Scope) (float64,
 			if !ok || !fn.IsAltstep || fn.Body == nil {
 				return
 			}
+			// Inside the altstep, a timer passed to it goes by its formal
+			// parameter's name: `altstep a(timer t)` activated as
+			// `a(tc_tmr)` waits on tc_tmr as t. Only an argument naming a
+			// timer is resolved; nothing is evaluated.
+			inner := scope
+			if fn.Params != nil && x.Args != nil {
+				var bound *runtime.Env
+				bind := func(formal string, arg syntax.Expr) {
+					id, ok := arg.(*syntax.Ident)
+					if !ok {
+						return
+					}
+					if av, ok := scope.Get(id.String()); ok {
+						if th, ok := av.(*runtime.TimerHandle); ok {
+							if bound == nil {
+								bound = runtime.NewEnv(scope)
+							}
+							bound.Set(formal, th)
+						}
+					}
+				}
+				for i, arg := range x.Args.List {
+					// `a(t := g)` names its formal; `a(g)` is positional.
+					if b, ok := arg.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.ASSIGN {
+						if f, ok := b.X.(*syntax.Ident); ok {
+							bind(f.String(), b.Y)
+						}
+						continue
+					}
+					if i < len(fn.Params.List) && fn.Params.List[i] != nil && fn.Params.List[i].Name != nil {
+						bind(fn.Params.List[i].Name.String(), arg)
+					}
+				}
+				if bound != nil {
+					inner = bound
+				}
+			}
 			for _, s := range fn.Body.Stmts {
 				if cc, ok := s.(*syntax.CommClause); ok && cc.Else == nil && cc.Comm != nil {
-					considerComm(cc.Comm, depth-1, scope)
+					considerComm(cc.Comm, depth-1, inner)
 				}
 			}
 		}
@@ -2527,8 +2572,12 @@ func altHasEventGuard(n *syntax.AltStmt) bool {
 			return true
 		}
 		// `[] a_altstep()` (Fun is a bare Ident): may hold event guards,
-		// so treat it as blockable rather than give up.
+		// so treat it as blockable rather than give up. And any receiving
+		// operation is an event guard, `any from pa.receive(t)` included.
 		if es, ok := cc.Comm.(*syntax.ExprStmt); ok {
+			if isReceivingOp(es.Expr) {
+				return true
+			}
 			if ce, ok := es.Expr.(*syntax.CallExpr); ok {
 				if _, isIdent := ce.Fun.(*syntax.Ident); isIdent {
 					return true
@@ -2913,7 +2962,11 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 								continue
 							}
 							if commGuardMatches(cc.Comm, env) {
+								// The branch taken is behaviour, not
+								// a guard: an alt in it waits.
+								restore := altCtx.suspend()
 								eval(cc.Body, env)
+								restore()
 								return true
 							}
 						}
@@ -3001,9 +3054,18 @@ func evalPortReceiveBare(n syntax.Node, port string, env runtime.Scope, consume 
 		return false
 	}
 	port = exec.PortKey(port) // real-scheduler: per-PTC port identity (no-op by default; "any port" passes through)
+	// A check with no receiving operation (`p.check`) observes whatever is
+	// at the head of the queue, a call, reply or exception included (ETSI
+	// 22.4); a receive, only messages.
+	peek := exec.PeekMessageFullLimited
+	if !consume {
+		peek = exec.PeekHeadLimited
+	}
 	if port == "any port" {
-		for _, name := range exec.PortNames() {
-			if head, ok := exec.PeekMessageFull(name); ok {
+		// Any of this component's own ports (ETSI 22.5).
+		for _, bare := range exec.CurrentComponentPortNames() {
+			name := exec.PortKey(bare)
+			if head, ok := peek(name, -1); ok {
 				if consume {
 					if deq, okDeq := exec.DequeueMessageFull(name); okDeq {
 						head = deq
@@ -3025,7 +3087,7 @@ func evalPortReceiveBare(n syntax.Node, port string, env runtime.Scope, consume 
 	// otherwise, so behaviour is byte-identical off it): only a message
 	// queued when this alt round began is visible to the guard this round.
 	limit := altReceiveLimit(exec, port)
-	head, ok := exec.PeekMessageFullLimited(port, limit)
+	head, ok := peek(port, limit)
 	if !ok {
 		return false
 	}

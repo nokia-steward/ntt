@@ -2816,7 +2816,17 @@ func (p *parser) parseStmt() Stmt {
 				p.expect(RPAREN)
 			}
 			return p.parseBlockStmt()
-		case "@nodefault", "@lazy", "@fuzzy", "@deterministic":
+		case "@nodefault":
+			// `@nodefault p.receive(t)`: a receiving operation used as
+			// a statement is an alt with that one alternative, and the
+			// modifier is that alt's (ETSI ES 201 873-1 20.1, 22.2.2).
+			tok := p.consume()
+			s := p.parseStmt()
+			if es, ok := s.(*ExprStmt); ok {
+				es.NoDefault = tok
+			}
+			return s
+		case "@lazy", "@fuzzy", "@deterministic":
 			// TTCN-3 ed. 4.13+ permits a small set of modifiers
 			// at statement position - they alter the runtime
 			// scheduler's behaviour but don't change the

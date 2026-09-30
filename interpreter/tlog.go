@@ -498,6 +498,16 @@ func checkAnyCall(n *syntax.CallExpr, env runtime.Scope) *syntax.CallExpr {
 	return c.(*syntax.CallExpr)
 }
 
+// isCheckAnyStandIn reports whether call is the nameless call standing in
+// for a check with no receiving operation (see checkAnyCall).
+func isCheckAnyStandIn(call *syntax.CallExpr) bool {
+	if call == nil {
+		return false
+	}
+	id, ok := call.Fun.(*syntax.Ident)
+	return ok && id != nil && id.Tok == nil
+}
+
 // tlIsCheckAny reports whether the receiving operation logged as call is a
 // check with no receiving operation of its own: a bare `p.check` guard
 // (logged with no call), `p.check` or `p.check()`, or `p.check(from c)`,

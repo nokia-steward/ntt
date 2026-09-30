@@ -768,7 +768,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 					// every PTC and terminates the testcase
 					// run. We mark the exec so subsequent
 					// BlockStmt steps short-circuit.
-					if stack := exec.AllComponents(); len(stack) > 0 && ref == stack[0] {
+					if ref != nil && ref.ID == exec.MTCID() {
 						exec.Stop()
 					}
 					// Async PTC: signal the goroutine the
@@ -1160,6 +1160,22 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		if n, ok := n.Expr.(*syntax.BinaryExpr); ok && n.Op.Kind() == syntax.ASSIGN {
 			return evalAssign(n.X, n.Y, env)
 		}
+		// A receiving operation used as a statement is an alt with that one
+		// alternative (ETSI 20.1): it waits for a match, and the active
+		// defaults apply.
+		if !altCtx.active() && canWait(env) {
+			if alt, ok := standaloneAlt(n); ok {
+				res := eval(alt, env)
+				// A wait ended by stopping the component ends its
+				// behaviour, not just this statement.
+				if res == nil {
+					if exec := runtime.FindTestcaseExec(env); exec != nil && (exec.Stopped() || componentStopRequested(exec)) {
+						return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
+					}
+				}
+				return res
+			}
+		}
 		// Bare `stop;` keyword - TTCN-3 21.3.3 / 23.3 terminates
 		// the surrounding behaviour. The lookup binds `stop` to
 		// Undefined as a fallback, so without this intercept the
@@ -1181,7 +1197,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 					if !cur.AliveModifier {
 						cur.SetAlive(false)
 					}
-					if stack := exec.AllComponents(); len(stack) > 0 && cur == stack[0] {
+					if cur.ID == exec.MTCID() {
 						exec.Stop()
 					}
 				}
@@ -1203,7 +1219,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				if cur := exec.CurrentComponent(); cur != nil {
 					cur.SetDone(true)
 					cur.SetAlive(false)
-					if stack := exec.AllComponents(); len(stack) > 0 && cur == stack[0] {
+					if cur.ID == exec.MTCID() {
 						exec.Stop()
 					}
 				}
@@ -1497,15 +1513,14 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// `p.getcall(...)`, `p.getreply(...)`, `p.catch(...)` on a
 		// port or port-array element (`p[i]`). Tagged onto the
 		// kind-aware FIFO so they never collide with message comm.
-		// The blocking `call(template, dur) { responseblock }` form
-		// (no `nowait`) is left to the existing path - this slice
-		// only models the non-blocking nowait call.
+		// The blocking `call(template, dur) { responseblock }` form is a
+		// CallStmt, evaluated on its own. A call reaching here has no
+		// response block, so it does not wait (ETSI 22.3.1): it has
+		// `nowait`, or its signature is `noblock`.
 		if sel, ok := n.Fun.(*syntax.SelectorExpr); ok {
 			if op, ok := sel.Sel.(*syntax.Ident); ok && isProcedurePortOp(op.String()) {
 				if pname, ok := portExprName(sel.X, env); ok {
-					if op.String() != "call" || callHasNowait(n) {
-						return evalProcedurePortOp(op.String(), pname, n, env)
-					}
+					return evalProcedurePortOp(op.String(), pname, n, env)
 				}
 			}
 		}
@@ -7191,7 +7206,9 @@ func currentStopChan(exec *runtime.TestcaseExec) <-chan struct{} {
 			return exit.StopChan
 		}
 	}
-	return nil
+	// The MTC's waits end when the testcase is stopped — `mtc.stop` from a
+	// PTC, an execute() timeout (ETSI 21.3.3).
+	return exec.StopChan()
 }
 
 // currentCompID returns the id of the component running on the calling
@@ -7329,12 +7346,8 @@ func startBodyShouldSkip(body syntax.Node, env runtime.Scope) bool {
 // the responder's statements rather than just the call expression.
 func startBodyRoot(body syntax.Node, env runtime.Scope) syntax.Node {
 	if ce, ok := body.(*syntax.CallExpr); ok {
-		if id, ok := ce.Fun.(*syntax.Ident); ok {
-			if v, ok := env.Get(id.String()); ok {
-				if fn, ok := v.(*runtime.Function); ok && fn.Body != nil {
-					return fn.Body
-				}
-			}
+		if fn := calleeFunction(ce.Fun, env); fn != nil && fn.Body != nil {
+			return fn.Body
 		}
 	}
 	return body
@@ -7417,40 +7430,6 @@ func startBodyIsDeferredResponder(body syntax.Node, env runtime.Scope) bool {
 	return hasGetcall && hasResponse && !hasWhileTrue
 }
 
-// startBodyIsBareResponder reports whether a skipped PTC body is a
-// STRAIGHT-LINE one-shot procedure server: getcall + reply/raise with no
-// alt, no timer.timeout, and no loop — nothing that must run on its own
-// scheduled goroutine. Only such a body is safe to run INLINE via a deferred
-// replay (RunDeferredResponders): a responder that waits inside an `alt` (or
-// on a timer) must be forked instead so its guard can park and the scheduler
-// can hand off, or running it inline on the caller's goroutine would deadlock
-// (Sem_220301_CallOperation_001). CallOp_015's `getcall; reply` server IS
-// bare, so it defers; a `alt { [] getcall ... }` server is not.
-func startBodyIsBareResponder(body syntax.Node, env runtime.Scope) bool {
-	if !startBodyIsDeferredResponder(body, env) {
-		return false
-	}
-	root := startBodyRoot(body, env)
-	bare := true
-	syntax.Inspect(root, func(n syntax.Node) bool {
-		if n == nil || !bare {
-			return false
-		}
-		switch x := n.(type) {
-		case *syntax.AltStmt:
-			bare = false
-			return false
-		case *syntax.SelectorExpr:
-			if id, ok := x.Sel.(*syntax.Ident); ok && id != nil && id.String() == "timeout" {
-				bare = false
-				return false
-			}
-		}
-		return true
-	})
-	return bare
-}
-
 // startBodyBlocksOnPortReceive reports whether the body of
 // `comp.start(call)` would block forever inside an alt whose only
 // guards are `port.receive(...)` / `.check(...)` / `.trigger(...)`
@@ -7515,12 +7494,8 @@ func startBodyDoesPortComm(body syntax.Node, env runtime.Scope) bool {
 				}
 			}
 			if ce, ok := n.(*syntax.CallExpr); ok {
-				if id, ok := ce.Fun.(*syntax.Ident); ok {
-					if v, ok := env.Get(id.String()); ok {
-						if fn, ok := v.(*runtime.Function); ok && fn.Body != nil {
-							scan(fn.Body)
-						}
-					}
+				if fn := calleeFunction(ce.Fun, env); fn != nil && fn.Body != nil {
+					scan(fn.Body)
 				}
 			}
 			return true
@@ -7530,44 +7505,28 @@ func startBodyDoesPortComm(body syntax.Node, env runtime.Scope) bool {
 	return found
 }
 
-// startBodyHasBlockingCall reports whether a started PTC body issues a
-// blocking `call { ... }` (a CallStmt), i.e. it is a caller/client rather
-// than a responder. Such a body always forks under strict — it produces a
-// call, so a pending call from another component is irrelevant (unlike a
-// getcall responder, which consumes a queued call inline). Resolves one
-// level of `.start(f())` callee like startBodyBlocksOnComm.
-func startBodyHasBlockingCall(body syntax.Node, env runtime.Scope) bool {
-	root := startBodyRoot(body, env)
-	found := false
-	visited := map[syntax.Node]bool{}
-	var scan func(n syntax.Node)
-	scan = func(rootNode syntax.Node) {
-		if rootNode == nil || visited[rootNode] {
-			return
+// calleeFunction resolves the function a call names — `f()`, or
+// `Module.f()` — or returns nil.
+func calleeFunction(fun syntax.Expr, env runtime.Scope) *runtime.Function {
+	name := ""
+	switch x := fun.(type) {
+	case *syntax.Ident:
+		name = x.String()
+	case *syntax.SelectorExpr:
+		// Modules share one scope; a qualified name is its base name.
+		if _, ok := x.X.(*syntax.Ident); ok {
+			name = syntax.Name(x.Sel)
 		}
-		visited[rootNode] = true
-		syntax.Inspect(rootNode, func(n syntax.Node) bool {
-			if n == nil || found {
-				return false
-			}
-			if _, ok := n.(*syntax.CallStmt); ok {
-				found = true
-				return false
-			}
-			if ce, ok := n.(*syntax.CallExpr); ok {
-				if id, ok := ce.Fun.(*syntax.Ident); ok {
-					if v, ok := env.Get(id.String()); ok {
-						if fn, ok := v.(*runtime.Function); ok && fn.Body != nil {
-							scan(fn.Body)
-						}
-					}
-				}
-			}
-			return true
-		})
 	}
-	scan(root)
-	return found
+	if name == "" {
+		return nil
+	}
+	v, ok := env.Get(name)
+	if !ok {
+		return nil
+	}
+	fn, _ := v.(*runtime.Function)
+	return fn
 }
 
 // startBodyBlocksOnComm reports whether a started PTC body would block
@@ -7830,20 +7789,6 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		// on the old "PTC body is a no-op" path). We still tag the
 		// ref as alive so `comp.alive`/`comp.done` answer correctly.
 		skip := startBodyShouldSkip(body, env)
-		// One procedure shape still must not run at start: a BARE finite
-		// responder (straight-line `getcall; reply`, no alt, no loop, no
-		// blocking call of its own) started before any call is queued. Its
-		// getcall is non-blocking, so it would fall through on the empty
-		// queue and reply to nobody - which a multicast `call to (...)`
-		// fixture then mis-attributes to the wrong sender
-		// (Sem_220301_CallOperation_015). It is replayed on demand
-		// instead, by RunDeferredResponders, for the call actually
-		// addressed to it.
-		if op == "start" && ref != nil && !ref.AliveModifier && startBodyIsBareResponder(body, env) {
-			if exec := runtime.FindTestcaseExec(env); exec == nil || !exec.HasPendingCalls() {
-				skip = true
-			}
-		}
 		// An `alive` PTC body (including a while(true) send/receive load
 		// worker) runs on a real goroutine instead of the
 		// skip/virtual-clock model, so never send it to the skip branch.
@@ -7904,38 +7849,14 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 			}
 		}
 		if forkComm {
-			// A CLIENT (a body that issues a blocking `call{}`) always
-			// forks: it PRODUCES a call, so another component's pending
-			// call is irrelevant. A RESPONDER (getcall/getreply with no
-			// blocking call of its own) forks only when no call is already
-			// queued — a pending call (the caller did `p.call(...);
-			// comp.start(server)`) is consumed inline by the
-			// finite/deferred-responder path below; forking that case
-			// instead races the routing and the responder blocks forever.
-			// The HasPendingCalls flag is global (any component's call), so
-			// gating a client on it would wrongly skip the second of two
-			// clients once the first has called (multi-client broadcast).
-			pending := false
-			if exec := runtime.FindTestcaseExec(env); exec != nil {
-				pending = exec.HasPendingCalls()
-			}
-			// A BARE finite responder (straight-line `getcall; reply`, no
-			// alt/timer/loop and no blocking call of its own) is NOT forked:
-			// it takes the skip+register path so it is replayed inline
-			// on-demand only for the call actually addressed to it
-			// (RunDeferredResponders peeks its queue). Forking it instead
-			// makes its non-blocking getcall fall through on an empty queue
-			// and reply spuriously, which multicast `call to (...)` fixtures
-			// mis-attribute to the wrong sender (Sem_220301_CallOperation_015).
-			// An alt-based responder (`alt { [] getcall ... }`) MUST still
-			// fork: its guard has to park on its own scheduled goroutine, so
-			// running it inline via a deferred replay would deadlock.
-			hasBlockingCall := startBodyHasBlockingCall(body, env)
-			bareResponder := startBodyIsBareResponder(body, env) && !hasBlockingCall
-			if !bareResponder && (hasBlockingCall || !pending) {
-				skip = false
-				forkStrict = true
-			}
+			// A body that communicates runs as the component it is, on its
+			// own goroutine. A responder used to be replayed inline on
+			// demand, or run inline when a call was already queued, while a
+			// standalone getcall did not wait; now that it waits (ETSI
+			// 20.1), run inline it would block the component that started
+			// it.
+			skip = false
+			forkStrict = true
 		}
 		// Exception: a finite responder body (getcall/reply/raise)
 		// runs when the caller already queued its nowait calls
@@ -8050,13 +7971,25 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				// out-of-bounds read of the zero value.
 				// See above.
 				fn, snapArgs, callArgExprs := snapshotPTCArgs(body, env)
+				// A restart of an alive component waits for the behaviour
+				// it stopped to unwind: the scheduler knows a component's
+				// behaviours by the component's id, so the old one must be
+				// gone before the new one is registered.
+				if err := waitPreviousBehaviour(exec, ref, env); err != nil {
+					return err, true
+				}
+				// The component runs a behaviour again: it is no longer
+				// done — a stopped alive component restarted, for one
+				// (ETSI 21.3.2). Cleared here, not by the new behaviour,
+				// which may not be scheduled before the starter asks.
+				ref.SetDone(false)
 				exit := exec.RegisterPTC(ref.ID)
 				// Register the PTC with the cooperative scheduler before it
 				// can be scheduled (FinishPTC deregisters it). No-op when
 				// the scheduler is off.
 				exec.SchedGoLive(ref.ID)
 				go func() {
-					defer exec.FinishPTC(ref.ID)
+					defer exec.FinishPTCExit(ref.ID, exit)
 					// Wait for the scheduler to grant this PTC the token so
 					// only one component runs at a time (no-op when off). If
 					// the testcase is torn down before this PTC was ever
@@ -8076,6 +8009,9 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 					} else {
 						_ = eval(body, runEnv)
 					}
+					// The defaults a behaviour activated end with it: an
+					// alive component started again begins with none.
+					exec.ClearDefaultsOf(ref.ID)
 					tlTerminated(exec, ref)
 					// Don't drain port maps on natural
 					// body exit: a daemon-style PTC
@@ -8261,7 +8197,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		// If the target is the MTC, also mark the testcase as
 		// stopped so the outer testcase body short-circuits.
 		if exec := runtime.FindTestcaseExec(env); exec != nil {
-			if stack := exec.AllComponents(); len(stack) > 0 && ref == stack[0] {
+			if ref != nil && ref.ID == exec.MTCID() {
 				exec.Stop()
 			}
 			if cur := exec.CurrentComponent(); cur != nil && cur.Equal(ref) {
@@ -8484,7 +8420,9 @@ func evalAnyPortOp(op string, n *syntax.CallExpr, env runtime.Scope) runtime.Obj
 	if exec == nil {
 		return runtime.Undefined
 	}
-	for _, port := range exec.PortNames() {
+	// `any port` is any of this component's own ports (ETSI 22.5), by
+	// bare name: the receiving operations qualify it themselves.
+	for _, port := range exec.CurrentComponentPortNames() {
 		var res runtime.Object
 		switch op {
 		case "receive":
@@ -8498,7 +8436,7 @@ func evalAnyPortOp(op string, n *syntax.CallExpr, env runtime.Scope) runtime.Obj
 			// envelope; on no-match leave res Undefined so the
 			// scan continues to the next port (TTCN-3 22.5).
 			kind, _ := procKindForOp(op)
-			if head, ok := exec.DequeueKind(port, kind); ok {
+			if head, ok := exec.DequeueKind(exec.PortKey(port), kind); ok {
 				if exec.TestLogger() != nil {
 					tlProcReceive(exec, n, port, head, nil, nil, nil, "receive", "", false)
 				}
@@ -10034,22 +9972,6 @@ func isProcedurePortOp(op string) bool {
 	switch op {
 	case "call", "getcall", "reply", "getreply", "raise", "catch":
 		return true
-	}
-	return false
-}
-
-// callHasNowait reports whether a `p.call(...)` carries the `nowait`
-// keyword (TTCN-3 22.3.1) - the non-blocking form this slice models.
-// The blocking form omits nowait and instead supplies an inline
-// response-handling block, which we leave to the legacy path.
-func callHasNowait(n *syntax.CallExpr) bool {
-	if n == nil || n.Args == nil {
-		return false
-	}
-	for _, a := range n.Args.List {
-		if id, ok := a.(*syntax.Ident); ok && id.String() == "nowait" {
-			return true
-		}
 	}
 	return false
 }
@@ -11612,8 +11534,15 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 	// later catch-all clause from an earlier specific one. -1 (no freeze)
 	// on the coop / conformance path — behaviour is then byte-identical.
 	limit := altReceiveLimit(exec, port)
+	// A check with no receiving operation (`p.check(from c)`) observes
+	// whatever is at the head of the queue, a call, reply or exception
+	// included (ETSI 22.4).
+	checkAny := !consume && isCheckAnyStandIn(info.call)
 	for {
 		head, ok := exec.PeekKindLimited(port, kind, limit)
+		if checkAny {
+			head, ok = exec.PeekHeadLimited(port, limit)
+		}
 		if !ok {
 			// Without the cooperative scheduler, bind a `-> sender v`
 			// target to the latest PTC ref so fixtures whose PTC body was
@@ -12307,5 +12236,76 @@ func clearPort(exec *runtime.TestcaseExec, n syntax.Node, pname string) {
 		tlEmitLazy(exec, n, "tliPClear", func() []tl.Arg {
 			return []tl.Arg{tlArg("port", tlOwnPort(exec, pname).Content()), tlArg("stat", tl.String(tlPortStatus(exec, pname)))}
 		})
+	}
+}
+
+// canWait reports whether the behaviour evaluating in env runs as its
+// component — the MTC's, or a PTC's on its own goroutine — and so may wait.
+// A PTC body the engine runs inline, on the goroutine of the component that
+// started it, may not: waiting there would block its starter.
+func canWait(env runtime.Scope) bool {
+	exec := runtime.FindTestcaseExec(env)
+	if exec == nil {
+		return false
+	}
+	if interleaveBodyCtx.active() {
+		return false
+	}
+	cur := exec.CurrentComponent()
+	return cur == nil || cur.ID == exec.MTCID() || exec.PTCExit(cur.ID) != nil
+}
+
+// standaloneAlts caches, per receiving statement, the one-alternative alt
+// it stands for (see standaloneAlt).
+var standaloneAlts sync.Map
+
+// standaloneAlt returns the alt statement `alt { [] s }` that the
+// receiving statement s — receive, trigger, check, getcall, getreply or
+// catch, on a port, with or without a template, from, to or redirect — is
+// equivalent to (ETSI 20.1), and false for any other statement.
+func standaloneAlt(s *syntax.ExprStmt) (*syntax.AltStmt, bool) {
+	if a, ok := standaloneAlts.Load(s); ok {
+		alt, _ := a.(*syntax.AltStmt)
+		return alt, alt != nil
+	}
+	var alt *syntax.AltStmt
+	if isReceivingOp(s.Expr) {
+		alt = &syntax.AltStmt{NoDefault: s.NoDefault, Body: &syntax.BlockStmt{Stmts: []syntax.Stmt{&syntax.CommClause{Comm: s}}}}
+	}
+	standaloneAlts.Store(s, alt)
+	return alt, alt != nil
+}
+
+// isReceivingOp reports whether e is a receiving operation on a port:
+// `p.receive(t) from c -> value v`, `p[1].check`, `any port.getreply`.
+func isReceivingOp(e syntax.Expr) bool {
+	for {
+		switch x := e.(type) {
+		case *syntax.RedirectExpr:
+			e = x.X
+			continue
+		case *syntax.FromExpr:
+			// `any from pa.receive(t)`: a receive on any element.
+			if x.KindTok == nil || !strings.EqualFold(x.KindTok.String(), "any") {
+				return false
+			}
+			e = x.X
+			continue
+		case *syntax.BinaryExpr:
+			if x.Op == nil || (x.Op.Kind() != syntax.FROM && x.Op.Kind() != syntax.TO) {
+				return false
+			}
+			e = x.X
+			continue
+		case *syntax.CallExpr:
+			e = x.Fun
+			continue
+		case *syntax.SelectorExpr:
+			switch syntax.Name(x.Sel) {
+			case "receive", "trigger", "check", "getcall", "getreply", "catch":
+				return true
+			}
+		}
+		return false
 	}
 }

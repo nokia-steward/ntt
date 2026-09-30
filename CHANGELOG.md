@@ -193,6 +193,39 @@ Independent of the two clocks:
 - **The alt guards `[] any port.getcall`, `getreply` and `catch` match**
   (ETSI 22.5). The guard looked in a queue named `any port`, found
   nothing, and waited for good.
+- **A receiving operation used as a statement waits** (ETSI 20.1).
+  `p.receive(t);` with nothing queued yet returned at once and ended the
+  behaviour, so a plain exchange — the MTC sends, a PTC receives and
+  answers, the MTC receives — ended with verdict `none`, on either clock.
+  It is now the alt with that one alternative the standard defines, and
+  the active defaults apply. What this took, each wrong before:
+  - a component whose body communicates runs as that component; a
+    responder (`getcall; reply`) was replayed inline by its caller, which
+    a waiting `getcall` would block;
+  - a `call` with no response block is sent — a `noblock` signature's as
+    well as one with `nowait` (22.3.1); the former did nothing;
+  - `p.check` with no receiving operation sees a call, reply or exception
+    at the head of the queue, not only a message (22.4);
+  - `any port` is the component's own ports (22.5), not every component's;
+  - a default whose timer is its altstep's parameter (`altstep a(timer
+    t)`, positional or named) fires: the alt waiting for it looked the
+    timer up by the wrong name;
+  - `@nodefault p.receive(t)` is the alt `alt @nodefault { ... }`; the
+    parser dropped the modifier;
+  - a receive in the branch of a default that matched waits, as in any
+    behaviour; the default's sweep made it conclude at once;
+  - `mtc.stop` from a PTC ends a waiting MTC; nothing woke it.
+  A receive in an `interleave` branch body still does not wait: the engine
+  does not expand interleave into its alternatives, and waiting there
+  would block the branch that could satisfy it.
+- **Starting a component whose behaviour still runs is an error** (ETSI
+  21.3.2), where it went ahead.
+- **A stopped `alive` component can be started again** (ETSI 21.3.3), on
+  either clock. The new behaviour did not run: `start` left the component
+  `done`, so the next `c.done` was satisfied at once; and the stopped
+  behaviour, finishing, finished the new one too. The restart now waits
+  for the stopped behaviour to end, and the defaults a behaviour activated
+  end with it (21.3.2).
 
 - **`any timer.timeout` / `all timer.timeout` block when used as a
   statement** (ETSI 23.7), as the named `T.timeout` always has. Outside an
@@ -239,9 +272,6 @@ in [`docs/conformance/remaining-work.md`](docs/conformance/remaining-work.md)
 - **A PTC body that waits on a timer and uses no port is not executed**, on
   either clock. Its duration is modelled, so `.done` waits the right time,
   but none of its statements run — a `setverdict(fail)` in it is lost.
-- On the default clock, a forked PTC that has finished is `done` but never
-  `killed`, and a two-way message handshake between the MTC and a PTC can
-  end with verdict `none`.
 - Under `--live`, the `alt` guard `c.done` can be true for a PTC that is
   still blocked on a port.
 
