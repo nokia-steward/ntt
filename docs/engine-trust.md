@@ -6,10 +6,10 @@ exists at all, see the [feature matrix](ntt-vs-titan.md); for the work queue,
 [remaining work](conformance/remaining-work.md); for per-push numbers, the
 [conformance dashboard](conformance/index.html).
 
-Short answer, as of 2026-08-10: **4747 of 4925 ETSI conformance files match
-their expected outcome, 96.39%.** The number went down 1.34 points that day,
-deliberately, and the reason it went down is the most informative thing on
-this page.
+Short answer, as of 2026-09-30: **4787 of 4948 ETSI conformance files match
+their expected outcome, 97.20%.** On 2026-08-10 the number went down 1.34
+points, deliberately, and the reason it went down is the most informative
+thing on this page; how it came back is the second most.
 
 ## One engine
 
@@ -42,8 +42,9 @@ Three rules keep that honest:
 - **Anything that cannot clear the gate is reverted, not absorbed.** On
   2026-08-10 a change that was defensible in principle - running timer-only
   PTC bodies for real, which the virtual clock now makes possible - measured
-  -7 files and +0. It is out of the tree, and the diagnosis is recorded in a
-  test.
+  -7 files and +0. It was kept out of the tree, with its diagnosis recorded
+  in a test, until the defects it ran into were fixed (below); it landed on
+  2026-09-30 at +5, 0 lost.
 
 One caveat about a number you will see: the **real-execution rate**
 (currently 49.58%) counts only files whose verdict came from executing a
@@ -105,12 +106,44 @@ Defects that had been sitting behind green tests:
 - **A stopped `alive` component cannot be restarted**, which ETSI 21.3.3
   requires. Two layers: `start` does not clear the component's `done` flag,
   so a following `comp.done` is satisfied by the previous run; and with that
-  fixed, the re-forked goroutine still never gets scheduled.
+  fixed, the re-forked goroutine still never gets scheduled. *Fixed
+  2026-09-30:* the stopped behaviour unwinds without the scheduler's token,
+  which the scheduler took for a deadlock, and finishing, it finished the
+  new behaviour too.
 - **`interleave` does not suspend a blocked branch**, so two mutually
   dependent branches deadlock instead of completing.
 
 Each has a test carrying its diagnosis, so the next attempt starts from what
 was already learned.
+
+## What waiting found
+
+On 2026-09-30 a receiving operation used as a statement - `p.receive(t);` -
+was found not to wait. With nothing queued it returned at once and ended
+the behaviour, so the plainest exchange, the MTC sending and a PTC
+answering, ended with verdict `none`. Making it wait, as the one-alternative
+alt the standard defines (20.1), first measured -24: the old behaviour had
+been hiding other defects, which waiting exposed one after another. Each
+was fixed before the change went in:
+
+- procedure responders were replayed inline by their caller instead of
+  running as their component;
+- a `call` of a `noblock` signature sent nothing;
+- a bare `check` saw only messages, not calls, replies or exceptions;
+- `any port` meant every component's ports, not the component's own;
+- the `any port` procedure guards never matched;
+- a default whose timer was its altstep's parameter never fired;
+- a stopped `alive` component could not be restarted (above);
+- `mtc.stop` from a PTC did not end a waiting MTC;
+- timer-only PTC bodies were modelled instead of run.
+
+Together: 4754 → 4787 matched, none lost. The two clocks were compared
+behaviour by behaviour with `ntt log diff` (see [test logging](test-logging.md))
+over a suite of probes written for their differences; what remains there is
+timing - whether a PTC got a turn before it was stopped, whether a default was
+consulted before a message arrived - not a different verdict. The one
+exception is a testcase that never ends: `--live` reports the verdict it had
+when `--timeout` expired, where the virtual clock reports the deadlock.
 
 ## An ending is a value, not a silence
 

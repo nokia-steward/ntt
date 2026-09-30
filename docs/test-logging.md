@@ -123,10 +123,10 @@ Some operations are logged in a narrower sense than the standard's:
   without arguments or over `all component`. An imported behaviour started
   or activated by its unqualified name is reported in the current module.
 
-A PTC whose body the engine models rather than runs — a body that waits on
-a timer and uses no port — gets its `tliCStart` and no `tliCTerminated`:
-its statements are not executed, and the log does not pretend they were
-(see Known issues in the changelog).
+Every started behaviour runs, and is logged as it runs. On the virtual
+clock, a component that enters a loop which never ends and never waits or
+acts (`while (true) {}`) waits there until it is stopped, so the log shows
+nothing more from it until its `tliCTerminated`.
 
 These policies keep a log readable without dropping information:
 
