@@ -190,6 +190,9 @@ Independent of the two clocks:
   afterwards.
 - **`c.running` is false for a component that was never started** (ETSI
   21.3.5); it answered true from the moment the component was created.
+- **The alt guards `[] any port.getcall`, `getreply` and `catch` match**
+  (ETSI 22.5). The guard looked in a queue named `any port`, found
+  nothing, and waited for good.
 
 - **`any timer.timeout` / `all timer.timeout` block when used as a
   statement** (ETSI 23.7), as the named `T.timeout` always has. Outside an

@@ -2866,46 +2866,16 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 						// enqueued one).
 						if kind, ok := procKindForOp(op.String()); ok {
 							if exec := runtime.FindTestcaseExec(env); exec != nil {
-								// Qualify the port to the CURRENT component's
-								// per-PTC key ("\x00c<id>/p"): a bare
-								// getreply/getcall/catch in a PTC must read that
-								// PTC's own queue, not the unqualified name (where
-								// a broadcast reply/exception routed to the PTC's
-								// qualified key would be invisible, hanging the
-								// call block — Sem_220305_raise_operation_003).
-								qkey := exec.PortKey(portIdent.String())
-								// Honour the alt round's snapshot boundary
-								// (ETSI 20.2), as the templated and message
-								// receive paths do. Without it this bare
-								// guard peeked the LIVE queue, so a reply
-								// arriving mid-round was invisible to an
-								// earlier, more specific clause and got
-								// consumed by this catch-all one instead —
-								// `[] p.getreply(S:? value 42)` losing to a
-								// following `[] p.getreply`.
-								limit := altReceiveLimit(exec, qkey)
-								// ETSI 22.3.1 h: an unqualified
-								// getreply / catch inside a blocking
-								// call(S,...){ } block treats only
-								// S's reply / exception. Leave a
-								// mismatched head queued so the block
-								// falls through to its timeout branch.
-								if kind == runtime.MsgReply || kind == runtime.MsgException {
-									if csig := currentCallSignature(env); csig != "" {
-										if head, ok := exec.PeekKindLimited(qkey, kind, limit); ok && head.Signature != "" && head.Signature != csig {
-											if exec.TestLogger() != nil {
-												tlProcReceive(exec, sel, qkey, head, nil, nil, nil, "mismatch",
-													"answers "+head.Signature+", not the called "+csig, true)
-											}
-											return false
-										}
-									}
+								// `any port.getreply` (22.5) looks at each of
+								// the component's own ports in turn.
+								ports := []string{portIdent.String()}
+								if ports[0] == "any port" {
+									ports = exec.CurrentComponentPortNames()
 								}
-								if head, ok := exec.DequeueKindLimited(qkey, kind, limit); ok {
-									if exec.TestLogger() != nil {
-										tlProcReceive(exec, sel, qkey, head, nil, nil, nil, "receive", "", false)
+								for _, port := range ports {
+									if bareProcGuard(exec, sel, port, kind, env) {
+										return true
 									}
-									return true
 								}
 							}
 						}
@@ -3281,4 +3251,45 @@ func activatedDefaultCalls(env runtime.Scope) []defaultCall {
 		out = append(out, defaultCall{call: call, scope: d.Env})
 	}
 	return out
+}
+
+// bareProcGuard is the bare procedure guard `[] port.getreply` (getcall,
+// catch; TTCN-3 22.3) on one port of the current component: it takes the
+// head call, reply or exception of kind queued there, if any.
+func bareProcGuard(exec *runtime.TestcaseExec, sel *syntax.SelectorExpr, port string, kind runtime.PortMsgKind, env runtime.Scope) bool {
+	// Qualify the port to the CURRENT component's per-PTC key
+	// ("\x00c<id>/p"): a bare getreply/getcall/catch in a PTC must read
+	// that PTC's own queue, not the unqualified name (where a broadcast
+	// reply/exception routed to the PTC's qualified key would be
+	// invisible, hanging the call block — Sem_220305_raise_operation_003).
+	qkey := exec.PortKey(port)
+	// Honour the alt round's snapshot boundary (ETSI 20.2), as the
+	// templated and message receive paths do. Without it this bare guard
+	// peeked the LIVE queue, so a reply arriving mid-round was invisible
+	// to an earlier, more specific clause and got consumed by this
+	// catch-all one instead — `[] p.getreply(S:? value 42)` losing to a
+	// following `[] p.getreply`.
+	limit := altReceiveLimit(exec, qkey)
+	// ETSI 22.3.1 h: an unqualified getreply / catch inside a blocking
+	// call(S,...){ } block treats only S's reply / exception. Leave a
+	// mismatched head queued so the block falls through to its timeout
+	// branch.
+	if kind == runtime.MsgReply || kind == runtime.MsgException {
+		if csig := currentCallSignature(env); csig != "" {
+			if head, ok := exec.PeekKindLimited(qkey, kind, limit); ok && head.Signature != "" && head.Signature != csig {
+				if exec.TestLogger() != nil {
+					tlProcReceive(exec, sel, qkey, head, nil, nil, nil, "mismatch",
+						"answers "+head.Signature+", not the called "+csig, true)
+				}
+				return false
+			}
+		}
+	}
+	if head, ok := exec.DequeueKindLimited(qkey, kind, limit); ok {
+		if exec.TestLogger() != nil {
+			tlProcReceive(exec, sel, qkey, head, nil, nil, nil, "receive", "", false)
+		}
+		return true
+	}
+	return false
 }

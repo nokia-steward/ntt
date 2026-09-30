@@ -413,8 +413,9 @@ verdict the same and every event valid.
   alt the standard defines measures **-24** (33 lost, 9 gained); on the
   MTC only, **-23**. The losses rest on two further defects, to be fixed
   first: the alt guard `[] any port.getreply` (bare, a procedure operation
-  on `any port`) never matches, and a PTC body the engine runs inline
-  deadlocks the MTC once its own standalone `getcall` waits.
+  on `any port`) never matched — *fixed 2026-09-30, +7 (Sem_2204 037,
+  038, 061, 062, 085, 086, 110), 0 lost* — and a PTC body the engine runs
+  inline deadlocks the MTC once its own standalone `getcall` waits.
 - **A field assignment to a record initialised positionally is lost.**
   After `var R r := {1, 2}`, `r.a := 3` leaves `r.a` at 1; initialised as
   `{a := 1, b := 2}` it works.
