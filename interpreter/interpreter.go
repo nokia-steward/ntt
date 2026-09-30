@@ -7529,117 +7529,6 @@ func calleeFunction(fun syntax.Expr, env runtime.Scope) *runtime.Function {
 	return fn
 }
 
-// startBodyBlocksOnComm reports whether a started PTC body would block
-// waiting on inter-component communication — a blocking `call` statement
-// (CallStmt) or a getcall/getreply/receive/trigger/catch operation. Such
-// bodies can only execute correctly on a real goroutine concurrent with
-// the caller (e.g. a `server` PTC blocked in `getcall` while the `client`
-// PTC issues the matching `call`). It is used under the strict profile to
-// fork non-alive PTCs whose bodies the synchronous model would otherwise
-// skip. A pure compute loop (no comm op) returns false and stays skipped,
-// so we never spin a goroutine that can't make observable progress.
-func startBodyBlocksOnComm(body syntax.Node, env runtime.Scope) bool {
-	root := startBodyRoot(body, env)
-	// Only a blocking `call{...}` (a CallStmt, handled below) and a
-	// server `getcall` justify forking. Deliberately NOT `getreply` /
-	// `catch` / `receive` / `trigger`: a body whose only blocking op is a
-	// standalone `getreply`/`receive` alt is one half of a pair whose
-	// counterpart (a `nowait` caller, or a send-only sender) is NOT
-	// forked, so forking just this half makes it wait for traffic that
-	// never comes and time out. Those half-pair shapes stay on the skip
-	// path (unchanged from baseline). getcall is safe because its
-	// counterpart is always a blocking-call client we DO fork (CallStmt)
-	// or an already-queued call (handled inline via HasPendingCalls).
-	commOps := map[string]bool{
-		"getcall": true,
-	}
-	found := false
-	// noFork is set when the body must NOT be forked even though it
-	// contains a comm op: an [else] clause makes the alt finite (no
-	// blocking), and a `@decoded` redirect depends on codec decoding the
-	// strict path does not implement yet.
-	noFork := false
-	visited := map[syntax.Node]bool{}
-	var scan func(n syntax.Node) bool
-	scan = func(rootNode syntax.Node) bool {
-		if rootNode == nil || visited[rootNode] {
-			return false
-		}
-		visited[rootNode] = true
-		syntax.Inspect(rootNode, func(n syntax.Node) bool {
-			if n == nil {
-				return false
-			}
-			// An [else] guard anywhere means the alt always resolves
-			// immediately — the body is finite and handled by the
-			// finite/deferred-responder path, not concurrency.
-			if cc, ok := n.(*syntax.CommClause); ok && cc.Else != nil {
-				noFork = true
-			}
-			if _, ok := n.(*syntax.CallStmt); ok { // blocking call { ... }
-				found = true
-			}
-			// `@decoded` redirect assignment depends on codec decoding
-			// that is not implemented yet (Phase 3). Such a body, if
-			// forked, would run and its getcall param redirect would fail
-			// to decode — so leave it on the skip path until decoding
-			// lands. Treating it as "does not block on comm" keeps
-			// forkStrict from stealing it. Guards
-			// Sem_220302_getcall_operation_014..019.
-			if _, ok := n.(*syntax.DecodedExpr); ok {
-				noFork = true
-			}
-			if sel, ok := n.(*syntax.SelectorExpr); ok {
-				if id, ok := sel.Sel.(*syntax.Ident); ok && commOps[id.String()] {
-					found = true
-				}
-			}
-			if ce, ok := n.(*syntax.CallExpr); ok {
-				if id, ok := ce.Fun.(*syntax.Ident); ok {
-					if v, ok := env.Get(id.String()); ok {
-						if fn, ok := v.(*runtime.Function); ok && fn.Body != nil {
-							scan(fn.Body)
-						}
-					}
-				}
-			}
-			return true
-		})
-		return found
-	}
-	scan(root)
-	return found && !noFork
-}
-
-func startBodyBlocksOnPortReceive(body syntax.Node, env runtime.Scope) bool {
-	root := body
-	if ce, ok := body.(*syntax.CallExpr); ok {
-		if id, ok := ce.Fun.(*syntax.Ident); ok {
-			if v, ok := env.Get(id.String()); ok {
-				if fn, ok := v.(*runtime.Function); ok && fn.Body != nil {
-					root = fn.Body
-				}
-			}
-		}
-	}
-	hit := false
-	syntax.Inspect(root, func(n syntax.Node) bool {
-		if hit || n == nil {
-			return false
-		}
-		alt, ok := n.(*syntax.AltStmt)
-		if !ok || alt == nil || alt.Body == nil {
-			return true
-		}
-		if altPortReceiveOnly(alt) {
-			hit = true
-			return false
-		}
-		return true
-	})
-	return hit
-}
-
 // altPortReceiveOnly returns true when alt has at least one
 // CommClause and every CommClause is a real-port-receive guard
 // (`receive` / `check` / `trigger`, with or without `-> value`
@@ -7924,27 +7813,6 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 					ref.SetDone(true)
 					if !ref.AliveModifier {
 						ref.SetAlive(false)
-					}
-				}
-				if op == "start" && startBodyIsDeferredResponder(body, env) {
-					if exec := runtime.FindTestcaseExec(env); exec != nil {
-						fn, snapArgs, callArgExprs := snapshotPTCArgs(body, env)
-						exec.RegisterDeferredResponder(ref.ID, func() {
-							runEnv := componentExecutionEnv(ref, env)
-							runEnv.Set("self", ref)
-							exec.PushComponent(ref)
-							defer exec.PopComponent()
-							if fn != nil {
-								_, _, _ = applyFunctionWithCallSite(functionWithEnv(fn, runEnv), snapArgs, callArgExprs)
-							} else {
-								_ = eval(body, runEnv)
-							}
-							tlTerminated(exec, ref)
-							ref.SetDone(true)
-							if !ref.AliveModifier {
-								ref.SetAlive(false)
-							}
-						})
 					}
 				}
 			}
@@ -10131,7 +9999,6 @@ func evalProcedureCallTo(port string, call *syntax.CallExpr, toExpr syntax.Expr,
 		tlProcSend(exec, call, "call", port, msg, keys, addressed, false)
 	}
 	deliverEnvelope(exec, keys, msg)
-	exec.RunDeferredResponders()
 	return runtime.Undefined
 }
 
@@ -10178,7 +10045,7 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 		// pure-Go or C test port): the driver answers the call and we
 		// enqueue its return value as the reply a later getreply reads.
 		// Gated on a driver being present, so loopback procedure ports
-		// keep their deferred-responder behaviour untouched.
+		// are untouched.
 		if drv := exec.PortDriver(port); drv != nil {
 			if caller, ok := drv.(runtime.PortCaller); ok {
 				if exec.TestLogger() != nil {
@@ -10211,7 +10078,6 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 			tlProcSend(exec, n, "call", bareName, callMsg, keys, false, false)
 		}
 		deliverEnvelope(exec, keys, callMsg)
-		exec.RunDeferredResponders()
 		return runtime.Undefined
 	case "reply":
 		var params, ret runtime.Object
