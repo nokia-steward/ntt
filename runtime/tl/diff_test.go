@@ -419,3 +419,39 @@ func TestSummaryOfAParameterWithoutValue(t *testing.T) {
 		t.Errorf("summary: %s", got)
 	}
 }
+
+// TestCompareIgnoresDefaultsConsultedInVain: an alt that found nothing
+// consults its defaults and waits; whether it did so before a message
+// arrived differs between correct runs. A default that fires is compared.
+func TestCompareIgnoresDefaultsConsultedInVain(t *testing.T) {
+	ptc := tl.ComponentID{Name: "echo", ID: "2", Type: "C"}
+	consulted := func(fires bool) []*tl.Event {
+		evs := []*tl.Event{
+			{Op: "tliADefaults", Ts: 3, Line: 5, C: ptc},
+			{Op: "tliSEnter", Ts: 3, Line: 20, C: ptc},
+			{Op: "tliSLeave", Ts: 3, Line: 20, C: ptc},
+		}
+		if fires {
+			return append(evs, &tl.Event{Op: "tliSetVerdict", Ts: 3, Line: 21, C: ptc, Args: []tl.Arg{{"verdict", tl.Verdict("fail")}}})
+		}
+		return append(evs, &tl.Event{Op: "tliAWait", Ts: 3, Line: 5, C: ptc})
+	}
+	// The run that waited, with the defaults consulted in its first round.
+	waited := func(fires bool) []*tl.Event {
+		r := run("tc", "ping", "2", false)
+		for i, e := range r {
+			if e.Op == "tliANomatch" {
+				return append(append(append([]*tl.Event{}, r[:i+1]...), consulted(fires)...), r[i+1:]...)
+			}
+		}
+		t.Fatal("no tliANomatch")
+		return nil
+	}
+	quick := run("tc", "ping", "2", true)
+	if res := tl.Compare(logOf(t, true, quick), logOf(t, true, waited(false))); len(res) != 1 || !res[0].Same() {
+		t.Fatalf("defaults consulted in vain reported as a difference: %+v", res)
+	}
+	if res := tl.Compare(logOf(t, true, quick), logOf(t, true, waited(true))); len(res) != 1 || res[0].Same() {
+		t.Fatalf("a default that fired was not compared: %+v", res)
+	}
+}

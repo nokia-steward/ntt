@@ -264,14 +264,33 @@ func compareRuns(x, y *Run, lossy bool) Result {
 	return res
 }
 
+// actions returns what of a component's events is compared: its actions,
+// less those of the defaults an alt consulted in a round that found
+// nothing — between tliADefaults and the alt's tliAWait. Whether an alt
+// consulted its defaults before a message arrived differs between correct
+// runs, as the arrival does; a default that fires is an action.
 func actions(events []*Node) []*Node {
-	var out []*Node
+	var out, consulted []*Node
+	consulting := false
 	for _, e := range events {
-		if !ArrivalTiming(e.Tag) {
-			out = append(out, e)
+		switch strings.TrimSuffix(strings.TrimSuffix(e.Tag, "_c"), "_m") {
+		case "tliADefaults":
+			out, consulted, consulting = append(out, consulted...), nil, true
+		case "tliAWait":
+			consulted, consulting = nil, false
+		case "tliALeave", "tliARepeat", "tliAEnter":
+			out, consulted, consulting = append(out, consulted...), nil, false
 		}
+		if ArrivalTiming(e.Tag) {
+			continue
+		}
+		if consulting {
+			consulted = append(consulted, e)
+			continue
+		}
+		out = append(out, e)
 	}
-	return out
+	return append(out, consulted...)
 }
 
 // canonical renders what is compared of an event: its operation, where in
