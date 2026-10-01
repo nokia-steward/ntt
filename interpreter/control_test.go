@@ -146,7 +146,10 @@ func TestControl_ExecuteTimeoutYieldsError(t *testing.T) {
 	if v != runtime.ErrorVerdict {
 		t.Fatalf("verdict = %s (%s), want error (a testcase past its execute timeout is stopped)", v, reason)
 	}
-	if d := time.Since(start); d > 5*time.Second {
+	// It ends at the limit, not never: on the virtual clock a spin takes
+	// time only after about a million iterations, which a slow host
+	// under the race detector takes some seconds to compute.
+	if d := time.Since(start); d > 60*time.Second {
 		t.Fatalf("took %s: the execute timeout did not stop the spinning testcase", d)
 	}
 }

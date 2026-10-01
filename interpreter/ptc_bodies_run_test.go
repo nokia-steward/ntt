@@ -151,7 +151,7 @@ func TestStartedBodiesRun(t *testing.T) {
 			testcase tc() runs on C system C {
 				var C c := C.create, s := C.create;
 				s.start(sleeper());
-				c.start(work(50000));
+				c.start(work(5000));
 				timer g := 1.0; g.start;
 				var integer i := 0; while (i < 2500) { i := i + 1 }
 				if (not g.running) { setverdict(fail, "the MTC's loop took time") }

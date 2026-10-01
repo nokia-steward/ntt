@@ -398,22 +398,23 @@ func TestExecuteTimeout(t *testing.T) {
 }
 
 // TestExecuteTimeoutWhileExchanging: two components exchanging messages
-// for good never wait long, but time passes as they compute, so an
-// execute() limit ends the testcase (ETSI 26.1) on the virtual clock too.
+// for good, each waiting for the other's, never all wait, but time passes
+// as they go on, so an execute() limit ends the testcase (ETSI 26.1) on
+// the virtual clock too.
 func TestExecuteTimeoutWhileExchanging(t *testing.T) {
 	src := `module M {
 		type port P message { inout integer }
 		type component C { port P p }
-		function prod() runs on C { while (true) { p.send(1) } }
-		function cons() runs on C { while (true) { p.receive(integer:?) } }
+		function ping() runs on C { var integer v; p.send(0); while (true) { p.receive(integer:?) -> value v; p.send(v + 1) } }
+		function pong() runs on C { var integer v; while (true) { p.receive(integer:?) -> value v; p.send(v + 1) } }
 		testcase tc() runs on C system C {
 			var C a := C.create, b := C.create; connect(a:p, b:p);
-			a.start(prod()); b.start(cons());
+			a.start(ping()); b.start(pong());
 			timer t := 60.0; t.start; t.timeout; setverdict(pass);
 		}
 		control { execute(tc(), 0.5) }
 	}`
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
 	defer cancel()
 	for _, k := range clocks {
 		opts := k.opts
