@@ -28,11 +28,11 @@ single functional test doubles as a performance probe. See
   component lifecycle, port configuration, verdicts and alt steps, each with
   a timestamp, the component and the source line. The file is the
   standard's XML format (Annex B), or JSON Lines with `--log-format=jsonl`.
-  112 of the 125 operations are logged: procedure-based communication
+  113 of the 125 operations are logged: procedure-based communication
   (call, getcall, reply, getreply, raise, catch, and a call's timeout),
   function, altstep and testcase entry and exit with their parameters and
   result, assignments, module parameters, `@lazy` evaluation, `encvalue` /
-  `decvalue`, `match`, `rnd`, and the control part. Logs validate against the Annex B schemas:
+  `decvalue`, `match`, `rnd`, `action`, and the control part. Logs validate against the Annex B schemas:
   the whole conformance corpus was run with logging on, every event valid
   and every verdict unchanged. The published schemas do not compile as
   printed; the seven corrections needed are documented. See
@@ -225,16 +225,72 @@ Independent of the two clocks:
   a `while (true)` loop that breaks, was not executed but modelled: none
   of its statements ran, a `setverdict(fail)` in it was lost, and a loop
   that ends was taken for one that does not. Every started body now runs.
-  A loop that never ends and never waits or acts (`while (true) {}`) is
-  recognised where it is entered: on the virtual clock, where computing
-  takes no time, the component waits there until it is stopped, instead
-  of holding everything else up; everything before it, and a branch that
-  does not reach it, runs as written. A PTC started just before the MTC's
-  behaviour ends runs until it waits or finishes before the PTCs still
-  running are stopped. Passing an object reference to a started
+  On the virtual clock computing takes no time, so a component in a long
+  loop lets the others run now and then — those woken by an event first,
+  then the others computing, in turn — and time does not pass while it
+  computes. Only a long one takes time: each million or so iterations
+  with no wait, and each hundred thousand turns at one instant — about
+  fifty thousand message round trips — count as a second of virtual time
+  (less when a timer is due sooner, which then fires first), so a
+  component that computes for good — a busy wait, a spin, two components
+  exchanging messages for good — does not hold every timer, or an
+  `execute()` limit, still; nor do two components keeping each other busy
+  keep a third from running. A PTC started just before the MTC's behaviour ends
+  runs until it waits or finishes, a finite computation included, before
+  the PTCs still running are stopped. Passing an object reference to a started
   behaviour, or a value holding one, is an error (ETSI ES 203 790
   5.1.2.2). On `--live`, a started PTC holds up its starter only when it
   maps or sends through an external driver.
+- **`c.call(f())` runs f as component c and waits for it** (ETSI 21.3.10),
+  on either clock. A body that waited on a timer was modelled, not run,
+  and one run inline could not wait for anything another component does.
+  `c.call(f(), d) catch(timeout) { ... }` waits at most d seconds: the
+  block runs only when f did not end in time, and then c is stopped;
+  without the clause, a call that times out is a testcase error. The
+  block used to run whether or not the call timed out.
+- **`execute(tc(), d)` bounds the testcase in the test system's time**
+  (ETSI 26.1): virtual time on the virtual clock, where it was real time,
+  so a testcase whose timers ran past d finished in a moment and was not
+  stopped. `ntt exec` runs testcases directly and now takes the timeout
+  from the control part, as it takes the arguments. A testcase cut off by
+  its time limit — the harness budget, `--live --timeout`, an `execute()`
+  timeout — ends with `error` (it did not terminate), not the verdict it
+  had reached; it terminates when the MTC does, so stopping the PTCs
+  afterwards does not count.
+- **Values have value semantics** (ETSI 6): an assignment, an
+  initialisation, a parameter (its default and a `@lazy` one included), a
+  component variable's initial value, a sent message, a redirect and the
+  arguments of `start` and `activate` each hold a value of their own. `var R r2 :=
+  r; r.a := 3` changed `r2`; a server changing the parameter it received
+  changed its caller's argument; one PTC's change to a component variable
+  initialised from a constant changed the constant, and every other
+  component's copy, and under `--live` could crash the run on a concurrent
+  map write.
+- **A field of a record initialised positionally can be assigned**
+  (`var R r := {1, 2}; r.a := 3` left `r.a` at 1), and `-> param (x)`
+  binds the parameter, not the parameter list.
+- **Each element of a port array is a port of its own** (ETSI 21.1):
+  `connect(self:pa[1], c:p)` connects that element only, what c sends
+  arrives on `pa[1]`, and `any from pa.receive(...) -> @index value i`
+  binds i. Every element was connected under the array's name.
+- **An altstep can be an alternative of an alt** (`[] a()`), with its
+  parameters, guards and `[else]`; it deadlocked on the virtual clock.
+- **`p.call(...) to c { ... }`** sends the call and waits in its response
+  block; the call was never sent.
+- **`action()`** (ETSI 22.6) writes its text, free text and values joined
+  by `&`, and is logged as `tliAction`; it was not implemented.
+- **`system` is a component reference**: what arrives on a mapped port
+  from the SUT comes from it, so `from system`, `-> sender s; s == system`
+  and `from s` with `s := system` match (22.2.2). None did.
+- **Evaluated once:** a port index (`pa[f()].send`) and a `to` clause
+  (`send(v) to f()`) ran `f()` twice.
+- **`c.done -> value v;` as a statement waits** for c, as `c.done;` does.
+- **`any port.getcall(S:{...})` takes the call it matches**, with its
+  redirects; a bare `any port.getcall` guard no longer consumes a message.
+- **An inline `[false] T.timeout` guard** no longer livelocks the virtual
+  clock, as expired default timers did before.
+- **A call's signature no longer reaches a PTC** for the unqualified
+  `getreply` / `catch` rule (22.3.1 h).
 - **A stopped `alive` component can be started again** (ETSI 21.3.3), on
   either clock. The new behaviour did not run: `start` left the component
   `done`, so the next `c.done` was satisfied at once; and the stopped
@@ -284,7 +340,13 @@ These are older than this release and are recorded, with their diagnosis,
 in [`docs/conformance/remaining-work.md`](docs/conformance/remaining-work.md)
 §1s.
 
-- Under `--live`, the `alt` guard `c.done` can be true for a PTC that is
-  still blocked on a port.
+- A receive in an `interleave` branch body does not wait: the engine does
+  not expand interleave into its alternatives (ETSI 20.4), and two branches
+  that depend on each other deadlock.
+- A function called from a PTC reads and writes the module-level copy of a
+  component variable, not the PTC's own, and a component variable
+  initialised from a module constant is undefined in the MTC.
+- Starting a non-alive component again after its behaviour ended is
+  accepted, where ETSI 21.3.2 makes it an error.
 
 [0.24.0]: https://github.com/nokia/ntt/compare/v0.23.2...ntt-titan

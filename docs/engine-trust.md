@@ -6,8 +6,8 @@ exists at all, see the [feature matrix](ntt-vs-titan.md); for the work queue,
 [remaining work](conformance/remaining-work.md); for per-push numbers, the
 [conformance dashboard](conformance/index.html).
 
-Short answer, as of 2026-09-30: **4787 of 4948 ETSI conformance files match
-their expected outcome, 97.20%.** On 2026-08-10 the number went down 1.34
+Short answer, as of 2026-09-30: **4794 of 4948 ETSI conformance files match
+their expected outcome, 97.34%.** On 2026-08-10 the number went down 1.34
 points, deliberately, and the reason it went down is the most informative
 thing on this page; how it came back is the second most.
 
@@ -47,7 +47,7 @@ Three rules keep that honest:
   2026-09-30 at +5, 0 lost.
 
 One caveat about a number you will see: the **real-execution rate**
-(currently 49.58%) counts only files whose verdict came from executing a
+(currently 50.52%) counts only files whose verdict came from executing a
 testcase, not from a parse or semantic rejection. It cannot approach 100%.
 2200 of the files expect `reject`, and a completed run always yields a TTCN-3
 verdict, never the string `reject` - so the ceiling is about 55%. Reading it
@@ -137,13 +137,47 @@ was fixed before the change went in:
 - `mtc.stop` from a PTC did not end a waiting MTC;
 - timer-only PTC bodies were modelled instead of run.
 
-Together: 4754 → 4787 matched, none lost. The two clocks were compared
+Together: 4754 → 4787 matched, none lost.
+
+## What a review found
+
+The same day, the rest of the recorded defects were worked through, each
+change reviewed independently before it went in. The reviews mattered: the
+first version of "a loop lets the others run" let virtual time pass while a
+component computed, so a guard timer could fire during a finite
+computation - even the component's own - and a message sent at time zero
+could lose to a timer. The version that went in lets the others run and
+counts each million or so iterations without a wait - and each hundred
+thousand turns at one instant, about fifty thousand message round trips -
+as a second of virtual time, so that a computation that goes on for good
+still lets timers fire, while a short one takes none and a long one does
+not use up a watchdog far off. The second review caught a version that
+jumped straight to the next timer; the third, one that could pass a timer
+of a component woken but not yet run, so that two timers expired out of
+order; the fourth, a component starved while two others kept each other
+busy. Each is now a test. The reviews also found values
+shared where TTCN-3 copies them: a sent message the sender changed
+afterwards, a redirect of a message a `check` left queued, a server
+changing the parameter it received, a component variable's initial value
+shared by every component (under `--live`, a crash). Fixed with them:
+
+- `c.call(f())` ran f inline, or modelled it, instead of running it as c;
+  `catch(timeout)` ran whether or not the call timed out;
+- an `execute()` timeout was real time on the virtual clock, and `ntt exec`
+  ignored it; a testcase cut off by a time limit reported the verdict it
+  had reached, not `error`;
+- the elements of a port array were connected under the array's name;
+- an altstep could not be an alternative of an alt;
+- `p.call(...) to c { ... }` was never sent; `action()` did not exist;
+  `from system` never matched; a port index and a `to` clause ran twice.
+
+Together: 4787 → 4794 matched, none lost. The two clocks were compared
 behaviour by behaviour with `ntt log diff` (see [test logging](test-logging.md))
 over a suite of probes written for their differences; what remains there is
-timing - whether a PTC got a turn before it was stopped, whether a default was
-consulted before a message arrived - not a different verdict. The one
-exception is a testcase that never ends: `--live` reports the verdict it had
-when `--timeout` expired, where the virtual clock reports the deadlock.
+timing - whether a PTC got a turn before it was stopped - not a different
+verdict. The one exception is a testcase that never ends: `--live` reports
+that it did not terminate within its time limit, where the virtual clock
+reports the deadlock.
 
 ## An ending is a value, not a silence
 

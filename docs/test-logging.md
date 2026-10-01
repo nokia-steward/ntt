@@ -47,13 +47,13 @@ the test specification performs the operation (file and line).
 
 ## What is logged
 
-112 of the 125 TCI-TL operations, covering message- and procedure-based
+113 of the 125 TCI-TL operations, covering message- and procedure-based
 testing end to end, behaviour, variables, codecs and the control part:
 
 | Area | Operations |
 |---|---|
 | Testcase | `tliTcStart`, `tliTcStarted`, `tliTcStop` (an `execute()` timeout), `tliTcTerminated` |
-| Verdict and log | `tliSetVerdict`, `tliGetVerdict`, `tliLog` |
+| Verdict, log and action | `tliSetVerdict`, `tliGetVerdict`, `tliLog`, `tliAction` (the text of an `action()`) |
 | Messages to components | `tliMSend_c` (and `_MC` multicast, `_BC` broadcast), `tliMDetected_c`, `tliMReceive_c`, `tliMChecked_c`, `tliMMismatch_c`, `tliCheckedAny_c`, `tliCheckAnyMismatch_c` |
 | Messages to the system | `tliMSend_m` (and `_MC` multicast), `tliMDetected_m`, `tliMReceive_m`, `tliMChecked_m`, `tliMMismatch_m`, `tliCheckedAny_m`, `tliCheckAnyMismatch_m` |
 | Timers | `tliTStart`, `tliTStop`, `tliTRead`, `tliTRunning`, `tliTTimeoutDetected`, `tliTTimeout`, `tliTTimeoutMismatch` |
@@ -82,15 +82,15 @@ logged in that order.
 
 Control-part events are produced by the control part itself, not by a test
 component; they appear as the component `control`. `ntt exec` runs
-testcases directly, so a log it writes has no control events; they come
-from running a control part through the library (`RunControlWith`). A
+testcases directly, so a log it writes has no control events (it takes a
+testcase's arguments and `execute()` timeout from the control part); they
+come from running a control part through the library (`RunControlWith`). A
 control part logs its start and end, its own `tliSEnter` and `tliSLeave`,
 and each testcase it executes; the functions it calls, its assignments and
 the module parameters it reads are not logged.
 
 **Not logged:**
 
-- `tliAction`: the engine does not implement `action()`.
 - The control part's parameterised and result forms and its stop
   (`tliCtrlStartWithParameters`, `tliCtrlTerminatedWithResult`,
   `tliCtrlStop`): a control part has no parameters and no result, and the
@@ -124,9 +124,11 @@ Some operations are logged in a narrower sense than the standard's:
   or activated by its unqualified name is reported in the current module.
 
 Every started behaviour runs, and is logged as it runs. On the virtual
-clock, a component that enters a loop which never ends and never waits or
-acts (`while (true) {}`) waits there until it is stopped, so the log shows
-nothing more from it until its `tliCTerminated`.
+clock computing takes no time: a component in a long loop lets the others
+run now and then, and only a long computation takes time: each million or so
+iterations without a wait, and each hundred thousand turns at one instant
+(about fifty thousand message round trips), count as a second of virtual
+time, less when a timer is due sooner.
 
 These policies keep a log readable without dropping information:
 
@@ -229,8 +231,10 @@ is not:
   `Detected` forms), mismatches, which depend on what was at the head of a
   queue or whether a component or timer had finished yet (every
   `Mismatch` form), and alt rounds that found nothing (`tliANomatch`, `tliADefaults`,
-  `tliAWait`). These are left out. So is the elapsed time a timer read
-  reports, which measures the clock.
+  `tliAWait`), including what the defaults consulted in such a round did —
+  whether an alt consulted them before a message arrived is timing too; a
+  default that fires is compared. These are left out. So is the elapsed
+  time a timer read reports, which measures the clock.
 - **Everything else must agree:** every send and receive with its value and
   template (a broadcast's or multicast's destinations as a set), every call, reply and exception, every verdict and reason,
   timer, component and port operation, every alt entered and left, and

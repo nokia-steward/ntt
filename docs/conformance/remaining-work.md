@@ -418,12 +418,14 @@ verdict the same and every event valid.
   038, 061, 062, 085, 086, 110), 0 lost* — and a PTC body the engine runs
   inline deadlocks the MTC once its own standalone `getcall` waits.
 - **Found reviewing the standalone-receive fix, older than it, not fixed:**
-  - `p.call(S:{}) to c { ... }`, a blocking call with `to`, is never sent:
+  - *Fixed 2026-09-30.* (+3: Sem_220301_CallOperation_011, _013,
+    Sem_2003_the_repeat_statement_002; and _003 with an altstep alternative that repeats.)
+    `p.call(S:{}) to c { ... }`, a blocking call with `to`, is never sent:
     the call-statement path accepts only a bare call expression.
-  - `-> param (x)` binds a list, which then fails with a type mismatch.
-  - `pa[1].receive` on a port array connected to PTCs never matches, and
+  - *Fixed 2026-09-30.* `-> param (x)` binds a list, which then fails with a type mismatch.
+  - *Fixed 2026-09-30.* `pa[1].receive` on a port array connected to PTCs never matches, and
     `any from pa.receive(...) -> @index value i` does not bind `i`.
-  - Under `--live`, a testcase still waiting when `--timeout` expires
+  - *Fixed 2026-09-30.* Under `--live`, a testcase still waiting when `--timeout` expires
     reports the verdict it had then, where `execute()` with a timeout
     gives `error`.
   - A receive inside an `interleave` branch body does not wait: the
@@ -433,26 +435,28 @@ verdict the same and every event valid.
   - A blocking signature called with no response block and no `nowait`
     is sent without waiting, where the standard makes it an error.
 - **Found reviewing the started-bodies change, not fixed:**
-  - A loop that waits on a zero-length timer for good
+  - *Fixed 2026-09-30.* (Each million or so iterations with no wait count as a
+    second of virtual time.) A loop that waits on a zero-length timer for good
     (`while (true) { t.start(0.0); t.timeout }`) takes no virtual time, so
     on the virtual clock nothing else ever runs.
-  - `c.call(f())` on a component still models a body that waits on a
+  - *Fixed 2026-09-30.* `c.call(f())` on a component still models a body that waits on a
     timer instead of running it.
-  - `ntt exec` does not enforce an `execute()` timeout, and a testcase
+  - *Fixed 2026-09-30.* `ntt exec` does not enforce an `execute()` timeout, and a testcase
     that runs out the harness budget reports its current verdict rather
     than `error` (26).
-- **A field assignment to a record initialised positionally is lost.**
+- *Fixed 2026-09-30.* (+2: Sem_1101_ValueVars_001, Sem_1102_TemplateVars_001, with
+  value semantics.) **A field assignment to a record initialised positionally is lost.**
   After `var R r := {1, 2}`, `r.a := 3` leaves `r.a` at 1; initialised as
   `{a := 1, b := 2}` it works.
-- **A port index expression is evaluated twice** in `pa[f()].send(1)` and
+- *Fixed 2026-09-30.* **A port index expression is evaluated twice** in `pa[f()].send(1)` and
   `pa[f()].receive(1)`: `f()` runs twice.
 - *Fixed 2026-09-30, with the restart below.* **A restarted `alive`
   component reports `.running` false**, and under `--live` so does a PTC
   blocked in a receive.
-- **An altstep used as an alt branch** (`[] a()`) deadlocks on the
+- *Fixed 2026-09-30.* (+1: Sem_160201_invoking_altsteps_004.) **An altstep used as an alt branch** (`[] a()`) deadlocks on the
   virtual clock.
-- **`p.check(from system)` on a mapped port never matches.**
-- **`action()` is not implemented** ("identifier not found"). The corpus's
+- *Fixed 2026-09-30.* **`p.check(from system)` on a mapped port never matches.**
+- *Fixed 2026-09-30.* **`action()` is not implemented** ("identifier not found"). The corpus's
   eleven `action` fixtures are all negative-syntax or negative-semantic
   ones, which match only because the engine fails on them. `tliAction` is
   therefore never logged.
@@ -474,10 +478,11 @@ verdict the same and every event valid.
 - *Fixed 2026-09-30: a receive used as a statement did not wait (below).*
   **A two-way handshake ends in `none` on the virtual clock** — PTC sends,
   MTC receives and replies, PTC receives — with no defaults involved.
-- **Under `--live`, the snapshot guard `c.done` is true for a PTC still
-  blocked on a port.**
-- **`c.done -> value v;` as a statement does not block.**
-- **An inline `[false] T.timeout` guard livelocks the scheduler** the same
+- *Fixed by 2026-09-30 (re-probed: already so at 9f399ebe).* **Under
+  `--live`, the snapshot guard `c.done` is true for a PTC still blocked on
+  a port.**
+- *Fixed 2026-09-30.* **`c.done -> value v;` as a statement does not block.**
+- *Fixed 2026-09-30.* **An inline `[false] T.timeout` guard livelocks the scheduler** the same
   way expired default timers did; the fix above was kept to defaults.
 - *Fixed 2026-09-30.* Three layers: `start` did not clear `done`; the
   stopped behaviour unwinds without the scheduler's token, which the
@@ -489,15 +494,74 @@ verdict the same and every event valid.
   stopped behaviour also keeps running past the end of its testcase: its
   timer fires and it terminates during the next testcase, which
   `ntt log diff` over two logs of the same suite showed.
-- **The call signature still leaks into PTCs** for the unqualified
+- *Fixed 2026-09-30.* (Not reproduced; a PTC's environment now shadows the
+  signature.) **The call signature still leaks into PTCs** for the unqualified
   `getreply` / `catch` rule (22.3.1 h), which reads it from scope.
-- **`any port.getcall` / `getreply` / `catch` as a statement takes
+- *Fixed 2026-09-30.* **`any port.getcall` / `getreply` / `catch` as a statement takes
   nothing** (ETSI 22.5): the name `any port` reaches the procedure path as
   if it were a port, which has no queue. The call stays queued for a later
   receive to take. Found by the TCI-TL review.
-- **A `send`'s `to` clause is evaluated twice**, once to tag the message
+- *Fixed 2026-09-30.* **A `send`'s `to` clause is evaluated twice**, once to tag the message
   and once to route it, so a side effect in it (`to f()`) runs twice.
   Found by the TCI-TL review; the log itself evaluates nothing again.
+
+### 1r. Review and finish — 2026-09-30
+
+The items marked *Fixed 2026-09-30* above, each with a test on both clocks
+that fails without it: 4787 → 4794 matched, +7, 0 lost; with logging on,
+every verdict the same and every event valid. Two independent reviews
+found, and this work fixed before it went in: on the virtual clock a
+component computing let time pass (a guard timer fired during a finite
+computation, even the component's own); values were shared by a sent
+message, a redirect, a component variable's initial value and a
+parameter; a limit reached while PTCs were being stopped made a finished
+testcase an error; and every `in` parameter was copied (now only those a
+function that sees no component state writes). The second found the first
+fix's time passing too eager — straight to the next timer, so a long
+computation used up a watchdog — charstrings shared on element
+assignment, the arguments of `start` and `activate` shared with the
+caller, and an altstep alternative's `inout` parameters never written
+back. The third found time passing beyond a woken component's timer, and
+the charstring fix losing an element assignment to a component variable
+and evaluating an index twice; charstrings are now copied when assigned
+instead. A fourth check found a component, woken or started, starved
+while two others exchanged at one instant — it now runs after being
+passed over for a thousand turns — and a parameter's default and a
+`@lazy` parameter sharing the value they came from.
+
+**Found, not fixed:**
+
+- A receive in an `interleave` branch body does not wait (ETSI 20.4); two
+  branches that depend on each other deadlock
+  (`TestStrictInterleave_MutuallyDependentBranchesDeadlock`). The fix is to
+  run each branch body as a participant of its own, acting as the
+  component, so that a blocked branch parks while its siblings run; on
+  the real clock the branches need a baton of their own.
+- A function called from a PTC reads and writes the module-level copy of a
+  component variable, not the PTC's own: `function g() runs on C { n := n
+  + 1 }` called from a PTC's behaviour leaves the PTC's `n` unchanged. And a
+  component variable initialised from a module constant (`var R cr :=
+  c_R`) is undefined in the MTC: the MTC's members are bound when the
+  module is loaded, before the constant has its value.
+- Starting a non-alive component again after its behaviour ended is
+  accepted (ETSI 21.3.2 makes it an error).
+- `any from cs.done -> @index value i` binds nothing.
+- An `execute()` timeout held in a control-part variable
+  (`var float x := 1.0; execute(tc(), x)`) is not applied by `ntt exec`,
+  which reads the control part without running it.
+- An index-range array declared without an initialiser
+  (`var charstring a[2..3]`) is stored at the wrong offsets.
+- Copying costs time: assigning, declaring or passing (to a function with
+  `runs on`) a long charstring, record or list copies it, so a scanner
+  calling a helper once per character of a 100000-character string is
+  about twenty times slower than when the values were shared. Copy on
+  write would make passing free again.
+- On the virtual clock, a component spinning until an `execute()` limit
+  costs about a second of real time per second of the limit.
+- `while (t.running) { ... }` stops after a few iterations on either
+  clock: `t.running` counts polls instead of reading the clock.
+- An activated default does not fire in a blocking receive or alt inside
+  a function without `runs on` called from a component.
 
 ### 1y. `comp.done` does not block on the real clock — FIXED 2026-09-14
 
