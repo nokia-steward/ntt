@@ -301,6 +301,38 @@ func TestTCPPort_HangUpIsVisibleWhenRequested(t *testing.T) {
 	}
 }
 
+// TestTCPPort_HangUpIsNotData: the Disconnected record is not a
+// charstring, so an alt that lists the charstring alternative first still
+// reaches the one for the record (ETSI ES 201 873-1 22.2.2).
+func TestTCPPort_HangUpIsNotData(t *testing.T) {
+	addr, stop := startHangUpServer(t)
+	defer stop()
+
+	tcpport.Register("p", addr, tcpport.WithDisconnectEvent())
+	t.Cleanup(tcpport.Reset)
+
+	v, reason := run(t, "M.tc", `module M {
+		type enumerated DisconnectReason { closed(0), aborted(1) }
+		type record Disconnected { DisconnectReason reason, charstring detail }
+		type port P message { inout charstring; in Disconnected }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 5.0;
+			map(self:p, system:p);
+			g.start;
+			p.send("ping");
+			alt {
+				[] p.receive(charstring:?) { setverdict(fail, "charstring:? took the Disconnected record"); }
+				[] p.receive(Disconnected:?) { setverdict(pass); }
+				[] g.timeout { setverdict(fail, "timeout"); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s)", v, reason)
+	}
+}
+
 // TestTCPPort_HangUpSilentByDefault pins the compatibility half: without the
 // opt-in, no new inbound value appears, so a suite declaring only
 // `inout charstring` cannot have a Disconnected record consumed by a bare

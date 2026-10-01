@@ -163,6 +163,109 @@ func TestOperationSemantics(t *testing.T) {
 				if (n == 3) { setverdict(pass) } else { setverdict(fail, "n=", n) }
 			}
 		}`,
+		// A typed template matches only values of its type (22.2.2):
+		// `charstring:?` does not take a record, nor `integer:?` a
+		// charstring, so the alternative for the record's type does.
+		"typed templates": `module M {
+			type enumerated Reason { closed(0), aborted(1) }
+			type record Disconnected { Reason reason, charstring detail }
+			type record Other { integer n }
+			type port P message { inout charstring; inout integer; inout Disconnected; inout Other }
+			type component C { port P t }
+			testcase tc() runs on C system C {
+				connect(self:t, self:t);
+				t.send("line");
+				t.send(Disconnected:{ reason := closed, detail := "bye" });
+				t.send(Other:{ n := 1 });
+				var integer lines := 0, others := 0;
+				timer g := 1.0; g.start;
+				alt {
+					[] t.receive(integer:?) { setverdict(fail, "integer:? took a value of another type") }
+					[] t.receive(charstring:?) { lines := lines + 1; repeat }
+					[] t.receive(Disconnected:?) { others := others + 1; repeat }
+					[] t.receive(Other:?) { if (lines == 1 and others == 1) { setverdict(pass) } else { setverdict(fail, lines, others) } }
+					[] g.timeout { setverdict(fail, "timeout ", lines, others) }
+				}
+			}
+		}`,
+		// `?` and `*` in a pattern stand for any character, a line end
+		// too (B.1.5), in regexp() as in match().
+		"patterns across line ends": `module M {
+			type component C {}
+			testcase tc() runs on C {
+				var charstring nl := char(0, 0, 0, 10);
+				var charstring b := "{""ifName"":""ens3f0np0""}" & nl;
+				var charstring r := regexp(b, "*""ifName"":""([^""]+)""*", 0);
+				var charstring whole := regexp("a" & nl & "b", "(*)", 0);
+				if (r == "ens3f0np0" and whole == "a" & nl & "b" and match("x" & nl & "y", pattern "x?[a-z]") and match(b, pattern "*ens3*")) { setverdict(pass) }
+				else { setverdict(fail, r, whole) }
+			}
+		}`,
+		// An inout or out parameter writes back into its own actual, wherever
+		// it stands among in parameters, positional or named.
+		"inout after in": `module M {
+			type component C {}
+			type record R { integer status, charstring body }
+			type record S { boolean seen, integer n }
+			function f(R r, inout S s, in integer k, out integer o) return integer {
+				s := { seen := true, n := r.status + k }; o := k * 2; return r.status
+			}
+			function g(charstring name, inout S s) return integer { return f({ 1, "" }, s, lengthof(name), s.n) }
+			testcase tc() runs on C {
+				var R r := { status := 200, body := "x" };
+				var S s := { seen := false, n := 0 };
+				var integer o := 0, k := 5;
+				var integer x := f(r, s, k, o);
+				if (x != 200 or r.status != 200 or not s.seen or s.n != 205 or o != 10 or k != 5) { setverdict(fail, r, s, o, k) }
+				var S t := { seen := false, n := 0 };
+				x := f(o := o, k := 1, s := t, r := r);
+				if (t.n != 201 or o != 2) { setverdict(fail, "named: ", t, o) }
+				var charstring name := "abc";
+				var S u := { seen := false, n := 0 };
+				x := g(name, u);
+				if (name == "abc" and u.n == 6) { setverdict(pass) } else { setverdict(fail, "chained: ", name, u) }
+			}
+		}`,
+		// An array and a union's @default alternative are values of
+		// their types; a record of is a list, not an integer.
+		"typed templates of lists and unions": `module M {
+			type integer Arr[3];
+			type record of integer IL;
+			type union U { @default integer n, charstring s }
+			type port P message { inout Arr; inout IL; inout U; inout integer }
+			type component C { port P t }
+			function fu() return U { return 7 }
+			testcase tc() runs on C system C {
+				connect(self:t, self:t);
+				var Arr a := { 1, 2, 3 };
+				t.send(a);
+				t.send(U:5);
+				t.send(fu());
+				var integer n := 0;
+				timer g := 0.5; g.start;
+				alt {
+					[] t.receive(IL:{}) { setverdict(fail, "IL:{} took an array") }
+					[] t.receive(Arr:?) { n := n + 1; repeat }
+					[] t.receive(U:?) { n := n + 10; repeat }
+					[] g.timeout { if (n == 21) { setverdict(pass) } else { setverdict(fail, "n=", n) } }
+				}
+				t.send(4);
+				alt { [] t.receive(IL:?) { setverdict(fail, "IL:? took an integer") } [] t.receive(integer:?) {} }
+			}
+		}`,
+		// `and` and `or` evaluate their right operand only when the left
+		// does not decide (7.1.4).
+		"short-circuit": `module M {
+			type component C { var integer calls := 0 }
+			function side() runs on C return boolean { calls := calls + 1; return true }
+			testcase tc() runs on C {
+				var charstring s := "";
+				var integer n := lengthof(s);
+				while (n > 0 and s[n - 1] == char(0, 0, 0, 10)) { n := n - 1 }
+				var boolean b1 := false and side(), b2 := true or side(), b3 := true and side();
+				if (n == 0 and not b1 and b2 and b3 and calls == 1) { setverdict(pass) } else { setverdict(fail, n, b1, b2, calls) }
+			}
+		}`,
 		"param redirect": `module M {
 			signature S(in integer x);
 			type port PP procedure { inout S }

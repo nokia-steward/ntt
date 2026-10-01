@@ -2622,6 +2622,15 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 		return x
 	}
 
+	// `and` and `or` evaluate their right operand only when the left
+	// does not decide the result (ETSI ES 201 873-1 7.1.4): in `n > 0
+	// and s[n - 1] == c`, s[-1] is not read when n is 0.
+	if xb, ok := x.(runtime.Bool); ok {
+		if (op == syntax.AND && !bool(xb)) || (op == syntax.OR && bool(xb)) {
+			return xb
+		}
+	}
+
 	y := eval(n.Y, env)
 	if runtime.IsError(y) {
 		return y
@@ -5954,7 +5963,7 @@ func evalAnyAllFromMsg(n *syntax.FromExpr, sel *syntax.SelectorExpr, call *synta
 			var tmpl runtime.Object = runtime.Any
 			if call != nil {
 				var matched bool
-				if matched, tmpl = portReceiveMatch(head.Payload, call, env); !matched {
+				if matched, tmpl = portReceiveMatch(head.Payload, systemLoopback(head), call, env); !matched {
 					if exec.TestLogger() != nil {
 						tlReceive(exec, call, pn, head, tmpl, nil, "mismatch", false, !isTrigger)
 					}
@@ -6606,10 +6615,12 @@ func writebackInoutParamsWithSnapshot(fn *runtime.Function, callArgs []syntax.Ex
 		if param == nil || param.Name == nil {
 			continue
 		}
-		if param.Direction == nil {
-			continue
+		// A parameter with no direction is an in parameter; it takes
+		// its positional argument as any other does.
+		dir := "in"
+		if param.Direction != nil {
+			dir = strings.ToLower(param.Direction.String())
 		}
-		dir := strings.ToLower(param.Direction.String())
 		idx := -1
 		if i, ok := named[param.Name.String()]; ok {
 			idx = i
@@ -11793,7 +11804,7 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 		payloadOk := true
 		var tmpl runtime.Object = runtime.Any
 		if !isProc && info.call != nil {
-			payloadOk, tmpl = portReceiveMatch(head.Payload, info.call, env)
+			payloadOk, tmpl = portReceiveMatch(head.Payload, systemLoopback(head), info.call, env)
 		}
 		// Honour the procedure signature template (parameter record +
 		// `value`/exception) rather than the lenient "any envelope of
@@ -12151,7 +12162,7 @@ func evalPortTrigger(port string, n *syntax.CallExpr, env runtime.Scope) runtime
 	if !ok {
 		return runtime.Undefined
 	}
-	matches, tmpl := portReceiveMatch(head.Payload, n, env)
+	matches, tmpl := portReceiveMatch(head.Payload, systemLoopback(head), n, env)
 	_, _ = exec.DequeueMessage(port)
 	if exec.TestLogger() != nil {
 		ev := "receive"
@@ -12198,14 +12209,129 @@ func evalPortCheck(port string, n *syntax.CallExpr, env runtime.Scope) runtime.O
 // any message; calls with a single template argument compare it via
 // the same `match` builtin used by user-level `match()` expressions.
 func portReceiveMatches(head runtime.Object, n *syntax.CallExpr, env runtime.Scope) bool {
-	ok, _ := portReceiveMatch(head, n, env)
+	ok, _ := portReceiveMatch(head, true, n, env)
 	return ok
+}
+
+// systemLoopback reports whether msg was looped back by a port mapped to
+// the system with no driver: the SUT's answer, encoded as an adapter
+// would (see encodedView).
+func systemLoopback(msg runtime.PortMessage) bool {
+	return isSystemRef(msg.Sender)
+}
+
+// valueOfType reports whether v can be a value of the type typeExpr names.
+// It answers false only when the kinds plainly differ — a charstring for
+// an integer, a record for a charstring, a record with a field the record
+// type has not — and true when it cannot tell: values carry no type name.
+func valueOfType(v runtime.Object, typeExpr syntax.Expr, env runtime.Scope) bool {
+	name := syntax.Name(typeExpr)
+	for depth := 0; depth < 16 && name != ""; depth++ {
+		if want, ok := baseObjectTypeForName(name); ok {
+			return v.Type() == want
+		}
+		switch strings.ToLower(name) {
+		case "verdicttype":
+			return v.Type() == runtime.VERDICT
+		}
+		t, ok := env.Get(name)
+		if !ok {
+			return true
+		}
+		switch td := t.(type) {
+		case *runtime.EnumType:
+			return v.Type() == runtime.ENUM_VALUE
+		case *runtime.TypeDesc:
+			switch {
+			case td.IsList || td.ListKind != "":
+				return v.Type() == runtime.LIST
+			case td.Struct != nil:
+				return structValueFits(v, td.Struct)
+			case td.Underlying != "" && td.Underlying != name:
+				name = td.Underlying
+				continue
+			}
+		}
+		return true
+	}
+	return true
+}
+
+// structValueFits reports whether v can be a value of the record, set or
+// union type decl: a structured value with none but its fields.
+func structValueFits(v runtime.Object, decl *syntax.StructTypeDecl) bool {
+	declared := map[string]bool{}
+	for _, f := range decl.Fields {
+		if f != nil && f.Name != nil {
+			declared[f.Name.String()] = true
+		}
+	}
+	switch x := v.(type) {
+	case *runtime.Record:
+		for k := range x.Fields {
+			if !declared[k] {
+				return false
+			}
+		}
+		return true
+	case *runtime.List:
+		for _, k := range x.FieldNames {
+			if !declared[k] {
+				return false
+			}
+		}
+		return len(x.FieldNames) > 0 || len(x.Elements) <= len(decl.Fields)
+	}
+	// A union with a @default alternative takes that alternative's value
+	// as itself (6.2.5.1).
+	for _, f := range decl.Fields {
+		if f != nil && f.DefaultTok != nil {
+			return true
+		}
+	}
+	return false
+}
+
+// encodedView reports whether a template of the type typeExpr names can
+// be the encoded form of a value: a string type, or a type with an
+// encode attribute. A port mapped to the system with no driver loops a
+// message back as the SUT would answer it, encoding and decoding as an
+// adapter does, so such a template sees a value of another type.
+func encodedView(typeExpr syntax.Expr, env runtime.Scope) bool {
+	name := syntax.Name(typeExpr)
+	for depth := 0; depth < 16 && name != ""; depth++ {
+		switch want, ok := baseObjectTypeForName(name); {
+		case ok:
+			return want == runtime.CHARSTRING || want == runtime.OCTETSTRING ||
+				want == runtime.BITSTRING || want == runtime.HEXSTRING
+		}
+		t, ok := env.Get(name)
+		if !ok {
+			return true
+		}
+		td, ok := t.(*runtime.TypeDesc)
+		if !ok {
+			return false
+		}
+		if _, ok := td.Lookup("encode"); ok {
+			return true
+		}
+		if td.Underlying == "" || td.Underlying == name {
+			return false
+		}
+		name = td.Underlying
+	}
+	return true
 }
 
 // portReceiveMatch is portReceiveMatches that also returns the template it
 // matched against (runtime.Any when the operation has none), so a logged
 // receive or mismatch shows the template actually used.
-func portReceiveMatch(head runtime.Object, n *syntax.CallExpr, env runtime.Scope) (bool, runtime.Object) {
+//
+// A typed template (`charstring:?`) matches only a value of its type —
+// unless, for a message looped back by a port mapped to the system with
+// no driver (loopback), the template can be the value's encoded form.
+func portReceiveMatch(head runtime.Object, loopback bool, n *syntax.CallExpr, env runtime.Scope) (bool, runtime.Object) {
 	if n.Args == nil || len(n.Args.List) == 0 {
 		return true, runtime.Any
 	}
@@ -12223,6 +12349,11 @@ func portReceiveMatch(head runtime.Object, n *syntax.CallExpr, env runtime.Scope
 	tmpl := eval(first, env)
 	if runtime.IsError(tmpl) || tmpl == nil {
 		return true, runtime.Any
+	}
+	// A typed template matches only a value of its type (ETSI ES 201
+	// 873-1 22.2.2): `charstring:?` is any charstring, not anything.
+	if typeExpr != nil && !(loopback && encodedView(typeExpr, env)) && !valueOfType(head, typeExpr, env) {
+		return false, tmpl
 	}
 	// Coerce a POSITIONAL record/set template to its declared named fields.
 	// A runtime.Record is an unordered map, so matching a positional list

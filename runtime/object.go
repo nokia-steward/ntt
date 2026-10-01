@@ -298,6 +298,9 @@ type TypeDesc struct {
 	// variable of such a type adopts this offset so `v[lo]` reads the
 	// first element (ETSI 6.2.7 / 6.3.1).
 	IndexOffset int
+	// IsList marks an array, record of or set of type: its values are
+	// lists.
+	IsList bool
 }
 
 func (t *TypeDesc) Type() ObjectType { return TYPE_DESC }

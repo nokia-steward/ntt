@@ -1402,6 +1402,9 @@ func bindDeclNameScoped(env runtime.Scope, n syntax.Node, scopes []*syntax.WithS
 				spec.KindTok.String() == "set" {
 				td.ListKind = runtime.SET_OF
 			}
+			if _, ok := d.Field.Type.(*syntax.ListSpec); ok || len(d.Field.ArrayDef) > 0 {
+				td.IsList = true
+			}
 			mergeUnderlyingAttrs(td, env)
 			env.Set(syntax.Name(d.Field.Name), td)
 		}

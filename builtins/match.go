@@ -408,7 +408,7 @@ func compileTTCNRegex(re string) (*regexp.Regexp, error) {
 //
 // Mapping (subset):
 //
-//	?            -> .
+//	?            -> .   (any character, a line end included)
 //	*            -> .*
 //	X#N          -> (X){N}
 //	X#(N,M)      -> (X){N,M}
@@ -421,7 +421,9 @@ func compileTTCNRegex(re string) (*regexp.Regexp, error) {
 //	regex metas  -> escaped (so .+ etc. are treated literally)
 func ttcnPatternToRegex(s string) (string, error) {
 	var b strings.Builder
-	b.WriteString(`\A`)
+	// `?` and `*` stand for any character (ETSI ES 201 873-1 B.1.5), a
+	// line end included: Go's `.` needs the s flag for that.
+	b.WriteString(`(?s)\A`)
 	for i := 0; i < len(s); {
 		c := s[i]
 		switch c {
