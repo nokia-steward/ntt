@@ -2,7 +2,7 @@
 // nil; depth_runtime.go's init() then leaves useFastGoid==false and
 // goroutineID() routes to the slow stack-parsing form.
 
-//go:build !(amd64 && linux)
+//go:build !(amd64 || arm64)
 
 package interpreter
 

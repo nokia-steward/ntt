@@ -5,7 +5,7 @@ import (
 )
 
 // BenchmarkGoroutineIDFast measures the asm fast path. On a machine
-// where init() has flipped useFastGoid==true (linux/amd64, default
+// where init() has flipped useFastGoid==true (amd64 or arm64, default
 // Go layout), this is the cost paid on every eval() entry/exit.
 func BenchmarkGoroutineIDFast(b *testing.B) {
 	if !useFastGoid {

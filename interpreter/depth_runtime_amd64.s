@@ -1,13 +1,15 @@
 // Assembly helper to read the current goroutine's `g` pointer from
 // the runtime's TLS slot. See depth_runtime.go for the why.
 //
-// linux/amd64 specific: the Go runtime stores g in the TLS slot at
-// FS:[0], identical to what the compiler emits when generating
-// goroutine-aware preludes. We copy that slot into the return value
-// and return -- five instructions, ~1-2 ns vs runtime.Stack's tens
-// of microseconds.
+// amd64: the Go runtime keeps g in its thread-local slot, which the
+// assembler's TLS pseudo-register addresses on every operating system
+// (FS on Linux, GS on macOS and Windows), as the compiler's own
+// goroutine-aware preludes do. We copy that slot into the return value
+// and return -- a few instructions, ~1-2 ns vs runtime.Stack's tens of
+// microseconds. init() checks the result against runtime.Stack before
+// using it.
 
-//go:build amd64 && linux
+//go:build amd64
 
 #include "textflag.h"
 

@@ -14,10 +14,10 @@
 // minutes-long hang we were seeing.
 //
 // This file replaces that with a direct read of g.goid via a tiny
-// piece of Go assembly that grabs the current g pointer out of the
-// runtime's TLS slot (see depth_runtime_amd64.s for the linux/amd64
-// build; other architectures fall back to runtime.Stack via the
-// build-constrained shim below).
+// piece of Go assembly that grabs the current g pointer: out of the
+// runtime's TLS slot on amd64 (depth_runtime_amd64.s), out of the g
+// register on arm64 (depth_runtime_arm64.s). Other architectures fall
+// back to runtime.Stack via the build-constrained shim below.
 //
 // goidOffset is calibrated at init() against runtime.Stack so we
 // fail loudly if a future Go release shuffles the g struct instead
@@ -33,9 +33,9 @@ import (
 	nttruntime "github.com/nokia/ntt/runtime"
 )
 
-// getg is implemented in depth_runtime_amd64.s for linux/amd64. On
-// other targets the build tag in that file is unset, and we fall
-// back to the slow path defined in depth_runtime_fallback.go.
+// getg is implemented in depth_runtime_amd64.s and depth_runtime_arm64.s. On
+// other targets depth_runtime_getg_other.go returns nil, and we fall
+// back to the slow path below.
 
 // goidOffset is the byte offset of the goid field within runtime.g.
 // Stable across Go 1.5..1.26 on amd64 (and arm64) but calibrated at
