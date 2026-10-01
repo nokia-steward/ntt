@@ -537,7 +537,8 @@ passed over for a thousand turns — and a parameter's default and a
   run each branch body as a participant of its own, acting as the
   component, so that a blocked branch parks while its siblings run; on
   the real clock the branches need a baton of their own.
-- A function called from a PTC reads and writes the module-level copy of a
+- *Fixed 2026-10-01 (see CHANGELOG; 0 gained, 0 lost — no conformance
+  fixture tells the copies apart).* A function called from a PTC reads and writes the module-level copy of a
   component variable, not the PTC's own: `function g() runs on C { n := n
   + 1 }` called from a PTC's behaviour leaves the PTC's `n` unchanged. And a
   component variable initialised from a module constant (`var R cr :=
@@ -546,6 +547,18 @@ passed over for a thousand turns — and a parameter's default and a
 - Starting a non-alive component again after its behaviour ended is
   accepted (ETSI 21.3.2 makes it an error).
 - `any from cs.done -> @index value i` binds nothing.
+- A class declared `runs on C` (ES 203 790) does not see the component's
+  variables in its methods.
+- Component types are registered under the testcase's module, whichever
+  module declares them, so of two like-named component types in different
+  modules one wins: a type extending `Base` in module X can get module M's
+  `Base`, and its own members then fall back to one copy every component
+  shares.
+- An error in a PTC's behaviour (an unknown identifier, say) ends it with
+  verdict `none`, not `error`; the testcase can then pass on the MTC's
+  verdict alone.
+- `match(v, t)` with `v` undefined is true.
+- A component type's `template` members are not bound.
 - An `execute()` timeout held in a control-part variable
   (`var float x := 1.0; execute(tc(), x)`) is not applied by `ntt exec`,
   which reads the control part without running it.
@@ -585,7 +598,8 @@ changed only as intended. Found, older than this work:
   once in a process (`-count=2`): its fixture's call counter is not reset.
 
 In order of what they cost a suite: component variables seen through a
-`runs on` function called from a PTC; interleave; a record's field order;
+`runs on` function called from a PTC (*fixed 2026-10-01*); interleave; a
+record's field order;
 the real clock's throughput with idle components; copying long values;
 then the small ones above.
 

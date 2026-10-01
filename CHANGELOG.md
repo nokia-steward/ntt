@@ -291,6 +291,17 @@ Independent of the two clocks:
   clock, as expired default timers did before.
 - **A call's signature no longer reaches a PTC** for the unqualified
   `getreply` / `catch` rule (22.3.1 h).
+- **Each component has its own variables** (ETSI 6.2.10.4), on either
+  clock: a function that runs on a component, however it is reached —
+  called from the behaviour a PTC was started with, from a default, from
+  another such function — reads and writes that component's variables,
+  timers and ports. Only the started function itself used to; anything it
+  called shared one module-wide copy with every other component, so two
+  PTCs running the same helpers counted into the same variable. A
+  component's variables are initialised when it is created, in the MTC
+  too, where one initialised from a constant was undefined; an extended
+  component type's members are inherited (6.2.10.2); and a function
+  running on a PTC no longer sees the names its starter had in scope.
 - **A stopped `alive` component can be started again** (ETSI 21.3.3), on
   either clock. The new behaviour did not run: `start` left the component
   `done`, so the next `c.done` was satisfied at once; and the stopped
@@ -343,9 +354,6 @@ in [`docs/conformance/remaining-work.md`](docs/conformance/remaining-work.md)
 - A receive in an `interleave` branch body does not wait: the engine does
   not expand interleave into its alternatives (ETSI 20.4), and two branches
   that depend on each other deadlock.
-- A function called from a PTC reads and writes the module-level copy of a
-  component variable, not the PTC's own, and a component variable
-  initialised from a module constant is undefined in the MTC.
 - Starting a non-alive component again after its behaviour ended is
   accepted, where ETSI 21.3.2 makes it an error.
 
