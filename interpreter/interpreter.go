@@ -1303,6 +1303,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			Name:    n.Name.String(),
 			Module:  moduleNameFromEnv(env),
 			Kind:    "function",
+			RunsOn:  n.RunsOn != nil,
 			Isolated: n.RunsOn == nil && n.Mtc == nil && n.System == nil &&
 				n.KindTok.Kind() != syntax.TESTCASE,
 		}
@@ -4175,6 +4176,21 @@ func evalBlockStmts(stmts []syntax.Stmt, env runtime.Scope) runtime.Object {
 	return result
 }
 
+// functionScope is the scope a call of fn runs in, around its parameters
+// and locals: the variables of the component it runs on, for a function
+// with runs on, before the module's definitions; else where fn was
+// defined.
+func functionScope(fn *runtime.Function) runtime.Scope {
+	if fn.RunsOn {
+		if exec := runtime.FindTestcaseExec(fn.Env); exec != nil {
+			if cur := exec.CurrentComponent(); cur != nil && cur.Vars != nil {
+				return cur.Vars
+			}
+		}
+	}
+	return fn.Env
+}
+
 // paramWritten reports whether body may write the variable name: assign to
 // it or into it, redirect into it, or pass it (or a part of it) as an
 // argument, which may be an inout or out one. The answer is cached per
@@ -6196,7 +6212,11 @@ func applyFunctionStopped(fn *runtime.Function, args []runtime.Object) (runtime.
 // parameters bound to args — each value the callee's own copy (ETSI 6) —
 // or to their defaults.
 func bindFunctionParams(fn *runtime.Function, args []runtime.Object) *runtime.Env {
-	fenv := runtime.NewEnv(fn.Env)
+	fenv := runtime.NewEnv(functionScope(fn))
+	// __SCOPE__ in a function or altstep is its name (ETSI D.5).
+	if fn.Name != "" {
+		fenv.Set(runtime.ScopeNameKey, runtime.NewCharstring(fn.Name))
+	}
 	if fn.Params != nil {
 		for i, param := range fn.Params.List {
 			if param == nil || param.Name == nil {
@@ -7361,14 +7381,37 @@ func componentExecutionEnv(ref *runtime.ComponentRef, parent runtime.Scope) runt
 	runEnv.Set(procCallSigKey, runtime.Undefined)
 	runEnv.Set(procCallTimeoutKey, runtime.Undefined)
 	if ref != nil {
-		if body := componentTypeBody(ref.Module, ref.TypeName); body != nil {
-			bindComponentMembers(runEnv, body)
+		// The component's variables: its own, in a scope of the
+		// module's — not the starter's, whose names a function running
+		// on the component has no business seeing — kept by an alive
+		// component across its behaviours (ETSI 21.3.2).
+		if !ref.AliveModifier || ref.Vars == nil {
+			vars := runtime.NewEnv(runtime.RootScope(parent))
+			vars.Set(procCallSigKey, runtime.Undefined)
+			vars.Set(procCallTimeoutKey, runtime.Undefined)
+			vars.Set("self", ref)
+			ref.Vars = vars
+			ref.PendingVars = func() { bindComponentType(vars, ref.Module, ref.TypeName) }
 		}
 		if ref.AliveModifier {
 			ref.Scope = runEnv
 		}
 	}
 	return runEnv
+}
+
+// initComponentVars binds ref's variables, on the component's own
+// goroutine once it runs as the component: an initialiser calling a
+// function that runs on it uses its variables (6.2.10.4), and one that
+// waits waits as the component, not as its starter.
+func initComponentVars(ref *runtime.ComponentRef) {
+	if ref == nil {
+		return
+	}
+	if f := ref.PendingVars; f != nil {
+		ref.PendingVars = nil
+		f()
+	}
 }
 
 func functionWithEnv(fn *runtime.Function, env runtime.Scope) *runtime.Function {
@@ -8034,6 +8077,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 					}
 					exec.PushComponent(ref)
 					defer exec.PopComponent()
+					initComponentVars(ref)
 					if fn != nil {
 						_, _, _ = applyFunctionWithCallSite(functionWithEnv(fn, runEnv), snapArgs, callArgExprs)
 					} else {
@@ -8175,6 +8219,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				}
 				exec.PushComponent(ref)
 				defer exec.PopComponent()
+				initComponentVars(ref)
 				if fn != nil {
 					result, fenv, stopped = applyFunctionWithCallSite(functionWithEnv(fn, runEnv), snapArgs, callArgExprs)
 				} else {
@@ -8241,6 +8286,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				exec.PushComponent(ref)
 				defer exec.PopComponent()
 			}
+			initComponentVars(ref)
 			scopedFn := functionWithEnv(fn, runEnv)
 			indexSnapshot := snapshotLHSIndices(fn, callArgExprs, env)
 			var fenv runtime.Scope
@@ -8253,6 +8299,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				exec.PushComponent(ref)
 				defer exec.PopComponent()
 			}
+			initComponentVars(ref)
 			result = eval(body, runEnv)
 			if rv, ok := result.(*runtime.ReturnValue); ok {
 				result = rv.Value

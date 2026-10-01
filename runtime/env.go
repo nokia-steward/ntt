@@ -104,6 +104,18 @@ func (env *Env) Assign(name string, val Object) bool {
 	return false
 }
 
+// RootScope returns the outermost scope of s's chain: the module scope a
+// testcase's scopes all lead to.
+func RootScope(s Scope) Scope {
+	for {
+		e, ok := s.(*Env)
+		if !ok || e == nil || e.outer == nil {
+			return s
+		}
+		s = e.outer
+	}
+}
+
 func NewEnv(outer Scope) *Env {
 	return &Env{
 		outer: outer,

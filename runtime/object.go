@@ -405,6 +405,17 @@ type ComponentRef struct {
 	// ended via stop/kill. Redirect clauses are suppressed in that
 	// incomplete-execution case (ETSI 21.3.10).
 	LastCallStopped bool
+
+	// Vars is the scope holding the component's own variables, constants,
+	// timers and ports — its type's members (ETSI ES 201 873-1 6.2.10.4).
+	// A function that runs on the component, however it is reached,
+	// reads and writes these.
+	Vars Scope
+
+	// PendingVars binds the component's variables into Vars, when its
+	// behaviour first runs, as the component (see the interpreter's
+	// initComponentVars); nil once done.
+	PendingVars func()
 }
 
 // MergeVerdict folds v into the component's local verdict using the
@@ -1394,6 +1405,10 @@ type Function struct {
 	// produces a RaisedValue (catch) or unconditionally (finally).
 	Catch   []*syntax.CatchClause
 	Finally *syntax.BlockStmt
+
+	// RunsOn marks a function or altstep declared with a runs on clause: it
+	// sees the variables of the component it runs on (ComponentRef.Vars).
+	RunsOn bool
 
 	// Isolated marks a function declared without runs on, mtc or system:
 	// it sees no component's variables, so nothing it does can change the

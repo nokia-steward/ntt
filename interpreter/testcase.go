@@ -416,9 +416,13 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 		env.Set(runtime.ModuleNameKey, runtime.NewCharstring(syntax.Name(modNode.Name)))
 	}
 
+	// The MTC's variables, constants, timers and ports are its own, bound
+	// when it is created — now, when the module's constants have their
+	// values — and seen by every function that runs on it.
+	mtcVars := runtime.NewEnv(env)
 	// Testcases get a fresh inner scope so locals don't leak into the
 	// module namespace.
-	tcEnv := runtime.NewEnv(env)
+	tcEnv := runtime.NewEnv(mtcVars)
 	tcEnv.Set(runtime.ScopeNameKey, runtime.NewCharstring(fnName))
 	// Stash the testcase's effective Annex E attributes (the testcase
 	// `with { encode ... }` clause overriding the module clause) so a
@@ -434,6 +438,9 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 			tcWith = tcNode.With
 		}
 		tcEnv.Set(activeAttrsKey, typeDescForScoped("", tcWith, []*syntax.WithSpec{modWith}))
+		// Outside the testcase — a behaviour started on a PTC, a function
+		// — the module's attributes apply.
+		env.Set(activeAttrsKey, typeDescForScoped("", nil, []*syntax.WithSpec{modWith}))
 	}
 	// Allocate a real ComponentRef for the MTC so `mtc.stop` /
 	// `mtc.kill` / `self.stop` operations target a stable handle
@@ -471,6 +478,7 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 	env.Set("system", systemSender)
 	exec.PushComponent(mtcRef)
 	defer exec.PopComponent()
+	mtcRef.Vars = mtcVars
 	// Bind formal parameters of the testcase. The executor doesn't
 	// pass actual arguments, so we first try to fish them out of the
 	// module's control part - many ETSI fixtures execute the same
@@ -494,6 +502,12 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 		// tliTcTerminated is logged by the caller, once the verdict is
 		// final: a panic or an execute() timeout still changes it here.
 		tlTestcaseStarted(lexec, tcNode, module, fnName, tcEnv)
+	}
+	// The MTC's variables, bound as the MTC — an initialiser calling a
+	// function that runs on it uses its variables — once the testcase has
+	// started.
+	if tcNode != nil && tcNode.RunsOn != nil && tcNode.RunsOn.Comp != nil {
+		bindComponentType(mtcVars, module, mtcTypeName)
 	}
 	if lexec := tlExec(tcEnv); lexec != nil {
 		tlScope(lexec, tcNode, "tliSEnter", module, fnName, "testcase", tcNode.Params, tcEnv, nil)
@@ -1314,6 +1328,7 @@ func bindDeclNameScoped(env runtime.Scope, n syntax.Node, scopes []*syntax.WithS
 			// no TestcaseExec yet at this point.
 			if d.Name != nil {
 				registerComponentTypeBody(env, syntax.Name(d.Name), d.Body)
+				registerComponentTypeParents(d.Body, d.Extends)
 				registerComponentTypePortsFromBody(syntax.Name(d.Name), d.Body)
 			}
 		}
@@ -3314,6 +3329,7 @@ func registerComponentTypePortsFromBody(compTypeName string, body *syntax.BlockS
 var (
 	componentTypeBodiesMu sync.RWMutex
 	componentTypeBodies   = map[string]*syntax.BlockStmt{}
+	componentTypeParents  = map[*syntax.BlockStmt][]string{} // by the type's body; guarded by componentTypeBodiesMu
 )
 
 func registerComponentTypeBody(env runtime.Scope, compTypeName string, body *syntax.BlockStmt) {
@@ -3324,6 +3340,53 @@ func registerComponentTypeBody(env runtime.Scope, compTypeName string, body *syn
 	defer componentTypeBodiesMu.Unlock()
 	componentTypeBodies[componentTypeKey(moduleNameFromEnv(env), compTypeName)] = body
 	componentTypeBodies[compTypeName] = body
+}
+
+// registerComponentTypeParents records the component types the component
+// type declared with body extends (ETSI ES 201 873-1 6.2.10.2): by the
+// declaration itself, so that a like-named type of another module has
+// its own.
+func registerComponentTypeParents(body *syntax.BlockStmt, extends []syntax.Expr) {
+	if body == nil || len(extends) == 0 {
+		return
+	}
+	var parents []string
+	for _, e := range extends {
+		if n := syntax.Name(e); n != "" {
+			parents = append(parents, n)
+		}
+	}
+	componentTypeBodiesMu.Lock()
+	defer componentTypeBodiesMu.Unlock()
+	componentTypeParents[body] = parents
+}
+
+// bindComponentType binds into env the members of component type
+// compTypeName — those it inherits first, then its own, which may
+// override none of them (6.2.10.2) — as a component of that type has them.
+func bindComponentType(env runtime.Scope, moduleName, compTypeName string) {
+	var bind func(name string, seen map[string]bool)
+	bind = func(name string, seen map[string]bool) {
+		if seen[name] {
+			return
+		}
+		seen[name] = true
+		body := componentTypeBody(moduleName, name)
+		if body == nil {
+			return
+		}
+		componentTypeBodiesMu.RLock()
+		parents := componentTypeParents[body]
+		componentTypeBodiesMu.RUnlock()
+		for _, p := range parents {
+			bind(p, seen)
+		}
+		// __SCOPE__ in a member's initialiser is its component type
+		// (ETSI D.5).
+		env.Set(runtime.ScopeNameKey, runtime.NewCharstring(name))
+		bindComponentMembers(env, body)
+	}
+	bind(compTypeName, map[string]bool{})
 }
 
 func componentTypeBody(moduleName, compTypeName string) *syntax.BlockStmt {
