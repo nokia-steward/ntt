@@ -1,35 +1,35 @@
 # Current Conformance Misses
 
-Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/735de3fb-56f8-493f-b29c-b428a203445d/scratchpad/off6.json` using the current workspace runner.
+Generated from `conformance-report.json` using the current workspace runner.
 
-- Summary: `ran 4948 files: 4787 matched, 23 skipped (97.20% match rate)`
-- Misses: `161`
+- Summary: `ran 4948 files: 4794 matched, 23 skipped (97.34% match rate)`
+- Misses: `154`
 
 ## Misses By Outcome
 
 - `reject->pass`: `77`
 - `reject->none`: `24`
 - `->`: `23`
-- `pass->error`: `17`
+- `pass->error`: `14`
 - `pass->fail`: `10`
-- `pass->none`: `8`
+- `pass->none`: `4`
 - `pass->parse-error`: `2`
 
 ## Misses By Chapter
 
-- `core_language/22_communication_operations`: `43` (`pass->error`=12, `pass->fail`=9, `pass->none`=2, `reject->none`=1, `reject->pass`=19)
+- `core_language/22_communication_operations`: `41` (`pass->error`=12, `pass->fail`=9, `reject->none`=1, `reject->pass`=19)
 - `core_language/06_types_and_values`: `34` (`->`=9, `reject->none`=10, `reject->pass`=15)
 - `core_language/05_basic_language_elements`: `20` (`->`=3, `reject->none`=1, `reject->pass`=16)
 - `core_language/15_templates`: `16` (`->`=2, `reject->none`=3, `reject->pass`=11)
 - `core_language/09_test_configurations`: `8` (`pass->error`=1, `reject->none`=4, `reject->pass`=3)
-- `core_language/16_functions_altsteps_testcases`: `8` (`->`=1, `pass->error`=1, `pass->none`=1, `reject->none`=1, `reject->pass`=4)
-- `core_language/20_statement_and_operations_for_alt`: `8` (`pass->error`=1, `pass->fail`=1, `pass->none`=3, `reject->pass`=3)
-- `core_language/11_variables`: `4` (`->`=2, `pass->error`=2)
+- `core_language/16_functions_altsteps_testcases`: `7` (`->`=1, `pass->none`=1, `reject->none`=1, `reject->pass`=4)
+- `core_language/20_statement_and_operations_for_alt`: `6` (`pass->error`=1, `pass->fail`=1, `pass->none`=1, `reject->pass`=3)
 - `core_language/26_module_control`: `3` (`->`=3)
 - `core_language/B_matching_incoming_values`: `3` (`reject->none`=2, `reject->pass`=1)
 - `oo/501_classes_and_objects`: `3` (`pass->parse-error`=2, `reject->pass`=1)
 - `core_language/07_expressions`: `2` (`reject->pass`=2)
 - `core_language/08_modules`: `2` (`->`=2)
+- `core_language/11_variables`: `2` (`->`=2)
 - `core_language/21_configuration_operations`: `2` (`reject->pass`=2)
 - `core_language/27_specifying_attributes`: `2` (`->`=1, `reject->none`=1)
 - `core_language/19_basic_program_statements`: `1` (`pass->none`=1)
@@ -48,8 +48,6 @@ Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/735de3fb-56f8-493f-b2
 - `core_language/22_communication_operations/2202_message_based_communication/220203_trigger_operation/NegSem_220203_TriggerOperation_023.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_012.ttcn`: `reject -> pass` - Both replies received
 - `core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_020.ttcn`: `reject -> none`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/Sem_220301_CallOperation_011.ttcn`: `pass -> none`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/Sem_220301_CallOperation_013.ttcn`: `pass -> none`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_012.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_017.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/Sem_220302_getcall_operation_007.ttcn`: `pass -> fail` - The any from getcall operation didn't match for some reason
@@ -60,7 +58,9 @@ Generated from `/tmp/claude-1000/-home-rdiniz-programs-ntt/735de3fb-56f8-493f-b2
 - `core_language/22_communication_operations/2203_procedure_based_communication/220303_reply_operation/NegSem_220303_ReplyOperation_008.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220303_reply_operation/NegSem_220303_ReplyOperation_010.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_009.ttcn`: `reject -> pass`
-- ... `23` more in `current-misses.json`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_014.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_016.ttcn`: `reject -> pass`
+- ... `21` more in `current-misses.json`
 
 ### `core_language/06_types_and_values`
 

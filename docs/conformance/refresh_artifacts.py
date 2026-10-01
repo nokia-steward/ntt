@@ -185,7 +185,9 @@ def main():
     args = ap.parse_args()
 
     report = load_report(args.report)
-    inv = build_misses(report, args.report)
+    # Only the report's file name: where it was written is local to the
+    # machine that ran it, and the artifacts are published.
+    inv = build_misses(report, os.path.basename(args.report))
     with open(MISSES_JSON, "w") as f:
         json.dump(inv, f, indent=1)
         f.write("\n")

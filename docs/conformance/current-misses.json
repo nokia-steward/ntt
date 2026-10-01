@@ -1,24 +1,23 @@
 {
- "summary": "ran 4948 files: 4787 matched, 23 skipped (97.20% match rate)",
- "source": "/tmp/claude-1000/-home-rdiniz-programs-ntt/735de3fb-56f8-493f-b29c-b428a203445d/scratchpad/off6.json",
- "miss_count": 161,
+ "summary": "ran 4948 files: 4794 matched, 23 skipped (97.34% match rate)",
+ "source": "conformance-report.json",
+ "miss_count": 154,
  "outcomes": {
   "reject->pass": 77,
   "reject->none": 24,
   "->": 23,
-  "pass->error": 17,
+  "pass->error": 14,
   "pass->fail": 10,
-  "pass->none": 8,
+  "pass->none": 4,
   "pass->parse-error": 2
  },
  "chapters": [
   {
    "chapter": "core_language/22_communication_operations",
-   "misses": 43,
+   "misses": 41,
    "outcomes": {
     "reject->pass": 19,
     "reject->none": 1,
-    "pass->none": 2,
     "pass->fail": 9,
     "pass->error": 12
    }
@@ -61,31 +60,22 @@
   },
   {
    "chapter": "core_language/16_functions_altsteps_testcases",
-   "misses": 8,
+   "misses": 7,
    "outcomes": {
     "reject->none": 1,
     "reject->pass": 4,
     "->": 1,
-    "pass->error": 1,
     "pass->none": 1
    }
   },
   {
    "chapter": "core_language/20_statement_and_operations_for_alt",
-   "misses": 8,
+   "misses": 6,
    "outcomes": {
-    "pass->none": 3,
+    "pass->none": 1,
     "pass->fail": 1,
     "pass->error": 1,
     "reject->pass": 3
-   }
-  },
-  {
-   "chapter": "core_language/11_variables",
-   "misses": 4,
-   "outcomes": {
-    "->": 2,
-    "pass->error": 2
    }
   },
   {
@@ -120,6 +110,13 @@
   },
   {
    "chapter": "core_language/08_modules",
+   "misses": 2,
+   "outcomes": {
+    "->": 2
+   }
+  },
+  {
+   "chapter": "core_language/11_variables",
    "misses": 2,
    "outcomes": {
     "->": 2
@@ -701,27 +698,11 @@
   },
   {
    "chapter": "core_language/11_variables",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/11_variables/1101_value_variables/Sem_1101_ValueVars_001.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/11_variables",
    "expected": "",
    "actual": "",
    "outcome": "->",
    "relpath": "core_language/11_variables/1102_template_variables/NegSyn_1102_TemplateVars_001.ttcn",
    "message": ""
-  },
-  {
-   "chapter": "core_language/11_variables",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/11_variables/1102_template_variables/Sem_1102_TemplateVars_001.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
   },
   {
    "chapter": "core_language/15_templates",
@@ -902,14 +883,6 @@
   {
    "chapter": "core_language/16_functions_altsteps_testcases",
    "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/16_functions_altsteps_testcases/1602_altsteps/160201_invoking_altsteps/Sem_160201_invoking_altsteps_004.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/16_functions_altsteps_testcases",
-   "expected": "pass",
    "actual": "none",
    "outcome": "pass->none",
    "relpath": "core_language/16_functions_altsteps_testcases/1602_altsteps/1602_toplevel/Sem_1602_toplevel_004.ttcn",
@@ -921,22 +894,6 @@
    "actual": "none",
    "outcome": "pass->none",
    "relpath": "core_language/19_basic_program_statements/1909_stop_statement/Sem_1909_stop_statement_004.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/20_statement_and_operations_for_alt",
-   "expected": "pass",
-   "actual": "none",
-   "outcome": "pass->none",
-   "relpath": "core_language/20_statement_and_operations_for_alt/2003_the_repeat_statement/Sem_2003_the_repeat_statement_002.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/20_statement_and_operations_for_alt",
-   "expected": "pass",
-   "actual": "none",
-   "outcome": "pass->none",
-   "relpath": "core_language/20_statement_and_operations_for_alt/2003_the_repeat_statement/Sem_2003_the_repeat_statement_003.ttcn",
    "message": ""
   },
   {
@@ -1065,22 +1022,6 @@
    "actual": "none",
    "outcome": "reject->none",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_020.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "none",
-   "outcome": "pass->none",
-   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/Sem_220301_CallOperation_011.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "none",
-   "outcome": "pass->none",
-   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/Sem_220301_CallOperation_013.ttcn",
    "message": ""
   },
   {
