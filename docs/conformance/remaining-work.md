@@ -563,6 +563,32 @@ passed over for a thousand turns — and a parameter's default and a
 - An activated default does not fire in a blocking receive or alt inside
   a function without `runs on` called from a component.
 
+**Testing after it, 2026-10-01.** Every conformance file that executes
+(2617) was run on both clocks with logging on: the verdicts are the same
+on both for all of them, and 2479 log the same actions (`ntt log diff`).
+The corpus report is the same byte for byte with one job and with eight.
+The reviews' 170 probe files, run on the build before this work and after,
+changed only as intended. Found, older than this work:
+
+- **A record's fields are written in no particular order** — by `log()`
+  and in the test log, where the Annex B value lists them as declared:
+  `{field2 := 4, field1 := 3}`. A record holds its fields in a map, which
+  `Inspect` and the TCI-TL conversion walk as it comes. 72 of the 138
+  files whose two logs differ differ only in this.
+- **On the real clock, idle components slow an exchange a hundredfold**:
+  an MTC/echo ping-pong runs at about 37000 round trips a second, and at
+  about 290 with 20 PTCs parked in an alt on a long timer. It bears on
+  live testing and profiling.
+- `any from pa.getcall(...)` over a port array does not match (5
+  conformance files, Sem_220302_getcall_operation_007, _010 to _013).
+- The C test-port bridge's `TestRegisterAndSend` fails when run more than
+  once in a process (`-count=2`): its fixture's call counter is not reset.
+
+In order of what they cost a suite: component variables seen through a
+`runs on` function called from a PTC; interleave; a record's field order;
+the real clock's throughput with idle components; copying long values;
+then the small ones above.
+
 ### 1y. `comp.done` does not block on the real clock — FIXED 2026-09-14
 
 Found 2026-09-09 by a Windows CI failure in a test of the built-in TCP port,
