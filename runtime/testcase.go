@@ -480,6 +480,10 @@ func (t *TestcaseExec) FinishPTC(refID int64) {
 // given a brief grace period to unwind before WaitPTCs returns
 // regardless. Called from RunTestcaseWith on the way out so a
 // PTC running an infinite alt doesn't dangle the testcase.
+// settleBound bounds how long, on the real clock, the PTCs still running
+// when the MTC's behaviour ends get to wait or finish (see WaitPTCs).
+const settleBound = time.Second
+
 func (t *TestcaseExec) WaitPTCs(timeout time.Duration) {
 	t.ptcMu.Lock()
 	exits := make([]*PTCExit, 0, len(t.ptcExits))
@@ -495,7 +499,10 @@ func (t *TestcaseExec) WaitPTCs(timeout time.Duration) {
 	// until it waits or finishes, as the scheduler's drain gives it on the
 	// virtual clock.
 	if t.sched == nil {
-		settle := time.Now().Add(timeout)
+		// Bounded: long enough for one on a loaded host to finish
+		// what it was doing; a PTC that computes for good costs its
+		// testcase that much, then is stopped.
+		settle := time.Now().Add(settleBound)
 		for _, p := range exits {
 			for time.Now().Before(settle) {
 				select {
@@ -520,6 +527,8 @@ func (t *TestcaseExec) WaitPTCs(timeout time.Duration) {
 	for _, p := range exits {
 		p.Stop()
 	}
+	// A PTC waiting on a timer wakes on a message or the stop; wake it.
+	t.signalMessageReady()
 	deadline := time.Now().Add(timeout)
 	for _, p := range exits {
 		remaining := time.Until(deadline)
@@ -871,7 +880,9 @@ func (t *TestcaseExec) EnqueueMessageFrom(port string, msg Object, sender Object
 		t.ports = map[string][]PortMessage{}
 	}
 	t.msgSeq++
-	pm := PortMessage{Payload: msg, Sender: sender, Seq: t.msgSeq}
+	// What is sent is a value (ETSI ES 201 873-1 22.2.1): the sender's
+	// later changes do not reach it, nor one receiver's the others'.
+	pm := PortMessage{Payload: CopyValue(msg), Sender: sender, Seq: t.msgSeq}
 	t.ports[port] = append(t.ports[port], pm)
 	t.mu.Unlock()
 	t.tlDetected(port, pm)
@@ -1485,6 +1496,8 @@ func (t *TestcaseExec) EnqueueEnvelope(port string, msg PortMessage) {
 	}
 	t.msgSeq++
 	msg.Seq = t.msgSeq
+	msg.Payload = CopyValue(msg.Payload)
+	msg.RetValue = CopyValue(msg.RetValue)
 	t.ports[port] = append(t.ports[port], msg)
 	t.mu.Unlock()
 	t.tlDetected(port, msg)
@@ -2101,6 +2114,31 @@ func (t *TestcaseExec) SetDeterministicScheduler(b bool) {
 	t.mu.Unlock()
 }
 
+// SetVirtualLimit bounds the testcase to d seconds of virtual time from
+// now (an execute() timeout, ETSI ES 201 873-1 26.1): when the clock would
+// pass it, the testcase is stopped. No-op with the scheduler off.
+func (t *TestcaseExec) SetVirtualLimit(d float64) {
+	if t.sched == nil {
+		return
+	}
+	t.sched.mu.Lock()
+	t.sched.limit = t.sched.clock + d
+	t.sched.hasLimit = true
+	t.sched.onLimit = t.Stop
+	t.sched.mu.Unlock()
+}
+
+// VirtualLimitReached reports whether the testcase was stopped by its
+// virtual-time limit (SetVirtualLimit).
+func (t *TestcaseExec) VirtualLimitReached() bool {
+	if t.sched == nil {
+		return false
+	}
+	t.sched.mu.Lock()
+	defer t.sched.mu.Unlock()
+	return t.sched.limitHit
+}
+
 // SchedulerActive reports whether the cooperative scheduler owns timing.
 func (t *TestcaseExec) SchedulerActive() bool {
 	return t.sched != nil
@@ -2177,18 +2215,46 @@ func (t *TestcaseExec) SchedDrain(id int64) {
 	}
 }
 
+// SchedYield hands the token on while participant id computes, and gets it
+// back (see coopScheduler.yield). No-op with the scheduler off.
+func (t *TestcaseExec) SchedYield(id int64, stop <-chan struct{}) (stopped bool) {
+	if t.sched == nil {
+		return false
+	}
+	return t.sched.yield(id, stop)
+}
+
+// SchedRunning reports whether participant id holds the scheduler's
+// token: whether the calling behaviour is the one the scheduler runs.
+// True with the scheduler off.
+func (t *TestcaseExec) SchedRunning(id int64) bool {
+	if t.sched == nil {
+		return true
+	}
+	t.sched.mu.Lock()
+	defer t.sched.mu.Unlock()
+	return t.sched.running == id
+}
+
 // SchedParkWhileLive parks participant id until participant other has
 // finished, or stop fires (see coopScheduler.parkWhileLive). No-op with the
 // scheduler off.
 func (t *TestcaseExec) SchedParkWhileLive(id, other int64, stop <-chan struct{}) (stopped bool) {
+	stopped, _ = t.SchedParkWhileLiveFor(id, other, 0, false, stop)
+	return stopped
+}
+
+// SchedParkWhileLiveFor is SchedParkWhileLive for at most d seconds of the
+// virtual clock, with bounded; timedOut reports that d elapsed first.
+func (t *TestcaseExec) SchedParkWhileLiveFor(id, other int64, d float64, bounded bool, stop <-chan struct{}) (stopped, timedOut bool) {
 	if t.sched == nil {
-		return false
+		return false, false
 	}
-	st, dl := t.sched.parkWhileLive(id, other, stop)
+	st, dl, to := t.sched.parkWhileLive(id, other, t.sched.now()+d, bounded, stop)
 	if dl {
 		t.reportDeadlock()
 	}
-	return st
+	return st, to
 }
 
 // reportDeadlock records a terminal scheduler deadlock as an `error`

@@ -176,7 +176,12 @@ func exprStmtCallExpr(es *syntax.ExprStmt) *syntax.CallExpr {
 	if es == nil || es.Expr == nil {
 		return nil
 	}
-	ce, ok := es.Expr.(*syntax.CallExpr)
+	e := es.Expr
+	// `p.call(...) to c`: the call is the left of the `to` clause.
+	if b, ok := e.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.TO {
+		e = b.X
+	}
+	ce, ok := e.(*syntax.CallExpr)
 	if !ok {
 		return nil
 	}

@@ -178,11 +178,21 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// (ETSI 22.3.1 h).
 		var restoreCallSig, restoreCallTimeout func()
 		if es, ok := n.Stmt.(*syntax.ExprStmt); ok {
-			if ce, ok := es.Expr.(*syntax.CallExpr); ok {
+			// `p.call(...) to c { ... }` addresses the call; the block
+			// is the same.
+			call, to := es.Expr, syntax.Expr(nil)
+			if b, ok := call.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.TO {
+				call, to = b.X, b.Y
+			}
+			if ce, ok := call.(*syntax.CallExpr); ok {
 				if sel, ok := ce.Fun.(*syntax.SelectorExpr); ok {
 					if op, ok := sel.Sel.(*syntax.Ident); ok && op.String() == "call" {
 						if pname, ok := portExprName(sel.X, env); ok {
-							_ = evalProcedurePortOp("call", pname, ce, env)
+							if to != nil {
+								_ = evalProcedureCallTo(pname, ce, to, env)
+							} else {
+								_ = evalProcedurePortOp("call", pname, ce, env)
+							}
 							restoreCallSig = pushCallSignature(ce, env)
 							// The call's timeout duration becomes a virtual
 							// timer the response-block alt parks on so
@@ -314,13 +324,13 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		}
 		if info := extractCommOp(n); info.call != nil {
 			if sel, ok := info.call.Fun.(*syntax.SelectorExpr); ok {
-				if portIdent, ok := sel.X.(*syntax.Ident); ok {
+				if portName, ok := commPortName(sel.X, env); ok {
 					if op, ok := sel.Sel.(*syntax.Ident); ok {
 						switch op.String() {
 						case "receive", "trigger", "getreply", "catch", "getcall":
-							return evalPortReceiveInfo(portIdent.String(), info, env, true)
+							return evalPortReceiveInfo(portName, info, env, true)
 						case "check":
-							return evalPortReceiveInfo(portIdent.String(), info, env, false)
+							return evalPortReceiveInfo(portName, info, env, false)
 						}
 					}
 				}
@@ -404,7 +414,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 	case *syntax.Declarator:
 		var val runtime.Object = runtime.Undefined
 		if n.Value != nil {
-			val = eval(n.Value, env)
+			val = runtime.CopyValue(eval(n.Value, env))
 			if runtime.IsError(val) {
 				return val
 			}
@@ -1293,6 +1303,8 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			Name:    n.Name.String(),
 			Module:  moduleNameFromEnv(env),
 			Kind:    "function",
+			Isolated: n.RunsOn == nil && n.Mtc == nil && n.System == nil &&
+				n.KindTok.Kind() != syntax.TESTCASE,
 		}
 		if n.KindTok.Kind() == syntax.ALTSTEP {
 			f.IsAltstep = true
@@ -1328,6 +1340,8 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				return evalGetverdict(env)
 			case "log":
 				return evalLog(n, env)
+			case "action":
+				return evalAction(n, env)
 			case "decvalue", "decvalue_o", "decvalue_unichar":
 				return evalDecValue(name.String(), n, env)
 			case "encvalue", "encvalue_o", "encvalue_unichar":
@@ -1459,7 +1473,14 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// constructed class instance (ETSI 5.1.1.8/5.1.1.9). Checked
 		// before the component/port operations so an object's method
 		// never collides with a component op name.
+		// A port operation (`pa[f()].send(1)`) is recognised without
+		// evaluating the port reference, whose index the port path
+		// evaluates, once.
+		onPort := false
 		if sel, ok := n.Fun.(*syntax.SelectorExpr); ok {
+			onPort = isPortReference(sel.X, env)
+		}
+		if sel, ok := n.Fun.(*syntax.SelectorExpr); ok && !onPort {
 			if op, ok := sel.Sel.(*syntax.Ident); ok {
 				if inst, ok := eval(sel.X, env).(*runtime.ClassInstance); ok {
 					if res, handled := dispatchClassMethod(inst, op.String(), n, env); handled {
@@ -1478,7 +1499,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// Receivers can be Ident (`MyComp.create`), IndexExpr
 		// (`v_ptcs[i].start(f)`) or any expression that evaluates
 		// to a TypeDesc / ComponentRef.
-		if sel, ok := n.Fun.(*syntax.SelectorExpr); ok {
+		if sel, ok := n.Fun.(*syntax.SelectorExpr); ok && !onPort {
 			if op, ok := sel.Sel.(*syntax.Ident); ok {
 				switch op.String() {
 				case "create", "start", "stop", "kill", "alive", "running", "done", "killed", "call":
@@ -1519,7 +1540,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// `nowait`, or its signature is `noblock`.
 		if sel, ok := n.Fun.(*syntax.SelectorExpr); ok {
 			if op, ok := sel.Sel.(*syntax.Ident); ok && isProcedurePortOp(op.String()) {
-				if pname, ok := portExprName(sel.X, env); ok {
+				// `any port.getcall(...)` is no port of that name: it
+				// fans out below (ETSI 22.5).
+				if pname, ok := portExprName(sel.X, env); ok && pname != "any port" {
 					return evalProcedurePortOp(op.String(), pname, n, env)
 				}
 			}
@@ -1531,25 +1554,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				// (`p.send`) or a port-array element (`p[i].send`,
 				// an IndexExpr); resolve both to the instance name
 				// that keys the message queue (TTCN-3 22.1).
-				name := ""
-				haveName := false
-				if portIdent, ok := sel.X.(*syntax.Ident); ok {
-					name = portIdent.String()
-					// Follow a port passed as a parameter to its
-					// originating instance (ETSI 5.4.2), so a
-					// `p_port.receive`/`.send` inside a function or
-					// activated default acts on the caller's port.
-					if pn, isPort := resolvePortName(sel.X, env); isPort {
-						name = pn
-					}
-					haveName = true
-				} else if _, ok := sel.X.(*syntax.IndexExpr); ok {
-					if pn, ok := portExprName(sel.X, env); ok {
-						name = pn
-						haveName = true
-					}
-				}
-				if haveName {
+				if name, haveName := commPortName(sel.X, env); haveName {
 					// `any port.receive(...)` (and friends)
 					// fan out across every known port queue
 					// and pick the first match. The lexer
@@ -1716,11 +1721,6 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return apply(f, args)
 
 	case *syntax.WhileStmt:
-		if alwaysTrue(n.Cond) {
-			if r, parked := parkEndlessLoop(n, n.Body, env); parked {
-				return r
-			}
-		}
 		for {
 			if r := loopStopped(env); r != nil {
 				return r
@@ -1764,11 +1764,6 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		}
 
 	case *syntax.DoWhileStmt:
-		if alwaysTrue(n.Cond) {
-			if r, parked := parkEndlessLoop(n, n.Body, env); parked {
-				return r
-			}
-		}
 		for {
 			if r := loopStopped(env); r != nil {
 				return r
@@ -1803,11 +1798,6 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			val := eval(n.Init, env)
 			if runtime.IsError(val) {
 				return val
-			}
-		}
-		if alwaysTrue(n.Cond) {
-			if r, parked := parkEndlessLoop(n, n.Body, env); parked {
-				return r
 			}
 		}
 
@@ -2589,9 +2579,8 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 	if op == syntax.TO || op == syntax.FROM {
 		if info := extractCommOp(n); info.call != nil {
 			if sel, ok := info.call.Fun.(*syntax.SelectorExpr); ok {
-				if portIdent, ok := sel.X.(*syntax.Ident); ok {
+				if portName, ok := commPortName(sel.X, env); ok {
 					if name, ok := sel.Sel.(*syntax.Ident); ok {
-						portName := portIdent.String()
 						switch name.String() {
 						case "send":
 							return evalPortSendTo(portName, info.call, env, info.to)
@@ -3734,7 +3723,9 @@ func evalExprList(exprs []syntax.Expr, env runtime.Scope) []runtime.Object {
 }
 
 func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtime.Object) {
-	val := eval(rhs, env)
+	// The target gets its own value (ETSI 6): `r2 := r` then `r.a := 3`
+	// leaves r2 as it was.
+	val := runtime.CopyValue(eval(rhs, env))
 	if runtime.IsError(val) {
 		return val
 	}
@@ -3920,7 +3911,9 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 				// Copy-on-write before mutating an interned
 				// ASCII-single-rune cache entry; otherwise
 				// the in-place edit would corrupt every
-				// other holder of "X" / body[k] / etc.
+				// other holder of "X" / body[k] / etc. A
+				// variable holds a charstring of its own
+				// (runtime.CopyValue), so no other does.
 				if cloned, swapped := s.CloneIfInterned(); swapped {
 					s = cloned
 					storeReceiver(l.X, s, env)
@@ -3978,9 +3971,7 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 			rec.Set(fid.String(), val)
 			return storeReceiver(l.X, rec, env)
 		}
-		if s, ok := recv.(runtime.Scope); ok {
-			s.Set(fid.String(), val)
-		}
+		setField(recv, fid.String(), val)
 		return nil
 	}
 
@@ -3988,6 +3979,46 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 	// CallExpr, etc.). Swallow the assignment so the rest of the
 	// testcase still runs.
 	return nil
+}
+
+// isPortReference reports, without evaluating anything, whether e names
+// a port: a port identifier, or an element of a port array (`pa[i]`).
+func isPortReference(e syntax.Expr, env runtime.Scope) bool {
+	for {
+		switch x := e.(type) {
+		case *syntax.IndexExpr:
+			e = x.X
+			continue
+		case *syntax.Ident:
+			v, ok := env.Get(x.String())
+			if !ok {
+				return false
+			}
+			_, isPort := v.(*runtime.PortRef)
+			return isPort
+		}
+		return false
+	}
+}
+
+// setField sets field name of a structured value to val: a record held by
+// name, or one held positionally with its field names (as a positional
+// initialiser such as `{1, 2}` leaves it).
+func setField(recv runtime.Object, name string, val runtime.Object) {
+	switch r := recv.(type) {
+	case *runtime.List:
+		for i, f := range r.FieldNames {
+			if f == name {
+				for len(r.Elements) <= i {
+					r.Elements = append(r.Elements, runtime.Undefined)
+				}
+				r.Elements[i] = val
+				return
+			}
+		}
+	case runtime.Scope:
+		r.Set(name, val)
+	}
 }
 
 // storeReceiver writes back a freshly materialised aggregate (Record /
@@ -4006,9 +4037,7 @@ func storeReceiver(recv syntax.Expr, val runtime.Object, env runtime.Scope) runt
 			parent = runtime.NewRecord()
 		}
 		if fid, ok := r.Sel.(*syntax.Ident); ok {
-			if p, ok := parent.(runtime.Scope); ok {
-				p.Set(fid.String(), val)
-			}
+			setField(parent, fid.String(), val)
 		}
 		return storeReceiver(r.X, parent, env)
 	case *syntax.IndexExpr:
@@ -4118,7 +4147,19 @@ func evalBlockStmts(stmts []syntax.Stmt, env runtime.Scope) runtime.Object {
 				return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
 			}
 		}
-		result = eval(stmts[i], env)
+		// `c.call(f(), d) catch(timeout) { ... }` is parsed as three
+		// statements: the call, `catch(timeout)` and the block, which
+		// runs only when the call timed out (ETSI 21.3.10).
+		if ce := callWithCatchTimeout(stmts, i); ce != nil {
+			callCatchesTimeout.Store(ce, struct{}{})
+			result = eval(stmts[i], env)
+			i += 2
+			if result == callTimedOut {
+				result = eval(stmts[i], env)
+			}
+		} else {
+			result = eval(stmts[i], env)
+		}
 		if g, ok := result.(*runtime.Goto); ok {
 			if idx := findLabel(stmts, g.Label); idx >= 0 {
 				i = idx // loop's i++ resumes at the statement after the label
@@ -4132,6 +4173,152 @@ func evalBlockStmts(stmts []syntax.Stmt, env runtime.Scope) runtime.Object {
 		}
 	}
 	return result
+}
+
+// paramWritten reports whether body may write the variable name: assign to
+// it or into it, redirect into it, or pass it (or a part of it) as an
+// argument, which may be an inout or out one. The answer is cached per
+// body.
+func paramWritten(body *syntax.BlockStmt, name string) bool {
+	if body == nil {
+		return false
+	}
+	w, ok := writtenNames.Load(body)
+	if !ok {
+		w, _ = writtenNames.LoadOrStore(body, collectWrittenNames(body))
+	}
+	return w.(map[string]bool)[name]
+}
+
+var writtenNames sync.Map // *syntax.BlockStmt -> map[string]bool
+
+func collectWrittenNames(body *syntax.BlockStmt) map[string]bool {
+	names := map[string]bool{}
+	mark := func(e syntax.Expr) {
+		if id := rootIdent(e); id != "" {
+			names[id] = true
+		}
+	}
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		switch x := n.(type) {
+		case *syntax.BinaryExpr:
+			if x.Op != nil && x.Op.Kind() == syntax.ASSIGN {
+				mark(x.X)
+			}
+		case *syntax.RedirectExpr:
+			for _, v := range x.Value {
+				mark(v)
+			}
+			for _, v := range x.Param {
+				mark(v)
+			}
+			for _, v := range x.Verdict {
+				mark(v)
+			}
+			mark(x.Sender)
+			mark(x.Index)
+			mark(x.Timestamp)
+		case *syntax.CallExpr:
+			if x.Args != nil {
+				for _, a := range x.Args.List {
+					mark(a)
+				}
+			}
+		}
+		return true
+	})
+	return names
+}
+
+// rootIdent returns the variable an lvalue-like expression names: `v`,
+// `v[i]`, `v.f` and their combinations name v. "" for anything else.
+func rootIdent(e syntax.Expr) string {
+	for {
+		switch x := e.(type) {
+		case *syntax.Ident:
+			return x.String()
+		case *syntax.IndexExpr:
+			e = x.X
+		case *syntax.SelectorExpr:
+			e = x.X
+		case *syntax.ParenExpr:
+			if len(x.List) != 1 {
+				for _, el := range x.List {
+					if id := rootIdent(el); id != "" {
+						return id
+					}
+				}
+				return ""
+			}
+			e = x.List[0]
+		case *syntax.BinaryExpr:
+			// `p := v` in a named argument or assignment list.
+			if x.Op != nil && x.Op.Kind() == syntax.ASSIGN {
+				e = x.Y
+				continue
+			}
+			return ""
+		default:
+			return ""
+		}
+	}
+}
+
+// callTimedOut is the result of a component call that timed out and has a
+// `catch(timeout)` clause.
+var callTimedOut runtime.Object = callTimeoutSignal{}
+
+type callTimeoutSignal struct{}
+
+func (callTimeoutSignal) Inspect() string             { return "timeout" }
+func (callTimeoutSignal) Type() runtime.ObjectType    { return runtime.Undefined.Type() }
+func (callTimeoutSignal) Equal(o runtime.Object) bool { _, ok := o.(callTimeoutSignal); return ok }
+
+// callCatchesTimeout holds the component calls followed by a
+// `catch(timeout)` clause.
+var callCatchesTimeout sync.Map // *syntax.CallExpr -> struct{}
+
+// callWithCatchTimeout returns the call of stmts[i] when it is
+// `c.call(f(), d)` followed by `catch(timeout)` and a block, else nil.
+func callWithCatchTimeout(stmts []syntax.Stmt, i int) *syntax.CallExpr {
+	if i+2 >= len(stmts) {
+		return nil
+	}
+	if _, ok := stmts[i+2].(*syntax.BlockStmt); !ok {
+		return nil
+	}
+	es, ok := stmts[i+1].(*syntax.ExprStmt)
+	if !ok {
+		return nil
+	}
+	c, ok := es.Expr.(*syntax.CallExpr)
+	if !ok || c.Args == nil || len(c.Args.List) != 1 {
+		return nil
+	}
+	if id, ok := c.Fun.(*syntax.Ident); !ok || id.String() != "catch" {
+		return nil
+	}
+	if id, ok := c.Args.List[0].(*syntax.Ident); !ok || id.String() != "timeout" {
+		return nil
+	}
+	cs, ok := stmts[i].(*syntax.ExprStmt)
+	if !ok {
+		return nil
+	}
+	x := cs.Expr
+	if r, ok := x.(*syntax.RedirectExpr); ok {
+		x = r.X
+	}
+	ce, ok := x.(*syntax.CallExpr)
+	if !ok || ce.Args == nil || len(ce.Args.List) < 2 {
+		return nil
+	}
+	if sel, ok := ce.Fun.(*syntax.SelectorExpr); ok {
+		if op, ok := sel.Sel.(*syntax.Ident); ok && op.String() == "call" {
+			return ce
+		}
+	}
+	return nil
 }
 
 // findLabel returns the index of the `label <name>;` statement in stmts,
@@ -4637,7 +4824,7 @@ func evalValueDecl(vd *syntax.ValueDecl, env runtime.Scope) runtime.Object {
 								recordDeclaredType(env, syntax.Name(decl.Name), vd.Type)
 								continue
 							}
-							v := eval(decl.Value, env)
+							v := runtime.CopyValue(eval(decl.Value, env))
 							if runtime.IsError(v) {
 								return v
 							}
@@ -5974,46 +6161,7 @@ func applyFunctionStopped(fn *runtime.Function, args []runtime.Object) (runtime.
 	if fn.IsExternal {
 		return applyExternalFunction(fn, args)
 	}
-	fenv := runtime.NewEnv(fn.Env)
-	if fn.Params != nil {
-		for i, param := range fn.Params.List {
-			if param == nil || param.Name == nil {
-				continue
-			}
-			modif := ""
-			if param.Modif != nil && param.Modif.Kind() != syntax.ILLEGAL {
-				modif = strings.ToLower(param.Modif.String())
-			}
-			switch {
-			case i < len(args) && args[i] != nil:
-				fenv.Set(param.Name.String(), args[i])
-			case param.Value != nil:
-				// @lazy / @fuzzy defaults are *delayed*: the
-				// thunk is evaluated when the parameter is
-				// first read inside the body. @fuzzy is
-				// re-evaluated on every read.
-				if modif == "@lazy" || modif == "@fuzzy" {
-					fenv.Set(param.Name.String(), &runtime.LazyThunk{
-						Expr:   param.Value,
-						Env:    fenv,
-						Fuzzy:  modif == "@fuzzy",
-						Name:   param.Name.String(),
-						Module: fn.Module,
-					})
-					continue
-				}
-				if v := eval(param.Value, fenv); !runtime.IsError(v) && v != nil {
-					fenv.Set(param.Name.String(), v)
-					continue
-				}
-				fenv.Set(param.Name.String(), runtime.Undefined)
-			case param.TemplateRestriction != nil:
-				fenv.Set(param.Name.String(), runtime.Any)
-			default:
-				fenv.Set(param.Name.String(), runtime.Undefined)
-			}
-		}
-	}
+	fenv := bindFunctionParams(fn, args)
 	var raw runtime.Object
 	if runtime.TLActive() && fn.Name != "" {
 		if lexec := tlExec(fenv); lexec != nil {
@@ -6042,6 +6190,61 @@ func applyFunctionStopped(fn *runtime.Function, args []runtime.Object) (runtime.
 		stopped = true
 	}
 	return unwrap(raw), fenv, stopped
+}
+
+// bindFunctionParams makes the scope a call of fn runs in: its formal
+// parameters bound to args — each value the callee's own copy (ETSI 6) —
+// or to their defaults.
+func bindFunctionParams(fn *runtime.Function, args []runtime.Object) *runtime.Env {
+	fenv := runtime.NewEnv(fn.Env)
+	if fn.Params != nil {
+		for i, param := range fn.Params.List {
+			if param == nil || param.Name == nil {
+				continue
+			}
+			modif := ""
+			if param.Modif != nil && param.Modif.Kind() != syntax.ILLEGAL {
+				modif = strings.ToLower(param.Modif.String())
+			}
+			switch {
+			case i < len(args) && args[i] != nil:
+				// A parameter is a value of its own (ETSI 5.4.1.1) —
+				// unless nothing could tell it from the actual's: an
+				// `in` parameter of an isolated function that is never
+				// written. Copying a large value on every call is costly.
+				if modif == "" && fn.Isolated && !paramWritten(fn.Body, param.Name.String()) {
+					fenv.Set(param.Name.String(), args[i])
+					continue
+				}
+				fenv.Set(param.Name.String(), runtime.CopyValue(args[i]))
+			case param.Value != nil:
+				// @lazy / @fuzzy defaults are *delayed*: the
+				// thunk is evaluated when the parameter is
+				// first read inside the body. @fuzzy is
+				// re-evaluated on every read.
+				if modif == "@lazy" || modif == "@fuzzy" {
+					fenv.Set(param.Name.String(), &runtime.LazyThunk{
+						Expr:   param.Value,
+						Env:    fenv,
+						Fuzzy:  modif == "@fuzzy",
+						Name:   param.Name.String(),
+						Module: fn.Module,
+					})
+					continue
+				}
+				if v := eval(param.Value, fenv); !runtime.IsError(v) && v != nil {
+					fenv.Set(param.Name.String(), runtime.CopyValue(v))
+					continue
+				}
+				fenv.Set(param.Name.String(), runtime.Undefined)
+			case param.TemplateRestriction != nil:
+				fenv.Set(param.Name.String(), runtime.Any)
+			default:
+				fenv.Set(param.Name.String(), runtime.Undefined)
+			}
+		}
+	}
+	return fenv
 }
 
 // wildcardAsBinarystring lifts a TTCN-3 template wildcard (`?` /
@@ -6125,7 +6328,9 @@ func forceThunk(v runtime.Object) runtime.Object {
 	if !ok || expr == nil {
 		return runtime.Undefined
 	}
-	val := eval(expr, t.Env)
+	// The parameter's value, of its own: a change to it in the callee
+	// does not reach the actual it was evaluated from.
+	val := runtime.CopyValue(eval(expr, t.Env))
 	if !t.Fuzzy {
 		t.Cached = val
 		t.Once = true
@@ -6568,9 +6773,7 @@ func assignToLHS(lhs syntax.Expr, val runtime.Object, env runtime.Scope) {
 			storeReceiver(l.X, rec, env)
 			return
 		}
-		if s, ok := recv.(runtime.Scope); ok {
-			s.Set(fid.String(), val)
-		}
+		setField(recv, fid.String(), val)
 	case *syntax.IndexExpr:
 		container := eval(l.X, env)
 		idx := eval(l.Index, env)
@@ -7152,6 +7355,11 @@ func componentExecutionEnv(ref *runtime.ComponentRef, parent runtime.Scope) runt
 		return ref.Scope
 	}
 	runEnv := runtime.NewEnv(parent)
+	// The call block the starter may be in is the starter's, not this
+	// component's: an unqualified getreply or catch here answers only a
+	// call made here (ETSI 22.3.1 h).
+	runEnv.Set(procCallSigKey, runtime.Undefined)
+	runEnv.Set(procCallTimeoutKey, runtime.Undefined)
 	if ref != nil {
 		if body := componentTypeBody(ref.Module, ref.TypeName); body != nil {
 			bindComponentMembers(runEnv, body)
@@ -7256,8 +7464,27 @@ func loopStopped(env runtime.Scope) runtime.Object {
 	if exec.Stopped() || componentStopRequested(exec) {
 		return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
 	}
+	// On the virtual clock a component that loops for long lets the
+	// others run now and then (see coopScheduler.yield): computing takes
+	// no time there, so one that computes for good would hold them all.
+	// Not while it takes an alt's snapshot — a loop in a guard, a default
+	// or a template function: the others' events come after it.
+	if exec.SchedulerActive() {
+		if cur := exec.CurrentComponent(); cur != nil {
+			cur.LoopTicks++
+			if cur.LoopTicks%loopYieldEvery == 0 && !altCtx.active() && canWait(env) {
+				if exec.SchedYield(cur.ID, currentStopChan(exec)) || componentStopRequested(exec) || exec.Stopped() {
+					return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
+				}
+			}
+		}
+	}
 	return nil
 }
+
+// loopYieldEvery is how many iterations of its loops a component computes
+// on the virtual clock before it lets the others run.
+const loopYieldEvery = 1000
 
 // componentStopRequested reports whether the current PTC has been asked
 // to stop via `comp.stop` / `all component.stop` (both close the PTC's
@@ -7487,109 +7714,6 @@ func startBodyUses(body syntax.Node, env runtime.Scope, names ...string) bool {
 	return found
 }
 
-// endlessLoops caches, per loop, whether it never ends and never waits
-// (see loopNeverEnds).
-var endlessLoops sync.Map
-
-// loopNeverEnds reports whether a loop whose condition always holds runs
-// for good without waiting or acting: its body — the functions it calls
-// included — neither leaves the loop (a break of this loop, a goto, a
-// return from it, a stop or kill of the component, a raise), nor waits for
-// anything (an alt, a receiving operation, a timeout, a done or killed, a
-// call), nor acts on anything outside the component (a send, call, reply
-// or raise on a port, a start, a verdict). Such a loop does nothing anyone
-// could observe, forever.
-func loopNeverEnds(loop syntax.Node, body *syntax.BlockStmt, env runtime.Scope) bool {
-	if v, ok := endlessLoops.Load(loop); ok {
-		return v.(bool)
-	}
-	ends := false
-	ops := map[string]bool{
-		"timeout": true, "receive": true, "trigger": true, "check": true,
-		"getcall": true, "getreply": true, "catch": true, "done": true,
-		"killed": true, "call": true, "send": true, "reply": true,
-		"raise": true, "start": true,
-	}
-	visited := map[syntax.Node]bool{}
-	// scan walks n; inLoop is set within this loop's own body, outside
-	// any loop nested in it (whose break is its own).
-	var scan func(n syntax.Node, inLoop bool)
-	scan = func(n syntax.Node, inLoop bool) {
-		if n == nil || ends || visited[n] {
-			return
-		}
-		visited[n] = true
-		syntax.Inspect(n, func(x syntax.Node) bool {
-			if ends || x == nil {
-				return false
-			}
-			switch y := x.(type) {
-			case *syntax.WhileStmt, *syntax.ForStmt, *syntax.DoWhileStmt:
-				// A nested loop's break is its own; the rest of what it
-				// holds counts.
-				for _, c := range y.Children() {
-					scan(c, false)
-				}
-				return false
-			case *syntax.BranchStmt:
-				switch y.Tok.Kind() {
-				case syntax.BREAK:
-					ends = ends || inLoop
-				case syntax.GOTO:
-					ends = true
-				}
-			case *syntax.ReturnStmt:
-				ends = ends || inLoop
-			case *syntax.AltStmt, *syntax.CallStmt, *syntax.RaiseStmt:
-				ends = true
-			case *syntax.Ident:
-				if y.Tok != nil && (y.String() == "stop" || y.String() == "setverdict") {
-					ends = true
-				}
-			case *syntax.SelectorExpr:
-				name := syntax.Name(y.Sel)
-				if ops[name] {
-					ends = true
-				}
-				if name == "stop" || name == "kill" {
-					if r := syntax.Name(y.X); r == "self" || r == "mtc" {
-						ends = true
-					}
-				}
-			case *syntax.CallExpr:
-				if fn := calleeFunction(y.Fun, env); fn != nil && fn.Body != nil {
-					// What a callee does counts; its return and break
-					// are its own.
-					scan(fn.Body, false)
-				}
-			}
-			return !ends
-		})
-	}
-	scan(body, true)
-	endlessLoops.Store(loop, !ends)
-	return !ends
-}
-
-// parkEndlessLoop is entered with a loop whose condition always holds. On
-// the virtual clock, where computing takes no time, a loop that never ends
-// and never waits (see loopNeverEnds) would hold the scheduler for good,
-// and no timer anywhere would ever fire; the component waits there instead,
-// doing what the loop does — nothing observable — until it is stopped. On
-// the real clock the loop runs.
-func parkEndlessLoop(loop syntax.Node, body *syntax.BlockStmt, env runtime.Scope) (runtime.Object, bool) {
-	exec := runtime.FindTestcaseExec(env)
-	if exec == nil || !exec.SchedulerActive() || !canWait(env) || !loopNeverEnds(loop, body, env) {
-		return nil, false
-	}
-	for {
-		re, stopped := exec.SchedPark(currentCompID(exec), 0, false, currentStopChan(exec))
-		if stopped || !re || exec.Stopped() || componentStopRequested(exec) {
-			return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}, true
-		}
-	}
-}
-
 // holdsObjectReference reports whether v is, or holds as a field or
 // element, a reference to an object.
 func holdsObjectReference(v runtime.Object) bool {
@@ -7621,16 +7745,6 @@ func markWaiting(exec *runtime.TestcaseExec) (done func()) {
 		}
 	}
 	return func() {}
-}
-
-// alwaysTrue reports whether a loop condition is the literal true, or
-// absent (`for (;;)`).
-func alwaysTrue(cond syntax.Expr) bool {
-	if cond == nil {
-		return true
-	}
-	lit, ok := cond.(*syntax.ValueLiteral)
-	return ok && lit.Tok != nil && lit.Tok.Kind() == syntax.TRUE
 }
 
 // calleeFunction resolves the function a call names — `f()`, or
@@ -7705,7 +7819,7 @@ func snapshotPTCArgs(body syntax.Node, env runtime.Scope) (*runtime.Function, []
 					toEval = b.Y
 				}
 			}
-			snap = append(snap, eval(toEval, env))
+			snap = append(snap, runtime.CopyValue(eval(toEval, env)))
 			callArgs = append(callArgs, a)
 		}
 	}
@@ -7751,7 +7865,8 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		// setverdict(fail); }` clause and derail tests that passed
 		// on the old "PTC body is a no-op" path). We still tag the
 		// ref as alive so `comp.alive`/`comp.done` answer correctly.
-		skip := startBodyShouldSkip(body, env)
+		// A call runs its behaviour, as a start does (below).
+		skip := op != "call" && startBodyShouldSkip(body, env)
 		// An `alive` PTC body (including a while(true) send/receive load
 		// worker) runs on a real goroutine instead of the
 		// skip/virtual-clock model, so never send it to the skip branch.
@@ -8019,11 +8134,113 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		if ref != nil && op == "call" {
 			ref.LastCallStopped = false
 		}
-		if exec := runtime.FindTestcaseExec(env); exec != nil {
-			exec.PushComponent(ref)
-			defer exec.PopComponent()
-		}
-		if fn, snapArgs, callArgExprs := snapshotPTCArgs(body, env); fn != nil {
+		exec := runtime.FindTestcaseExec(env)
+		if op == "call" && ref != nil && exec != nil {
+			// `c.call(f())` runs f as component c and waits for it to end
+			// (ETSI 21.3.10): as a start, on c's own goroutine, so that
+			// what f waits for it can wait for; then the caller, which
+			// waited, takes its result.
+			if err := waitPreviousBehaviour(exec, ref, env); err != nil {
+				return err, true
+			}
+			fn, snapArgs, callArgExprs := snapshotPTCArgs(body, env)
+			for _, a := range snapArgs {
+				if holdsObjectReference(a) {
+					return runtime.Errorf("an object reference cannot be passed to a behaviour called on component %s (ETSI ES 203 790 5.1.2.2)", ref.Inspect()), true
+				}
+			}
+			// `c.call(f(), d)` waits at most d seconds (ETSI 21.3.10).
+			limit, bounded := 0.0, false
+			if len(n.Args.List) > 1 {
+				switch d := eval(n.Args.List[1], env).(type) {
+				case runtime.Float:
+					limit, bounded = float64(d), true
+				case runtime.Int:
+					limit, bounded = float64(d.Int64()), true
+				}
+			}
+			ref.SetDone(false)
+			var indexSnapshot []runtime.Object
+			if fn != nil {
+				indexSnapshot = snapshotLHSIndices(fn, callArgExprs, env)
+			}
+			var fenv runtime.Scope
+			exit := exec.RegisterPTC(ref.ID)
+			exec.SchedGoLive(ref.ID)
+			go func() {
+				defer exec.FinishPTCExit(ref.ID, exit)
+				if exec.SchedAcquireToken(ref.ID, exit.StopChan) {
+					stopped = true
+					return
+				}
+				exec.PushComponent(ref)
+				defer exec.PopComponent()
+				if fn != nil {
+					result, fenv, stopped = applyFunctionWithCallSite(functionWithEnv(fn, runEnv), snapArgs, callArgExprs)
+				} else {
+					result = eval(body, runEnv)
+					if rv, ok := result.(*runtime.ReturnValue); ok {
+						result = rv.Value
+						stopped = true
+					}
+				}
+				exec.ClearDefaultsOf(ref.ID)
+			}()
+			// The caller stopped while waiting: the called behaviour
+			// is stopped with it, and its result is not taken.
+			callerStopped, timedOut := false, false
+			if exec.SchedulerActive() {
+				callerStopped, timedOut = exec.SchedParkWhileLiveFor(currentCompID(exec), ref.ID, limit, bounded, currentStopChan(exec))
+			} else {
+				var expired <-chan time.Time
+				if bounded {
+					t := time.NewTimer(time.Duration(limit * float64(time.Second)))
+					defer t.Stop()
+					expired = t.C
+				}
+				select {
+				case <-exit.DoneChan:
+				case <-currentStopChan(exec):
+					callerStopped = true
+				case <-expired:
+					timedOut = true
+				}
+			}
+			if callerStopped {
+				exec.StopPTC(ref.ID)
+				ref.LastCallStopped = true
+				return runtime.Undefined, true
+			}
+			if timedOut {
+				// The behaviour did not end in time: the called
+				// component is stopped, and the call ends — in its
+				// `catch(timeout)` clause if it has one, else in a
+				// testcase error (ETSI 21.3.10).
+				if lexec := tlExec(env); lexec != nil {
+					tlEmit(lexec, nil, "tliCCallTerminated",
+						tlArg("verdict", tl.Verdict(tlVerdict(ref.GetVerdict()))),
+						tlArg("reason", tl.String("timeout")))
+				}
+				exec.StopPTC(ref.ID)
+				drainComponentPortMaps(exec, ref.ID)
+				ref.SetDone(true)
+				if !ref.AliveModifier {
+					ref.SetAlive(false)
+				}
+				ref.LastCallStopped = true
+				if _, ok := callCatchesTimeout.Load(n); ok {
+					return callTimedOut, true
+				}
+				return runtime.Errorf("call of a behaviour on component %s timed out after %gs, with no catch(timeout) clause (ETSI ES 201 873-1 21.3.10)", ref.Inspect(), limit), true
+			}
+			if fn != nil && !stopped && fenv != nil {
+				writebackInoutParamsWithSnapshot(fn, callArgExprs, indexSnapshot, fenv, env)
+			}
+		} else if fn, snapArgs, callArgExprs := snapshotPTCArgs(body, env); fn != nil {
+			if exec != nil {
+				exec.PushComponent(ref)
+				defer exec.PopComponent()
+			}
 			scopedFn := functionWithEnv(fn, runEnv)
 			indexSnapshot := snapshotLHSIndices(fn, callArgExprs, env)
 			var fenv runtime.Scope
@@ -8032,6 +8249,10 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				writebackInoutParamsWithSnapshot(fn, callArgExprs, indexSnapshot, fenv, env)
 			}
 		} else {
+			if exec != nil {
+				exec.PushComponent(ref)
+				defer exec.PopComponent()
+			}
 			result = eval(body, runEnv)
 			if rv, ok := result.(*runtime.ReturnValue); ok {
 				result = rv.Value
@@ -8352,15 +8573,11 @@ func evalAnyPortOp(op string, n *syntax.CallExpr, env runtime.Scope) runtime.Obj
 		case "check":
 			res = evalPortCheck(port, n, env)
 		case "getcall", "getreply", "catch":
-			// Procedure receive ops match a kind-tagged
-			// envelope; on no-match leave res Undefined so the
-			// scan continues to the next port (TTCN-3 22.5).
-			kind, _ := procKindForOp(op)
-			if head, ok := exec.DequeueKind(exec.PortKey(port), kind); ok {
-				if exec.TestLogger() != nil {
-					tlProcReceive(exec, n, port, head, nil, nil, nil, "receive", "", false)
-				}
-				return runtime.NewBool(true)
+			// As on a single port: the signature template and the
+			// alt's snapshot apply. No match leaves res Undefined so
+			// the scan goes on to the next port (TTCN-3 22.5).
+			if r := evalPortReceiveInfo(port, commOpInfo{call: n}, env, true); !isUndefinedResult(r) {
+				return r
 			}
 			res = runtime.Undefined
 		default:
@@ -9276,7 +9493,9 @@ func snapshotActivateArgs(callExpr syntax.Expr, env runtime.Scope) runtime.Scope
 		if runtime.IsError(v) {
 			continue
 		}
-		defEnv.Set(id.String(), v)
+		// The value it has now, not the variable: a later change to
+		// the variable does not reach the default (ETSI 20.5.2).
+		defEnv.Set(id.String(), runtime.CopyValue(v))
 		bound = true
 	}
 	if !bound {
@@ -9950,6 +10169,25 @@ func procKindForOp(op string) (runtime.PortMsgKind, bool) {
 	return 0, false
 }
 
+// commPortName names the port a communication operation `x.op(...)` acts
+// on: a bare port (`p`) or an element of a port array (`p[i]`), the index
+// evaluated now. A port passed as a parameter is followed to its
+// originating instance (ETSI 5.4.2), so a `p_port.receive`/`.send` inside a
+// function or activated default acts on the caller's port.
+func commPortName(x syntax.Expr, env runtime.Scope) (string, bool) {
+	switch x.(type) {
+	case *syntax.Ident:
+		name, _ := portExprName(x, env)
+		if pn, isPort := resolvePortName(x, env); isPort {
+			name = pn
+		}
+		return name, true
+	case *syntax.IndexExpr:
+		return portExprName(x, env)
+	}
+	return "", false
+}
+
 // portExprName renders a port-instance reference to the queue key the
 // loopback model uses. A bare port is its identifier; an array element
 // `p[i]` becomes `p[<i>]` with the index evaluated now. Returns
@@ -10037,7 +10275,7 @@ func evalProcedureCallTo(port string, call *syntax.CallExpr, toExpr syntax.Expr,
 		if cur := exec.CurrentComponent(); cur != nil {
 			curID = cur.ID
 		}
-		for _, peer := range exec.ConnectedPeers(runtime.PortEndpoint{Comp: curID, Port: port}) {
+		for _, peer := range connectedPeers(exec, curID, port) {
 			if targets[peer.Comp] {
 				keys = append(keys, exec.PortKeyFor(peer.Comp, peer.Port))
 			}
@@ -10569,6 +10807,18 @@ func applyParamRedirect(pe syntax.Expr, payload runtime.Object, paramNames []str
 		applyRedirectValueExpr(pe, payload, env)
 		return
 	}
+	// Parameters given positionally (`S:{5}`) arrive as a list: name its
+	// elements by the signature's parameters, so `-> param (v)` binds the
+	// first parameter and `-> param (v := x)` the one named x.
+	if l, ok := payload.(*runtime.List); ok && len(l.FieldNames) == 0 && len(paramNames) > 0 && len(l.Elements) <= len(paramNames) {
+		named := runtime.NewRecord()
+		for i, e := range l.Elements {
+			if paramNames[i] != "" {
+				named.Set(paramNames[i], e)
+			}
+		}
+		payload = named
+	}
 	rec, isRec := payload.(*runtime.Record)
 	for i, el := range paren.List {
 		if isDashExpr(el) {
@@ -10580,7 +10830,7 @@ func applyParamRedirect(pe syntax.Expr, payload runtime.Object, paramNames []str
 		}
 		if isRec && i < len(paramNames) && paramNames[i] != "" {
 			if fv, ok := rec.Fields[paramNames[i]]; ok {
-				assignToLHS(el, fv, env)
+				assignToLHS(el, runtime.CopyValue(fv), env)
 				continue
 			}
 		}
@@ -11002,27 +11252,13 @@ func strictConnectedTargets(exec *runtime.TestcaseExec, bareName string) []strin
 	if cur == nil {
 		return nil
 	}
-	peers := exec.ConnectedPeers(runtime.PortEndpoint{Comp: cur.ID, Port: bareName})
-	suffix := ""
+	peers := connectedPeers(exec, cur.ID, bareName)
 	if len(peers) == 0 {
-		// Port-array element: connect records the endpoint under the
-		// array's BASE name (resolvePortEndpoint/portRefName drops the
-		// `[i]`), while comm uses the indexed name "p[i]". Fall back to
-		// the base and re-apply the element suffix to the peer's port so
-		// `connect(self:p[i], v:p[i])` routes p[i] to v's p[i].
-		var base string
-		base, suffix = splitPortIndex(bareName)
-		if suffix == "" {
-			return nil
-		}
-		peers = exec.ConnectedPeers(runtime.PortEndpoint{Comp: cur.ID, Port: base})
-		if len(peers) == 0 {
-			return nil
-		}
+		return nil
 	}
 	keys := make([]string, 0, len(peers))
 	for _, peer := range peers {
-		keys = append(keys, exec.PortKeyFor(peer.Comp, peer.Port+suffix))
+		keys = append(keys, exec.PortKeyFor(peer.Comp, peer.Port))
 	}
 	return keys
 }
@@ -11073,7 +11309,7 @@ func routeProcEnvelopeTo(exec *runtime.TestcaseExec, bareName string, toExpr syn
 	if cur := exec.CurrentComponent(); cur != nil {
 		curID = cur.ID
 	}
-	for _, peer := range exec.ConnectedPeers(runtime.PortEndpoint{Comp: curID, Port: bareName}) {
+	for _, peer := range connectedPeers(exec, curID, bareName) {
 		if !targets[peer.Comp] {
 			continue
 		}
@@ -11201,13 +11437,14 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 		// Sem_220201_SendOperation_005). Fall back to broadcast when the
 		// target set can't be resolved or matches no connected peer.
 		if dest != nil {
-			if ids := callTargetComponentIDs(dest, env); ids != nil {
+			// The destination as evaluated above: a `to f()` runs once.
+			if ids := targetComponentIDs(sender); ids != nil {
 				curID := int64(-1)
 				if cur := exec.CurrentComponent(); cur != nil {
 					curID = cur.ID
 				}
 				delivered := false
-				for _, peer := range exec.ConnectedPeers(runtime.PortEndpoint{Comp: curID, Port: bareName}) {
+				for _, peer := range connectedPeers(exec, curID, bareName) {
 					if !ids[peer.Comp] {
 						continue
 					}
@@ -11224,8 +11461,23 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 		}
 		return runtime.Undefined
 	}
+	// A mapped port with no driver loops the message back, as the SUT
+	// would answer it: it comes from the system.
+	if exec.IsMapped(runtime.PortEndpoint{Comp: currentComponentID(exec), Port: bareName}) {
+		sender = systemSender
+	}
 	exec.EnqueueMessageFrom(port, payload, sender)
 	return runtime.Undefined
+}
+
+// systemSender is the sender of what a mapped port receives from the
+// system when no port driver stands for it (see evalPortSendTo).
+var systemSender = &runtime.ComponentRef{ID: systemEndpointID, Name: "system"}
+
+// isSystemRef reports whether v is the system component's reference.
+func isSystemRef(v runtime.Object) bool {
+	r, ok := v.(*runtime.ComponentRef)
+	return ok && r != nil && r.ID == systemEndpointID
 }
 
 // commOpInfo is the parsed shape of a `port.send/receive/check/...`
@@ -11598,7 +11850,12 @@ func receiveIgnoresSelfSentOnConnectedPort(exec *runtime.TestcaseExec, port stri
 	// connected to a different endpoint (the message went to that
 	// peer). A self-loop (`connect(self:p, self:p)`) must deliver the
 	// message back to the sender, so it is not ignored.
-	return exec.ConnectedToOther(runtime.PortEndpoint{Comp: cur.ID, Port: port})
+	for _, peer := range connectedPeers(exec, cur.ID, port) {
+		if peer.Comp != cur.ID || peer.Port != port {
+			return true
+		}
+	}
+	return false
 }
 
 // prePopulateRedirectExpr binds the redirect's sender target to the
@@ -11688,11 +11945,13 @@ func applyRedirectValueExpr(v syntax.Expr, payload runtime.Object, env runtime.S
 			rhs = eval(b.Y, sub)
 		}
 		if !runtime.IsError(rhs) {
-			assignToLHS(b.X, rhs, env)
+			assignToLHS(b.X, runtime.CopyValue(rhs), env)
 		}
 		return
 	}
-	assignToLHS(v, payload, env)
+	// A redirect stores a value: a message a check leaves queued, or
+	// another redirect of the same message, does not share it.
+	assignToLHS(v, runtime.CopyValue(payload), env)
 }
 
 // encodePlaceholderForInt returns the encvalue / encvalue_o /
@@ -11795,7 +12054,19 @@ func fromAddrMatch(sender runtime.Object, addr syntax.Expr, env runtime.Scope) (
 	if addr == nil {
 		return true, nil
 	}
+	// `from system`: what arrives on a mapped port from the SUT — with
+	// no sender, as a port driver delivers it, or looped back on a mapped
+	// port that has none (ETSI 22.2.2).
+	if id, ok := addr.(*syntax.Ident); ok && id.Tok != nil && id.String() == "system" {
+		return sender == nil || isSystemRef(sender), nil
+	}
 	if sender == nil {
+		// So does `from s`, s holding system.
+		if id, ok := addr.(*syntax.Ident); ok {
+			if v, ok := env.Get(id.String()); ok && isSystemRef(forceThunk(v)) {
+				return true, v
+			}
+		}
 		return false, nil
 	}
 	// `from P.address:(20..40)` - the address-type qualifier carries
@@ -12170,7 +12441,13 @@ func canWait(env runtime.Scope) bool {
 		return false
 	}
 	cur := exec.CurrentComponent()
-	return cur == nil || cur.ID == exec.MTCID() || exec.PTCExit(cur.ID) != nil
+	if cur != nil && cur.ID != exec.MTCID() && exec.PTCExit(cur.ID) == nil {
+		return false
+	}
+	// On the virtual clock, only the participant the scheduler runs: a
+	// body run inline by another component — a component's `call` — is
+	// not one.
+	return exec.SchedRunning(currentCompID(exec))
 }
 
 // standaloneAlts caches, per receiving statement, the one-alternative alt

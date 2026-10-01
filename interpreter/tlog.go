@@ -306,7 +306,7 @@ func tlSend(exec *runtime.TestcaseExec, n syntax.Node, port string, dest, payloa
 		return
 	}
 	peers := tlConnectedPeers(exec, port)
-	if ids := tlTargetIDs(dest); ids != nil {
+	if ids := targetComponentIDs(dest); ids != nil {
 		var to []tl.PortID
 		for _, p := range peers {
 			if ids[p.Comp] {
@@ -353,25 +353,13 @@ func sortPortIDs(ps []tl.PortID) {
 }
 
 // tlConnectedPeers returns the endpoints port of the current component is
-// connected to, the way the engine routes to them: an element of a port
-// array is connected under the array's name, and its peer is the same
-// element of the peer's array.
+// connected to, the way the engine routes to them (connectedPeers).
 func tlConnectedPeers(exec *runtime.TestcaseExec, port string) []runtime.PortEndpoint {
 	cur := int64(-1)
 	if c := exec.CurrentComponent(); c != nil {
 		cur = c.ID
 	}
-	peers := exec.ConnectedPeers(runtime.PortEndpoint{Comp: cur, Port: port})
-	if len(peers) == 0 {
-		base, suffix := splitPortIndex(port)
-		if suffix == "" {
-			return nil
-		}
-		peers = exec.ConnectedPeers(runtime.PortEndpoint{Comp: cur, Port: base})
-		for i := range peers {
-			peers[i].Port += suffix
-		}
-	}
+	peers := connectedPeers(exec, cur, port)
 	// The connection graph is a map: list the peers in one order, so that
 	// two runs log a broadcast alike.
 	sort.Slice(peers, func(i, j int) bool {
@@ -383,9 +371,9 @@ func tlConnectedPeers(exec *runtime.TestcaseExec, port string) []runtime.PortEnd
 	return peers
 }
 
-// tlTargetIDs is the set of components a `to` value addresses: one
+// targetComponentIDs is the set of components a `to` value addresses: one
 // component, or a list of them. Nil when it addresses none.
-func tlTargetIDs(dest runtime.Object) map[int64]bool {
+func targetComponentIDs(dest runtime.Object) map[int64]bool {
 	var refs []runtime.Object
 	switch v := dest.(type) {
 	case *runtime.ComponentRef:

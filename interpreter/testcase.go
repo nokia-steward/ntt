@@ -85,6 +85,13 @@ type TestcaseOptions struct {
 	// part statically", which is what a directly-executed testcase does.
 	// Unexported: it is an internal hand-off, not a caller knob.
 	actualArgs []runtime.Object
+
+	// executeTimeout is the timeout operand of the control part's
+	// execute() (ETSI ES 201 873-1 26.1), in seconds, when it has one. A
+	// directly-executed testcase mines it from the control part, as it
+	// does its arguments.
+	executeTimeout    float64
+	hasExecuteTimeout bool
 }
 
 // RunTestcase is the canonical entry point the executor uses to
@@ -351,6 +358,25 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 	}
 	// The cooperative scheduler is engaged after SetMTCID below (it needs
 	// the MTC's component id as the root participant).
+	//
+	// An execute() timeout bounds the testcase in the test system's time:
+	// virtual time on the virtual clock (the scheduler stops the testcase
+	// when its clock would pass the limit), real time on the real clock.
+	limit, hasLimit := opts.executeTimeout, opts.hasExecuteTimeout
+	if !hasLimit && opts.actualArgs == nil {
+		limit, hasLimit = findExecuteTimeout(modNode, fnName, env)
+	}
+	var limitCtx, outerCtx context.Context
+	if hasLimit && !opts.DeterministicScheduler {
+		outerCtx = opts.Context
+		if outerCtx == nil {
+			outerCtx = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(outerCtx, time.Duration(limit*float64(time.Second)))
+		defer cancel()
+		opts.Context = ctx
+		limitCtx = ctx
+	}
 	// Cancellation: when the caller supplies a context, stop the
 	// executor on cancellation so a blocked alt / timer wait unwinds
 	// instead of leaking a goroutine. The watcher is bounded by
@@ -434,9 +460,15 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 	// the root participant that holds the token first).
 	if opts.DeterministicScheduler {
 		exec.SetDeterministicScheduler(true)
+		if hasLimit {
+			exec.SetVirtualLimit(limit)
+		}
 	}
 	env.Set("mtc", mtcRef)
 	env.Set("self", mtcRef)
+	// `system` is a component reference too: the one what arrives from
+	// the SUT comes from (ETSI 22.2.2).
+	env.Set("system", systemSender)
 	exec.PushComponent(mtcRef)
 	defer exec.PopComponent()
 	// Bind formal parameters of the testcase. The executor doesn't
@@ -469,6 +501,21 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 	r := eval(tcNode.Body, tcEnv)
 	if len(tcNode.Catch) > 0 || tcNode.Finally != nil {
 		r = runExceptionHandlers(r, tcNode.Catch, tcNode.Finally, tcEnv)
+	}
+	// A testcase cut off by its time limit — the harness budget, `--live
+	// --timeout`, an execute() timeout — did not terminate: its verdict is
+	// error, not whatever it had reached (ETSI ES 201 873-1 clause 26). It
+	// terminates when the MTC does, so the teardown's time does not count.
+	cutOff := ""
+	if exec.VirtualLimitReached() || (limitCtx != nil && limitCtx.Err() == context.DeadlineExceeded && outerCtx.Err() == nil) {
+		cutOff = fmt.Sprintf("execute: testcase did not terminate within %gs", limit)
+	} else if opts.Context != nil {
+		switch opts.Context.Err() {
+		case context.DeadlineExceeded:
+			cutOff = "testcase did not terminate within its time limit"
+		case context.Canceled:
+			cutOff = "testcase was cancelled before it terminated"
+		}
 	}
 	// The testcase is left once its exception handlers have run, as a
 	// function is.
@@ -511,6 +558,11 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 	// starts at none and setverdict is what moves it. The coercion also
 	// fabricated a verdict for files whose setverdict is never reached,
 	// which is a defect to fix rather than paper over.
+	if cutOff != "" {
+		exec.SetVerdict(runtime.ErrorVerdict, cutOff)
+		tlTestcaseStopped(exec, cutOff)
+		return runtime.ErrorVerdict, cutOff, nil
+	}
 	return exec.GetVerdict(), exec.Reason(), nil
 }
 
@@ -792,6 +844,54 @@ func bindFormalParam(env runtime.Scope, fp *syntax.FormalPar, v runtime.Object) 
 
 // executeCallFor reports whether stmt is `execute(tcName(...))` (or
 // `execute(tcName(...), ...)`) and returns the inner testcase call.
+// findExecuteTimeout returns the timeout operand of the control part's
+// first `execute(tcName(...), T)`, evaluated in the module scope, when it
+// has one that evaluates to a positive duration.
+func findExecuteTimeout(mod *syntax.Module, tcName string, env runtime.Scope) (float64, bool) {
+	cp := findControlPart(mod)
+	if cp == nil || cp.Body == nil {
+		return 0, false
+	}
+	// The first execute() of the testcase, as its arguments are taken
+	// from the first (findExecuteArgs).
+	var timeout syntax.Expr
+	found := false
+	cp.Body.Inspect(func(n syntax.Node) bool {
+		if found {
+			return false
+		}
+		call, ok := n.(*syntax.CallExpr)
+		if !ok {
+			return true
+		}
+		if id, ok := call.Fun.(*syntax.Ident); !ok || id.String() != "execute" || call.Args == nil || len(call.Args.List) == 0 {
+			return true
+		}
+		if tc, ok := call.Args.List[0].(*syntax.CallExpr); ok {
+			if id, ok := tc.Fun.(*syntax.Ident); ok && id.String() == tcName {
+				found = true
+				if len(call.Args.List) > 1 {
+					timeout = call.Args.List[1]
+				}
+			}
+		}
+		return true
+	})
+	if timeout == nil {
+		return 0, false
+	}
+	var d float64
+	switch v := eval(timeout, runtime.NewEnv(env)).(type) {
+	case runtime.Float:
+		d = float64(v)
+	case runtime.Int:
+		d = float64(v.Int64())
+	default:
+		return 0, false
+	}
+	return d, d > 0
+}
+
 func executeCallFor(stmt syntax.Stmt, tcName string) (*syntax.CallExpr, bool) {
 	es, ok := stmt.(*syntax.ExprStmt)
 	if !ok {
@@ -1062,6 +1162,53 @@ func evalGetverdict(env runtime.Scope) runtime.Object {
 		lexec.TLog("tliGetVerdict", "", 0, tlArg("verdict", tl.Verdict(string(v))))
 	}
 	return v
+}
+
+// evalAction implements the SUT action operation `action(...)` (ETSI
+// ES 201 873-1 22.6): an informal request, free text or the values of
+// template instances joined with `&`, that the test system cannot carry
+// out itself. There is no SUT adapter to hand it to, so it is recorded
+// in the testcase log and the test log (tliAction), and the behaviour
+// goes on.
+func evalAction(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
+	var parts []string
+	if n.Args != nil {
+		// Its text is free text and template instances joined by `&`
+		// (ETSI ES 201 873-1 22.6): each is written out on its own, so
+		// an `&` between text and a value is no concatenation.
+		var texts []syntax.Expr
+		var split func(e syntax.Expr)
+		split = func(e syntax.Expr) {
+			if b, ok := e.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.CONCAT {
+				split(b.X)
+				split(b.Y)
+				return
+			}
+			texts = append(texts, e)
+		}
+		for _, a := range n.Args.List {
+			split(a)
+		}
+		for _, a := range texts {
+			v := eval(a, env)
+			if runtime.IsError(v) {
+				return v
+			}
+			if s, ok := v.(*runtime.String); ok {
+				parts = append(parts, string(s.Value))
+				continue
+			}
+			parts = append(parts, v.Inspect())
+		}
+	}
+	text := strings.Join(parts, "")
+	if exec := runtime.FindTestcaseExec(env); exec != nil {
+		exec.Log("action: " + text)
+		if exec.TestLogger() != nil {
+			tlEmit(exec, n, "tliAction", tlArg("action", tl.String(text)))
+		}
+	}
+	return nil
 }
 
 // evalLog implements `log(...)` by joining the inspected forms of all
@@ -2122,6 +2269,24 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		}
 		if matchedClause != nil {
 			waiting = false
+			// An altstep taken as the alternative ran its branch: a
+			// repeat in it re-evaluates this alt, a break leaves it, a
+			// stop unwinds (ETSI 20.5.2).
+			if r := takeAltstepResult(); r != nil {
+				switch {
+				case r == runtime.Repeat:
+					if lexec != nil {
+						lexec.TLScanEnd(currentCompID(lexec))
+						lexec.TLAltBump(currentCompID(lexec))
+						tlEmit(lexec, n, "tliARepeat")
+					}
+					continue
+				case r == runtime.Break:
+					return nil
+				case needBreak(r):
+					return r
+				}
+			}
 			// The scan is over: the body — of this alt, or of the default
 			// this alt is — logs everything it does.
 			if altExec != nil && altExec.TestLogger() != nil {
@@ -2297,6 +2462,9 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 			altExec.EndAltRound(goroutineID())
 		}
 		if matchedIdx >= 0 {
+			// An altstep is no alternative of an interleave (20.4); what
+			// one taken would have left is not for a later alt.
+			_ = takeAltstepResult()
 			taken[matchedIdx] = true
 			remaining--
 			waiting = false
@@ -2520,6 +2688,13 @@ func nextAltTimerVirtualDeadline(n *syntax.AltStmt, env runtime.Scope) (float64,
 			}
 		}
 	}
+	// Only a deadline still ahead counts. The alt waits because none of
+	// its alternatives matched, so a timer already due belongs to one
+	// whose guard is false (`[false] t.timeout`); waking on it would wake
+	// at once to the same state, for good.
+	if exec := runtime.FindTestcaseExec(env); exec != nil {
+		floor = exec.VirtualClock()
+	}
 	for _, s := range n.Body.Stmts {
 		cc, ok := s.(*syntax.CommClause)
 		if !ok || cc.Else != nil || cc.Comm == nil {
@@ -2696,7 +2871,15 @@ func nextAltTimerDeadlineLenient(n *syntax.AltStmt, env runtime.Scope) (time.Dur
 		deadline := th.StartedAt.Add(time.Duration(th.Duration * float64(time.Second)))
 		remaining := deadline.Sub(now)
 		if remaining <= 0 {
-			return 0, false
+			// Due, and not taken: its boolean guard is false — the
+			// others bound the wait — or it came due since the guards
+			// were scanned, and the alt looks again at once.
+			if cc.X != nil {
+				if gv, ok := eval(cc.X, env).(runtime.Bool); ok && !bool(gv) {
+					continue
+				}
+			}
+			remaining = 0
 		}
 		if !have || remaining < soonest {
 			soonest = remaining
@@ -2932,12 +3115,9 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 								}
 							}
 						}
-						// Legacy fallback: treat the guard as
-						// matched if any message is queued, so
-						// fixtures that use a bare procedure guard
-						// as a generic "did anything arrive" check
-						// keep working.
-						return evalPortReceiveBare(sel, portIdent.String(), env, true)
+						// A procedure guard takes a call, reply or
+						// exception, never a message (ETSI 22.3).
+						return false
 					}
 				}
 			}
@@ -2957,23 +3137,7 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 			if id, ok := ce.Fun.(*syntax.Ident); ok {
 				if v, ok := env.Get(id.String()); ok {
 					if fn, ok := v.(*runtime.Function); ok && fn.IsAltstep && fn.Body != nil {
-						for _, s := range fn.Body.Stmts {
-							cc, ok := s.(*syntax.CommClause)
-							if !ok || cc.Body == nil {
-								continue
-							}
-							if cc.Else != nil || cc.Comm == nil {
-								continue
-							}
-							if commGuardMatches(cc.Comm, env) {
-								// The branch taken is behaviour, not
-								// a guard: an alt in it waits.
-								restore := altCtx.suspend()
-								eval(cc.Body, env)
-								restore()
-								return true
-							}
-						}
+						return altstepAlternativeMatches(fn, ce, env)
 					}
 				}
 			}
@@ -3259,7 +3423,7 @@ func bindComponentMembers(env runtime.Scope, body *syntax.BlockStmt) {
 			if dec.Value != nil {
 				v := eval(dec.Value, env)
 				if v != nil && !runtime.IsError(v) {
-					env.Set(name, v)
+					env.Set(name, runtime.CopyValue(v))
 					continue
 				}
 			}
@@ -3359,4 +3523,88 @@ func bareProcGuard(exec *runtime.TestcaseExec, sel *syntax.SelectorExpr, port st
 		return true
 	}
 	return false
+}
+
+// altstepAlternativeMatches evaluates the alternative `[] a(...)` of an alt:
+// the altstep's alternatives take part in the alt (ETSI 20.5.2). They are
+// looked at, not waited on — in the altstep's own scope, its parameters
+// bound and its local definitions made — and the first whose guard holds,
+// or its [else], is taken: its branch runs, and what the branch ends with
+// — a repeat, a break, a stop — reaches the alt (see takeAltstepResult).
+// When none holds the alternative does not match, and the alt waits as it
+// does for any.
+func altstepAlternativeMatches(fn *runtime.Function, ce *syntax.CallExpr, env runtime.Scope) bool {
+	var actuals []syntax.Expr
+	if ce.Args != nil {
+		actuals = ce.Args.List
+	}
+	indexSnapshot := snapshotLHSIndices(fn, actuals, env)
+	fenv := bindFunctionParams(fn, evalCallArgsLazy(fn, actuals, env))
+	var elseClause *syntax.CommClause
+	for _, s := range fn.Body.Stmts {
+		if _, ok := s.(*syntax.CommClause); !ok {
+			if r := eval(s, fenv); runtime.IsError(r) {
+				return false
+			}
+		}
+	}
+	var taken *syntax.CommClause
+	for _, s := range fn.Body.Stmts {
+		cc, ok := s.(*syntax.CommClause)
+		if !ok {
+			continue
+		}
+		if cc.Else != nil {
+			if elseClause == nil {
+				elseClause = cc
+			}
+			continue
+		}
+		if cc.Comm == nil {
+			continue
+		}
+		if cc.X != nil {
+			if gv, ok := eval(cc.X, fenv).(runtime.Bool); ok && !bool(gv) {
+				continue
+			}
+		}
+		if commGuardMatches(cc.Comm, fenv) {
+			taken = cc
+			break
+		}
+	}
+	if taken == nil {
+		taken = elseClause
+	}
+	if taken == nil {
+		return false
+	}
+	var res runtime.Object
+	if taken.Body != nil {
+		// The branch taken is behaviour, not a guard: an alt in it waits.
+		restore := altCtx.suspend()
+		res = evalAltClauseBody(taken.Body, fenv)
+		restore()
+		altstepResults.Store(goroutineID(), res)
+	}
+	// The altstep was invoked: its inout and out parameters go back to
+	// the actuals, unless its behaviour was stopped.
+	if rv, ok := res.(*runtime.ReturnValue); !ok || !rv.Stopped {
+		writebackInoutParamsWithSnapshot(fn, actuals, indexSnapshot, fenv, env)
+	}
+	return true
+}
+
+// altstepResults holds, per goroutine, what the branch of an altstep taken
+// as an alternative ended with, for the alt that took it.
+var altstepResults sync.Map
+
+// takeAltstepResult returns and forgets what the branch of an altstep
+// taken as the alternative just matched ended with, or nil.
+func takeAltstepResult() runtime.Object {
+	if v, ok := altstepResults.LoadAndDelete(goroutineID()); ok {
+		r, _ := v.(runtime.Object)
+		return r
+	}
+	return nil
 }

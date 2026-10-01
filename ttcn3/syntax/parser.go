@@ -2770,7 +2770,13 @@ func (p *parser) parseStmt() Stmt {
 
 		// try call-statement block
 		if p.tok == LBRACE {
-			c, ok := x.Expr.(*CallExpr)
+			// `p.call(...) to c { ... }`: the call is the left of the
+			// `to` clause.
+			e := x.Expr
+			if b, ok := e.(*BinaryExpr); ok && b.Op != nil && b.Op.Kind() == TO {
+				e = b.X
+			}
+			c, ok := e.(*CallExpr)
 			if !ok {
 				return x
 			}

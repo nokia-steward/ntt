@@ -8,8 +8,8 @@ import (
 	"math"
 	"math/big"
 	"reflect"
-	"strconv"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -367,7 +367,11 @@ type ComponentRef struct {
 	// start (the MTC's own blocking `timeout` provides the real
 	// observation window). ModeledDuration == 0 means "no finite
 	// model" - such a body stays running until an explicit stop/kill.
-	Started         bool
+	Started bool
+	// LoopTicks counts the loop iterations the component's behaviour has
+	// run, for yielding on the virtual clock; only its own goroutine
+	// touches it.
+	LoopTicks       int64
 	StartedAt       time.Time
 	ModeledDuration float64
 
@@ -1390,6 +1394,11 @@ type Function struct {
 	// produces a RaisedValue (catch) or unconditionally (finally).
 	Catch   []*syntax.CatchClause
 	Finally *syntax.BlockStmt
+
+	// Isolated marks a function declared without runs on, mtc or system:
+	// it sees no component's variables, so nothing it does can change the
+	// value an `in` parameter was given, other than writing the parameter.
+	Isolated bool
 }
 
 func (f *Function) Type() ObjectType { return FUNCTION }

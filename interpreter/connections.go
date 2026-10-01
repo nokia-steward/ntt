@@ -33,9 +33,9 @@ func resolvePortEndpoint(e syntax.Expr, env runtime.Scope) (runtime.PortEndpoint
 	switch v := e.(type) {
 	case *syntax.BinaryExpr:
 		compExpr = v.X
-		portName = portRefName(v.Y)
-	case *syntax.Ident:
-		portName = v.String()
+		portName = portElementName(v.Y, env)
+	case *syntax.Ident, *syntax.IndexExpr:
+		portName = portElementName(v, env)
 	default:
 		return runtime.PortEndpoint{}, false, false
 	}
@@ -44,6 +44,36 @@ func resolvePortEndpoint(e syntax.Expr, env runtime.Scope) (runtime.PortEndpoint
 	}
 	compID, isSystem := resolveComponentID(compExpr, env, exec)
 	return runtime.PortEndpoint{Comp: compID, Port: portName}, isSystem, true
+}
+
+// portElementName names the port a `connect`/`map` argument refers to: an
+// element of a port array by its element (`p[1]`), each element being a
+// port of its own (ETSI ES 201 873-1 21.1), else the port.
+func portElementName(e syntax.Expr, env runtime.Scope) string {
+	if _, ok := e.(*syntax.IndexExpr); ok {
+		if name, ok := portExprName(e, env); ok {
+			return name
+		}
+	}
+	return portRefName(e)
+}
+
+// connectedPeers returns the endpoints port of component comp is connected
+// to. An element of a port array is connected as itself; one whose array
+// was connected as a whole reaches the same element of the peer's array.
+func connectedPeers(exec *runtime.TestcaseExec, comp int64, port string) []runtime.PortEndpoint {
+	if peers := exec.ConnectedPeers(runtime.PortEndpoint{Comp: comp, Port: port}); len(peers) > 0 {
+		return peers
+	}
+	base, suffix := splitPortIndex(port)
+	if suffix == "" {
+		return nil
+	}
+	peers := exec.ConnectedPeers(runtime.PortEndpoint{Comp: comp, Port: base})
+	for i := range peers {
+		peers[i].Port += suffix
+	}
+	return peers
 }
 
 // portRefName extracts the port name from a port reference, accepting

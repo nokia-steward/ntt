@@ -465,6 +465,13 @@ func evalComponentDoneRedirect(n *syntax.RedirectExpr, env runtime.Scope) (runti
 	if !ok || ref == nil {
 		return nil, false
 	}
+	// Outside an alt it is the statement `c.done -> value v;`, which waits
+	// for the component as `c.done;` does (ETSI 21.3.7).
+	if !altCtx.active() {
+		if r := blockUntilComponentState(ref, op.String(), env); runtime.IsError(r) {
+			return r, true
+		}
+	}
 	var matched bool
 	if op.String() == "done" {
 		matched = compDone(ref, env)

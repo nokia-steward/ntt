@@ -1,11 +1,9 @@
 package interpreter
 
 import (
-	"context"
 	"fmt"
 	"math/big"
 	"runtime/debug"
-	"time"
 
 	"github.com/nokia/ntt/runtime"
 	"github.com/nokia/ntt/runtime/tl"
@@ -183,25 +181,14 @@ func runOneExecute(trees []*ttcn3.Tree, modNode *syntax.Module, module, tcName s
 		inner.actualArgs = []runtime.Object{}
 	}
 
-	// An execute() timeout bounds the testcase the same way the
-	// harness's per-case budget does, so reuse the context mechanism
-	// rather than inventing a second stop path. The virtual clock does
-	// not apply: `execute(TC(), 2.0)` bounds the whole testcase in real
-	// time, it is not a TTCN-3 timer the scheduler can fast-forward.
-	var deadline context.Context
+	// An execute() timeout bounds the testcase in the test system's time
+	// (runTestcaseIn): virtual time on the virtual clock, real time on the
+	// real one.
 	if hasTimeout {
-		d := time.Duration(timeout * float64(time.Second))
-		if d <= 0 {
+		if timeout <= 0 {
 			return runtime.ErrorVerdict, "execute: non-positive timeout"
 		}
-		parent := inner.Context
-		if parent == nil {
-			parent = context.Background()
-		}
-		ctx, cancel := context.WithTimeout(parent, d)
-		defer cancel()
-		inner.Context = ctx
-		deadline = ctx
+		inner.executeTimeout, inner.hasExecuteTimeout = timeout, true
 	}
 
 	// Each execute() gets a module scope of its own, so module-level
@@ -214,9 +201,6 @@ func runOneExecute(trees []*ttcn3.Tree, modNode *syntax.Module, module, tcName s
 	v, r, err := runTestcaseIn(env, exec, trees, modNode, module, tcName, tcNode, inner)
 	if err != nil {
 		v, r = runtime.ErrorVerdict, err.Error()
-	} else if deadline != nil && deadline.Err() == context.DeadlineExceeded {
-		v, r = runtime.ErrorVerdict, fmt.Sprintf("execute: testcase did not terminate within %gs", timeout)
-		tlTestcaseStopped(exec, r)
 	}
 	tlTestcaseTerminated(exec, v, r)
 	return v, r

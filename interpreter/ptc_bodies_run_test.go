@@ -101,6 +101,176 @@ func TestStartedBodiesRun(t *testing.T) {
 				c.stop;
 			}
 		}`,
+		// On the virtual clock computing takes no time; a component that
+		// computes for long lets the others run, and time pass to the next
+		// timer. A busy wait on another component ends, two spinning
+		// components leave the MTC's timer to fire, and a loop over a
+		// timer of no length does not hold everyone.
+		"busy wait on another": `module M {
+			type component C {}
+			function short() runs on C { var integer i := 0; while (i < 10) { i := i + 1 } }
+			function waiter(C o) runs on C { while (true) { if (not o.running) { break } } setverdict(pass); }
+			testcase tc() runs on C system C {
+				var C o := C.create, w := C.create;
+				o.start(short());
+				w.start(waiter(o));
+				w.done;
+			}
+		}`,
+		"two spinning": `module M {
+			type component C {}
+			function f() runs on C { while (true) {} }
+			testcase tc() runs on C system C {
+				var C a := C.create, b := C.create;
+				a.start(f());
+				b.start(f());
+				timer t := 0.2; t.start; t.timeout;
+				setverdict(pass);
+				a.stop;
+				b.stop;
+			}
+		}`,
+		"zero-length timer loop": `module M {
+			type component C { timer z }
+			function f() runs on C { while (true) { z.start(0.0); z.timeout; } }
+			testcase tc() runs on C system C {
+				var C c := C.create;
+				c.start(f());
+				timer g := 0.5; g.start; g.timeout;
+				setverdict(pass);
+				c.stop;
+			}
+		}`,
+		// A computation that ends takes no time on the virtual clock: a
+		// timer does not fire while it runs, the component's own included,
+		// nor while a loop evaluates an alt's guard.
+		"a computation takes no time": `module M {
+			type component C {}
+			function work(integer n) runs on C { var integer i := 0; while (i < n) { i := i + 1 } setverdict(pass) }
+			function sleeper() runs on C { timer w := 2.0; w.start; w.timeout; }
+			testcase tc() runs on C system C {
+				var C c := C.create, s := C.create;
+				s.start(sleeper());
+				c.start(work(50000));
+				timer g := 1.0; g.start;
+				var integer i := 0; while (i < 2500) { i := i + 1 }
+				if (not g.running) { setverdict(fail, "the MTC's loop took time") }
+				alt { [] c.done {} [] g.timeout { setverdict(fail, "the PTC's loop took time") } }
+				s.stop;
+			}
+		}`,
+		// A computation that goes on for long takes some time at last,
+		// but not all there is to the next timer: a watchdog far off
+		// outlasts it, and a testcase limit is not reached.
+		"a long computation takes some time": `module M {
+			type port P message { inout integer }
+			type component C { port P p }
+			function work() runs on C { var integer s := 0; for (var integer i := 0; i < 1100000; i := i + 1) { s := s + 1 } setverdict(pass) }
+			testcase tc() runs on C system C {
+				var C c := C.create;
+				c.start(work());
+				timer guard := 60.0; guard.start;
+				alt { [] c.done {} [] guard.timeout { setverdict(fail, "watchdog") } }
+			}
+			control { execute(tc(), 100.0) }
+		}`,
+		// Two components exchanging messages for good, each waiting for
+		// the other's, still let the MTC's timer fire.
+		"exchanging for good": `module M {
+			type port P message { inout integer }
+			type component C { port P p }
+			function ping() runs on C { var integer v; p.send(0); while (true) { p.receive(integer:?) -> value v; p.send(v + 1) } }
+			function pong() runs on C { var integer v; while (true) { p.receive(integer:?) -> value v; p.send(v + 1) } }
+			testcase tc() runs on C system C {
+				var C a := C.create, b := C.create;
+				connect(a:p, b:p);
+				a.start(ping()); b.start(pong());
+				timer g := 1.0; g.start; g.timeout;
+				setverdict(pass);
+				all component.stop;
+			}
+		}`,
+		// When time passes for an exchange at one instant, it stops at
+		// the timer due first — a woken component's included — so two
+		// timers still expire in order.
+		"timers in order while exchanging": `module M {
+			type port P message { inout integer }
+			type component C { port P p }
+			function echo() runs on C { var integer v; while (true) { p.receive(integer:?) -> value v; p.send(v) } }
+			function x() runs on C {
+				timer t1 := 1.5, t2 := 1.8; t1.start; t2.start;
+				alt { [] t2.timeout { setverdict(fail, "t2 before t1") } [] t1.timeout { setverdict(pass) } }
+			}
+			testcase tc() runs on C system C {
+				var C e := C.create, d := C.create;
+				connect(self:p, e:p); e.start(echo());
+				d.start(x());
+				var integer v;
+				for (var integer i := 0; i < 120000; i := i + 1) { p.send(i); p.receive(integer:?) -> value v; }
+				d.done;
+				setverdict(pass);
+			}
+		}`,
+		// Two components keeping each other busy do not keep a third
+		// from running: its answer comes at once, as on the real clock.
+		"a third component while two exchange": `module M {
+			type port P message { inout integer, charstring }
+			type component C { port P p, q }
+			function echo() runs on C { var integer v; while (true) { p.receive(integer:?) -> value v; p.send(v) } }
+			function replier() runs on C { q.receive(charstring:"ping"); q.send("pong") }
+			testcase tc() runs on C system C {
+				var C a := C.create, w := C.create;
+				connect(self:p, a:p); connect(self:q, w:q);
+				a.start(echo()); w.start(replier());
+				timer guard := 5.0; guard.start;
+				q.send("ping"); p.send(0);
+				var integer v;
+				alt {
+					[] p.receive(integer:?) -> value v { p.send(v + 1); repeat }
+					[] q.receive(charstring:"pong") { if (guard.read > 0.5) { setverdict(fail, "pong at ", guard.read) } else { setverdict(pass) } }
+					[] guard.timeout { setverdict(fail, "no pong") }
+				}
+				a.stop;
+			}
+		}`,
+		"a loop in a guard": `module M {
+			type port P message { inout integer }
+			type component C { port P p }
+			function long() return boolean { var integer i := 0; while (i < 2500) { i := i + 1 } return true }
+			function late() runs on C { timer w := 2.0; w.start; w.timeout; p.send(1) }
+			testcase tc() runs on C system C {
+				var C c := C.create; connect(mtc:p, c:p);
+				c.start(late());
+				timer t := 1.0; t.start;
+				alt { [long()] p.receive(integer:1) { setverdict(fail, "taken after the timer expired") } [] t.timeout { setverdict(pass) } }
+				c.stop;
+			}
+		}`,
+		// A loop that ends, however it ends, runs to its end.
+		"return in an inner loop": `module M {
+			type component C { var integer x := 0 }
+			function g() runs on C { while (true) { for (var integer i := 0; i < 2; i := i + 1) { if (x > 5) { return } } x := x + 1 } }
+			function f() runs on C { g(); setverdict(pass); }
+			testcase tc() runs on C system C {
+				var C c := C.create;
+				c.start(f());
+				timer t := 2.0; t.start;
+				alt { [] c.done {} [] t.timeout { setverdict(fail, "the loop did not end") } }
+			}
+		}`,
+		"loop that kills another": `module M {
+			type component C { var integer x := 0 }
+			function spin() runs on C { while (true) {} }
+			function f(C v) runs on C { while (true) { x := x + 1; if (x == 3) { v.kill; break } } setverdict(pass); }
+			testcase tc() runs on C system C {
+				var C v := C.create, c := C.create;
+				v.start(spin());
+				c.start(f(v));
+				timer t := 2.0; t.start;
+				alt { [] v.killed {} [] t.timeout { setverdict(fail, "not killed") } }
+				c.done;
+			}
+		}`,
 		// Two PTCs exchanging messages for good when the MTC ends: each
 		// gets turns, then they are stopped.
 		"ping-pong at the end": `module M {
@@ -166,6 +336,23 @@ func TestStartWithAnObjectReferenceIsAnError(t *testing.T) {
 			if v != runtime.ErrorVerdict {
 				t.Errorf("%s, %s clock: %s (%s), want error", tc, k.name, v, reason)
 			}
+		}
+	}
+}
+
+// TestComputingAfterTheMTCEnds: a PTC that computes when the MTC's
+// behaviour ends finishes a finite computation, and the verdict it then
+// sets counts, on either clock.
+func TestComputingAfterTheMTCEnds(t *testing.T) {
+	src := `module M {
+		type component C {}
+		function f() runs on C { var integer i := 0; while (i < 3000) { i := i + 1 } setverdict(fail, "late") }
+		testcase tc() runs on C system C { var C c := C.create; c.start(f()); setverdict(pass); }
+	}`
+	for _, k := range clocks {
+		v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", k.opts)
+		if err != nil || v != runtime.FailVerdict {
+			t.Errorf("%s clock: %s (%s) %v, want fail", k.name, v, reason, err)
 		}
 	}
 }
