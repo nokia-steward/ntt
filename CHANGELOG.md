@@ -291,6 +291,25 @@ Independent of the two clocks:
   clock, as expired default timers did before.
 - **A call's signature no longer reaches a PTC** for the unqualified
   `getreply` / `catch` rule (22.3.1 h).
+- **A typed template matches only values of its type** (ETSI 22.2.2):
+  `p.receive(charstring:?)` took any value — a record the built-in TCP
+  port reports a disconnection with, say, so an alt listing the
+  charstring alternative first never reached the one for the record —
+  and `integer:?` took a charstring. A value of another kind, or a record
+  with a field the record type does not declare, now goes to the
+  alternative of its own type.
+- **`and` and `or` short-circuit** (ETSI 7.1.4): the right operand ran
+  even when the left decided the result, so `n > 0 and s[n - 1] == c`
+  read `s[-1]` of an empty string and ended in an error.
+- **An `inout` or `out` parameter after an `in` one writes back into its
+  own argument.** An `in` parameter declared without the word `in` was
+  not counted, so `f(R r, inout S s)` wrote `s` into the caller's first
+  argument — `r`, or a module parameter passed there — and left the
+  actual for `s` unchanged.
+- **`?` and `*` in a pattern match a line end too** (ETSI B.1.5), in
+  `regexp()` and in the patterns `match()` hands to its regular
+  expressions: a value ending in a newline — a JSON body as an HTTP
+  service writes it — made every `regexp()` over it return "".
 - **Each component has its own variables** (ETSI 6.2.10.4), on either
   clock: a function that runs on a component, however it is reached —
   called from the behaviour a PTC was started with, from a default, from

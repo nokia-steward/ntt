@@ -558,6 +558,22 @@ passed over for a thousand turns — and a parameter's default and a
   verdict `none`, not `error`; the testcase can then pass on the MTC's
   verdict alone.
 - `match(v, t)` with `v` undefined is true.
+- **Names resolve across modules without an import.** All modules of a
+  run share one flat scope, so a module's own constant can be shadowed by
+  a like-named definition of a module it does not import: in module A,
+  `x == c_closed` compares with module B's record `c_closed` instead of
+  A's charstring, and fails with a type mismatch. The same flat scope is
+  why like-named component types mix (above), and why the test log names
+  the calling testcase's module, not the function's, for a function's
+  variables. A scope per module, with imports, is the fix; it is the
+  first item after interleave.
+- A typed template's type is checked against what a value can be, and
+  some differences are not visible: the length or range of a subtype, an
+  enumerated value of another enumerated type, a record of another type
+  with the same field names, a qualified type name (`M.T:?`), `anytype`.
+  On a port mapped to the system with no driver, whose loopback stands in
+  for the SUT's codec, a string-typed template still takes a value of any
+  type.
 - A component type's `template` members are not bound.
 - An `execute()` timeout held in a control-part variable
   (`var float x := 1.0; execute(tc(), x)`) is not applied by `ntt exec`,
