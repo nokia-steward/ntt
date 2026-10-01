@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	goruntime "runtime"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -220,7 +221,11 @@ func TestExecProfileCapturesMetrics(t *testing.T) {
 	// sample legitimately measures exactly zero, and this assertion failed
 	// there with min=0s while max=13ms — the same run proving the clock
 	// works and that one sample rounded to nothing.
-	if p.Latency.Min < 0 || p.Latency.Max <= 0 || p.Latency.Max < p.Latency.Min {
+	// On Windows all five can fall within one tick of the clock and
+	// measure zero; the five samples counted above show latency is
+	// measured there too.
+	if p.Latency.Min < 0 || p.Latency.Max < p.Latency.Min ||
+		(p.Latency.Max <= 0 && goruntime.GOOS != "windows") {
 		t.Fatalf("latency min/max = %s/%s, want max > 0 and 0 <= min <= max",
 			p.Latency.Min, p.Latency.Max)
 	}
