@@ -7534,6 +7534,10 @@ func currentCompID(exec *runtime.TestcaseExec) int64 {
 func loopStopped(env runtime.Scope) runtime.Object {
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil {
+		// A control part's loop, once its time is up.
+		if controlBudgetSpent(env) {
+			return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
+		}
 		return nil
 	}
 	if exec.Stopped() || componentStopRequested(exec) {

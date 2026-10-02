@@ -397,6 +397,68 @@ func TestExecTCPTLSMisconfigurationFailsTheMap(t *testing.T) {
 	}
 }
 
+// TestExecRunsAControlPart: `Module.control` in [EXECUTE] runs the
+// module's control part, whose testcases' verdicts it reports as one.
+func TestExecRunsAControlPart(t *testing.T) {
+	path := writeTC(t, `module m {
+		type component C {}
+		testcase a() runs on C { setverdict(pass) }
+		testcase b(integer x) runs on C { if (x == 2) { setverdict(pass) } else { setverdict(fail, x) } }
+		control { execute(a()); var integer two := 2; execute(b(two)); }
+	}`)
+	d := newStaticDriver([]string{path})
+	if v, reason, err := d.Run(context.Background(), "m.control"); err != nil || v != rreport.Pass {
+		t.Fatalf("Run(m.control): verdict=%s reason=%q err=%v, want pass", v, reason, err)
+	}
+	if v, _, _ := d.Run(context.Background(), "nosuch.control"); v != rreport.Error {
+		t.Fatalf("an unknown module's control part: verdict=%s, want error", v)
+	}
+	// A module's bare name, as [EXECUTE] may give it, is its control part.
+	if v, reason, err := d.Run(context.Background(), "m"); err != nil || v != rreport.Pass {
+		t.Fatalf("Run(m): verdict=%s reason=%q err=%v, want pass", v, reason, err)
+	}
+}
+
+// TestExecControlPartTimeoutIsPerTestcase: --timeout bounds each testcase
+// a control part runs, not the control part as a whole.
+func TestExecControlPartTimeoutIsPerTestcase(t *testing.T) {
+	path := writeTC(t, `module m {
+		type component C {}
+		testcase a() runs on C { timer t := 0.3; t.start; t.timeout; setverdict(pass) }
+		control { execute(a()); execute(a()); execute(a()); execute(a()) }
+	}`)
+	d := newStaticDriver([]string{path})
+	d.live = true
+	d.timeout = time.Second
+	if v, reason, err := d.Run(context.Background(), "m.control"); err != nil || v != rreport.Pass {
+		t.Fatalf("four testcases within the bound each: verdict=%s reason=%q err=%v, want pass", v, reason, err)
+	}
+	hang := writeTC(t, `module h {
+		type component C {}
+		testcase hang() runs on C { timer t := 30.0; t.start; t.timeout; setverdict(pass) }
+		control { execute(hang()) }
+	}`)
+	d = newStaticDriver([]string{hang})
+	d.live = true
+	d.timeout = 300 * time.Millisecond
+	v, reason, err := d.Run(context.Background(), "h.control")
+	if err != nil || v != rreport.Error || !strings.Contains(reason, "did not terminate") {
+		t.Fatalf("verdict=%s reason=%q err=%v, want the hung testcase cut off", v, reason, err)
+	}
+	// What the control part does itself is bounded too.
+	busy := writeTC(t, `module b {
+		type component C {}
+		testcase quick() runs on C { setverdict(pass) }
+		control { var integer i := 0; execute(quick()); while (true) { i := i + 1 } }
+	}`)
+	d = newStaticDriver([]string{busy})
+	d.timeout = 300 * time.Millisecond
+	v, reason, err = d.Run(context.Background(), "b.control")
+	if err != nil || v != rreport.Error || !strings.Contains(reason, "control part did not terminate") {
+		t.Fatalf("verdict=%s reason=%q err=%v, want the control part cut off", v, reason, err)
+	}
+}
+
 // TestRegisterConfiguredTestPorts_NonTCPIgnored confirms a non-tcp (or
 // address-less) transport registers nothing, so unrelated
 // [TESTPORT_PARAMETERS] entries are inert.

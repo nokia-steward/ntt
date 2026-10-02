@@ -1,9 +1,12 @@
 package interpreter
 
 import (
+	"context"
 	"fmt"
 	"math/big"
 	"runtime/debug"
+	"sync"
+	"time"
 
 	"github.com/nokia/ntt/runtime"
 	"github.com/nokia/ntt/runtime/tl"
@@ -30,6 +33,82 @@ func (executeHandler) Inspect() string          { return "execute-handler" }
 func (h executeHandler) Equal(o runtime.Object) bool {
 	other, ok := o.(executeHandler)
 	return ok && &other == &h
+}
+
+// controlBudget bounds what a control part does itself — the time it
+// spends outside the testcases it executes, which are bounded each
+// (TestcaseOptions.TestcaseTimeout) — and ends with the run's context.
+// Its loops stop once it is spent, and it executes no further testcase.
+type controlBudget struct {
+	mu      sync.Mutex
+	left    time.Duration
+	since   time.Time
+	timer   *time.Timer
+	limit   time.Duration // 0: no time of its own, only the context
+	ctx     context.Context
+	expired chan struct{}
+	once    sync.Once
+}
+
+const controlBudgetKey = "\x00ttcn3:control-budget"
+
+func newControlBudget(ctx context.Context, d time.Duration) *controlBudget {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	b := &controlBudget{left: d, limit: d, ctx: ctx, expired: make(chan struct{})}
+	b.resume()
+	return b
+}
+
+func (b *controlBudget) resume() {
+	if b.limit <= 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.since = time.Now()
+	b.timer = time.AfterFunc(b.left, func() { b.once.Do(func() { close(b.expired) }) })
+}
+
+func (b *controlBudget) pause() {
+	if b.limit <= 0 {
+		return
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.timer.Stop() {
+		if b.left -= time.Since(b.since); b.left < 0 {
+			b.left = 0
+		}
+	}
+}
+
+func (b *controlBudget) spent() bool {
+	select {
+	case <-b.expired:
+		return true
+	default:
+		return b.ctx.Err() != nil
+	}
+}
+
+func (*controlBudget) Type() runtime.ObjectType { return runtime.ObjectType("CONTROL_BUDGET") }
+func (*controlBudget) Inspect() string          { return "control budget" }
+func (b *controlBudget) Equal(o runtime.Object) bool {
+	other, ok := o.(*controlBudget)
+	return ok && other == b
+}
+
+// controlBudgetSpent reports whether env is a control part's whose budget
+// is spent.
+func controlBudgetSpent(env runtime.Scope) bool {
+	v, ok := env.Get(controlBudgetKey)
+	if !ok {
+		return false
+	}
+	b, ok := v.(*controlBudget)
+	return ok && b.spent()
 }
 
 // ControlPartIsLoadBearing reports whether a module's `control` part
@@ -134,8 +213,21 @@ func RunControlWith(trees []*ttcn3.Tree, module string, opts TestcaseOptions) (v
 	// control-scope binding would be invisible there. Each execute()
 	// builds a fresh module scope of its own, which does not carry the
 	// handler, so a testcase body cannot re-enter this.
+	var budget *controlBudget
+	if opts.TestcaseTimeout > 0 || opts.Context != nil {
+		budget = newControlBudget(opts.Context, opts.TestcaseTimeout)
+		defer budget.pause()
+		env.Set(controlBudgetKey, budget)
+	}
 	env.Set(executeHandlerKey, executeHandler{
 		run: func(tcName string, args []runtime.Object, timeout float64, hasTimeout bool, host string, hasHost bool) runtime.Verdict {
+			if budget != nil {
+				if budget.spent() {
+					return runtime.ErrorVerdict
+				}
+				budget.pause()
+				defer budget.resume()
+			}
 			tlExecute(opts.TestLogger, control, modNode, module, tcName, args, timeout, hasTimeout)
 			v, r := runOneExecute(trees, modNode, module, tcName, args, timeout, hasTimeout, host, hasHost, opts)
 			ran = true
@@ -150,6 +242,12 @@ func RunControlWith(trees []*ttcn3.Tree, module string, opts TestcaseOptions) (v
 	if res := eval(control.Body, ctrlEnv); runtime.IsError(res) {
 		e, _ := res.(*runtime.Error)
 		return runtime.ErrorVerdict, "control: " + e.Inspect(), nil
+	}
+	if budget != nil && budget.spent() {
+		if budget.limit <= 0 || budget.ctx.Err() != nil {
+			return runtime.ErrorVerdict, "control part stopped: " + context.Cause(budget.ctx).Error(), nil
+		}
+		return runtime.ErrorVerdict, fmt.Sprintf("control part did not terminate within %v, besides its testcases", budget.limit), nil
 	}
 	if !ran {
 		return runtime.NoneVerdict, "control part executed no testcase", nil
@@ -189,6 +287,16 @@ func runOneExecute(trees []*ttcn3.Tree, modNode *syntax.Module, module, tcName s
 			return runtime.ErrorVerdict, "execute: non-positive timeout"
 		}
 		inner.executeTimeout, inner.hasExecuteTimeout = timeout, true
+	}
+
+	if opts.TestcaseTimeout > 0 {
+		parent := opts.Context
+		if parent == nil {
+			parent = context.Background()
+		}
+		ctx, cancel := context.WithTimeout(parent, opts.TestcaseTimeout)
+		defer cancel()
+		inner.Context = ctx
 	}
 
 	// Each execute() gets a module scope of its own, so module-level

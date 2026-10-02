@@ -64,6 +64,11 @@ type TestcaseOptions struct {
 	// Nil = unbounded.
 	Context context.Context
 
+	// TestcaseTimeout, when positive, bounds each testcase a control part
+	// executes (RunControlWith), in real time: one that has not terminated
+	// by then is stopped with error. Context bounds the control part.
+	TestcaseTimeout time.Duration
+
 	// Profiling turns on per-port performance capture (send/receive
 	// counts and send->receive round-trip latency). Meaningful only on the
 	// real clock (a live SUT); the virtual-clock path measures no real

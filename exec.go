@@ -201,6 +201,12 @@ func runExec(cmd *cobra.Command, args []string) (err error) {
 
 	selectors := make([]exec.Selector, 0, len(execPatterns))
 	for _, p := range execPatterns {
+		// `Module.control` names a control part, which is no testcase
+		// for a pattern to match.
+		if strings.HasSuffix(p, ".control") && !strings.Contains(p, "*") {
+			selectors = append(selectors, exec.Selector{Name: p})
+			continue
+		}
 		selectors = append(selectors, exec.Selector{Name: p, Pattern: true})
 	}
 
@@ -612,6 +618,18 @@ func newStaticDriver(files []string) *staticDriver {
 
 func (d *staticDriver) Run(ctx context.Context, name string) (rreport.Verdict, string, error) {
 	path := d.owner[name]
+	// `Module.control`, or a module's bare name, runs the module's
+	// control part (ETSI 26.2), as a .cfg's [EXECUTE] section may name it.
+	control := ""
+	if path == "" {
+		mod, ok := strings.CutSuffix(name, ".control")
+		if !ok && !strings.Contains(name, ".") {
+			mod, ok = name, true
+		}
+		if p := d.moduleFile(mod); ok && p != "" {
+			path, control = p, mod
+		}
+	}
 	if path == "" {
 		return rreport.Error, "testcase not found", nil
 	}
@@ -661,7 +679,14 @@ func (d *staticDriver) Run(ctx context.Context, name string) (rreport.Verdict, s
 	if timeout <= 0 {
 		timeout = deterministicSafetyTimeout
 	}
+	// A control part runs testcases one after another: each is bounded,
+	// not the whole.
 	runCtx, cancel := context.WithTimeout(ctx, timeout)
+	if control != "" {
+		cancel()
+		runCtx, cancel = context.WithCancel(ctx)
+		opts.TestcaseTimeout = timeout
+	}
 	defer cancel()
 	opts.Context = runCtx
 
@@ -672,10 +697,29 @@ func (d *staticDriver) Run(ctx context.Context, name string) (rreport.Verdict, s
 	var rawStats map[string]runtime.PortStat
 	if d.profiling {
 		opts.Profiling = true
-		opts.OnProfile = func(s map[string]runtime.PortStat) { rawStats = s }
+		// A control part reports each testcase it runs: their sum.
+		opts.OnProfile = func(s map[string]runtime.PortStat) {
+			if rawStats == nil {
+				rawStats = map[string]runtime.PortStat{}
+			}
+			for k, st := range s {
+				sum := rawStats[k]
+				sum.Sends += st.Sends
+				sum.Receives += st.Receives
+				sum.Latencies = append(sum.Latencies, st.Latencies...)
+				rawStats[k] = sum
+			}
+		}
 	}
 	start := time.Now()
-	v, reason, err := interpreter.RunTestcaseWith(trees, name, opts)
+	var v runtime.Verdict
+	var reason string
+	var err error
+	if control != "" {
+		v, reason, err = interpreter.RunControlWith(trees, control, opts)
+	} else {
+		v, reason, err = interpreter.RunTestcaseWith(trees, name, opts)
+	}
 	if d.profiling {
 		d.lastMetrics = buildMetrics(rawStats, time.Since(start))
 	}
@@ -683,6 +727,22 @@ func (d *staticDriver) Run(ctx context.Context, name string) (rreport.Verdict, s
 		return rreport.Error, err.Error(), nil
 	}
 	return mapVerdict(v), reason, nil
+}
+
+// moduleFile returns the file that declares module mod, or "".
+func (d *staticDriver) moduleFile(mod string) string {
+	for _, p := range d.files {
+		tree := d.trees[p]
+		if tree == nil {
+			continue
+		}
+		for _, m := range tree.Modules() {
+			if node, ok := m.Node.(*syntax.Module); ok && syntax.Name(node.Name) == mod {
+				return p
+			}
+		}
+	}
+	return ""
 }
 
 // LastMetrics returns the performance profile of the most recent Run (nil
