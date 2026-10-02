@@ -210,7 +210,8 @@ worse than a red one.
   scheduled; and with that cleared, the re-forked PTC goroutine still never
   gets scheduled. Tripwire:
   `TestRestartAfterStop_DoesNotRunTheNewBehaviour`.
-- **Interleave does not suspend a blocked branch.**
+- *Fixed 2026-10-02: a branch body that waits lets the others go on
+  (interleave.go).* **Interleave does not suspend a blocked branch.**
   `Sem_2004_InterleaveStatement_001` needs branch 2 to run while branch 1's
   body is blocked in a nested alt - coroutine-style interleaving inside one
   component. Note the suite treats a nested alt in an interleave body as
@@ -428,8 +429,9 @@ verdict the same and every event valid.
   - *Fixed 2026-09-30.* Under `--live`, a testcase still waiting when `--timeout` expires
     reports the verdict it had then, where `execute()` with a timeout
     gives `error`.
-  - A receive inside an `interleave` branch body does not wait: the
-    engine does not expand interleave into its alternatives (20.4).
+  - *Fixed 2026-10-02.* A receive inside an `interleave` branch body does
+    not wait: the engine does not expand interleave into its alternatives
+    (20.4).
   - On `--live`, each `start` of a PTC that blocks costs its starter the
     50 ms start barrier.
   - A blocking signature called with no response block and no `nowait`
@@ -531,7 +533,10 @@ passed over for a thousand turns — and a parameter's default and a
 
 **Found, not fixed:**
 
-- A receive in an `interleave` branch body does not wait (ETSI 20.4); two
+- *Fixed 2026-10-02: each started branch body runs as a coroutine of the
+  component, waiting where the component would and handing the turn back
+  to the interleave (interleave.go); Sem_2004_InterleaveStatement_001 and
+  _002 now pass.* A receive in an `interleave` branch body does not wait (ETSI 20.4); two
   branches that depend on each other deadlock
   (`TestStrictInterleave_MutuallyDependentBranchesDeadlock`). The fix is to
   run each branch body as a participant of its own, acting as the
@@ -626,6 +631,19 @@ passed over for a thousand turns — and a parameter's default and a
   clock: `t.running` counts polls instead of reading the clock.
 - An activated default does not fire in a blocking receive or alt inside
   a function without `runs on` called from a component.
+- In an interleave branch body, a few waits still wait as the whole
+  component instead of letting the other branches go on: `any from` over a
+  timer array, `c.call(f())`, and starting a component whose previous
+  behaviour is still ending. A body given up when the interleave is left
+  still logs the end of the alt it waited in.
+- An alt that repeats for good — a default `[else] { repeat }` beside a
+  timer that can never fire on the virtual clock, since nothing waits —
+  ends quietly after about a million rounds, as if it had finished.
+- `p.getreply(S2:{-} value ?)` takes a reply to another signature, S1,
+  so of two blocking calls in a row the second can take the first's
+  reply. And in a blocking call's block, a getreply's `-> value v
+  param(...)` redirects leave their variables unset (its `sender`
+  redirect works).
 
 **Testing after it, 2026-10-01.** Every conformance file that executes
 (2617) was run on both clocks with logging on: the verdicts are the same

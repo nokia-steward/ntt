@@ -2284,6 +2284,12 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 	if n.Body == nil {
 		return nil
 	}
+	// This alt's wait, told from any other one — of the same alt
+	// statement too, and from itself before a repeat (interleave.go).
+	waitAt := new(byte)
+	// This alt is a default's altstep: a repeat in it re-evaluates the
+	// alt that invoked the default (ETSI 20.5.2).
+	isDefault := defaultCtx.active()
 	// Test logging: entering and leaving the alt, and — once per stretch of
 	// rounds that match nothing, so a polling backstop cannot flood the
 	// log — that no alternative matched, that the defaults are consulted
@@ -2384,11 +2390,15 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			if r := takeAltstepResult(); r != nil {
 				switch {
 				case r == runtime.Repeat:
+					if isDefault {
+						return runtime.Repeat
+					}
 					if lexec != nil {
 						lexec.TLScanEnd(currentCompID(lexec))
 						lexec.TLAltBump(currentCompID(lexec))
 						tlEmit(lexec, n, "tliARepeat")
 					}
+					waitAt = new(byte)
 					continue
 				case r == runtime.Break:
 					return nil
@@ -2412,9 +2422,13 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 				restoreBranch()
 				restore()
 				if res == runtime.Repeat {
+					if isDefault {
+						return runtime.Repeat
+					}
 					if lexec != nil {
 						tlEmit(lexec, n, "tliARepeat")
 					}
+					waitAt = new(byte)
 					continue // a body returned Repeat -> re-snapshot
 				} else {
 					return res
@@ -2429,12 +2443,22 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			if lexec != nil {
 				lexec.TLScanEnd(currentCompID(lexec))
 			}
+			// A default that takes its [else] has fired (20.5.1); its
+			// branch is ordinary behaviour, as a matched one is.
+			defaultBranchFire()
+			restore, restoreBranch := defaultCtx.suspend(), defaultBranchSuspend()
 			res := evalAltClauseBody(elseClause.Body, env)
+			restoreBranch()
+			restore()
 			if res == runtime.Repeat {
+				if isDefault {
+					return runtime.Repeat
+				}
 				if lexec != nil {
 					tlEmit(lexec, n, "tliARepeat")
 				}
 				waiting = false
+				waitAt = new(byte)
 				continue
 			}
 			return res
@@ -2444,11 +2468,22 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		// unless the alt is marked `@nodefault`. A default that stopped the
 		// component hands back its unwinding result, which has to travel
 		// past this alt statement.
-		if !defaultsSuppressed(n) {
+		// In an interleave branch body the interleave runs them, after
+		// its branches not yet taken (20.4, 20.5).
+		if !defaultsSuppressed(n) && currentInterleaveBranch() == nil {
 			if lexec != nil && !waiting && len(lexec.DefaultsOf(currentCompID(lexec))) > 0 {
 				tlEmit(lexec, n, "tliADefaults")
 			}
 			if ctl, fired := runDefaults(env); fired {
+				if ctl == runtime.Repeat {
+					// The default repeats this alt (20.5.2).
+					if lexec != nil {
+						tlEmit(lexec, n, "tliARepeat")
+					}
+					waiting = false
+					waitAt = new(byte)
+					continue
+				}
 				return ctl
 			}
 		}
@@ -2470,150 +2505,11 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			}
 		}
 		waiting = true
-		if !blockForAltEvents(n, env) {
+		if !blockForAltEvents(n, waitAt, env) {
 			// Nothing to wait for (only boolean / unmodelled guards) or
 			// this PTC was stopped: conclude without fabricating a
 			// verdict, per real alt semantics (the caller's outer
 			// context / timeout governs a genuinely blocked alt).
-			return nil
-		}
-	}
-	return nil
-}
-
-// evalInterleaveStmtStrict evaluates `interleave { ... }` under the strict
-// profile (ETSI ES 201 873-1 §20.4): every alternative is taken EXACTLY
-// ONCE, in whatever interleaved order its guard becomes ready. Each round
-// re-snapshots the not-yet-taken alternatives and takes the first whose
-// guard matches; when none match it blocks on the branch event sources and
-// re-snapshots. This is the correct semantics for the common case and
-// replaces running interleave as a plain best-effort alt (which took only
-// ONE alternative).
-//
-// A branch body that itself blocks needs no special handling. A nested alt
-// inside a body parks on its own event sources and, finding nothing that can
-// ever fire, concludes without matching; the interleave then re-snapshots and
-// takes the sibling whose guard the first body just enabled, and a later round
-// re-offers the branch whose blocking read is now satisfiable. Interleaves
-// with blocking bodies used to defer to the best-effort evaluator on the
-// assumption that they needed cooperative suspend/resume at the blocking
-// point; measured against the full ETSI corpus that fallback changed no
-// verdict, so the snapshot evaluator carries them directly.
-//
-// Activated defaults are likewise handled here. They are appended after the
-// remaining alternatives (20.5) and one that fires leaves the interleave —
-// runDefaults reports a default that actually took a branch, not merely one
-// that changed the verdict, which is the signal this needs.
-func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
-	if n.Body == nil {
-		return nil
-	}
-	var clauses []*syntax.CommClause
-	for _, s := range n.Body.Stmts {
-		if cc, ok := s.(*syntax.CommClause); ok && cc.Comm != nil && cc.Else == nil {
-			clauses = append(clauses, cc)
-		}
-	}
-	taken := make([]bool, len(clauses))
-	remaining := len(clauses)
-	// Test logging: each branch taken begins a new round, and a scan after
-	// waiting logs only what is new in its round (see evalAltStmtStrict).
-	lexec := tlExec(env)
-	if lexec != nil && defaultCtx.active() {
-		lexec = nil
-	}
-	if lexec != nil {
-		lexec.TLAltBump(currentCompID(lexec))
-		defer lexec.TLScanEnd(currentCompID(lexec))
-	}
-	waiting := false
-	const maxRounds = 1 << 20
-	for round := 0; round < maxRounds && remaining > 0; round++ {
-		// Alt-local declarations are re-evaluated each round (ETSI 20.2).
-		for _, s := range n.Body.Stmts {
-			if _, ok := s.(*syntax.CommClause); ok {
-				continue
-			}
-			if r := eval(s, env); needBreak(r) {
-				return r
-			}
-		}
-		// Freeze the visible-message boundary for the guard scan (ETSI 20.2
-		// snapshot), same as evalAltStmtStrict: on the real-clock concurrent
-		// path a message arriving mid-scan must not let a later branch take
-		// what an earlier one would. Cleared before the matched body runs.
-		altExec := runtime.FindTestcaseExec(env)
-		freeze := altExec != nil && !deterministicSchedulerEnabled(env)
-		if freeze {
-			altExec.BeginAltRound(goroutineID())
-		}
-		if lexec != nil {
-			lexec.TLScanBegin(currentCompID(lexec), waiting)
-		}
-		matchedIdx := -1
-		for i, cc := range clauses {
-			if taken[i] {
-				continue
-			}
-			// Boolean guard (ETSI 20.2): eligible only when it holds.
-			if cc.X != nil {
-				if gv, ok := eval(cc.X, env).(runtime.Bool); ok && !bool(gv) {
-					continue
-				}
-			}
-			if commGuardMatches(cc.Comm, env) {
-				matchedIdx = i
-				defaultBranchFire() // no-op unless inside a runDefaults sweep
-				break
-			}
-		}
-		if freeze {
-			altExec.EndAltRound(goroutineID())
-		}
-		if matchedIdx >= 0 {
-			// An altstep is no alternative of an interleave (20.4); what
-			// one taken would have left is not for a later alt.
-			_ = takeAltstepResult()
-			taken[matchedIdx] = true
-			remaining--
-			waiting = false
-			if altExec != nil && altExec.TestLogger() != nil {
-				altExec.TLScanEnd(currentCompID(altExec))
-			}
-			if lexec != nil {
-				lexec.TLAltBump(currentCompID(lexec))
-			}
-			if body := clauses[matchedIdx].Body; body != nil {
-				interleaveBodyCtx.enter()
-				res := evalAltClauseBody(body, env)
-				interleaveBodyCtx.leave()
-				// `repeat` is not permitted in interleave (20.4); ignore
-				// it. `break` / `return` / `stop` / `goto` / error leaves
-				// the interleave immediately.
-				if res != runtime.Repeat && needBreak(res) {
-					return res
-				}
-			}
-			continue // re-snapshot: taking one branch may enable another
-		}
-		// No alternative matched. Activated defaults are appended after the
-		// remaining alternatives (20.5); one that fires leaves the interleave.
-		if !defaultsSuppressed(n) {
-			if ctl, fired := runDefaults(env); fired {
-				return ctl
-			}
-		}
-		// This interleave IS the body of an activated default: a default is a
-		// single non-blocking pass, so conclude instead of parking the token.
-		if defaultCtx.active() {
-			return nil
-		}
-		// Block on the remaining branch event sources and re-snapshot.
-		if lexec != nil {
-			lexec.TLScanEnd(currentCompID(lexec))
-		}
-		waiting = true
-		if !blockForAltEvents(n, env) {
 			return nil
 		}
 	}
@@ -2626,7 +2522,17 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Obje
 // whose 2ms backstop also covers component / timer guards that raise no
 // MessageReady signal. Returns true to re-snapshot, false when there is
 // nothing to wait for or the PTC was stopped.
-func blockForAltEvents(n *syntax.AltStmt, env runtime.Scope) bool {
+func blockForAltEvents(n *syntax.AltStmt, at interface{}, env runtime.Scope) bool {
+	// In an interleave branch body, the interleave waits (interleave.go).
+	if currentInterleaveBranch() != nil {
+		vd, hasVD := nextAltTimerVirtualDeadline(n, env)
+		rd, hasRD := nextAltTimerDeadlineLenient(n, env)
+		events := altHasEventGuard(n)
+		if !hasVD && !hasRD && !events {
+			return false // only boolean / [else] guards: nothing to await
+		}
+		return interleaveWait(ilEvent{at: at, deadline: vd, hasTimer: hasVD, real: rd, hasReal: hasRD, events: events})
+	}
 	exec := runtime.FindTestcaseExec(env)
 	// A stopped executor - the testcase was stopped, or its context (the
 	// harness budget, or an execute() timeout) was cancelled - unwinds a
@@ -3170,7 +3076,7 @@ func prePopulateRedirects(g syntax.Node, env runtime.Scope) {
 		if cur, ok := env.Get(id.String()); ok && cur != runtime.Undefined && cur != runtime.Null {
 			return true
 		}
-		env.Set(id.String(), latest)
+		redirectScope(env).Set(id.String(), latest)
 		return true
 	})
 }

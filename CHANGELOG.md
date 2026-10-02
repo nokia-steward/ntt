@@ -258,9 +258,6 @@ Independent of the two clocks:
   - a receive in the branch of a default that matched waits, as in any
     behaviour; the default's sweep made it conclude at once;
   - `mtc.stop` from a PTC ends a waiting MTC; nothing woke it.
-  A receive in an `interleave` branch body still does not wait: the engine
-  does not expand interleave into its alternatives, and waiting there
-  would block the branch that could satisfy it.
 - **Starting a component whose behaviour still runs is an error** (ETSI
   21.3.2), where it went ahead.
 - **A started behaviour runs, on either clock** (ETSI 21.3.2). On the
@@ -334,6 +331,22 @@ Independent of the two clocks:
   clock, as expired default timers did before.
 - **A call's signature no longer reaches a PTC** for the unqualified
   `getreply` / `catch` rule (22.3.1 h).
+- **`interleave` interleaves** (ETSI 20.4). A branch body ran to its end
+  once its guard matched, and a receive in it did not wait, so two
+  branches that depend on each other deadlocked — the first one's body
+  waiting for what only the second one's sends. A body that reaches a
+  receiving statement, an alt, a timeout or a `done` now waits there while
+  the other branches go on, as the standard's expansion of interleave into
+  nested alts has it: each started body runs as a coroutine of the
+  component, and the interleave waits, as the component, for the earliest
+  of what its branches wait for. Interleaves nest, and run in PTCs alike;
+  the activated defaults come after the branches not yet taken, as 20.5
+  has them. Sem_2004_InterleaveStatement_001 and _002 now pass.
+- **A default whose branch ends in `repeat` re-evaluates the alt that
+  invoked it** (ETSI 20.5.2). It repeated its own altstep, which then
+  found nothing, and the alt ended as if the default had taken over: a
+  default skipping keepalives (`[] p.receive(KeepAlive:?) { repeat }`)
+  ended the very alt waiting for the answer.
 - **`T.running` reads the clock.** It counted how often it was asked, and
   after four times answered false: `while (t_window.running) { ... }`
   around a function waiting on a timer of its own ended after a few
@@ -449,9 +462,6 @@ These are older than this release and are recorded, with their diagnosis,
 in [`docs/conformance/remaining-work.md`](docs/conformance/remaining-work.md)
 §1s.
 
-- A receive in an `interleave` branch body does not wait: the engine does
-  not expand interleave into its alternatives (ETSI 20.4), and two branches
-  that depend on each other deadlock.
 - Starting a non-alive component again after its behaviour ended is
   accepted, where ETSI 21.3.2 makes it an error.
 

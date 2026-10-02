@@ -47,11 +47,6 @@ var altBodyCtx altContext
 // guard ever matches.
 var defaultCtx altContext
 
-// interleaveBodyCtx is active while an interleave's branch body runs. A
-// receiving statement there is part of the interleaving (ETSI 20.4), which
-// the engine does not expand; waiting on it would block the branches that
-// could satisfy it, so it keeps not waiting.
-var interleaveBodyCtx altContext
 
 // defaultBranchState tracks, per goroutine, whether an alt guard actually
 // matched while runDefaults was evaluating an activated default. runDefaults

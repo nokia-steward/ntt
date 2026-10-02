@@ -260,6 +260,9 @@ func waitComponentState(ref *runtime.ComponentRef, op string, env runtime.Scope)
 	if exec == nil || ref == nil {
 		return runtime.NewBool(pred(ref, env))
 	}
+	// In an interleave branch body, the interleave waits.
+	for at := new(byte); !pred(ref, env) && interleaveWait(ilEvent{at: at, events: true}); {
+	}
 	stop := currentStopChan(exec)
 	if !exec.SchedulerActive() {
 		// Real clock: wait on the PTC's exit.
@@ -358,6 +361,9 @@ func waitComponentsState(kind, op string, refs []*runtime.ComponentRef, env runt
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil {
 		return runtime.NewBool(satisfied())
+	}
+	// In an interleave branch body, the interleave waits.
+	for at := new(byte); !satisfied() && interleaveWait(ilEvent{at: at, events: true}); {
 	}
 	stop := currentStopChan(exec)
 	if !exec.SchedulerActive() {

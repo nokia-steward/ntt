@@ -564,33 +564,18 @@ func TestStrictInterleave_TakesEachBranchOnce(t *testing.T) {
 	}
 }
 
-// TestStrictInterleave_MutuallyDependentBranchesDeadlock records a KNOWN GAP,
-// and is deliberately asserted against what the engine really does rather
-// than what the spec asks for.
-//
-// Mirrors Sem_2004_InterleaveStatement_001: branch 1's body sends the message
-// that enables branch 2's guard and then blocks in a nested alt waiting for
-// the message branch 2's body sends, so the two branches are mutually
-// dependent. ETSI 20.4 wants both branches taken and the nested alt to reach
-// `setverdict(pass)`, which needs the interleave to SUSPEND a blocked branch
-// body and run another ready branch - coroutine-style interleaving inside a
-// single component, which we do not implement. We run branch 1's body to
-// completion, so its nested alt waits for a message nobody will send.
-//
-// A nested alt inside an interleave body is legal as far as the suite is
-// concerned: NegSem_2004_InterleaveStatement_001 has the same construct and
-// blames its `for` loop for the rejection, not the alt.
-//
-// This test asserted `pass` until 2026-08-10 and was vacuous: nothing set
-// pass. The nested alt never matched, so `setverdict(pass)` never ran, and
-// the verdict came from the engine's undeclared-verdict coercion. Both that
-// coercion and the deadlock release that let the blocked alt conclude have
-// since been removed, so the deadlock is now reported for what it is.
-func TestStrictInterleave_MutuallyDependentBranchesDeadlock(t *testing.T) {
+// TestStrictInterleave_MutuallyDependentBranches mirrors
+// Sem_2004_InterleaveStatement_001: branch 1's body sends the message that
+// enables branch 2's guard and then waits in a nested alt for the message
+// branch 2's body sends. ETSI 20.4 has both branches taken and the nested
+// alt reach `setverdict(pass)`: a body that waits lets the other branches
+// go on (interleave.go).
+func TestStrictInterleave_MutuallyDependentBranches(t *testing.T) {
 	src := `module M {
 		type port P message { inout integer }
 		type component C { port P p1, p2 }
 		testcase tc() runs on C system C {
+			connect(self:p1, self:p1); connect(self:p2, self:p2);
 			p1.send(integer:1);
 			interleave {
 				[] p1.receive(integer:1) {
@@ -605,17 +590,15 @@ func TestStrictInterleave_MutuallyDependentBranchesDeadlock(t *testing.T) {
 			}
 		}
 	}`
-	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
-	defer cancel()
-	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
-		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true, Context: ctx})
-	if err != nil {
-		t.Fatalf("RunTestcaseWith: %v", err)
-	}
-	if v != runtime.ErrorVerdict {
-		t.Fatalf("verdict = %s (%s), want error: branch 1's body blocks on a message only branch 2 can send, "+
-			"and we do not suspend a blocked branch body, so this deadlocks. Reaching pass here would mean "+
-			"branch-level suspension now works - update this test and Sem_2004_InterleaveStatement_001 with it", v, reason)
+	for _, k := range clocks {
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		opts := k.opts
+		opts.Context = ctx
+		v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", opts)
+		cancel()
+		if err != nil || v != runtime.PassVerdict {
+			t.Errorf("%s clock: %s (%s) %v", k.name, v, reason, err)
+		}
 	}
 }
 
@@ -879,5 +862,251 @@ func TestStrictSched_BroadcastRaiseToAll(t *testing.T) {
 	}
 	if v != runtime.PassVerdict {
 		t.Fatalf("verdict = %s (%s), want pass: a bare catch must read its own component's queue", v, reason)
+	}
+}
+
+// TestStrictInterleave_BodiesWait: a receive, a timeout and a done in a
+// branch body wait there while the other branches go on, on both clocks
+// and in a PTC; a nested interleave in a body interleaves too.
+func TestStrictInterleave_BodiesWait(t *testing.T) {
+	for name, src := range map[string]string{
+		"receive in a body": `module M {
+			type port P message { inout integer }
+			type component C { port P p1, p2 }
+			testcase tc() runs on C {
+				connect(self:p1, self:p1); connect(self:p2, self:p2);
+				var integer seen := 0;
+				p1.send(1);
+				interleave {
+					[] p1.receive(integer:1) { p2.send(2); p1.receive(integer:3); seen := seen + 1 }
+					[] p2.receive(integer:2) { p1.send(3); seen := seen + 10 }
+				}
+				if (seen == 11) { setverdict(pass) } else { setverdict(fail, seen) }
+			}
+		}`,
+		"timeout in a body": `module M {
+			type port P message { inout integer }
+			type component C { port P p }
+			function later() runs on C { timer d := 1.5; d.start; d.timeout; p.send(5) }
+			testcase tc() runs on C {
+				var C c := C.create;
+				connect(self:p, c:p);
+				c.start(later());
+				timer t1 := 1.0, t2 := 1.0;
+				var integer order := 0;
+				t1.start;
+				interleave {
+					[] t1.timeout { t2.start; t2.timeout; order := order * 10 + 2 }
+					[] p.receive(integer:5) { order := order * 10 + 1 }
+				}
+				if (order == 12) { setverdict(pass) } else { setverdict(fail, order) }
+			}
+		}`,
+		"done in a body": `module M {
+			type port P message { inout integer }
+			type component C { port P p }
+			function w() runs on C { timer d := 1.0; d.start; d.timeout; p.send(7) }
+			testcase tc() runs on C {
+				var C c := C.create;
+				connect(self:p, c:p);
+				var integer got := 0;
+				timer go := 0.5;
+				go.start;
+				interleave {
+					[] go.timeout { c.start(w()); c.done; got := got + 1 }
+					[] p.receive(integer:7) { got := got + 10 }
+				}
+				if (got == 11) { setverdict(pass) } else { setverdict(fail, got) }
+			}
+		}`,
+		"in a PTC": `module M {
+			type port P message { inout integer }
+			type component C { port P p }
+			function ping() runs on C {
+				interleave {
+					[] p.receive(integer:1) { p.send(2); p.receive(integer:3) }
+					[] p.receive(integer:4) { }
+				}
+				setverdict(pass);
+			}
+			testcase tc() runs on C {
+				var C c := C.create;
+				connect(self:p, c:p);
+				c.start(ping());
+				p.send(1);
+				p.receive(integer:2);
+				p.send(4);
+				p.send(3);
+				c.done;
+			}
+		}`,
+		"nested interleave": `module M {
+			type port P message { inout integer }
+			type component C { port P p1, p2, p3 }
+			testcase tc() runs on C {
+				connect(self:p1, self:p1); connect(self:p2, self:p2); connect(self:p3, self:p3);
+				var integer n := 0;
+				p1.send(1);
+				p1.send(9);
+				interleave {
+					[] p1.receive(integer:1) {
+						interleave {
+							[] p2.receive(integer:2) { n := n + 1 }
+							[] p3.receive(integer:3) { n := n + 1 }
+						}
+					}
+					[] p1.receive(integer:9) { p2.send(2); p3.send(3); n := n + 1 }
+				}
+				if (n == 3) { setverdict(pass) } else { setverdict(fail, n) }
+			}
+		}`,
+	} {
+		for _, k := range clocks {
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			opts := k.opts
+			opts.Context = ctx
+			v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", opts)
+			cancel()
+			if err != nil || v != runtime.PassVerdict {
+				t.Errorf("%s, %s clock: %s (%s) %v", name, k.name, v, reason, err)
+			}
+		}
+	}
+}
+
+// TestStrictInterleave_StoppedWhileABodyWaits: a component stopped while
+// a branch body of its interleave waits ends, and so does the body.
+func TestStrictInterleave_StoppedWhileABodyWaits(t *testing.T) {
+	src := `module M {
+		type port P message { inout integer }
+		type component C { port P p }
+		function f() runs on C {
+			interleave {
+				[] p.receive(integer:1) { p.send(2); p.receive(integer:99) }
+				[] p.receive(integer:3) { }
+			}
+		}
+		testcase tc() runs on C {
+			var C c := C.create;
+			connect(self:p, c:p);
+			c.start(f());
+			p.send(1);
+			p.receive(integer:2);
+			c.stop;
+			setverdict(pass);
+		}
+	}`
+	for _, k := range clocks {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		opts := k.opts
+		opts.Context = ctx
+		v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", opts)
+		cancel()
+		if err != nil || v != runtime.PassVerdict {
+			t.Errorf("%s clock: %s (%s) %v", k.name, v, reason, err)
+		}
+	}
+}
+
+// TestDefaultRepeat: a default whose branch ends in repeat re-evaluates
+// the alt that invoked it (ETSI 20.5.2) — in an interleave too, where a
+// body that waits meanwhile goes on; a body whose nested alt repeats
+// counts as going on.
+func TestDefaultRepeat(t *testing.T) {
+	for name, src := range map[string]string{
+		"a default that repeats re-evaluates the alt": `module M {
+  type port P message { inout integer }
+  type component C { port P p1, p2 }
+  altstep skip() runs on C { [] p1.receive(integer:0) { log("skipped"); repeat } }
+  testcase tc() runs on C {
+    connect(self:p1, self:p1); connect(self:p2, self:p2);
+    activate(skip());
+    p1.send(0); p1.send(0); p1.send(2);
+    alt { [] p1.receive(integer:2) { setverdict(pass) } }
+    if (getverdict != pass) { setverdict(fail, "alt left by repeating default") }
+  }
+}`,
+		"a default that repeats in an interleave": `module M {
+  type port P message { inout integer }
+  type component C { port P p1, p2 }
+  altstep skip() runs on C { [] p2.receive(integer:0) { log("skipped"); repeat } }
+  testcase tc() runs on C {
+    connect(self:p1, self:p1); connect(self:p2, self:p2);
+    activate(skip());
+    var integer n := 0;
+    p1.send(1);
+    interleave {
+      [] p1.receive(integer:1) { p2.send(0); p1.send(9); p2.receive(integer:5); n := n + 1 }
+      [] p1.receive(integer:9) { p2.send(5); n := n + 10 }
+    }
+    if (n == 11) { setverdict(pass) } else { setverdict(fail, "n=", n) }
+  }
+}`,
+		"a body that repeats goes on": `module M {
+  type port P message { inout integer }
+  type component C { port P p1, p2, p3, p4, p5 }
+  altstep d() runs on C { [] p3.receive(integer:5) { setverdict(fail, "default fired while a body could go on") } }
+  testcase tc() runs on C {
+    connect(self:p1, self:p1); connect(self:p2, self:p2); connect(self:p3, self:p3);
+    connect(self:p4, self:p4); connect(self:p5, self:p5);
+    var integer n := 0;
+    p1.send(1); p1.send(9); p5.send(3);
+    interleave {
+      [] p1.receive(integer:1) { p2.receive(integer:2); p4.send(7); n := n + 1 }
+      [] p1.receive(integer:9) { alt { [] p4.receive(integer:0) { p2.send(2); repeat } [] p4.receive(integer:7) { n := n + 10 } } }
+      [] p5.receive(integer:3) { p4.send(0); n := n + 100 }
+    }
+    if (n == 111) { setverdict(pass) } else { setverdict(fail, "n=", n) }
+  }
+}`,
+		"a default repeating through an altstep alternative": `module M {
+  type port P message { inout integer }
+  type component C { port P p; var integer cnt := 0; var integer k := 0; var boolean first := true }
+
+  altstep a2() runs on C { [] p.receive(integer:1) { cnt := cnt + 1; repeat } }
+  altstep d() runs on C { [] a2() {} }
+  testcase tc() runs on C {
+    connect(self:p, self:p); activate(d());
+    p.send(1); p.send(1); p.send(2);
+    alt { [] p.receive(integer:2) { if (cnt == 2) { setverdict(pass) } else { setverdict(fail, "cnt") } } }
+    if (getverdict == none) { setverdict(fail, "alt ended w/o 2, cnt=", cnt) }
+  }
+}`,
+		"an alt in a default's [else] repeats itself": `module M {
+  type port P message { inout integer }
+  type component C { port P p; var integer cnt := 0; var integer k := 0; var boolean first := true }
+
+  altstep d() runs on C { [else] { if (first) { first := false; alt { [] p.receive(integer:3) { k := k + 1; if (k < 2) { repeat } } } } } }
+  testcase tc() runs on C {
+    connect(self:p, self:p); activate(d());
+    p.send(3); p.send(3); p.send(2);
+    alt { [] p.receive(integer:2) { setverdict(fail, "invoking alt took 2") } }
+    if (k != 2) { setverdict(fail, "k=", k) }
+    p.receive(integer:2);
+    setverdict(pass);
+  }
+}`,
+		"a default taking its [else] has fired": `module M {
+  type port P message { inout integer }
+  type component C { port P p; var integer cnt := 0 }
+  altstep d() runs on C { [else] { cnt := cnt + 1 } }
+  testcase tc() runs on C {
+    connect(self:p, self:p); activate(d());
+    timer t := 1.0; t.start;
+    alt { [] t.timeout { setverdict(fail, "timer: alt not ended by default else, cnt=", cnt) } }
+    if (getverdict == none) { setverdict(pass) }
+  }
+}`,
+	} {
+		for _, k := range clocks {
+			ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+			opts := k.opts
+			opts.Context = ctx
+			v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", opts)
+			cancel()
+			if err != nil || v != runtime.PassVerdict {
+				t.Errorf("%s, %s clock: %s (%s) %v", name, k.name, v, reason, err)
+			}
+		}
 	}
 }

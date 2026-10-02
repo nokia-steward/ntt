@@ -179,7 +179,10 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// schedule the response block like an alt. The call's signature
 		// qualifies the block's unqualified getreply / catch guards
 		// (ETSI 22.3.1 h).
-		var restoreCallSig, restoreCallTimeout func()
+		// The block's own scope holds the call's signature and timeout,
+		// so another block — an interleave branch's — has its own.
+		callEnv := runtime.NewEnv(env)
+		callEnv.Set(callBlockKey, callBlock{outer: env})
 		if es, ok := n.Stmt.(*syntax.ExprStmt); ok {
 			// `p.call(...) to c { ... }` addresses the call; the block
 			// is the same.
@@ -196,27 +199,21 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 							} else {
 								_ = evalProcedurePortOp("call", pname, ce, env)
 							}
-							restoreCallSig = pushCallSignature(ce, env)
+							pushCallSignature(ce, callEnv)
 							// The call's timeout duration becomes a virtual
 							// timer the response-block alt parks on so
 							// `catch(timeout)` can fire (ETSI 22.3.1).
-							restoreCallTimeout = pushCallTimeout(ce, env)
+							pushCallTimeout(ce, callEnv)
 						}
 					}
 				}
 			}
 		}
-		if restoreCallSig != nil {
-			defer restoreCallSig()
-		}
-		if restoreCallTimeout != nil {
-			defer restoreCallTimeout()
-		}
 		if n.Body != nil {
 			alt := &syntax.AltStmt{Body: n.Body}
 			callResponseAlts.Store(alt, struct{}{})
 			defer callResponseAlts.Delete(alt)
-			return evalAltStmtStrict(alt, env)
+			return evalAltStmtStrict(alt, callEnv)
 		}
 		return nil
 
@@ -7183,6 +7180,9 @@ func evalTimerSelector(th *runtime.TimerHandle, n *syntax.SelectorExpr, env runt
 			}
 			return runtime.NewBool(expired)
 		}
+		// In an interleave branch body, the interleave waits.
+		for at := new(byte); !timerExpired(th, env) && interleaveWait(timerWait(th, at)); {
+		}
 		// Outside an alt, under the quiescence scheduler:
 		// park until the virtual clock reaches this
 		// timer's deadline, letting any earlier event or
@@ -7304,6 +7304,9 @@ func evalTimerOp(th *runtime.TimerHandle, sel syntax.Expr, n *syntax.CallExpr, e
 				th.Running = false
 			}
 			return runtime.NewBool(expired)
+		}
+		// In an interleave branch body, the interleave waits.
+		for at := new(byte); !timerExpired(th, env) && interleaveWait(timerWait(th, at)); {
 		}
 		// Outside an alt, under the quiescence scheduler: park until the
 		// virtual clock reaches the deadline so any earlier event or timer
@@ -9967,6 +9970,11 @@ func runDefaults(env runtime.Scope) (runtime.Object, bool) {
 		// branch. The verdict-change test below is kept as a superset.
 		defaultBranchArm()
 		res := eval(ast.n, d.Env)
+		// A repeat in the default's branch re-evaluates the alt that
+		// invoked it (ETSI 20.5.2).
+		if res == runtime.Repeat {
+			return runtime.Repeat, true
+		}
 		// A default that stops the component, or errors, terminates the
 		// behaviour that invoked it: the statements after the enclosing
 		// alt must not run (ETSI 20.5.1,
@@ -10001,13 +10009,47 @@ func defaultUnwind(res runtime.Object) runtime.Object {
 	return nil
 }
 
+// callBlockKey binds, in the scope of a blocking call's response block,
+// the scope the call was made in (callBlock).
+const callBlockKey = "\x00ttcn3:call-block"
+
+// callBlock is a blocking call's response block's scope's own binding:
+// the scope of the call, which the block's statements write through to.
+type callBlock struct{ outer runtime.Scope }
+
+func (callBlock) Type() runtime.ObjectType { return runtime.ObjectType("CALL_BLOCK") }
+func (callBlock) Inspect() string          { return "call block" }
+func (c callBlock) Equal(o runtime.Object) bool {
+	other, ok := o.(callBlock)
+	return ok && other.outer == c.outer
+}
+
+// redirectScope is where a redirect's target is bound ahead of a match
+// (prePopulateRedirects): env, or for a blocking call's response block,
+// which has a scope of its own, the scope the call was made in.
+func redirectScope(env runtime.Scope) runtime.Scope {
+	if e, ok := env.(*runtime.Env); ok && e.Binds(callBlockKey) {
+		if v, ok := e.Get(callBlockKey); ok {
+			if cb, ok := v.(callBlock); ok {
+				return cb.outer
+			}
+		}
+	}
+	return env
+}
+
 // defaultsFired runs the activated defaults on behalf of a STANDALONE
 // receiving operation that did not match. When one fires, the operation
 // yields either the default's own unwinding result or a bare return, both
 // of which end the current statement chain.
 func defaultsFired(env runtime.Scope) (runtime.Object, bool) {
+	// In an interleave branch body the interleave runs them (20.5).
+	if currentInterleaveBranch() != nil {
+		return nil, false
+	}
 	ctl, fired := runDefaults(env)
-	if !fired {
+	// A default that repeats has the operation try again.
+	if !fired || ctl == runtime.Repeat {
 		return nil, false
 	}
 	if ctl != nil {
@@ -12257,7 +12299,7 @@ func prePopulateRedirectExpr(r *syntax.RedirectExpr, exec *runtime.TestcaseExec,
 	if cur, ok := env.Get(id.String()); ok && cur != runtime.Undefined && cur != runtime.Null {
 		return
 	}
-	env.Set(id.String(), latest)
+	redirectScope(env).Set(id.String(), latest)
 }
 
 // applyRedirect realises `-> value v_val` and `-> sender v_addr` on
@@ -12882,6 +12924,9 @@ func timerAggregateBlockingTimeout(timers []*runtime.TimerHandle, anyKind bool, 
 	if target == nil {
 		return runtime.NewBool(false)
 	}
+	// In an interleave branch body, the interleave waits.
+	for at := new(byte); !timerExpired(target, env) && interleaveWait(timerWait(target, at)); {
+	}
 	exec := runtime.FindTestcaseExec(env)
 	if exec != nil && target.Duration > 0 && deterministicSchedulerEnabled(env) {
 		// Under the quiescence scheduler, park until the virtual clock
@@ -12935,9 +12980,6 @@ func clearPort(exec *runtime.TestcaseExec, n syntax.Node, pname string) {
 func canWait(env runtime.Scope) bool {
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil {
-		return false
-	}
-	if interleaveBodyCtx.active() {
 		return false
 	}
 	cur := exec.CurrentComponent()
