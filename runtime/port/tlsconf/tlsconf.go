@@ -33,8 +33,9 @@ type Config struct {
 	Insecure bool
 }
 
-// warnInsecureOnce keeps the skip-verify warning to one line per run.
-var warnInsecureOnce sync.Once
+// warnedInsecure keeps the skip-verify warning to one line per port kind
+// (who) and run.
+var warnedInsecure sync.Map // who -> *sync.Once
 
 // Build turns the declarative settings into a tls.Config, reading any
 // certificate files from disk. A nil t verifies against the system roots.
@@ -51,7 +52,8 @@ func Build(t *Config, who string) (*tls.Config, error) {
 		// convenience against a self-signed test endpoint, but a run that
 		// did it cannot support a security claim — and that is easy to
 		// forget when the setting lives in a config file nobody re-reads.
-		warnInsecureOnce.Do(func() {
+		once, _ := warnedInsecure.LoadOrStore(who, new(sync.Once))
+		once.(*sync.Once).Do(func() {
 			fmt.Fprintf(os.Stderr,
 				"%s: TLS certificate verification is DISABLED (insecure_skip_verify); "+
 					"the identity of the server is not checked\n", who)

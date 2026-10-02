@@ -48,8 +48,11 @@
 // client connection over the same framing: the server is verified against
 // the system roots by default, or against a CA bundle, with a client
 // certificate for mutual TLS or a name override — the settings the HTTP
-// port takes for an https:// base URL (see tlsconf.Config). A handshake or
-// verification failure fails the map, naming the cause.
+// port takes for an https:// base URL (see tlsconf.Config). A failed
+// connection fails the map, and so does a failed handshake or verification
+// of the server, naming the cause. Under TLS 1.3 a server that rejects the
+// client's certificate says so only after the handshake: that arrives as a
+// disconnect.
 package tcpport
 
 import (
@@ -116,6 +119,10 @@ type Rule struct {
 	// these settings; nil is plain TCP. A zero Config verifies the server
 	// against the system roots.
 	TLS *tlsconf.Config
+	// Err, when set, makes the map fail with it: the rule was given
+	// settings it cannot honour — TLS asked for in a way it cannot tell,
+	// say — and connecting regardless would be worse than not.
+	Err string
 }
 
 // config holds the tunables an Option can set.
@@ -267,6 +274,9 @@ func (p *tcpPort) OnMap(context.Context) error {
 	if !ok {
 		return fmt.Errorf("tcpport %s: no address rule matches the mapping component", p.inst)
 	}
+	if rule.Err != "" {
+		return fmt.Errorf("tcpport %s: %s", p.inst, rule.Err)
+	}
 	conn, err := dial(rule, p.inst)
 	if err != nil {
 		return err
@@ -295,13 +305,28 @@ func dial(rule Rule, inst string) (net.Conn, error) {
 		}
 		return conn, nil
 	}
-	cfg, err := tlsconf.Build(rule.TLS, "tcpport "+inst)
+	cfg, err := tlsconf.Build(rule.TLS, "tcpport")
 	if err != nil {
 		return nil, fmt.Errorf("tcpport %s: %w", inst, err)
 	}
-	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: rule.DialTimeout}, "tcp", rule.Addr, cfg)
+	if cfg.ServerName == "" {
+		host, _, err := net.SplitHostPort(rule.Addr)
+		if err != nil {
+			host = rule.Addr
+		}
+		cfg.ServerName = host
+	}
+	deadline := time.Now().Add(rule.DialTimeout)
+	raw, err := (&net.Dialer{Deadline: deadline}).Dial("tcp", rule.Addr)
 	if err != nil {
-		return nil, fmt.Errorf("tcpport %s: TLS dial %s: %w", inst, rule.Addr, err)
+		return nil, fmt.Errorf("tcpport %s: dial %s: %w", inst, rule.Addr, err)
+	}
+	conn := tls.Client(raw, cfg)
+	ctx, cancel := context.WithDeadline(context.Background(), deadline)
+	defer cancel()
+	if err := conn.HandshakeContext(ctx); err != nil {
+		raw.Close()
+		return nil, fmt.Errorf("tcpport %s: TLS handshake with %s: %w", inst, rule.Addr, err)
 	}
 	return conn, nil
 }

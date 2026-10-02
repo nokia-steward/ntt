@@ -147,7 +147,28 @@ func TestTCPPort_TLSVerifiesTheServer(t *testing.T) {
 		type component C { port P p }
 		testcase tc() runs on C system C { map(self:p, system:p); setverdict(pass); }
 	}`)
-	if v != runtime.ErrorVerdict || !strings.Contains(reason, "TLS") {
-		t.Fatalf("verdict = %s (%s), want an error naming TLS", v, reason)
+	if v != runtime.ErrorVerdict || !strings.Contains(reason, "TLS handshake") {
+		t.Fatalf("verdict = %s (%s), want an error naming the TLS handshake", v, reason)
+	}
+}
+
+// TestTCPPort_TLSConnectFailureIsNoHandshakeFailure: nothing listening is
+// a failed connection, said so, not a failed handshake.
+func TestTCPPort_TLSConnectFailureIsNoHandshakeFailure(t *testing.T) {
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	addr := ln.Addr().String()
+	ln.Close()
+	tcpport.Register("p", addr, tcpport.WithTLS(tlsconf.Config{}))
+	t.Cleanup(tcpport.Reset)
+	v, reason := run(t, "M.tc", `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C { map(self:p, system:p); setverdict(pass); }
+	}`)
+	if v != runtime.ErrorVerdict || strings.Contains(reason, "TLS") || !strings.Contains(reason, "dial") {
+		t.Fatalf("verdict = %s (%s), want a dial error", v, reason)
 	}
 }

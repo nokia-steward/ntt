@@ -92,10 +92,27 @@
 // and WithTLS). Certificate files are read at map time, so a bad path fails
 // the map operation and names the file.
 //
+// With streaming on (WithStream, or `stream := "sse"` / `"lines"`), a
+// response is delivered as it arrives: its HttpResponse (status, an empty
+// body, and headers when asked for) once the headers come, then each
+// server-sent event or each line, then the end of the stream:
+//
+//	type record SseEvent      { charstring event, charstring data, charstring id }
+//	type record HttpLine      { charstring line }
+//	type record HttpStreamEnd { charstring detail }
+//
+// An answer other than 2xx arrives whole, and so, on an SSE port, does one
+// that is no text/event-stream. The timeout bounds the connection, the
+// handshake and the wait for the headers; the stream lasts until the
+// server ends it or the port is unmapped or stopped, and one that breaks
+// arrives as a TransportError. Once maxPendingStream of a stream's values
+// wait unreceived, the stream is stopped with an oversize TransportError.
+//
 // Not modelled: binary (non-UTF-8) bodies.
 package httpport
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	"crypto/tls"
@@ -108,6 +125,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -173,12 +191,25 @@ type Rule struct {
 	// ResponseHeaders adds the response's headers to the HttpResponse
 	// record (a `headers` field the suite declares).
 	ResponseHeaders bool
+	// Stream delivers each response as it arrives — StreamLines line by
+	// line, StreamSSE event by event — rather than whole; "" does not.
+	// The timeout then bounds the wait for the response's headers, not
+	// the stream, which lasts until the server ends it or the port is
+	// unmapped or stopped.
+	Stream string
 }
+
+// Streaming modes (Rule.Stream).
+const (
+	StreamLines = "lines" // each line of the body, as an HttpLine
+	StreamSSE   = "sse"   // each server-sent event, as an SseEvent
+)
 
 type config struct {
 	timeout         time.Duration
 	tls             *TLS
 	responseHeaders bool
+	stream          string
 }
 
 // Option configures a registered HTTP test port.
@@ -200,6 +231,12 @@ func WithResponseHeaders() Option {
 	return func(c *config) { c.responseHeaders = true }
 }
 
+// WithStream delivers each response as it arrives, in the given mode
+// (StreamLines or StreamSSE; see Rule.Stream).
+func WithStream(mode string) Option {
+	return func(c *config) { c.stream = mode }
+}
+
 // Register binds a TTCN-3 message port name to an HTTP test port that
 // issues requests against baseURL, for any component. Call once per port
 // name at startup; the first Register installs the global port-driver
@@ -210,7 +247,7 @@ func Register(portName, baseURL string, opts ...Option) {
 		o(&cfg)
 	}
 	RegisterRules(portName, []Rule{{Component: "*", BaseURL: baseURL, Timeout: cfg.timeout, TLS: cfg.tls,
-		ResponseHeaders: cfg.responseHeaders}})
+		ResponseHeaders: cfg.responseHeaders, Stream: cfg.stream}})
 }
 
 // RegisterRules binds a port name to component-selective base URLs. The
@@ -248,8 +285,12 @@ type httpPort struct {
 	baseURL         string
 	client          *http.Client
 	mapped          bool
-	responseHeaders bool           // resolved from the matched rule at OnMap
-	wg              sync.WaitGroup // in-flight requests, joined on unmap
+	responseHeaders bool               // resolved from the matched rule at OnMap
+	streamMode      string             // resolved from the matched rule at OnMap
+	ctx             context.Context    // the mapping's: cancelled on unmap, ending streams
+	cancel          context.CancelFunc //
+	timeout         time.Duration      // the matched rule's, for a stream port's whole answers
+	wg              sync.WaitGroup     // in-flight requests, joined on unmap
 }
 
 // resolveRule picks the rule matching the component doing the map, in
@@ -303,7 +344,15 @@ func (p *httpPort) OnMap(context.Context) error {
 	if rule.BaseURL == "" {
 		return fmt.Errorf("httpport %s: empty base URL", p.inst)
 	}
+	switch rule.Stream {
+	case "", StreamLines, StreamSSE:
+	default:
+		return fmt.Errorf("httpport %s: unknown stream mode %q (want %q or %q)", p.inst, rule.Stream, StreamLines, StreamSSE)
+	}
 	client := &http.Client{Timeout: rule.Timeout}
+	// Plain HTTP goes as Go's default client does; HTTPS by a transport
+	// of its own, with the configured TLS and nothing else.
+	var transport *http.Transport
 	// TLS applies to an https base URL. Building the config here (rather
 	// than at registration) means a missing or malformed cert file fails
 	// the map operation, so the testcase reports an error verdict naming
@@ -313,13 +362,40 @@ func (p *httpPort) OnMap(context.Context) error {
 		if err != nil {
 			return fmt.Errorf("httpport %s: %w", p.inst, err)
 		}
-		client.Transport = &http.Transport{TLSClientConfig: cfg}
+		transport = &http.Transport{TLSClientConfig: cfg}
 	}
+	// A stream lasts as long as the server keeps it open: the timeout
+	// bounds the connection, the handshake and the wait for its headers
+	// instead.
+	if rule.Stream != "" {
+		if transport == nil {
+			transport = http.DefaultTransport.(*http.Transport).Clone()
+		}
+		client.Timeout = 0
+		transport.DialContext = (&net.Dialer{Timeout: rule.Timeout}).DialContext
+		transport.TLSHandshakeTimeout = rule.Timeout
+		transport.ResponseHeaderTimeout = rule.Timeout
+	}
+	if transport != nil {
+		client.Transport = transport
+	}
+	ctx, cancel := context.WithCancel(context.Background())
 	p.mu.Lock()
+	// Mapped again without an unmap: the earlier mapping's streams end,
+	// and its idle connections close.
+	if p.cancel != nil {
+		p.cancel()
+	}
+	if old := p.client; old != nil && old.Transport != nil {
+		defer old.CloseIdleConnections() // its own; not the shared default
+	}
+	p.timeout = rule.Timeout
 	p.baseURL = rule.BaseURL
 	p.client = client
 	p.mapped = true
 	p.responseHeaders = rule.ResponseHeaders
+	p.streamMode = rule.Stream
+	p.ctx, p.cancel = ctx, cancel
 	p.mu.Unlock()
 	return nil
 }
@@ -339,11 +415,21 @@ func (p *httpPort) shutdown() error {
 	}
 	p.mapped = false
 	client := p.client
+	cancel := p.cancel
+	streaming := p.streamMode != ""
 	p.mu.Unlock()
 
-	p.wg.Wait() // in-flight requests finish (each bounded by the timeout)
-	if client != nil {
-		client.CloseIdleConnections()
+	// A stream would last until the server ends it: unmapping ends it.
+	// Other requests finish (each bounded by the timeout).
+	if streaming && cancel != nil {
+		cancel()
+	}
+	p.wg.Wait()
+	if cancel != nil {
+		cancel()
+	}
+	if client != nil && client.Transport != nil {
+		client.CloseIdleConnections() // its own; not the shared default
 	}
 	return nil
 }
@@ -358,12 +444,20 @@ func (p *httpPort) Send(_ context.Context, env *port.Envelope) error {
 	}
 	p.mu.Lock()
 	base, client, mapped, withHeaders := p.baseURL, p.client, p.mapped, p.responseHeaders
+	mode, ctx, timeout := p.streamMode, p.ctx, p.timeout
 	p.mu.Unlock()
 	if !mapped {
 		return fmt.Errorf("httpport %s: send before map", p.inst)
 	}
 
 	p.wg.Add(1)
+	if mode != "" {
+		go func() {
+			defer p.wg.Done()
+			p.stream(ctx, client, base, req, mode, withHeaders, timeout)
+		}()
+		return nil
+	}
 	go func() {
 		defer p.wg.Done()
 		status, body, header, failure := p.do(client, base, req)
@@ -390,14 +484,32 @@ type transportFailure struct {
 // for a server response — including 4xx and 5xx, which are answers — or a
 // non-nil transportFailure when no response was obtained.
 func (p *httpPort) do(client *http.Client, base string, r request) (int, string, http.Header, *transportFailure) {
+	req, failure := newHTTPRequest(context.Background(), base, r)
+	if failure != nil {
+		return 0, "", nil, failure
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		return 0, "", nil, &transportFailure{classify(err), fmt.Sprintf("%s %s: %v", r.method, req.URL, err)}
+	}
+	defer resp.Body.Close()
+	body, failure := readBody(resp, r)
+	if failure != nil {
+		return 0, "", nil, failure
+	}
+	return resp.StatusCode, body, resp.Header, nil
+}
+
+// newHTTPRequest builds the request r describes against base.
+func newHTTPRequest(ctx context.Context, base string, r request) (*http.Request, *transportFailure) {
 	var bodyReader io.Reader
 	if r.body != "" {
 		bodyReader = bytes.NewReader([]byte(r.body))
 	}
 	url := base + r.path
-	req, err := http.NewRequest(r.method, url, bodyReader)
+	req, err := http.NewRequestWithContext(ctx, r.method, url, bodyReader)
 	if err != nil {
-		return 0, "", nil, &transportFailure{reasonOther, fmt.Sprintf("build request %s %s: %v", r.method, url, err)}
+		return nil, &transportFailure{reasonOther, fmt.Sprintf("build request %s %s: %v", r.method, url, err)}
 	}
 	if r.body != "" {
 		ct := r.contentType
@@ -412,29 +524,255 @@ func (p *httpPort) do(client *http.Client, base string, r request) (int, string,
 		}
 	}
 	for _, h := range r.headers {
+		// Go takes the Host header from the request, not its headers.
+		if strings.EqualFold(h[0], "Host") {
+			req.Host = h[1]
+			continue
+		}
 		req.Header.Add(h[0], h[1])
 	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return 0, "", nil, &transportFailure{classify(err), fmt.Sprintf("%s %s: %v", r.method, url, err)}
-	}
-	defer resp.Body.Close()
+	return req, nil
+}
+
+// readBody reads a whole response body, up to the cap.
+func readBody(resp *http.Response, r request) (string, *transportFailure) {
 	// Read one byte past the cap so exceeding it is detectable: a plain
 	// LimitReader stops at the limit and reports success, which is how a
 	// too-large answer became a silently truncated one.
 	b, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxBodyLen)+1))
 	if err == nil && len(b) > maxBodyLen {
-		return 0, "", nil, &transportFailure{reasonOversize, fmt.Sprintf(
+		return "", &transportFailure{reasonOversize, fmt.Sprintf(
 			"%s %s: response body exceeds the %d-byte cap; not delivered rather than truncated",
-			r.method, url, maxBodyLen)}
+			r.method, resp.Request.URL, maxBodyLen)}
 	}
 	if err != nil {
 		// Headers arrived, so the SUT did answer; report the status and
 		// surface the truncated read in the body rather than pretending
 		// the request never happened.
-		return resp.StatusCode, fmt.Sprintf("read body: %v", err), resp.Header, nil
+		return fmt.Sprintf("read body: %v", err), nil
 	}
-	return resp.StatusCode, string(b), resp.Header, nil
+	return string(b), nil
+}
+
+// stream performs a request whose response is delivered as it arrives
+// (see StreamLines, StreamSSE): the response's status first, then each
+// line or event, then the stream's end. An answer other than 2xx is no
+// stream and is delivered whole, as without streaming. A stream the port
+// was unmapped or stopped during (ctx done) ends without a word: the suite
+// ended it.
+func (p *httpPort) stream(ctx context.Context, client *http.Client, base string, r request, mode string, withHeaders bool, timeout time.Duration) {
+	// Nothing reaches the suite once the stream is ended (ctx done): it
+	// ended it.
+	inject := func(v runtime.Object) bool {
+		if ctx.Err() != nil {
+			return false
+		}
+		goport.Inject(p.inst, v)
+		return true
+	}
+	req, failure := newHTTPRequest(ctx, base, r)
+	if failure != nil {
+		inject(newTransportError(failure))
+		return
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		inject(newTransportError(&transportFailure{classify(err), fmt.Sprintf("%s %s: %v", r.method, req.URL, err)}))
+		return
+	}
+	defer resp.Body.Close()
+	start := func(body string) *runtime.Record {
+		rec := newResponse(resp.StatusCode, body)
+		if withHeaders {
+			rec.Fields["headers"] = headerList(resp.Header)
+		}
+		return rec
+	}
+	// An answer other than 2xx is no stream, nor on an SSE port is one
+	// that is no event stream — a plain REST answer on the same port:
+	// either is delivered whole, its body read within the timeout.
+	events := strings.HasPrefix(strings.ToLower(strings.TrimSpace(resp.Header.Get("Content-Type"))), "text/event-stream")
+	if resp.StatusCode/100 != 2 || (mode == StreamSSE && !events) {
+		var timedOut atomic.Bool
+		var timer *time.Timer
+		if timeout > 0 {
+			timer = time.AfterFunc(timeout, func() { timedOut.Store(true); resp.Body.Close() })
+		}
+		body, failure := readBody(resp, r)
+		if timer != nil && !timer.Stop() && timedOut.Load() {
+			inject(newTransportError(&transportFailure{reasonTimeout, fmt.Sprintf("%s %s: the body did not arrive within %v", r.method, req.URL, timeout)}))
+			return
+		}
+		if failure != nil {
+			inject(newTransportError(failure))
+			return
+		}
+		inject(start(body))
+		return
+	}
+	if !inject(start("")) {
+		return
+	}
+
+	sc := bufio.NewScanner(resp.Body)
+	sc.Buffer(make([]byte, 0, 64<<10), maxBodyLen)
+	sc.Split(newLineScanner())
+	var ev sseEvent
+	first := true
+	for sc.Scan() {
+		line := sc.Text()
+		if first {
+			// A byte order mark opens the stream, and is no part of it.
+			line = strings.TrimPrefix(line, "\ufeff")
+			first = false
+		}
+		// The values wait in the suite's queue until it receives them;
+		// one that does not would let the stream fill the memory.
+		if goport.Pending(p.inst) >= maxPendingStream {
+			inject(newTransportError(&transportFailure{reasonOversize, fmt.Sprintf(
+				"%s %s: %d values of the stream wait unreceived; the stream is stopped", r.method, req.URL, maxPendingStream)}))
+			return
+		}
+		if mode != StreamSSE {
+			if !inject(newLine(line)) {
+				return
+			}
+			continue
+		}
+		dispatch, err := ev.feed(line)
+		if err != nil {
+			inject(newTransportError(&transportFailure{reasonOversize, fmt.Sprintf("%s %s: %v", r.method, req.URL, err)}))
+			return
+		}
+		if dispatch {
+			if !inject(ev.record()) {
+				return
+			}
+			ev.next()
+		}
+	}
+	if err := sc.Err(); err != nil {
+		reason := classify(err)
+		if errors.Is(err, bufio.ErrTooLong) {
+			reason = reasonOversize
+		}
+		inject(newTransportError(&transportFailure{reason, fmt.Sprintf("%s %s: stream: %v", r.method, req.URL, err)}))
+		return
+	}
+	inject(newStreamEnd("end of stream"))
+}
+
+// maxPendingStream caps the values of a stream that may wait unreceived.
+// A variable rather than a constant only so a test can lower it.
+var maxPendingStream = 10000
+
+// newLineScanner splits a stream into lines ending in CRLF, LF or CR, as an
+// event stream may (WHATWG HTML, "Server-sent events"). A line ending in
+// CR is a line at once — an event is not held back for the byte after it
+// — and an LF straight after that CR is no line of its own.
+func newLineScanner() bufio.SplitFunc {
+	afterCR := false
+	return func(data []byte, atEOF bool) (advance int, token []byte, err error) {
+		if afterCR && len(data) > 0 {
+			afterCR = false
+			if data[0] == '\n' {
+				return 1, nil, nil
+			}
+		}
+		if atEOF && len(data) == 0 {
+			return 0, nil, nil
+		}
+		if i := bytes.IndexAny(data, "\r\n"); i >= 0 {
+			if data[i] == '\r' {
+				if i+1 < len(data) {
+					if data[i+1] == '\n' {
+						return i + 2, data[:i], nil
+					}
+				} else {
+					afterCR = true
+				}
+			}
+			return i + 1, data[:i], nil
+		}
+		if atEOF {
+			return len(data), data, nil
+		}
+		return 0, nil, nil
+	}
+}
+
+// sseEvent accumulates the fields of one server-sent event (WHATWG HTML,
+// "Server-sent events": a line `field: value`, `:` a comment, a blank line
+// ending the event). The last event id carries over to the events after.
+type sseEvent struct {
+	event, id string
+	data      []string
+	size      int
+}
+
+// feed takes one line of the stream, and reports whether it ended an event
+// worth dispatching: one with data. An event's data is capped as a body is.
+func (e *sseEvent) feed(line string) (bool, error) {
+	if line == "" {
+		if len(e.data) > 0 {
+			return true, nil
+		}
+		// No data: nothing to dispatch, and the event type is reset.
+		e.event, e.data, e.size = "", nil, 0
+		return false, nil
+	}
+	if strings.HasPrefix(line, ":") {
+		return false, nil
+	}
+	field, value, _ := strings.Cut(line, ":")
+	value = strings.TrimPrefix(value, " ")
+	switch field {
+	case "event":
+		e.event = value
+	case "data":
+		e.size += len(value) + 1
+		if e.size > maxBodyLen {
+			return false, fmt.Errorf("an event's data exceeds the %d-byte cap", maxBodyLen)
+		}
+		e.data = append(e.data, value)
+	case "id":
+		if !strings.ContainsRune(value, 0) {
+			e.id = value
+		}
+	}
+	return false, nil
+}
+
+// next makes way for the next event: the type and data reset, the last
+// event id kept.
+func (e *sseEvent) next() { e.event, e.data, e.size = "", nil, 0 }
+
+// record renders the event as the TTCN-3 SseEvent record; an event without
+// a type is a "message".
+func (e *sseEvent) record() *runtime.Record {
+	rec := runtime.NewRecord()
+	event := e.event
+	if event == "" {
+		event = "message"
+	}
+	rec.Fields["event"] = runtime.NewCharstring(event)
+	rec.Fields["data"] = runtime.NewCharstring(strings.Join(e.data, "\n"))
+	rec.Fields["id"] = runtime.NewCharstring(e.id)
+	return rec
+}
+
+// newLine builds the TTCN-3 HttpLine record.
+func newLine(line string) *runtime.Record {
+	rec := runtime.NewRecord()
+	rec.Fields["line"] = runtime.NewCharstring(line)
+	return rec
+}
+
+// newStreamEnd builds the TTCN-3 HttpStreamEnd record.
+func newStreamEnd(detail string) *runtime.Record {
+	rec := runtime.NewRecord()
+	rec.Fields["detail"] = runtime.NewCharstring(detail)
+	return rec
 }
 
 // classify maps a transport error onto one of the reason labels. The

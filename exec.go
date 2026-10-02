@@ -385,6 +385,21 @@ func httpPortRule(port, comp string, params map[string]string) (httpport.Rule, b
 	// named rather than being silently ignored here.
 	if tlsCfg, set := tlsParams(port, comp, params); set {
 		rule.TLS = &tlsCfg
+		if !strings.HasPrefix(strings.ToLower(base), "https://") {
+			fmt.Fprintf(os.Stderr, "testport %q (%s): TLS settings given for %s, which is no https:// URL; they do not apply\n", port, comp, base)
+		}
+	}
+	if v := params["tls"]; v != "" && !strings.HasPrefix(strings.ToLower(base), "https://") {
+		fmt.Fprintf(os.Stderr, "testport %q (%s): tls is given for an HTTP port; TLS comes with an https:// base URL\n", port, comp)
+	}
+	switch v := strings.ToLower(params["stream"]); v {
+	case "", "false", "none":
+	case "true", "lines":
+		rule.Stream = httpport.StreamLines
+	case "sse":
+		rule.Stream = httpport.StreamSSE
+	default:
+		rule.Stream = params["stream"] // the map then fails, naming it
 	}
 	if v := params["response_headers"]; v != "" {
 		b, err := strconv.ParseBool(v)
@@ -458,21 +473,22 @@ func tcpPortRule(port, comp string, params map[string]string) (tcpport.Rule, boo
 		rule.ReportDisconnect = b
 	}
 	// `tls := "true"` makes it a TLS connection, with the HTTP port's TLS
-	// settings; settings without it would be ignored, so say so.
+	// settings. A tls it cannot read, or TLS settings without it, fail the
+	// map: connecting in the clear instead would be worse than not.
 	tlsCfg, tlsSet := tlsParams(port, comp, params)
 	useTLS := false
 	if v := params["tls"]; v != "" {
 		b, err := strconv.ParseBool(v)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "testport %q (%s): bad tls %q: %v\n", port, comp, v, err)
+			rule.Err = fmt.Sprintf("tls %q is neither true nor false", v)
 		}
 		useTLS = b
 	}
 	switch {
 	case useTLS:
 		rule.TLS = &tlsCfg
-	case tlsSet:
-		fmt.Fprintf(os.Stderr, "testport %q (%s): TLS settings given but tls is not \"true\"; connecting without TLS\n", port, comp)
+	case tlsSet && rule.Err == "":
+		rule.Err = "TLS settings (ca_cert, client_cert, server_name, insecure_skip_verify) given, but not tls := \"true\""
 	}
 	switch fr := strings.ToLower(params["framing"]); fr {
 	case "", "newline", "line":

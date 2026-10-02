@@ -851,6 +851,17 @@ type PortMessage struct {
 	RetValue Object
 }
 
+// QueueLen returns how many messages wait in the named port's inbound
+// queue, the name resolved as EnqueueMessageFrom resolves it.
+func (t *TestcaseExec) QueueLen(port string) int {
+	if resolved := LookupPortTypeInstance(port); resolved != "" {
+		port = resolved
+	}
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return len(t.ports[port])
+}
+
 // EnqueueMessage appends a payload to the named port's inbound queue.
 // Threadsafe.
 func (t *TestcaseExec) EnqueueMessage(port string, msg Object) {

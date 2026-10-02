@@ -371,6 +371,32 @@ func TestExecConfiguredTLSTCPPort(t *testing.T) {
 	}
 }
 
+// TestExecTCPTLSMisconfigurationFailsTheMap: a tls it cannot read, or TLS
+// settings without tls := "true", fail the map rather than connect in the
+// clear.
+func TestExecTCPTLSMisconfigurationFailsTheMap(t *testing.T) {
+	addr, stop := startEchoServer(t)
+	defer stop()
+	path := writeTC(t, `module m {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C { map(self:p, system:p); setverdict(pass); }
+	}`)
+	for _, extra := range []string{`*.p.tls := "yes"`, `*.p.ca_cert := "ca.pem"`} {
+		f, _ := cfg.Parse(strings.NewReader(fmt.Sprintf(
+			"[TESTPORT_PARAMETERS]\n*.p.transport := \"tcp\"\n*.p.address := %q\n%s\n", addr, extra)))
+		if n := registerConfiguredTestPorts(f); n != 1 {
+			t.Fatalf("%s: registered %d ports, want 1", extra, n)
+		}
+		d := newStaticDriver([]string{path})
+		d.live = true
+		if v, reason, _ := d.Run(context.Background(), "m.tc"); v != rreport.Error {
+			t.Errorf("%s: verdict=%s (%s), want the map to fail", extra, v, reason)
+		}
+		tcpport.Reset()
+	}
+}
+
 // TestRegisterConfiguredTestPorts_NonTCPIgnored confirms a non-tcp (or
 // address-less) transport registers nothing, so unrelated
 // [TESTPORT_PARAMETERS] entries are inert.

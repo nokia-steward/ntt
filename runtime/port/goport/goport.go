@@ -222,6 +222,16 @@ func Inject(name string, payload runtime.Object) bool {
 	return true
 }
 
+// Pending returns how many values wait, not yet received, in the queue
+// Inject delivers name's values to; 0 outside a testcase.
+func Pending(name string) int {
+	exec := runtime.CurrentExec()
+	if exec == nil {
+		return 0
+	}
+	return exec.QueueLen(resolveTarget(name))
+}
+
 // InjectReply delivers a procedure REPLY from a Go test port - the value
 // a `p.getreply` reads (procedure-based comm, ETSI 22.3). ret is the
 // return value, bound by `getreply ... -> value v`. params becomes the
