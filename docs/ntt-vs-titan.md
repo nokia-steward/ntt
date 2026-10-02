@@ -68,6 +68,7 @@ re-renders.
 | Built-in HTTP test port (no user code)| done     | n/a   | `[TESTPORT_PARAMETERS] transport := "http"`; `{method,path,body}` -> `{status,body}` records, JSON bodies as charstring; a failed request arrives as a matchable `TransportError`; `runtime/port/httpport` |
 | TLS for the TCP port                 | done     | n/a   | `tls := "true"`, with the HTTP port's TLS settings; framing and disconnect report as on plain TCP |
 | HTTP request and response headers    | done     | n/a   | optional `headers` field (`record of { name, val }`); response headers with `response_headers := "true"` |
+| Streaming HTTP responses (SSE)       | done     | n/a   | `stream := "sse"` / `"lines"`: status, then each event or line, then an end-of-stream value, as they arrive; over https too |
 | HTTPS / mutual TLS for the HTTP port | done     | n/a   | `ca_cert`, `client_cert`+`client_key`, `server_name`, `insecure_skip_verify`; certs read at map time so a bad path names the file |
 | Real-clock live execution            | done     | done  | `ntt exec --live` drives a live SUT on the real clock (same strict engine) |
 | Performance profiling                | done     | partial | `ntt exec --profile`: per-port latency percentiles + throughput; `--format=profile` / json |

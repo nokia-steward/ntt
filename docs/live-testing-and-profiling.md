@@ -227,6 +227,11 @@ file, keyed by port instance name (`*` matches any component):
 app.tc
 ```
 
+`[EXECUTE]` may name a module's control part instead — `app.control`, or just
+`app` — to run its testcases in the order, and with the arguments, it gives
+them; `--timeout` then bounds each testcase it runs, and, apart, what the
+control part does itself.
+
 Recognised parameters:
 
 | Parameter      | Meaning                                                         |
@@ -305,7 +310,19 @@ Request fields — only `path` is required; `method` defaults to `GET`, and
 `contentType` defaults to `application/json` when a body is present.
 Bodies stay `charstring`, so a JSON API composes with whatever types your
 suite already generates from its schema; this port does not need to know
-them.
+them. To work with a JSON body as a value, give its type the JSON encoding
+and decode it:
+
+```ttcn3
+type record Node { charstring ifName, integer mtu optional } with { encode "JSON" }
+
+var Node n;
+if (decvalue_unichar(rsp.body, n) == 0) { /* n.ifName, n.mtu */ }
+```
+
+Members the type does not declare are ignored, and an absent optional field
+is omitted; `encvalue_unichar(n)` gives the JSON text of a value, for a request
+body.
 
 **Headers.** A request may carry headers — an `Authorization` header, say —
 in an optional field (`value` is a TTCN-3 keyword, hence `val`):
@@ -329,6 +346,39 @@ type record HttpResponse { integer status, charstring body, HttpHeaders headers 
 ```
 
 They arrive sorted by name, one entry per value.
+
+**Streaming responses.** A port with `stream := "sse"` (or `"lines"`) delivers
+each response as it arrives instead of whole — a server-sent event stream, or
+any long-lived response read line by line — over `http://` or `https://`:
+
+```ttcn3
+type record HttpLine      { charstring line }                                  // stream := "lines"
+type record SseEvent      { charstring event, charstring data, charstring id } // stream := "sse"
+type record HttpStreamEnd { charstring detail }
+type port SsePort message { out HttpRequest; in HttpResponse, SseEvent, HttpStreamEnd, TransportError }
+```
+
+```ini
+*.events.transport := "http"
+*.events.base_url  := "https://10.0.0.7:8443"
+*.events.ca_cert   := "/etc/certs/ca.pem"
+*.events.stream    := "sse"
+```
+
+A request's response arrives as its `HttpResponse` (status, an empty body, and
+its headers when asked for) as soon as the headers do, then one `SseEvent` per
+event — `data` lines joined with a newline, `event` defaulting to `message`,
+comments skipped — or one `HttpLine` per line, then an `HttpStreamEnd` when the
+server ends the body. An answer other than 2xx is no stream and arrives whole,
+and so, on an `sse` port, does one that is no `text/event-stream` — so the same
+port can make ordinary REST calls. Events follow the event stream format: any
+line end, a byte order mark skipped, the last event id carried over to the
+events after it. The `timeout` bounds the connection, the handshake and the
+wait for the headers, not the stream, which lasts until the server ends it or
+the port is unmapped or stopped; a stream that breaks arrives as a
+`TransportError`. Values the suite does not receive wait in its queue: once
+10000 of a stream's wait, the stream is stopped with an `oversize` error rather
+than filling the memory.
 
 **A failed request is visible, not silent — and classified.** A 4xx/5xx is
 an ordinary response you match on: the SUT answered, it just said no. A

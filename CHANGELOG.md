@@ -99,6 +99,37 @@ single functional test doubles as a performance probe. See
   latency, with a copy-pasteable stand-in server. Exercised by CI so it
   cannot rot.
 
+- **JSON encoding and decoding** — `encvalue`, `encvalue_o` and
+  `encvalue_unichar` of a value whose type has `with { encode "JSON" }` (or
+  with "JSON" as the dynamic encoding) give its JSON text, and `decvalue*`
+  into a variable of such a type decode JSON text by the type (ES 201
+  873-11): a record or set as an object, its fields in declaration order and
+  an omitted optional left out, a record of as an array, a union as its one
+  alternative, an enumerated value by name, an octetstring as hex digits.
+  Decoding text from elsewhere — a service's response body — ignores members
+  the type does not declare, omits an absent optional field, and returns 1
+  for text that is malformed or does not fit the type: more than one value,
+  a member given twice, a digit string that is not whole octets. A float's
+  special values are `"infinity"`, `"-infinity"` and `"not_a_number"`, and a
+  value with an unbound mandatory field cannot be encoded. The type is told
+  from a variable, a parameter, a component variable, a function's result,
+  `valueof`, or an element or field of one — each as its own declaration
+  gives it — and may be qualified (`A.R`); its field types are the
+  declaring module's. A value wrapped in an object naming its type,
+  `{"M.T": value}`, decodes too. A type with JSON `variant` attributes, its
+  own or a field type's, is not handled by this codec yet.
+- **`[EXECUTE] Module.control`** — a `.cfg` may name a module's control
+  part, as `Module.control` or the module's bare name, and so may
+  `--pattern Module.control`; `ntt exec` then runs it as one case: its
+  testcases in the order it executes them, with the arguments it computes,
+  their verdicts merged. `--timeout` bounds each of those testcases, and
+  separately what the control part does itself: a control part that loops
+  for good ends with `error` when that time is up.
+- **Streaming HTTP responses** — with `stream := "sse"` (or `"lines"`) the
+  HTTP port delivers a response as it arrives: its status as soon as the
+  headers come, then each server-sent event (or line) as its own inbound
+  value, then an end-of-stream value; over https too. The timeout bounds the
+  wait for the headers, not the stream, which unmapping the port ends.
 - **HTTP headers** — an HTTP port request may carry headers, an
   `Authorization` header say, in an optional `headers` field (a `record of
   { charstring name, charstring val }`); with `response_headers := "true"`
@@ -303,6 +334,26 @@ Independent of the two clocks:
   clock, as expired default timers did before.
 - **A call's signature no longer reaches a PTC** for the unqualified
   `getreply` / `catch` rule (22.3.1 h).
+- **Choosing another alternative of a union drops the one it carried**:
+  `u.i := 1; u.s := "x"` left both, so `u == { s := "x" }` was false — in
+  a variable, a parameter, a field, a list element or an `anytype`.
+- **A function writing a field of its component's unbound record writes
+  the component's**: `cr.n := 5` in a `runs on` function made a record of
+  the function's own, and the component's stayed unbound.
+- **A module resolves its own names first.** All modules of a run shared
+  one flat scope, so a module's constant, function or template could be
+  shadowed by a like-named one of another module — imported or not —
+  loaded after it: `line == c_closed` compared with another module's
+  record. Each module's definitions now resolve in a scope of its own,
+  inside the shared one; the test log names a function's variables by the
+  function's module, not the testcase's; a component type extends the
+  type its own module means, though another module declares a like-named
+  one, and its members' initialisers name what that module sees. A
+  qualified reference — `A.c_x`, `A.f()` — names module A's definition. A
+  module parameter set by its bare name in a `.cfg` is set in every module
+  declaring it, and one set by its qualified name too takes that value in
+  its module, whichever comes first in the file. And the modules of a run are loaded in the order their
+  files were given, where it used to vary from run to run.
 - **A typed template matches only values of its type** (ETSI 22.2.2):
   `p.receive(charstring:?)` took any value — a record the built-in TCP
   port reports a disconnection with, say, so an alt listing the

@@ -549,7 +549,9 @@ passed over for a thousand turns — and a parameter's default and a
 - `any from cs.done -> @index value i` binds nothing.
 - A class declared `runs on C` (ES 203 790) does not see the component's
   variables in its methods.
-- Component types are registered under the testcase's module, whichever
+- *Fixed 2026-10-02 with the scope per module: a component type and what
+  it extends are looked up in the run's scopes, in the declaring module.*
+  Component types are registered under the testcase's module, whichever
   module declares them, so of two like-named component types in different
   modules one wins: a type extending `Base` in module X can get module M's
   `Base`, and its own members then fall back to one copy every component
@@ -558,7 +560,14 @@ passed over for a thousand turns — and a parameter's default and a
   verdict `none`, not `error`; the testcase can then pass on the MTC's
   verdict alone.
 - `match(v, t)` with `v` undefined is true.
-- **Names resolve across modules without an import.** All modules of a
+- *Fixed 2026-10-02: a module resolves its own names first (a scope per
+  module, inside the flat one), so a like-named definition elsewhere no
+  longer stands in for its own, and the log names a function's module; a
+  qualified reference (`A.c_x`) names module A's definition; modules load
+  in the order their files are given; 0 gained, 0 lost. A name a module
+  does not define still resolves to any module's, imported or not, and
+  each module's scope costs about a fifth more time to set up a run.*
+  **Names resolve across modules without an import.** All modules of a
   run share one flat scope, so a module's own constant can be shadowed by
   a like-named definition of a module it does not import: in module A,
   `x == c_closed` compares with module B's record `c_closed` instead of
@@ -576,8 +585,26 @@ passed over for a thousand turns — and a parameter's default and a
   type.
 - A component type's `template` members are not bound.
 - An `execute()` timeout held in a control-part variable
-  (`var float x := 1.0; execute(tc(), x)`) is not applied by `ntt exec`,
-  which reads the control part without running it.
+  (`var float x := 1.0; execute(tc(), x)`) is not applied when `ntt exec`
+  runs the testcase by name, reading the control part without running it;
+  running the control part (`Module.control`) applies it.
+- The JSON codec applies no JSON `variant` attributes (ES 201 873-11
+  Annex B: `name as`, `as value`, `omit as null`, ...): a type carrying one,
+  or whose fields' types do, is left to the round-trip placeholder codec,
+  as before. A control part's own timer wait is not cut short by
+  `--timeout`; its loops are. A control part's timers wait in real time
+  on the virtual clock too, and an `alt` in a control part with no
+  branch ready returns at once.
+- `var R x` declared in an inner block (`if (...) { var R x ... }`)
+  overwrites the value of a like-named variable of the enclosing block.
+- A testcase run on its own, not from a control part, has its
+  parameters unbound and untyped (its JSON encoding falls back).
+- Module parameters still live in the shared scope too: a module that
+  imports `p` from module A, where module B declares a `p` as well, may
+  read B's. A `.cfg` setting a parameter both by its bare and its
+  qualified name gives the qualified one, whatever their order in the
+  file (some tools let the later line win). `refers` and
+  `anytype` are not encoded either.
 - An index-range array declared without an initialiser
   (`var charstring a[2..3]`) is stored at the wrong offsets.
 - Copying costs time: assigning, declaring or passing (to a function with
