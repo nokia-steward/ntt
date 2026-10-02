@@ -591,9 +591,10 @@ passed over for a thousand turns — and a parameter's default and a
 - The JSON codec applies no JSON `variant` attributes (ES 201 873-11
   Annex B: `name as`, `as value`, `omit as null`, ...): a type carrying one,
   or whose fields' types do, is left to the round-trip placeholder codec,
-  as before. On the real clock, a control part's own timer wait is not
-  cut short by `--timeout`; its loops are. An `alt` in a control part
-  with no branch ready returns at once.
+  as before. `refers` and `anytype` are not encoded either.
+- On the real clock, a control part's own timer wait is not cut short by
+  `--timeout`; its loops are. An `alt` in a control part with no branch
+  ready returns at once.
 - `var R x` declared in an inner block (`if (...) { var R x ... }`)
   overwrites the value of a like-named variable of the enclosing block.
 - A testcase run on its own, not from a control part, has its
@@ -602,8 +603,7 @@ passed over for a thousand turns — and a parameter's default and a
   imports `p` from module A, where module B declares a `p` as well, may
   read B's. A `.cfg` setting a parameter both by its bare and its
   qualified name gives the qualified one, whatever their order in the
-  file (some tools let the later line win). `refers` and
-  `anytype` are not encoded either.
+  file (some tools let the later line win).
 - An index-range array declared without an initialiser
   (`var charstring a[2..3]`) is stored at the wrong offsets.
 - Copying costs time: assigning, declaring or passing (to a function with
