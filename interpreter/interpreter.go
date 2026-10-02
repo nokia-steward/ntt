@@ -4,6 +4,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"encoding/xml"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -142,6 +143,8 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				Body:       body,
 				Env:        env,
 				IsTemplate: true,
+				Home:       env,
+				Result:     n.Type,
 			})
 			return nil
 		}
@@ -1313,6 +1316,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			Kind:    "function",
 			RunsOn:  n.RunsOn != nil,
 			Home:    env,
+			Result:  returnType(n.Return),
 			Isolated: n.RunsOn == nil && n.Mtc == nil && n.System == nil &&
 				n.KindTok.Kind() != syntax.TESTCASE,
 		}
@@ -3990,6 +3994,13 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 			rec.Set(fid.String(), val)
 			return storeReceiver(l.X, rec, env)
 		}
+		// A union carries one alternative: choosing another drops it.
+		// (Only a value holding one other field can be a union's.)
+		if rec, ok := recv.(*runtime.Record); ok && len(rec.Fields) == 1 && otherFieldSet(rec, fid.String()) && isUnionTyped(l.X, env) {
+			for k := range rec.Fields {
+				delete(rec.Fields, k)
+			}
+		}
 		setField(recv, fid.String(), val)
 		return nil
 	}
@@ -4018,6 +4029,33 @@ func isPortReference(e syntax.Expr, env runtime.Scope) bool {
 		}
 		return false
 	}
+}
+
+// isUnionTyped reports whether e — a variable, parameter, field or
+// element — is declared of a union type.
+func isUnionTyped(e syntax.Expr, env runtime.Scope) bool {
+	if st := structDeclOf(lvalueTypeDesc(e, env)); st != nil {
+		return st.KindTok.Kind() == syntax.UNION
+	}
+	t, _, ok := staticTypeOf(e, env, 0)
+	if !ok {
+		return false
+	}
+	if t.name == "anytype" {
+		return true
+	}
+	shape, ok := jsonTypeOf(t, env)
+	return ok && shape.kind == "union"
+}
+
+// otherFieldSet reports whether rec holds a field other than name.
+func otherFieldSet(rec *runtime.Record, name string) bool {
+	for k := range rec.Fields {
+		if k != name {
+			return true
+		}
+	}
+	return false
 }
 
 // setField sets field name of a structured value to val: a record held by
@@ -4895,6 +4933,7 @@ func evalValueDecl(vd *syntax.ValueDecl, env runtime.Scope) runtime.Object {
 						return result
 					}
 					env.Set(decl.Name.String(), result)
+					recordDeclaredType(env, syntax.Name(decl.Name), vd.Type)
 				}
 				return n
 			case *runtime.ClassDesc:
@@ -5460,6 +5499,13 @@ func lookupTypeDesc(name string, env runtime.Scope) *runtime.TypeDesc {
 	}
 	if v, ok := env.Get(name); ok {
 		if td, ok := forceThunk(v).(*runtime.TypeDesc); ok {
+			return td
+		}
+	}
+	// A qualified name, `M.T`: module M's type.
+	if strings.Contains(name, ".") {
+		if v, _, ok := resolveTypeName(name, env); ok {
+			td, _ := v.(*runtime.TypeDesc)
 			return td
 		}
 	}
@@ -6246,6 +6292,11 @@ func bindFunctionParams(fn *runtime.Function, args []runtime.Object) *runtime.En
 	// __SCOPE__ in a function or altstep is its name (ETSI D.5).
 	if fn.Name != "" {
 		fenv.Set(runtime.ScopeNameKey, runtime.NewCharstring(fn.Name))
+	}
+	// The function its parameters are of, so their declared types can be
+	// told (staticTypeOf).
+	if fn.Params != nil && len(fn.Params.List) > 0 {
+		fenv.Set(currentFunctionKey, fn)
 	}
 	if fn.Params != nil {
 		for i, param := range fn.Params.List {
@@ -8774,6 +8825,31 @@ func evalDecValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 	// uninitialised values, etc) leaves the caller's slots alone
 	// and returns 1, matching the "unspecified failure" return
 	// code from the spec.
+	// Into a variable of a JSON-encoded type: the text decoded as JSON,
+	// whatever produced it.
+	if t, ok := jsonEncodedTypeOf(fn, n.Args.List[1], n, env); ok {
+		if _, known := jsonTypeOf(t, env); known {
+			if text, ok := encodedText(enc); ok {
+				val, err := decodeJSON(text, t, env)
+				if err == nil {
+					drainEncoded(n.Args.List[0], enc, env)
+					assignToLHS(n.Args.List[1], val, env)
+					return runtime.NewInt(0)
+				}
+				if res, ok := decodeExplicitJSON(n, enc, env); ok {
+					return res
+				}
+				// JSON that does not fit the type is no value of it,
+				// whatever value encoded to the same text. Text that is
+				// no JSON, or a type the codec does not handle, goes as
+				// before there was a JSON codec.
+				var syntaxErr jsonSyntaxError
+				if !errors.As(err, &syntaxErr) && !errors.Is(err, errJSONUnsupported) {
+					return runtime.NewInt(1)
+				}
+			}
+		}
+	}
 	var orig runtime.Object
 	var rest runtime.Object
 	switch v := enc.(type) {
@@ -8804,6 +8880,217 @@ func evalDecValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 	assignToLHS(n.Args.List[0], rest, env)
 	assignToLHS(n.Args.List[1], orig, env)
 	return runtime.NewInt(0)
+}
+
+// jsonEncodedTypeOf returns the declared type of e when it is
+// JSON-encoded, or the call fn names "JSON" as its dynamic encoding (ETSI
+// C.5). A type the codec does not follow — one carrying variant attributes
+// — is left to the other encoders.
+func jsonEncodedTypeOf(fn string, e syntax.Expr, call *syntax.CallExpr, env runtime.Scope) (jsonType, bool) {
+	t, inherited, ok := staticTypeOf(e, env, 0)
+	if !ok {
+		return jsonType{}, false
+	}
+	if i := dynamicEncodingArg(fn); call.Args != nil && i < len(call.Args.List) {
+		if s, ok := eval(call.Args.List[i], env).(*runtime.String); ok && strings.EqualFold(strings.TrimSpace(string(s.Value)), "JSON") {
+			return t, true
+		}
+	}
+	if t.name == "" {
+		return t, inherited
+	}
+	scope := env
+	if t.scope != nil {
+		scope = t.scope
+	}
+	v, scope, ok := resolveTypeName(t.name, scope)
+	if !ok {
+		return jsonType{}, false
+	}
+	var td *runtime.TypeDesc
+	switch x := v.(type) {
+	case *runtime.TypeDesc:
+		td = x
+	case *runtime.EnumType:
+		// An enumerated type's attributes are kept beside it.
+		if a, ok := scope.Get(enumAttrKey(t.name[strings.LastIndexByte(t.name, '.')+1:])); ok {
+			td, _ = a.(*runtime.TypeDesc)
+		}
+	}
+	if td == nil {
+		return t, inherited
+	}
+	if hasVariant(td) {
+		return jsonType{}, false
+	}
+	if isJSONEncodedType(td) {
+		return t, true
+	}
+	if _, own := td.Lookup("encode"); own {
+		return jsonType{}, false
+	}
+	return t, inherited
+}
+
+// dynamicEncodingArg is the index of the dynamic_encoding parameter of a
+// predefined codec function (ETSI ES 201 873-1 C.5).
+func dynamicEncodingArg(fn string) int {
+	switch fn {
+	case "encvalue", "encvalue_o":
+		return 2
+	case "decvalue_unichar":
+		return 4
+	}
+	return 3 // decvalue, decvalue_o, encvalue_unichar
+}
+
+// currentFunctionKey binds, in a call's scope, the function called.
+const currentFunctionKey = "\x00ttcn3:function"
+
+// staticTypeOf is the declared type of expression e, as far as it can be
+// told without evaluating it: a variable's, constant's, template's or
+// parameter's; a function's result; valueof's operand's; an element or
+// field of one of those; or the T of `T : value`. inherited reports that e
+// is part of a JSON-encoded value, whose encoding its parts share.
+func staticTypeOf(e syntax.Expr, env runtime.Scope, depth int) (t jsonType, inherited bool, ok bool) {
+	if depth > 16 {
+		return jsonType{}, false, false
+	}
+	switch x := e.(type) {
+	case *syntax.ParenExpr:
+		if len(x.List) == 1 {
+			return staticTypeOf(x.List[0], env, depth+1)
+		}
+	case *syntax.Ident:
+		// The declared type recorded beside the name, by the scope that
+		// binds it — not a like-named definition's further out — or, for
+		// a parameter, its function's.
+		name := x.String()
+		var owner runtime.Scope = env
+		if e, ok := env.(*runtime.Env); ok {
+			o := e.Owner(name)
+			if o == nil {
+				break
+			}
+			owner = o
+			if !o.Binds(declaredTypeKey(name)) {
+				if o.Binds(currentFunctionKey) {
+					if t, ok := paramType(o, name); ok {
+						return t, false, true
+					}
+				}
+				break
+			}
+		}
+		if tn := declaredTypeName(owner, name); tn != "" {
+			return jsonType{name: tn, scope: owner}, false, true
+		}
+	case *syntax.BinaryExpr:
+		if x.Op != nil && x.Op.Kind() == syntax.COLON {
+			return jsonType{name: syntax.Name(x.X)}, false, true
+		}
+	case *syntax.CallExpr:
+		id, isIdent := x.Fun.(*syntax.Ident)
+		if !isIdent {
+			break
+		}
+		if id.String() == "valueof" && x.Args != nil && len(x.Args.List) == 1 {
+			return staticTypeOf(x.Args.List[0], env, depth+1)
+		}
+		if v, ok := env.Get(id.String()); ok {
+			if fn, ok := v.(*runtime.Function); ok && fn.Result != nil {
+				return jsonType{name: syntax.Name(fn.Result), scope: fn.Home}, false, true
+			}
+		}
+	case *syntax.IndexExpr:
+		base, inh, ok := staticTypeOf(x.X, env, depth+1)
+		if !ok {
+			break
+		}
+		if shape, ok := jsonTypeOf(base, env); ok && shape.kind == "list" {
+			return shape.elem, inh || jsonEncodedName(base, env), true
+		}
+	case *syntax.SelectorExpr:
+		base, inh, ok := staticTypeOf(x.X, env, depth+1)
+		if !ok || x.Sel == nil {
+			break
+		}
+		if shape, ok := jsonTypeOf(base, env); ok && shape.fields != nil {
+			if f, ft := shape.field(syntax.Name(x.Sel)); f != nil {
+				return ft, inh || jsonEncodedName(base, env), true
+			}
+		}
+	}
+	return jsonType{}, false, false
+}
+
+// paramType is the declared type of parameter name of the function the
+// call scope fenv is of.
+func paramType(fenv runtime.Scope, name string) (jsonType, bool) {
+	v, ok := fenv.Get(currentFunctionKey)
+	if !ok {
+		return jsonType{}, false
+	}
+	fn, ok := v.(*runtime.Function)
+	if !ok || fn.Params == nil {
+		return jsonType{}, false
+	}
+	for _, p := range fn.Params.List {
+		if p != nil && p.Name != nil && p.Name.String() == name && p.Type != nil {
+			return jsonType{name: syntax.Name(p.Type), scope: fn.Home}, true
+		}
+	}
+	return jsonType{}, false
+}
+
+// jsonEncodedName reports whether the named type t is JSON-encoded.
+func jsonEncodedName(t jsonType, env runtime.Scope) bool {
+	if t.name == "" {
+		return false
+	}
+	scope := env
+	if t.scope != nil {
+		scope = t.scope
+	}
+	v, _, ok := resolveTypeName(t.name, scope)
+	td, _ := v.(*runtime.TypeDesc)
+	return ok && isJSONEncodedType(td)
+}
+
+// enumAttrKey binds the attributes of an enumerated type, whose own name
+// is bound to its values.
+func enumAttrKey(name string) string { return "\x00ttcn3:enum-attrs:" + name }
+
+// returnType is the type a return clause declares, or nil.
+func returnType(r *syntax.ReturnSpec) syntax.Expr {
+	if r == nil {
+		return nil
+	}
+	return r.Type
+}
+
+// recalled is the value a matching encvalue earlier in the testcase
+// encoded as enc, if any.
+func recalled(env runtime.Scope, enc runtime.Object) (runtime.Object, bool) {
+	switch v := enc.(type) {
+	case *runtime.Binarystring:
+		return recallEncoded(env, v)
+	case *runtime.String:
+		return recallEncodedString(env, v)
+	}
+	return nil, false
+}
+
+// encodedForm is JSON text as encvalue_unichar (a universal charstring),
+// encvalue_o (an octetstring) or encvalue (a bitstring) returns it.
+func encodedForm(fn string, text []byte) runtime.Object {
+	switch fn {
+	case "encvalue_unichar":
+		return runtime.NewUniversalString(string(text))
+	case "encvalue_o":
+		return &runtime.Binarystring{Unit: runtime.Octet, Value: new(big.Int).SetBytes(text), Length: len(text)}
+	}
+	return &runtime.Binarystring{Unit: runtime.Bit, Value: new(big.Int).SetBytes(text), Length: 8 * len(text)}
 }
 
 // decodeExplicitJSON decodes a hand-written JSON payload passed to
@@ -9188,6 +9475,19 @@ func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 	}
 	if lexec := tlExec(env); lexec != nil {
 		defer func() { tlEncode(lexec, n, v, res) }()
+	}
+	// A value of a JSON-encoded type is encoded as JSON (ES 201 873-11).
+	if t, ok := jsonEncodedTypeOf(fn, n.Args.List[0], n, env); ok {
+		if text, err := encodeJSON(v, t, env); err == nil {
+			out := encodedForm(fn, []byte(text))
+			switch o := out.(type) {
+			case *runtime.String:
+				rememberEncodedString(env, o, v)
+			case *runtime.Binarystring:
+				rememberEncoded(env, o, v)
+			}
+			return out
+		}
 	}
 	// Raw ints get a placeholder byte filled with their low byte:
 	// a number of fixtures compare the encoded blob byte-for-byte

@@ -1350,6 +1350,13 @@ func bindDeclNameScoped(env runtime.Scope, n syntax.Node, scopes []*syntax.WithS
 		if d.Name != nil {
 			env.Set(syntax.Name(d.Name), typeDescForScoped(syntax.Name(d.Name), d.With, scopes))
 		}
+	case *syntax.EnumTypeDecl:
+		if d.Name != nil {
+			// Beside the type, which is bound to its values.
+			td := typeDescForScoped(syntax.Name(d.Name), d.With, scopes)
+			td.Home = env
+			env.Set(enumAttrKey(syntax.Name(d.Name)), td)
+		}
 	case *syntax.TemplateDecl:
 		if d.Name != nil {
 			env.Set(syntax.Name(d.Name), runtime.Undefined)
@@ -1372,6 +1379,7 @@ func bindDeclNameScoped(env runtime.Scope, n syntax.Node, scopes []*syntax.WithS
 			case syntax.RECORD, syntax.SET, syntax.UNION:
 				td.Struct = d
 			}
+			td.Home = env
 			env.Set(syntax.Name(d.Name), td)
 		}
 	case *syntax.ClassTypeDecl:
@@ -1419,6 +1427,8 @@ func bindDeclNameScoped(env runtime.Scope, n syntax.Node, scopes []*syntax.WithS
 			if _, ok := d.Field.Type.(*syntax.ListSpec); ok || len(d.Field.ArrayDef) > 0 {
 				td.IsList = true
 			}
+			td.Spec = d.Field.Type
+			td.Home = env
 			mergeUnderlyingAttrs(td, env)
 			env.Set(syntax.Name(d.Field.Name), td)
 		}
@@ -2064,10 +2074,18 @@ func newModuleScope(root runtime.Scope, mod *syntax.Module) *runtime.Env {
 // flat scope always had it: a name another module refers to without
 // qualification resolves there.
 func publishModuleScope(root runtime.Scope, s *runtime.Env) {
+	mod := moduleNameFromEnv(s)
 	s.Each(func(name string, val runtime.Object) {
 		switch name {
 		case runtime.ModuleNameKey, activeAttrsKey:
 			return
+		}
+		// A definition's declared type, seen from another module, is
+		// this module's type of that name: say so.
+		if strings.HasPrefix(name, declaredTypeKey("")) && mod != "" {
+			if tn, ok := val.(*runtime.String); ok && !strings.Contains(string(tn.Value), ".") && s.Binds(string(tn.Value)) {
+				val = runtime.NewCharstring(mod + "." + string(tn.Value))
+			}
 		}
 		root.Set(name, val)
 	})
@@ -3619,6 +3637,7 @@ func bindComponentMembers(env runtime.Scope, body *syntax.BlockStmt) {
 			// to model component lifetimes. If the initialiser fails
 			// (e.g. references an unmodeled function) we fall back to
 			// Undefined so identifier lookups still succeed.
+			recordMemberType(env, name, vd.Type)
 			if dec.Value != nil {
 				v := eval(dec.Value, env)
 				if v != nil && !runtime.IsError(v) {
@@ -3629,6 +3648,23 @@ func bindComponentMembers(env runtime.Scope, body *syntax.BlockStmt) {
 			env.Set(name, runtime.Undefined)
 		}
 	}
+}
+
+// recordMemberType records a component variable's declared type, naming a
+// type of the module declaring the component type by that module, which
+// the module using the variable may not see as the same.
+func recordMemberType(env runtime.Scope, name string, typ syntax.Expr) {
+	tn := syntax.Name(typ)
+	if mod := moduleNameFromEnv(env); mod != "" && tn != "" && !strings.Contains(tn, ".") {
+		if v, ok := env.Get(tn); ok {
+			switch forceThunk(v).(type) {
+			case *runtime.TypeDesc, *runtime.EnumType:
+				env.Set(declaredTypeKey(name), runtime.NewCharstring(mod+"."+tn))
+				return
+			}
+		}
+	}
+	recordDeclaredType(env, name, typ)
 }
 
 // callResponseAlts holds the synthetic alt a blocking `call`'s response

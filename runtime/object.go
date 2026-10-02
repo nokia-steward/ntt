@@ -254,6 +254,9 @@ func objectsEqual(a, b Object) bool {
 type TypeDesc struct {
 	Name  string
 	Attrs map[string][]string
+	// Home is the scope the type was declared in — its module's — where
+	// the names its fields refer to resolve.
+	Home Scope
 	// Override records, per Annex E attribute kind (lower-cased), that
 	// the effective attribute was declared with the `override` modifier
 	// (ETSI 27.7). An override attribute on a record propagates to its
@@ -301,6 +304,11 @@ type TypeDesc struct {
 	// IsList marks an array, record of or set of type: its values are
 	// lists.
 	IsList bool
+	// Spec is the type specification a subtype declaration gives (`type
+	// record of T L`'s list of T, `type T S`'s reference to T), for a codec
+	// that walks a value by its type; nil for a record, set or union type
+	// (see Struct).
+	Spec syntax.TypeSpec
 }
 
 func (t *TypeDesc) Type() ObjectType { return TYPE_DESC }
@@ -1417,6 +1425,10 @@ type Function struct {
 	// a call of it resolves names in after the component's variables,
 	// whatever Env a start gave it.
 	Home Scope
+
+	// Result is the declared type of the function's return value, or
+	// nil.
+	Result syntax.Expr
 
 	// Isolated marks a function declared without runs on, mtc or system:
 	// it sees no component's variables, so nothing it does can change the
