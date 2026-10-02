@@ -100,6 +100,34 @@ func (b *controlBudget) Equal(o runtime.Object) bool {
 	return ok && other == b
 }
 
+// controlClock is a control part's virtual clock: its own timers run on
+// it, and each testcase it executes moves it on by the virtual time that
+// testcase took. Bound only on the virtual clock.
+type controlClock struct{ now float64 }
+
+const controlClockKey = "\x00ttcn3:control-clock"
+
+func (*controlClock) Type() runtime.ObjectType { return runtime.ObjectType("CONTROL_CLOCK") }
+func (*controlClock) Inspect() string          { return "control clock" }
+func (c *controlClock) Equal(o runtime.Object) bool {
+	other, ok := o.(*controlClock)
+	return ok && other == c
+}
+
+// controlClockOf is the control part's clock env runs on, or nil — in a
+// testcase, or on the real clock.
+func controlClockOf(env runtime.Scope) *controlClock {
+	if env == nil {
+		return nil
+	}
+	v, ok := env.Get(controlClockKey)
+	if !ok {
+		return nil
+	}
+	c, _ := v.(*controlClock)
+	return c
+}
+
 // controlBudgetSpent reports whether env is a control part's whose budget
 // is spent.
 func controlBudgetSpent(env runtime.Scope) bool {
@@ -219,6 +247,11 @@ func RunControlWith(trees []*ttcn3.Tree, module string, opts TestcaseOptions) (v
 		defer budget.pause()
 		env.Set(controlBudgetKey, budget)
 	}
+	var clock *controlClock
+	if opts.DeterministicClock {
+		clock = &controlClock{}
+		env.Set(controlClockKey, clock)
+	}
 	env.Set(executeHandlerKey, executeHandler{
 		run: func(tcName string, args []runtime.Object, timeout float64, hasTimeout bool, host string, hasHost bool) runtime.Verdict {
 			if budget != nil {
@@ -229,7 +262,10 @@ func RunControlWith(trees []*ttcn3.Tree, module string, opts TestcaseOptions) (v
 				defer budget.resume()
 			}
 			tlExecute(opts.TestLogger, control, modNode, module, tcName, args, timeout, hasTimeout)
-			v, r := runOneExecute(trees, modNode, module, tcName, args, timeout, hasTimeout, host, hasHost, opts)
+			v, r, took := runOneExecute(trees, modNode, module, tcName, args, timeout, hasTimeout, host, hasHost, opts)
+			if clock != nil {
+				clock.now += took
+			}
 			ran = true
 			if verdictRank(v) > verdictRank(agg) {
 				agg, aggReason = v, r
@@ -262,13 +298,15 @@ func RunControlWith(trees []*ttcn3.Tree, module string, opts TestcaseOptions) (v
 // does not terminate within the timeout is stopped with `error`, and a
 // host the runtime cannot resolve is `error` too. Neither is a testcase
 // failure, so both bypass the body's own verdict.
-func runOneExecute(trees []*ttcn3.Tree, modNode *syntax.Module, module, tcName string, args []runtime.Object, timeout float64, hasTimeout bool, host string, hasHost bool, opts TestcaseOptions) (runtime.Verdict, string) {
+//
+// It also returns the virtual time the testcase took.
+func runOneExecute(trees []*ttcn3.Tree, modNode *syntax.Module, module, tcName string, args []runtime.Object, timeout float64, hasTimeout bool, host string, hasHost bool, opts TestcaseOptions) (runtime.Verdict, string, float64) {
 	if hasHost && !hostIsLocal(host) {
-		return runtime.ErrorVerdict, fmt.Sprintf("execute: unknown host %q", host)
+		return runtime.ErrorVerdict, fmt.Sprintf("execute: unknown host %q", host), 0
 	}
 	tcNode := findTestcase(modNode, tcName)
 	if tcNode == nil {
-		return runtime.ErrorVerdict, fmt.Sprintf("execute: testcase %q not found in %q", tcName, module)
+		return runtime.ErrorVerdict, fmt.Sprintf("execute: testcase %q not found in %q", tcName, module), 0
 	}
 
 	inner := opts
@@ -284,7 +322,7 @@ func runOneExecute(trees []*ttcn3.Tree, modNode *syntax.Module, module, tcName s
 	// real one.
 	if hasTimeout {
 		if timeout <= 0 {
-			return runtime.ErrorVerdict, "execute: non-positive timeout"
+			return runtime.ErrorVerdict, "execute: non-positive timeout", 0
 		}
 		inner.executeTimeout, inner.hasExecuteTimeout = timeout, true
 	}
@@ -303,7 +341,7 @@ func runOneExecute(trees []*ttcn3.Tree, modNode *syntax.Module, module, tcName s
 	// state one testcase mutated cannot leak into the next.
 	env, initErr := newModuleEnv(trees, modNode, module, inner)
 	if initErr != "" {
-		return runtime.ErrorVerdict, initErr
+		return runtime.ErrorVerdict, initErr, 0
 	}
 	exec := runtime.NewTestcaseExec(module + "." + tcName)
 	v, r, err := runTestcaseIn(env, exec, trees, modNode, module, tcName, tcNode, inner)
@@ -311,7 +349,7 @@ func runOneExecute(trees []*ttcn3.Tree, modNode *syntax.Module, module, tcName s
 		v, r = runtime.ErrorVerdict, err.Error()
 	}
 	tlTestcaseTerminated(exec, v, r)
-	return v, r
+	return v, r, exec.VirtualClock()
 }
 
 // hostIsLocal reports whether an execute()'s host operand names a host

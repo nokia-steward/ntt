@@ -7054,7 +7054,7 @@ func evalTimerAggregateOp(kind string, sel syntax.Expr, env runtime.Scope) (runt
 	switch op {
 	case "running":
 		for _, th := range timers {
-			r := tickTimer(th)
+			r := timerStillRunning(th, env)
 			if anyKind && r {
 				return runtime.NewBool(true), true
 			}
@@ -7172,8 +7172,8 @@ func evalTimerSelector(th *runtime.TimerHandle, n *syntax.SelectorExpr, env runt
 		// timer fire out of order).
 		if altCtx.active() {
 			if !det && !schedActive {
-				if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
-					exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
+				if th.Duration > 0 {
+					advanceVirtual(env, th.StartedAtVirtual+th.Duration)
 				}
 			}
 			expired := timerExpired(th, env)
@@ -7207,8 +7207,8 @@ func evalTimerSelector(th *runtime.TimerHandle, n *syntax.SelectorExpr, env runt
 		// `T2.read` is exact), then fire instantly
 		// (deterministic) or sleep the real remaining
 		// time.
-		if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
-			exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
+		if th.Duration > 0 {
+			advanceVirtual(env, th.StartedAtVirtual+th.Duration)
 		}
 		if !det {
 			waitForTimerTimeout(th, env)
@@ -7219,13 +7219,9 @@ func evalTimerSelector(th *runtime.TimerHandle, n *syntax.SelectorExpr, env runt
 	case "start":
 		th.Running = true
 		th.Ticks = 0
-		th.MaxTicks = 4
+		th.MaxTicks = busyWaitPolls
 		th.StartedAt = time.Now()
-		if exec := runtime.FindTestcaseExec(env); exec != nil {
-			th.StartedAtVirtual = exec.VirtualClock()
-		} else {
-			th.StartedAtVirtual = 0
-		}
+		th.StartedAtVirtual, _ = virtualNow(env)
 		// Bare `T.start;` restores the declared
 		// default duration; see ETSI 23.2.
 		th.Duration = th.DefaultDuration
@@ -7246,13 +7242,9 @@ func evalTimerOp(th *runtime.TimerHandle, sel syntax.Expr, n *syntax.CallExpr, e
 	case "start":
 		th.Running = true
 		th.Ticks = 0
-		th.MaxTicks = 4
+		th.MaxTicks = busyWaitPolls
 		th.StartedAt = time.Now()
-		if exec := runtime.FindTestcaseExec(env); exec != nil {
-			th.StartedAtVirtual = exec.VirtualClock()
-		} else {
-			th.StartedAtVirtual = 0
-		}
+		th.StartedAtVirtual, _ = virtualNow(env)
 		// ETSI 23.2: `T.start;` without an argument uses the
 		// timer's declared default duration. A previous
 		// `T.start(M)` override does not persist.
@@ -7302,8 +7294,8 @@ func evalTimerOp(th *runtime.TimerHandle, sel syntax.Expr, n *syntax.CallExpr, e
 		// (preserves multi-timer ordering).
 		if altCtx.active() {
 			if !det && !schedActive {
-				if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
-					exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
+				if th.Duration > 0 {
+					advanceVirtual(env, th.StartedAtVirtual+th.Duration)
 				}
 			}
 			expired := timerExpired(th, env)
@@ -7335,8 +7327,8 @@ func evalTimerOp(th *runtime.TimerHandle, sel syntax.Expr, n *syntax.CallExpr, e
 		// expires. Fast-forward the virtual clock to the deadline (so a
 		// later `T2.read` is exact), then fire instantly (deterministic)
 		// or sleep the real remaining time.
-		if exec := runtime.FindTestcaseExec(env); exec != nil && th.Duration > 0 {
-			exec.AdvanceVirtualClock(th.StartedAtVirtual + th.Duration)
+		if th.Duration > 0 {
+			advanceVirtual(env, th.StartedAtVirtual+th.Duration)
 		}
 		if !det {
 			waitForTimerTimeout(th, env)
@@ -7362,8 +7354,8 @@ func timerExpired(th *runtime.TimerHandle, env runtime.Scope) bool {
 		return true
 	}
 	if useVirtualClock(env) {
-		if exec := runtime.FindTestcaseExec(env); exec != nil {
-			return exec.VirtualClock() >= th.StartedAtVirtual+th.Duration
+		if now, ok := virtualNow(env); ok {
+			return now >= th.StartedAtVirtual+th.Duration
 		}
 	}
 	if th.StartedAt.IsZero() {
@@ -7521,7 +7513,10 @@ func functionWithEnv(fn *runtime.Function, env runtime.Scope) *runtime.Function 
 // wall time (rare in the suite; bounded by the harness timeout).
 func deterministicClockEnabled(env runtime.Scope) bool {
 	exec := runtime.FindTestcaseExec(env)
-	return exec != nil && exec.DeterministicClock() && !exec.HasLivePTCs()
+	if exec == nil {
+		return controlClockOf(env) != nil
+	}
+	return exec.DeterministicClock() && !exec.HasLivePTCs()
 }
 
 // deterministicSchedulerEnabled reports whether the discrete-event
@@ -7538,7 +7533,7 @@ func deterministicSchedulerEnabled(env runtime.Scope) bool {
 func useVirtualClock(env runtime.Scope) bool {
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil {
-		return false
+		return controlClockOf(env) != nil
 	}
 	if exec.SchedulerActive() {
 		return true
@@ -8494,59 +8489,60 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 	return nil, false
 }
 
-// timerStillRunning answers `T.running`. Under the virtual clock a timer
-// stops running once its deadline has passed in VIRTUAL time — a sibling
-// `T.timeout` may have advanced the clock beyond this timer's expiry, and
-// tickTimer's wall-clock check never fires because no real time elapses, so
-// it would wrongly report the timer as still running (Sem_2306_007). When the
-// timer is not yet virtually expired we fall through to tickTimer, preserving
-// the tick-counter fallback that lets a `while (t.running) {}` busy-wait (no
-// clock advance) terminate.
+// timerStillRunning answers `T.running` by the clock: a timer runs until
+// it is stopped, its timeout is taken, or its deadline passes — virtual
+// time on the virtual clock, real time on the real one. An expired timer
+// is not running, but its timeout stays pending for a later `T.timeout`
+// (ETSI 23.5, 23.6).
+//
+// On the virtual clock computing takes no time, so a loop polling a timer
+// with nothing else to wait for — `while (t.running) {}` — would never see
+// it expire. Polls at one virtual instant are counted, and past
+// busyWaitPolls of them the timer is taken to run no more. A loop that
+// lets virtual time pass between its polls — waits on a timer, or for a
+// message that comes later — starts the count again.
 func timerStillRunning(th *runtime.TimerHandle, env runtime.Scope) bool {
-	if th == nil {
+	if th == nil || !th.Running {
 		return false
 	}
-	if useVirtualClock(env) && th.Running && timerExpired(th, env) {
-		th.Running = false
-		th.Ticks = th.MaxTicks
+	if th.Duration <= 0 || timerExpired(th, env) {
 		return false
 	}
-	return tickTimer(th)
-}
-
-// tickTimer advances the timer's virtual clock by one and reports the
-// new running state. We say the timer is still running iff the call
-// happened before the MaxTicks budget was exhausted, so a
-// `while (t.running)` loop terminates after at most MaxTicks iterations
-// even without a real scheduler.
-func tickTimer(th *runtime.TimerHandle) bool {
-	if !th.Running {
-		return false
+	if !useVirtualClock(env) {
+		return true
 	}
-	// ETSI 23.2: a timer started with duration 0.0 times out
-	// immediately, so it is never observed as running (Sem_2302_004).
-	if th.Duration <= 0 {
-		th.Running = false
-		return false
-	}
-	// Wall-clock expiry: once a started timer's real deadline has
-	// passed it is no longer running (ETSI 23.5), independent of the
-	// tick counter. This keeps `t.running` consistent with real time
-	// after a sibling `T.timeout` blocked the body long enough for a
-	// shorter timer to elapse (Sem_2306_007).
-	if !th.StartedAt.IsZero() {
-		deadline := th.StartedAt.Add(time.Duration(th.Duration * float64(time.Second)))
-		if !time.Now().Before(deadline) {
-			th.Running = false
-			return false
-		}
+	if now, _ := virtualNow(env); now != th.PolledAtVirtual {
+		th.PolledAtVirtual, th.Ticks = now, 0
 	}
 	th.Ticks++
-	if th.MaxTicks > 0 && th.Ticks > th.MaxTicks {
-		th.Running = false
-		return false
+	return th.Ticks <= busyWaitPolls
+}
+
+// busyWaitPolls is how many times a timer may be polled, with nothing
+// happening, before the poller is taken to be busy-waiting on it.
+const busyWaitPolls = 1000
+
+// virtualNow is the virtual time env runs at — its testcase's, or a
+// control part's on the virtual clock — and whether it has one.
+func virtualNow(env runtime.Scope) (float64, bool) {
+	if exec := runtime.FindTestcaseExec(env); exec != nil {
+		return exec.VirtualClock(), true
 	}
-	return true
+	if c := controlClockOf(env); c != nil {
+		return c.now, true
+	}
+	return 0, false
+}
+
+// advanceVirtual moves env's virtual clock on to t, if it is earlier.
+func advanceVirtual(env runtime.Scope, t float64) {
+	if exec := runtime.FindTestcaseExec(env); exec != nil {
+		exec.AdvanceVirtualClock(t)
+		return
+	}
+	if c := controlClockOf(env); c != nil && t > c.now {
+		c.now = t
+	}
 }
 
 // timerRead reports the elapsed time of a running timer (ETSI 23.4),
@@ -8564,7 +8560,8 @@ func tickTimer(th *runtime.TimerHandle) bool {
 // `t.start; <request/response>; t.read` — the enabler for profiling a live
 // SUT.
 func timerRead(th *runtime.TimerHandle, env runtime.Scope) runtime.Object {
-	if th == nil || !th.Running {
+	// An inactive timer — stopped, or expired — reads 0 (ETSI 23.4).
+	if th == nil || !th.Running || timerExpired(th, env) {
 		return runtime.Float(0.0)
 	}
 	if !useVirtualClock(env) {
@@ -8580,11 +8577,11 @@ func timerRead(th *runtime.TimerHandle, env runtime.Scope) runtime.Object {
 		}
 		return runtime.Float(elapsed)
 	}
-	exec := runtime.FindTestcaseExec(env)
-	if exec == nil {
+	now, ok := virtualNow(env)
+	if !ok {
 		return runtime.Float(0.0)
 	}
-	elapsed := exec.VirtualClock() - th.StartedAtVirtual
+	elapsed := now - th.StartedAtVirtual
 	if elapsed < 0 {
 		elapsed = 0
 	}

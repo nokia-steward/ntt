@@ -120,18 +120,19 @@ func (l *LazyThunk) Equal(o Object) bool {
 	return false
 }
 
-// TimerHandle is the runtime representation of a TTCN-3 timer value.
-// We don't model a real clock yet, but enough state lives here to
-// answer `.running`, `.read`, `.start`, and `.stop` against the same
-// object - including across parameter passing. Timer parameters are
-// passed by reference in TTCN-3, so the same pointer flows from the
-// declaration site into each callee.
+// TimerHandle is the runtime representation of a TTCN-3 timer value:
+// enough state to answer `.running`, `.read`, `.start`, `.stop` and
+// `.timeout` against the same object - including across parameter
+// passing. Timer parameters are passed by reference in TTCN-3, so the
+// same pointer flows from the declaration site into each callee.
 //
-// The Ticks field implements a coarse virtual-clock: each `.read` and
-// each `.running` access bumps the counter, and once it crosses
-// MaxTicks the timer flips to expired. Without this, loops like
-// `while (t.running) { ... t.read ... }` would never terminate because
-// nothing advances time.
+// Running is true from `.start` until the timer is stopped or its
+// timeout is taken: an expired timer whose timeout is still pending stays
+// Running, and is answered as not running by its deadline (ETSI 23.5,
+// 23.6). On the virtual clock, where computing takes no time, Ticks
+// counts the `.running` polls made at one virtual instant; past MaxTicks
+// of them the poller is taken to be busy-waiting, and told the timer runs
+// no more.
 type TimerHandle struct {
 	Name     string
 	Running  bool
@@ -156,6 +157,10 @@ type TimerHandle struct {
 	// is observable as elapsed time on T1 deterministically, without
 	// depending on wall-clock jitter (ETSI 23.4, Sem_2304_003).
 	StartedAtVirtual float64
+	// PolledAtVirtual is the virtual-clock reading at the last
+	// `.running`: Ticks counts the polls made at that instant — a
+	// busy-wait, past MaxTicks of them.
+	PolledAtVirtual float64
 }
 
 func (t *TimerHandle) Type() ObjectType { return TIMER_OBJ }

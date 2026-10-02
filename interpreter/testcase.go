@@ -2652,9 +2652,7 @@ func blockForAltEvents(n *syntax.AltStmt, env runtime.Scope) bool {
 		// deadline ordering preserved. (A queued message would already
 		// have matched in the snapshot pass before we got here.)
 		if vd, ok := nextAltTimerVirtualDeadline(n, env); ok {
-			if exec != nil {
-				exec.AdvanceVirtualClock(vd)
-			}
+			advanceVirtual(env, vd) // a testcase's clock, or a control part's
 			return true
 		}
 		// No timer guard: a real wait for port / component events, which

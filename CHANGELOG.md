@@ -334,6 +334,22 @@ Independent of the two clocks:
   clock, as expired default timers did before.
 - **A call's signature no longer reaches a PTC** for the unqualified
   `getreply` / `catch` rule (22.3.1 h).
+- **`T.running` reads the clock.** It counted how often it was asked, and
+  after four times answered false: `while (t_window.running) { ... }`
+  around a function waiting on a timer of its own ended after a few
+  iterations, the window not half over, on either clock; `any
+  timer.running` alike. A timer now runs until its deadline. On the
+  virtual clock, where computing takes no time, a loop that polls a timer
+  a thousand times at one virtual instant is taken to be busy-waiting, and
+  told the timer runs no more, so `while (t.running) {}` still ends; one
+  that lets virtual time pass between its polls runs to the deadline. Asking an expired
+  timer whether it runs no longer discards its timeout, which a later
+  `T.timeout` takes (ETSI 23.6), and an expired timer reads 0 (23.4).
+- **A control part's timers run on a clock of its own** on the virtual
+  clock, which each testcase it executes moves on by the virtual time that
+  testcase took: `while (t.running) { execute(tc()) }` runs as many
+  testcases as fit, and a control part's `t.timeout`, or an `alt` on its
+  timers, no longer waits in real time or never fires.
 - **Choosing another alternative of a union drops the one it carried**:
   `u.i := 1; u.s := "x"` left both, so `u == { s := "x" }` was false — in
   a variable, a parameter, a field, a list element or an `anytype`.

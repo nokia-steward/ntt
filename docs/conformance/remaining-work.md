@@ -591,10 +591,9 @@ passed over for a thousand turns — and a parameter's default and a
 - The JSON codec applies no JSON `variant` attributes (ES 201 873-11
   Annex B: `name as`, `as value`, `omit as null`, ...): a type carrying one,
   or whose fields' types do, is left to the round-trip placeholder codec,
-  as before. A control part's own timer wait is not cut short by
-  `--timeout`; its loops are. A control part's timers wait in real time
-  on the virtual clock too, and an `alt` in a control part with no
-  branch ready returns at once.
+  as before. On the real clock, a control part's own timer wait is not
+  cut short by `--timeout`; its loops are. An `alt` in a control part
+  with no branch ready returns at once.
 - `var R x` declared in an inner block (`if (...) { var R x ... }`)
   overwrites the value of a like-named variable of the enclosing block.
 - A testcase run on its own, not from a control part, has its
@@ -614,7 +613,16 @@ passed over for a thousand turns — and a parameter's default and a
   write would make passing free again.
 - On the virtual clock, a component spinning until an `execute()` limit
   costs about a second of real time per second of the limit.
-- `while (t.running) { ... }` stops after a few iterations on either
+- *Fixed 2026-10-02: `.running` reads the clock, and an expired timer's
+  timeout is kept. Still, on the virtual clock, a loop that only polls —
+  `while (t.running and c.running) {}`, or an alt with `[else]` in it —
+  never waits, so no other component's timer can fire meanwhile; after a
+  thousand polls at one instant the timer is taken to have run out. A
+  loop computing a lot between its polls lets virtual time pass, as any
+  long computation does (about a second of it per million iterations),
+  and so runs to the deadline, at that cost in real time. And `all
+  timer.running` also asks timers of blocks that have ended.*
+  `while (t.running) { ... }` stops after a few iterations on either
   clock: `t.running` counts polls instead of reading the clock.
 - An activated default does not fire in a blocking receive or alt inside
   a function without `runs on` called from a component.
