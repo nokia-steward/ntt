@@ -386,6 +386,13 @@ func httpPortRule(port, comp string, params map[string]string) (httpport.Rule, b
 	if tlsCfg, set := tlsParams(port, comp, params); set {
 		rule.TLS = &tlsCfg
 	}
+	if v := params["response_headers"]; v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "testport %q (%s): bad response_headers %q: %v\n", port, comp, v, err)
+		}
+		rule.ResponseHeaders = b
+	}
 	return rule, true
 }
 

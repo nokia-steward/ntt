@@ -141,7 +141,7 @@ func TestOversizeResponseIsReportedNotTruncated(t *testing.T) {
 	if err := p.OnMap(context.Background()); err != nil {
 		t.Fatalf("OnMap: %v", err)
 	}
-	status, got, failure := p.do(p.client, p.baseURL, request{method: "GET", path: "/big"})
+	status, got, _, failure := p.do(p.client, p.baseURL, request{method: "GET", path: "/big"})
 	if failure == nil {
 		t.Fatalf("oversize response delivered as a normal reply (status %d, %d bytes) — "+
 			"a truncated body must not look like a whole one", status, len(got))
@@ -168,7 +168,7 @@ func TestBodyAtCapIsDelivered(t *testing.T) {
 	if err := p.OnMap(context.Background()); err != nil {
 		t.Fatalf("OnMap: %v", err)
 	}
-	status, got, failure := p.do(p.client, p.baseURL, request{method: "GET", path: "/exact"})
+	status, got, _, failure := p.do(p.client, p.baseURL, request{method: "GET", path: "/exact"})
 	if failure != nil {
 		t.Fatalf("a body exactly at the cap was reported as %q; it is complete", failure.reason)
 	}

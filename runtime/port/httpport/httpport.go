@@ -24,12 +24,25 @@
 //	path         appended to the base URL, e.g. "/api/v1/health"
 //	body         request body; omitted or empty sends no body
 //	contentType  defaults to application/json when a body is present
+//	headers      optional request headers, sent as given — an
+//	             `Authorization` header, say — declared as
+//	             `record of HttpHeader headers optional`, with
+//	             `type record HttpHeader { charstring name, charstring val }`
+//	             (`value` is a TTCN-3 keyword); an entry may be positional;
+//	             a Content-Type among them overrides contentType
 //
-// Response record fields, always exactly these two, so a template can match
-// on them without knowing about optional fields:
+// Response record fields, exactly these two unless response headers are
+// asked for, so a template can match on them without knowing about
+// optional fields:
 //
 //	status       HTTP status code
 //	body         response body
+//
+// With response headers on (WithResponseHeaders, or
+// `response_headers := "true"`), the response also carries them, sorted
+// by name, one entry per value:
+//
+//	type record HttpResponse { integer status, charstring body, record of HttpHeader headers }
 //
 // A request that never completed is a different KIND of event from a server
 // answering — the SUT was not there, rather than saying no — so it arrives
@@ -79,8 +92,7 @@
 // and WithTLS). Certificate files are read at map time, so a bad path fails
 // the map operation and names the file.
 //
-// Not modelled: request or response headers beyond content type, and binary
-// (non-UTF-8) bodies.
+// Not modelled: binary (non-UTF-8) bodies.
 package httpport
 
 import (
@@ -93,6 +105,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"syscall"
@@ -157,11 +170,15 @@ type Rule struct {
 	// TLS configures an https base URL. Nil verifies against the system
 	// roots; it is ignored for a plain http:// URL.
 	TLS *TLS
+	// ResponseHeaders adds the response's headers to the HttpResponse
+	// record (a `headers` field the suite declares).
+	ResponseHeaders bool
 }
 
 type config struct {
-	timeout time.Duration
-	tls     *TLS
+	timeout         time.Duration
+	tls             *TLS
+	responseHeaders bool
 }
 
 // Option configures a registered HTTP test port.
@@ -177,6 +194,12 @@ func WithTLS(t TLS) Option {
 	return func(c *config) { c.tls = &t }
 }
 
+// WithResponseHeaders adds the response's headers to each HttpResponse
+// (see Rule.ResponseHeaders).
+func WithResponseHeaders() Option {
+	return func(c *config) { c.responseHeaders = true }
+}
+
 // Register binds a TTCN-3 message port name to an HTTP test port that
 // issues requests against baseURL, for any component. Call once per port
 // name at startup; the first Register installs the global port-driver
@@ -186,7 +209,8 @@ func Register(portName, baseURL string, opts ...Option) {
 	for _, o := range opts {
 		o(&cfg)
 	}
-	RegisterRules(portName, []Rule{{Component: "*", BaseURL: baseURL, Timeout: cfg.timeout, TLS: cfg.tls}})
+	RegisterRules(portName, []Rule{{Component: "*", BaseURL: baseURL, Timeout: cfg.timeout, TLS: cfg.tls,
+		ResponseHeaders: cfg.responseHeaders}})
 }
 
 // RegisterRules binds a port name to component-selective base URLs. The
@@ -220,11 +244,12 @@ type httpPort struct {
 	inst  string
 	rules []Rule
 
-	mu      sync.Mutex
-	baseURL string
-	client  *http.Client
-	mapped  bool
-	wg      sync.WaitGroup // in-flight requests, joined on unmap
+	mu              sync.Mutex
+	baseURL         string
+	client          *http.Client
+	mapped          bool
+	responseHeaders bool           // resolved from the matched rule at OnMap
+	wg              sync.WaitGroup // in-flight requests, joined on unmap
 }
 
 // resolveRule picks the rule matching the component doing the map, in
@@ -294,6 +319,7 @@ func (p *httpPort) OnMap(context.Context) error {
 	p.baseURL = rule.BaseURL
 	p.client = client
 	p.mapped = true
+	p.responseHeaders = rule.ResponseHeaders
 	p.mu.Unlock()
 	return nil
 }
@@ -331,7 +357,7 @@ func (p *httpPort) Send(_ context.Context, env *port.Envelope) error {
 		return err
 	}
 	p.mu.Lock()
-	base, client, mapped := p.baseURL, p.client, p.mapped
+	base, client, mapped, withHeaders := p.baseURL, p.client, p.mapped, p.responseHeaders
 	p.mu.Unlock()
 	if !mapped {
 		return fmt.Errorf("httpport %s: send before map", p.inst)
@@ -340,12 +366,16 @@ func (p *httpPort) Send(_ context.Context, env *port.Envelope) error {
 	p.wg.Add(1)
 	go func() {
 		defer p.wg.Done()
-		status, body, failure := p.do(client, base, req)
+		status, body, header, failure := p.do(client, base, req)
 		if failure != nil {
 			goport.Inject(p.inst, newTransportError(failure))
 			return
 		}
-		goport.Inject(p.inst, newResponse(status, body))
+		resp := newResponse(status, body)
+		if withHeaders {
+			resp.Fields["headers"] = headerList(header)
+		}
+		goport.Inject(p.inst, resp)
 	}()
 	return nil
 }
@@ -356,10 +386,10 @@ type transportFailure struct {
 	detail string // underlying message, for logging only
 }
 
-// do performs the request. It returns either (status, body, nil) for a
-// server response — including 4xx and 5xx, which are answers — or a
+// do performs the request. It returns either (status, body, header, nil)
+// for a server response — including 4xx and 5xx, which are answers — or a
 // non-nil transportFailure when no response was obtained.
-func (p *httpPort) do(client *http.Client, base string, r request) (int, string, *transportFailure) {
+func (p *httpPort) do(client *http.Client, base string, r request) (int, string, http.Header, *transportFailure) {
 	var bodyReader io.Reader
 	if r.body != "" {
 		bodyReader = bytes.NewReader([]byte(r.body))
@@ -367,7 +397,7 @@ func (p *httpPort) do(client *http.Client, base string, r request) (int, string,
 	url := base + r.path
 	req, err := http.NewRequest(r.method, url, bodyReader)
 	if err != nil {
-		return 0, "", &transportFailure{reasonOther, fmt.Sprintf("build request %s %s: %v", r.method, url, err)}
+		return 0, "", nil, &transportFailure{reasonOther, fmt.Sprintf("build request %s %s: %v", r.method, url, err)}
 	}
 	if r.body != "" {
 		ct := r.contentType
@@ -376,9 +406,17 @@ func (p *httpPort) do(client *http.Client, base string, r request) (int, string,
 		}
 		req.Header.Set("Content-Type", ct)
 	}
+	for _, h := range r.headers {
+		if strings.EqualFold(h[0], "Content-Type") {
+			req.Header.Del("Content-Type")
+		}
+	}
+	for _, h := range r.headers {
+		req.Header.Add(h[0], h[1])
+	}
 	resp, err := client.Do(req)
 	if err != nil {
-		return 0, "", &transportFailure{classify(err), fmt.Sprintf("%s %s: %v", r.method, url, err)}
+		return 0, "", nil, &transportFailure{classify(err), fmt.Sprintf("%s %s: %v", r.method, url, err)}
 	}
 	defer resp.Body.Close()
 	// Read one byte past the cap so exceeding it is detectable: a plain
@@ -386,7 +424,7 @@ func (p *httpPort) do(client *http.Client, base string, r request) (int, string,
 	// too-large answer became a silently truncated one.
 	b, err := io.ReadAll(io.LimitReader(resp.Body, int64(maxBodyLen)+1))
 	if err == nil && len(b) > maxBodyLen {
-		return 0, "", &transportFailure{reasonOversize, fmt.Sprintf(
+		return 0, "", nil, &transportFailure{reasonOversize, fmt.Sprintf(
 			"%s %s: response body exceeds the %d-byte cap; not delivered rather than truncated",
 			r.method, url, maxBodyLen)}
 	}
@@ -394,9 +432,9 @@ func (p *httpPort) do(client *http.Client, base string, r request) (int, string,
 		// Headers arrived, so the SUT did answer; report the status and
 		// surface the truncated read in the body rather than pretending
 		// the request never happened.
-		return resp.StatusCode, fmt.Sprintf("read body: %v", err), nil
+		return resp.StatusCode, fmt.Sprintf("read body: %v", err), resp.Header, nil
 	}
-	return resp.StatusCode, string(b), nil
+	return resp.StatusCode, string(b), resp.Header, nil
 }
 
 // classify maps a transport error onto one of the reason labels. The
@@ -475,6 +513,7 @@ func classify(err error) string {
 // request is the decoded form of an outgoing HttpRequest record.
 type request struct {
 	method, path, body, contentType string
+	headers                         [][2]string // name, value, in order
 }
 
 // decodeRequest reads the TTCN-3 request record. Only `path` is required;
@@ -494,6 +533,11 @@ func decodeRequest(payload interface{}) (request, error) {
 		body:        str(rec, "body"),
 		contentType: str(rec, "contentType"),
 	}
+	hs, err := decodeHeaders(rec.Fields["headers"])
+	if err != nil {
+		return request{}, err
+	}
+	r.headers = hs
 	if r.method == "" {
 		r.method = http.MethodGet
 	}
@@ -505,6 +549,66 @@ func decodeRequest(payload interface{}) (request, error) {
 		r.path = "/" + r.path
 	}
 	return r, nil
+}
+
+// decodeHeaders reads an optional `record of HttpHeader` — each entry a
+// record { charstring name, charstring val }, named or positional.
+// Absent, omit or empty sends none.
+func decodeHeaders(v runtime.Object) ([][2]string, error) {
+	if v == nil || v == runtime.Omit || v == runtime.Undefined {
+		return nil, nil
+	}
+	list, ok := v.(*runtime.List)
+	if !ok {
+		return nil, fmt.Errorf("httpport: headers is %s, want a record of { name, val }", v.Type())
+	}
+	var out [][2]string
+	for i, e := range list.Elements {
+		var name, value string
+		switch h := e.(type) {
+		case *runtime.Record:
+			name, value = str(h, "name"), str(h, "val")
+		case *runtime.List:
+			if len(h.FieldNames) == len(h.Elements) && len(h.FieldNames) > 0 {
+				rec := runtime.NewRecord()
+				for j, n := range h.FieldNames {
+					rec.Fields[n] = h.Elements[j]
+				}
+				name, value = str(rec, "name"), str(rec, "val")
+			} else if len(h.Elements) == 2 {
+				n, _ := h.Elements[0].(*runtime.String)
+				val, _ := h.Elements[1].(*runtime.String)
+				if n != nil && val != nil {
+					name, value = string(n.Value), string(val.Value)
+				}
+			}
+		}
+		if name == "" {
+			return nil, fmt.Errorf("httpport: header %d has no name", i)
+		}
+		out = append(out, [2]string{name, value})
+	}
+	return out, nil
+}
+
+// headerList renders response headers as a record of { name, val },
+// sorted by name, one entry per value, so two runs show them alike.
+func headerList(h http.Header) *runtime.List {
+	names := make([]string, 0, len(h))
+	for n := range h {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	list := &runtime.List{ListType: runtime.RECORD_OF}
+	for _, n := range names {
+		for _, v := range h[n] {
+			rec := runtime.NewRecord()
+			rec.Fields["name"] = runtime.NewCharstring(n)
+			rec.Fields["val"] = runtime.NewCharstring(v)
+			list.Elements = append(list.Elements, rec)
+		}
+	}
+	return list
 }
 
 // str reads a charstring field, returning "" when absent or not a string.

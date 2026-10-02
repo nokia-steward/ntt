@@ -99,6 +99,11 @@ single functional test doubles as a performance probe. See
   latency, with a copy-pasteable stand-in server. Exercised by CI so it
   cannot rot.
 
+- **HTTP headers** — an HTTP port request may carry headers, an
+  `Authorization` header say, in an optional `headers` field (a `record of
+  { charstring name, charstring val }`); with `response_headers := "true"`
+  the response carries its headers too, sorted by name. Suites that declare
+  neither are unchanged.
 - **TLS for the built-in TCP port** — `tls := "true"` makes a configured TCP
   port a TLS client over the same framing, verifying the server against the
   system roots or a `ca_cert`, with `client_cert`/`client_key` for mutual

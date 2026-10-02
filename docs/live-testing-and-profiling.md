@@ -307,6 +307,29 @@ Bodies stay `charstring`, so a JSON API composes with whatever types your
 suite already generates from its schema; this port does not need to know
 them.
 
+**Headers.** A request may carry headers — an `Authorization` header, say —
+in an optional field (`value` is a TTCN-3 keyword, hence `val`):
+
+```ttcn3
+type record HttpHeader { charstring name, charstring val }
+type record of HttpHeader HttpHeaders;
+type record HttpRequest { charstring method, charstring path, charstring body, HttpHeaders headers optional }
+
+p.send(HttpRequest:{ method := "GET", path := "/api/v1/nodes", body := "",
+                     headers := { { name := "Authorization", val := "Bearer " & token } } });
+```
+
+A `Content-Type` among them overrides `contentType`. The response's headers
+are added only when asked for — `*.p.response_headers := "true"` — because a
+response record has exactly `status` and `body` otherwise, and a template for
+it would not match a record with a field it does not declare:
+
+```ttcn3
+type record HttpResponse { integer status, charstring body, HttpHeaders headers }
+```
+
+They arrive sorted by name, one entry per value.
+
 **A failed request is visible, not silent — and classified.** A 4xx/5xx is
 an ordinary response you match on: the SUT answered, it just said no. A
 request that never completed is a different kind of event — the SUT was not
@@ -391,8 +414,7 @@ because a suite that skipped verification cannot support a claim about *which*
 server it talked to. Prefer `ca_cert` — pointing at the self-signed
 certificate itself works and keeps verification on.
 
-Not modelled: arbitrary request/response headers beyond content type, and
-binary bodies.
+Not modelled: binary bodies.
 
 ### Per-component addresses
 
