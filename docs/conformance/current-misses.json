@@ -1,14 +1,14 @@
 {
- "summary": "ran 4948 files: 4794 matched, 23 skipped (97.34% match rate)",
- "source": "conformance-report.json",
- "miss_count": 154,
+ "summary": "ran 4948 files: 4797 matched, 23 skipped (97.40% match rate)",
+ "source": "ntt-full.json",
+ "miss_count": 151,
  "outcomes": {
   "reject->pass": 77,
   "reject->none": 24,
   "->": 23,
-  "pass->error": 14,
-  "pass->fail": 10,
-  "pass->none": 4,
+  "pass->error": 13,
+  "pass->fail": 9,
+  "pass->none": 3,
   "pass->parse-error": 2
  },
  "chapters": [
@@ -70,11 +70,8 @@
   },
   {
    "chapter": "core_language/20_statement_and_operations_for_alt",
-   "misses": 6,
+   "misses": 3,
    "outcomes": {
-    "pass->none": 1,
-    "pass->fail": 1,
-    "pass->error": 1,
     "reject->pass": 3
    }
   },
@@ -895,30 +892,6 @@
    "outcome": "pass->none",
    "relpath": "core_language/19_basic_program_statements/1909_stop_statement/Sem_1909_stop_statement_004.ttcn",
    "message": ""
-  },
-  {
-   "chapter": "core_language/20_statement_and_operations_for_alt",
-   "expected": "pass",
-   "actual": "none",
-   "outcome": "pass->none",
-   "relpath": "core_language/20_statement_and_operations_for_alt/2003_the_repeat_statement/Sem_2003_the_repeat_statement_004.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/20_statement_and_operations_for_alt",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/20_statement_and_operations_for_alt/2004_the_interleave_statement/Sem_2004_InterleaveStatement_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/20_statement_and_operations_for_alt",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/20_statement_and_operations_for_alt/2004_the_interleave_statement/Sem_2004_InterleaveStatement_002.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
   },
   {
    "chapter": "core_language/20_statement_and_operations_for_alt",

@@ -1,18 +1,18 @@
 # Current Conformance Misses
 
-Generated from `conformance-report.json` using the current workspace runner.
+Generated from `ntt-full.json` using the current workspace runner.
 
-- Summary: `ran 4948 files: 4794 matched, 23 skipped (97.34% match rate)`
-- Misses: `154`
+- Summary: `ran 4948 files: 4797 matched, 23 skipped (97.40% match rate)`
+- Misses: `151`
 
 ## Misses By Outcome
 
 - `reject->pass`: `77`
 - `reject->none`: `24`
 - `->`: `23`
-- `pass->error`: `14`
-- `pass->fail`: `10`
-- `pass->none`: `4`
+- `pass->error`: `13`
+- `pass->fail`: `9`
+- `pass->none`: `3`
 - `pass->parse-error`: `2`
 
 ## Misses By Chapter
@@ -23,7 +23,7 @@ Generated from `conformance-report.json` using the current workspace runner.
 - `core_language/15_templates`: `16` (`->`=2, `reject->none`=3, `reject->pass`=11)
 - `core_language/09_test_configurations`: `8` (`pass->error`=1, `reject->none`=4, `reject->pass`=3)
 - `core_language/16_functions_altsteps_testcases`: `7` (`->`=1, `pass->none`=1, `reject->none`=1, `reject->pass`=4)
-- `core_language/20_statement_and_operations_for_alt`: `6` (`pass->error`=1, `pass->fail`=1, `pass->none`=1, `reject->pass`=3)
+- `core_language/20_statement_and_operations_for_alt`: `3` (`reject->pass`=3)
 - `core_language/26_module_control`: `3` (`->`=3)
 - `core_language/B_matching_incoming_values`: `3` (`reject->none`=2, `reject->pass`=1)
 - `oo/501_classes_and_objects`: `3` (`pass->parse-error`=2, `reject->pass`=1)
