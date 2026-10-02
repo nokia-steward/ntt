@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"context"
+	"crypto/tls"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -298,6 +299,74 @@ func TestExecConfiguredTCPPort(t *testing.T) {
 
 	v, reason, err := d.Run(context.Background(), "m.tc")
 	if err != nil || v != rreport.Pass {
+		t.Fatalf("Run: verdict=%s reason=%q err=%v, want pass", v, reason, err)
+	}
+}
+
+// TestExecConfiguredTLSTCPPort: `tls := "true"` with a ca_cert makes the
+// configured TCP port a verified TLS client, with newline framing and the
+// disconnect report as on plain TCP.
+func TestExecConfiguredTLSTCPPort(t *testing.T) {
+	// A certificate for 127.0.0.1, and the CA that vouches for it.
+	donor := httptest.NewTLSServer(http.NotFoundHandler())
+	cert := donor.TLS.Certificates[0]
+	caDER := donor.Certificate().Raw
+	donor.Close()
+	ln, err := tls.Listen("tcp", "127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{cert}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer ln.Close()
+	go func() {
+		for {
+			conn, err := ln.Accept()
+			if err != nil {
+				return
+			}
+			go func() {
+				defer conn.Close()
+				line, err := bufio.NewReader(conn).ReadString('\n')
+				if err != nil {
+					return
+				}
+				fmt.Fprintf(conn, "data: %s", line) // then hang up
+			}()
+		}
+	}()
+	ca := filepath.Join(t.TempDir(), "ca.pem")
+	if err := os.WriteFile(ca, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caDER}), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	f, _ := cfg.Parse(strings.NewReader(fmt.Sprintf(
+		"[TESTPORT_PARAMETERS]\n*.sse.transport := \"tcp\"\n*.sse.address := %q\n"+
+			"*.sse.tls := \"true\"\n*.sse.ca_cert := %q\n*.sse.report_disconnect := \"true\"\n",
+		ln.Addr().String(), ca)))
+	if n := registerConfiguredTestPorts(f); n != 1 {
+		t.Fatalf("registered %d ports, want 1", n)
+	}
+	t.Cleanup(tcpport.Reset)
+
+	path := writeTC(t, `module m {
+		type enumerated DisconnectReason { closed(0), aborted(1) }
+		type record Disconnected { DisconnectReason reason, charstring detail }
+		type port P message { inout charstring; in Disconnected }
+		type component C { port P sse }
+		testcase tc() runs on C system C {
+			timer g := 5.0;
+			map(self:sse, system:sse);
+			g.start;
+			sse.send("GET /events");
+			var integer lines := 0;
+			alt {
+				[] sse.receive(charstring:"data: GET /events") { lines := lines + 1; repeat }
+				[] sse.receive(Disconnected:?) { if (lines == 1) { setverdict(pass) } else { setverdict(fail, "lines ", lines) } }
+				[] g.timeout { setverdict(fail, "no answer over TLS"); }
+			}
+		}
+	}`)
+	d := newStaticDriver([]string{path})
+	d.live = true
+	if v, reason, err := d.Run(context.Background(), "m.tc"); err != nil || v != rreport.Pass {
 		t.Fatalf("Run: verdict=%s reason=%q err=%v, want pass", v, reason, err)
 	}
 }

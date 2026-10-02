@@ -237,6 +237,8 @@ Recognised parameters:
 | `dial_timeout` | a Go duration (e.g. `"5s"`), default `10s`                     |
 | `framing`      | `"newline"` (default, charstring) or `"length-prefix"` (octetstring) |
 | `report_disconnect` | `"true"` delivers a peer hang-up as an inbound `Disconnected` value (declare the type too) |
+| `tls`          | `"true"` makes it a TLS connection, over the same framing      |
+| `ca_cert`, `client_cert`, `client_key`, `server_name`, `insecure_skip_verify` | the TLS settings, as for the HTTP port (below) |
 
 For a binary protocol, use length-prefix framing and an `octetstring` port:
 
@@ -245,6 +247,23 @@ For a binary protocol, use length-prefix framing and an `octetstring` port:
 *.b.transport := "tcp"
 *.b.address   := "127.0.0.1:9000"
 *.b.framing   := "length-prefix"
+```
+
+With `tls := "true"` the port is a TLS client: by default it verifies the
+server against the system roots, and it takes the HTTP port's TLS settings —
+a CA bundle, a client certificate for mutual TLS, a name to check, or, in a
+test environment, no verification. A handshake or verification failure fails
+the map and says why. Framing and the disconnect report work as on plain TCP,
+so a long-lived line stream — server-sent events, say, over a protocol the
+suite speaks itself — can run over TLS:
+
+```ini
+[TESTPORT_PARAMETERS]
+*.sse.transport         := "tcp"
+*.sse.address           := "10.0.0.7:8443"
+*.sse.tls               := "true"
+*.sse.ca_cert           := "/etc/certs/ca.pem"
+*.sse.report_disconnect := "true"
 ```
 
 ## The built-in HTTP test port

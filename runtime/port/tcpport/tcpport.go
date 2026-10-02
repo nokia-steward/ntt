@@ -43,12 +43,20 @@
 // The value is opt-in because injecting a new inbound type into a port a
 // suite declared as `inout charstring` would let a bare `p.receive` consume
 // it as data. Declare the type and enable the option together.
+//
+// With TLS (WithTLS, or `tls := "true"` in a .cfg) the connection is a TLS
+// client connection over the same framing: the server is verified against
+// the system roots by default, or against a CA bundle, with a client
+// certificate for mutual TLS or a name override — the settings the HTTP
+// port takes for an https:// base URL (see tlsconf.Config). A handshake or
+// verification failure fails the map, naming the cause.
 package tcpport
 
 import (
 	"bufio"
 	"bytes"
 	"context"
+	"crypto/tls"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -63,6 +71,7 @@ import (
 	"github.com/nokia/ntt/runtime/port"
 	"github.com/nokia/ntt/runtime/port/api"
 	"github.com/nokia/ntt/runtime/port/goport"
+	"github.com/nokia/ntt/runtime/port/tlsconf"
 )
 
 // defaultDialTimeout bounds the OnMap dial so a `map` against a
@@ -103,6 +112,10 @@ type Rule struct {
 	// declare the type — in a suite that waits for pushes, where a hang-up
 	// is otherwise indistinguishable from silence.
 	ReportDisconnect bool
+	// TLS, when set, makes the connection a TLS client connection with
+	// these settings; nil is plain TCP. A zero Config verifies the server
+	// against the system roots.
+	TLS *tlsconf.Config
 }
 
 // config holds the tunables an Option can set.
@@ -110,6 +123,7 @@ type config struct {
 	dialTimeout      time.Duration
 	framing          Framing
 	reportDisconnect bool
+	tls              *tlsconf.Config
 }
 
 // Option configures a registered TCP test port.
@@ -132,6 +146,12 @@ func WithDisconnectEvent() Option {
 	return func(c *config) { c.reportDisconnect = true }
 }
 
+// WithTLS makes the connection a TLS client connection with the given
+// settings (see Rule.TLS).
+func WithTLS(t tlsconf.Config) Option {
+	return func(c *config) { c.tls = &t }
+}
+
 // Register binds a TTCN-3 message port TYPE name (e.g. "MyPort_PT") to a
 // built-in TCP test port that dials addr ("host:port") when a port of
 // that type is mapped, for any component. Each mapped instance opens its
@@ -149,6 +169,7 @@ func Register(portTypeName, addr string, opts ...Option) {
 		Framing:          cfg.framing,
 		DialTimeout:      cfg.dialTimeout,
 		ReportDisconnect: cfg.reportDisconnect,
+		TLS:              cfg.tls,
 	}})
 }
 
@@ -246,9 +267,9 @@ func (p *tcpPort) OnMap(context.Context) error {
 	if !ok {
 		return fmt.Errorf("tcpport %s: no address rule matches the mapping component", p.inst)
 	}
-	conn, err := net.DialTimeout("tcp", rule.Addr, rule.DialTimeout)
+	conn, err := dial(rule, p.inst)
 	if err != nil {
-		return fmt.Errorf("tcpport %s: dial %s: %w", p.inst, rule.Addr, err)
+		return err
 	}
 	p.mu.Lock()
 	p.conn = conn
@@ -261,6 +282,28 @@ func (p *tcpPort) OnMap(context.Context) error {
 	p.mu.Unlock()
 	go p.readLoop(conn, done, framing)
 	return nil
+}
+
+// dial opens the rule's connection: plain TCP, or TLS over it. The dial
+// timeout bounds the TLS handshake too. Certificate files are read here,
+// so a bad path fails the map and names the file.
+func dial(rule Rule, inst string) (net.Conn, error) {
+	if rule.TLS == nil {
+		conn, err := net.DialTimeout("tcp", rule.Addr, rule.DialTimeout)
+		if err != nil {
+			return nil, fmt.Errorf("tcpport %s: dial %s: %w", inst, rule.Addr, err)
+		}
+		return conn, nil
+	}
+	cfg, err := tlsconf.Build(rule.TLS, "tcpport "+inst)
+	if err != nil {
+		return nil, fmt.Errorf("tcpport %s: %w", inst, err)
+	}
+	conn, err := tls.DialWithDialer(&net.Dialer{Timeout: rule.DialTimeout}, "tcp", rule.Addr, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("tcpport %s: TLS dial %s: %w", inst, rule.Addr, err)
+	}
+	return conn, nil
 }
 
 // readLoop turns each inbound frame from the SUT into a TTCN-3 value and

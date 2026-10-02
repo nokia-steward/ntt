@@ -18,6 +18,7 @@ import (
 	"github.com/nokia/ntt/runtime/exec"
 	"github.com/nokia/ntt/runtime/port/httpport"
 	"github.com/nokia/ntt/runtime/port/tcpport"
+	"github.com/nokia/ntt/runtime/port/tlsconf"
 	rreport "github.com/nokia/ntt/runtime/report"
 	"github.com/nokia/ntt/runtime/tl"
 	"github.com/nokia/ntt/ttcn3"
@@ -382,7 +383,17 @@ func httpPortRule(port, comp string, params map[string]string) (httpport.Rule, b
 	// TLS settings apply to an https base URL. Certificate paths are
 	// resolved at map time, so a typo fails the testcase with the file
 	// named rather than being silently ignored here.
-	tlsCfg := httpport.TLS{
+	if tlsCfg, set := tlsParams(port, comp, params); set {
+		rule.TLS = &tlsCfg
+	}
+	return rule, true
+}
+
+// tlsParams reads a test port's TLS settings — ca_cert, client_cert,
+// client_key, server_name, insecure_skip_verify — and reports whether any
+// was given.
+func tlsParams(port, comp string, params map[string]string) (tlsconf.Config, bool) {
+	cfg := tlsconf.Config{
 		CACert:     params["ca_cert"],
 		ClientCert: params["client_cert"],
 		ClientKey:  params["client_key"],
@@ -393,12 +404,9 @@ func httpPortRule(port, comp string, params map[string]string) (httpport.Rule, b
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "testport %q (%s): bad insecure_skip_verify %q: %v\n", port, comp, v, err)
 		}
-		tlsCfg.Insecure = b
+		cfg.Insecure = b
 	}
-	if tlsCfg != (httpport.TLS{}) {
-		rule.TLS = &tlsCfg
-	}
-	return rule, true
+	return cfg, cfg != (tlsconf.Config{})
 }
 
 // mergeParams overlays own onto base, returning a new map (base unchanged).
@@ -441,6 +449,23 @@ func tcpPortRule(port, comp string, params map[string]string) (tcpport.Rule, boo
 			fmt.Fprintf(os.Stderr, "testport %q (%s): bad report_disconnect %q: %v\n", port, comp, v, err)
 		}
 		rule.ReportDisconnect = b
+	}
+	// `tls := "true"` makes it a TLS connection, with the HTTP port's TLS
+	// settings; settings without it would be ignored, so say so.
+	tlsCfg, tlsSet := tlsParams(port, comp, params)
+	useTLS := false
+	if v := params["tls"]; v != "" {
+		b, err := strconv.ParseBool(v)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "testport %q (%s): bad tls %q: %v\n", port, comp, v, err)
+		}
+		useTLS = b
+	}
+	switch {
+	case useTLS:
+		rule.TLS = &tlsCfg
+	case tlsSet:
+		fmt.Fprintf(os.Stderr, "testport %q (%s): TLS settings given but tls is not \"true\"; connecting without TLS\n", port, comp)
 	}
 	switch fr := strings.ToLower(params["framing"]); fr {
 	case "", "newline", "line":

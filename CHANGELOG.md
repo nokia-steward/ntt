@@ -99,6 +99,13 @@ single functional test doubles as a performance probe. See
   latency, with a copy-pasteable stand-in server. Exercised by CI so it
   cannot rot.
 
+- **TLS for the built-in TCP port** — `tls := "true"` makes a configured TCP
+  port a TLS client over the same framing, verifying the server against the
+  system roots or a `ca_cert`, with `client_cert`/`client_key` for mutual
+  TLS, `server_name` and `insecure_skip_verify` — the HTTP port's TLS
+  settings, now shared by both (`runtime/port/tlsconf`). A hang-up is
+  reported as on plain TCP, so a long-lived line stream can run over TLS.
+
 ### Changed
 
 - **A `setverdict` reason is reported for every verdict, not just fail and
