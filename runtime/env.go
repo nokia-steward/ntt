@@ -25,9 +25,23 @@ type Assigner interface {
 // scope's mutex is held only for its own store and the chain never
 // holds two locks at once.
 type Env struct {
-	mu    sync.RWMutex
 	outer Scope
+	*bindings
+}
+
+// bindings is what a scope binds. A view (Env.View) shares it with the
+// scope it views.
+type bindings struct {
+	mu    sync.RWMutex
 	store map[string]Object
+}
+
+// View returns a scope that binds what env binds — the same bindings,
+// shared, not copied — inside outer instead of env's own enclosing scope:
+// a component's variables seen from a function of whichever module runs
+// on the component.
+func (env *Env) View(outer Scope) *Env {
+	return &Env{outer: outer, bindings: env.bindings}
 }
 
 func (env *Env) Get(name string) (Object, bool) {
@@ -118,8 +132,22 @@ func RootScope(s Scope) Scope {
 
 func NewEnv(outer Scope) *Env {
 	return &Env{
-		outer: outer,
-		store: make(map[string]Object),
+		outer:    outer,
+		bindings: &bindings{store: make(map[string]Object)},
+	}
+}
+
+// Each calls f for every binding env itself holds (not an enclosing
+// scope's), in no particular order.
+func (env *Env) Each(f func(name string, val Object)) {
+	env.mu.RLock()
+	local := make(map[string]Object, len(env.store))
+	for k, v := range env.store {
+		local[k] = v
+	}
+	env.mu.RUnlock()
+	for k, v := range local {
+		f(k, v)
 	}
 }
 

@@ -631,7 +631,15 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				baseID.Tok != nil && baseID.Tok2 == nil &&
 				baseID.Tok.Kind() == syntax.IDENT {
 				if selID, ok := n.Sel.(*syntax.Ident); ok {
-					if v, found := env.Get(selID.String()); found {
+					// The module's own definition, when the base names
+					// a module of the run; else the one in scope.
+					scope := env
+					if ms, ok := runtime.RootScope(env).Get(moduleScopeKey(baseID.String())); ok {
+						if m, ok := ms.(moduleScope); ok {
+							scope = m.env
+						}
+					}
+					if v, found := scope.Get(selID.String()); found {
 						return forceThunk(v)
 					}
 				}
@@ -1304,6 +1312,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			Module:  moduleNameFromEnv(env),
 			Kind:    "function",
 			RunsOn:  n.RunsOn != nil,
+			Home:    env,
 			Isolated: n.RunsOn == nil && n.Mtc == nil && n.System == nil &&
 				n.KindTok.Kind() != syntax.TESTCASE,
 		}
@@ -4040,6 +4049,11 @@ func setField(recv runtime.Object, name string, val runtime.Object) {
 func storeReceiver(recv syntax.Expr, val runtime.Object, env runtime.Scope) runtime.Object {
 	switch r := recv.(type) {
 	case *syntax.Ident:
+		// Where the variable lives — a component's variable written by
+		// a function running on it — not a shadow of it here.
+		if a, ok := env.(runtime.Assigner); ok && a.Assign(r.String(), val) {
+			return nil
+		}
 		env.Set(r.String(), val)
 	case *syntax.SelectorExpr:
 		parent := eval(r.X, env)
@@ -4193,6 +4207,13 @@ func functionScope(fn *runtime.Function) runtime.Scope {
 	if fn.RunsOn {
 		if exec := runtime.FindTestcaseExec(fn.Env); exec != nil {
 			if cur := exec.CurrentComponent(); cur != nil && cur.Vars != nil {
+				home := fn.Home
+				if home == nil {
+					home = fn.Env
+				}
+				if vars, ok := cur.Vars.(*runtime.Env); ok {
+					return vars.View(home)
+				}
 				return cur.Vars
 			}
 		}

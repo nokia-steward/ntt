@@ -126,7 +126,7 @@ func RunControlWith(trees []*ttcn3.Tree, module string, opts TestcaseOptions) (v
 	aggReason := ""
 	ran := false
 
-	ctrlEnv := runtime.NewEnv(env)
+	ctrlEnv := runtime.NewEnv(moduleScopeOf(env, module))
 	ctrlEnv.Set(runtime.ScopeNameKey, runtime.NewCharstring("control"))
 	// Bind the handler on the MODULE scope, not the control scope:
 	// fixtures routinely wrap execute() in a helper function, and a

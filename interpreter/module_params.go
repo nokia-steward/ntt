@@ -26,6 +26,7 @@ package interpreter
 
 import (
 	"fmt"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -49,8 +50,22 @@ func ApplyModuleParameters(env runtime.Scope, modules []*syntax.Module, override
 	}
 	known := collectModuleParams(modules)
 	var warnings []string
-	for key, raw := range overrides {
-		decl, ok := known[key]
+	// Bare names first, so that a qualified one — the more specific —
+	// wins for its module; each in order, so a run is like the last.
+	keys := make([]string, 0, len(overrides))
+	for k := range overrides {
+		keys = append(keys, k)
+	}
+	qualified := func(k string) bool { return strings.Contains(k, ".") && !strings.HasPrefix(k, "*.") }
+	sort.Slice(keys, func(i, j int) bool {
+		if qi, qj := qualified(keys[i]), qualified(keys[j]); qi != qj {
+			return qj
+		}
+		return keys[i] < keys[j]
+	})
+	for _, key := range keys {
+		raw := overrides[key]
+		decls, ok := known[key]
 		if !ok {
 			warnings = append(warnings, fmt.Sprintf("unknown module parameter %q", key))
 			continue
@@ -60,23 +75,31 @@ func ApplyModuleParameters(env runtime.Scope, modules []*syntax.Module, override
 			warnings = append(warnings, fmt.Sprintf("modulepar %s: %s", key, err))
 			continue
 		}
-		env.Set(decl.localName, val)
+		// A bare name sets the parameter in every module that declares
+		// it; a qualified one, in that module.
+		for _, decl := range decls {
+			env.Set(decl.localName, val)
+			// And in its module's own scope, where the module's
+			// functions look first (see newModuleScope).
+			if ms := moduleScopeOf(env, decl.module); ms != env {
+				ms.Set(decl.localName, runtime.CopyValue(val))
+			}
+		}
 	}
 	return warnings
 }
 
 // moduleParamDecl is the descriptor for one modulepar declaration:
 // qualified key (Module.name), local name (just `name`), and the
-// module env it lives in. We don't need the env for now - every
-// modulepar lives in the run's single module env - but keeping the
-// type future-proofs the API for per-module envs later.
+// module that declares it, whose scope binds it too.
 type moduleParamDecl struct {
 	qualifiedName string
 	localName     string
+	module        string
 }
 
-func collectModuleParams(modules []*syntax.Module) map[string]moduleParamDecl {
-	out := map[string]moduleParamDecl{}
+func collectModuleParams(modules []*syntax.Module) map[string][]moduleParamDecl {
+	out := map[string][]moduleParamDecl{}
 	for _, mod := range modules {
 		if mod == nil {
 			continue
@@ -105,12 +128,11 @@ func collectModuleParams(modules []*syntax.Module) map[string]moduleParamDecl {
 					continue
 				}
 				key := modName + "." + name
-				out[key] = moduleParamDecl{qualifiedName: key, localName: name}
-				// Also accept the bare name; Titan's cfgs occasionally
-				// drop the module qualifier when the name is unique.
-				if _, exists := out[name]; !exists {
-					out[name] = moduleParamDecl{qualifiedName: key, localName: name}
-				}
+				d := moduleParamDecl{qualifiedName: key, localName: name, module: modName}
+				out[key] = []moduleParamDecl{d}
+				// Also accept the bare name, for every module that
+				// declares it (as `*.name` would).
+				out[name] = append(out[name], d)
 			}
 		}
 	}

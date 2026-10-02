@@ -537,6 +537,7 @@ type staticDriver struct {
 	cases    []string
 	owner    map[string]string      // testcase name -> file path
 	trees    map[string]*ttcn3.Tree // file path -> parsed tree, kept so Run can reuse them
+	files    []string               // the parsed files, in the order given, so every run sees the modules alike
 	modParam map[string]string      // last cfg's [MODULE_PARAMETERS], threaded into RunTestcaseWith
 
 	timeout time.Duration // --timeout: per-testcase wall-clock bound (0 = none)
@@ -575,6 +576,9 @@ func newStaticDriver(files []string) *staticDriver {
 		tree := ttcn3.ParseFile(p)
 		if tree == nil || tree.Root == nil {
 			continue
+		}
+		if _, dup := d.trees[p]; !dup {
+			d.files = append(d.files, p)
 		}
 		d.trees[p] = tree
 		for _, modNode := range tree.Modules() {
@@ -630,11 +634,10 @@ func (d *staticDriver) Run(ctx context.Context, name string) (rreport.Verdict, s
 	// from X { ... }` to resolve at exec time.
 	trees := make([]*ttcn3.Tree, 0, len(d.trees))
 	trees = append(trees, tree)
-	for p, t := range d.trees {
-		if p == path || t == nil {
-			continue
+	for _, p := range d.files {
+		if t := d.trees[p]; p != path && t != nil {
+			trees = append(trees, t)
 		}
-		trees = append(trees, t)
 	}
 	opts := interpreter.TestcaseOptions{
 		ModuleParameters: d.modParam,

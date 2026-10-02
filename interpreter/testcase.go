@@ -272,6 +272,8 @@ func newModuleEnv(trees []*ttcn3.Tree, modNode *syntax.Module, module string, op
 	// component definitions) so that later phases - which may
 	// reference those types in `modulepar T x := ...` initialisers or
 	// `template T t := ...` bodies - find the symbols already bound.
+	root := env
+	env = newModuleScope(root, modNode)
 	defs := flattenModuleDefs(modNode.Defs, []*syntax.WithSpec{modNode.With})
 	for _, pass := range []int{0, 1} {
 		for _, fd := range defs {
@@ -306,6 +308,9 @@ func newModuleEnv(trees []*ttcn3.Tree, modNode *syntax.Module, module string, op
 			annotateDef(env, d, syntax.Name(modNode.Name))
 		}
 	}
+
+	publishModuleScope(root, env)
+	env = root
 
 	// Layer `import ... with { ... }` attributes onto the imported
 	// definitions now that every module's defs are bound.
@@ -419,7 +424,7 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 	// The MTC's variables, constants, timers and ports are its own, bound
 	// when it is created — now, when the module's constants have their
 	// values — and seen by every function that runs on it.
-	mtcVars := runtime.NewEnv(env)
+	mtcVars := runtime.NewEnv(moduleScopeOf(env, module))
 	// Testcases get a fresh inner scope so locals don't leak into the
 	// module namespace.
 	tcEnv := runtime.NewEnv(mtcVars)
@@ -1327,8 +1332,12 @@ func bindDeclNameScoped(env runtime.Scope, n syntax.Node, scopes []*syntax.WithS
 			// after the testcase starts, even though there is
 			// no TestcaseExec yet at this point.
 			if d.Name != nil {
+				// The type's members, in the run's scopes: seen from a
+				// module as its other definitions are, its own first.
+				env.Set(componentTypeScopeKey(syntax.Name(d.Name)), componentType{
+					body: d.Body, module: moduleNameFromEnv(env), extends: extendedNames(d.Extends)})
 				registerComponentTypeBody(env, syntax.Name(d.Name), d.Body)
-				registerComponentTypeParents(d.Body, d.Extends)
+				registerComponentTypeParents(env, d.Body, d.Extends)
 				registerComponentTypePortsFromBody(syntax.Name(d.Name), d.Body)
 			}
 		}
@@ -1991,10 +2000,12 @@ func isTypeDecl(n syntax.Node) bool {
 // the interpreter can evaluate into env. Used to flatten sibling modules into
 // the active scope when emulating `import from <X> all` without a real
 // import resolver. Errors are swallowed (best-effort import).
-func initModuleDefs(env runtime.Scope, mod *syntax.Module) {
+func initModuleDefs(root runtime.Scope, mod *syntax.Module) {
 	if mod == nil {
 		return
 	}
+	env := newModuleScope(root, mod)
+	defer publishModuleScope(root, env)
 	defs := flattenModuleDefs(mod.Defs, []*syntax.WithSpec{mod.With})
 	for _, pass := range []int{0, 1} {
 		for _, fd := range defs {
@@ -2022,6 +2033,63 @@ func initModuleDefs(env runtime.Scope, mod *syntax.Module) {
 			annotateDef(env, d, syntax.Name(mod.Name))
 		}
 	}
+}
+
+// A module's definitions are evaluated in a scope of the module's own, so
+// that its functions, templates and constants resolve its names before
+// anyone else's: all modules of a run are also bound in one flat scope
+// (see newModuleEnv), where a like-named definition of another module,
+// imported or not, could otherwise stand in for the module's own. The
+// module's scope also names the module, for __MODULE__ and the test log.
+//
+// newModuleScope makes module mod's scope, inside root, and records it
+// there (moduleScopeOf).
+func newModuleScope(root runtime.Scope, mod *syntax.Module) *runtime.Env {
+	name := syntax.Name(mod.Name)
+	s := runtime.NewEnv(root)
+	s.Set(runtime.ModuleNameKey, runtime.NewCharstring(name))
+	// What a behaviour of the module encodes by, outside a testcase's own
+	// with (ETSI 27.1.2).
+	s.Set(activeAttrsKey, typeDescForScoped("", nil, []*syntax.WithSpec{mod.With}))
+	root.Set(moduleScopeKey(name), moduleScope{s})
+	return s
+}
+
+// publishModuleScope binds what module scope s binds in root too, as the
+// flat scope always had it: a name another module refers to without
+// qualification resolves there.
+func publishModuleScope(root runtime.Scope, s *runtime.Env) {
+	s.Each(func(name string, val runtime.Object) {
+		switch name {
+		case runtime.ModuleNameKey, activeAttrsKey:
+			return
+		}
+		root.Set(name, val)
+	})
+}
+
+// moduleScopeOf returns module name's scope in the run whose flat scope is
+// root, or root when it has none.
+func moduleScopeOf(root runtime.Scope, name string) runtime.Scope {
+	if v, ok := root.Get(moduleScopeKey(name)); ok {
+		if m, ok := v.(moduleScope); ok {
+			return m.env
+		}
+	}
+	return root
+}
+
+func moduleScopeKey(name string) string { return "\x00ttcn3:module:" + name }
+
+// moduleScope carries a module's scope in the flat one; it is no TTCN-3
+// value.
+type moduleScope struct{ env *runtime.Env }
+
+func (moduleScope) Type() runtime.ObjectType { return runtime.ObjectType("MODULE_SCOPE") }
+func (moduleScope) Inspect() string          { return "module scope" }
+func (m moduleScope) Equal(o runtime.Object) bool {
+	other, ok := o.(moduleScope)
+	return ok && other.env == m.env
 }
 
 type flatDef struct {
@@ -3332,7 +3400,7 @@ func registerComponentTypePortsFromBody(compTypeName string, body *syntax.BlockS
 var (
 	componentTypeBodiesMu sync.RWMutex
 	componentTypeBodies   = map[string]*syntax.BlockStmt{}
-	componentTypeParents  = map[*syntax.BlockStmt][]string{} // by the type's body; guarded by componentTypeBodiesMu
+	componentTypeParents  = map[*syntax.BlockStmt]typeParents{} // by the type's body; guarded by componentTypeBodiesMu
 )
 
 func registerComponentTypeBody(env runtime.Scope, compTypeName string, body *syntax.BlockStmt) {
@@ -3345,11 +3413,57 @@ func registerComponentTypeBody(env runtime.Scope, compTypeName string, body *syn
 	componentTypeBodies[compTypeName] = body
 }
 
+// componentType is a component type as a run sees it: its members, the
+// module that declares it, and the types it extends, named as there.
+type componentType struct {
+	body    *syntax.BlockStmt
+	module  string
+	extends []string
+}
+
+func (componentType) Type() runtime.ObjectType { return runtime.ObjectType("COMPONENT_TYPE") }
+func (componentType) Inspect() string          { return "component type" }
+func (c componentType) Equal(o runtime.Object) bool {
+	other, ok := o.(componentType)
+	return ok && other.body == c.body
+}
+
+// componentTypeScopeKey is where a scope binds component type name.
+func componentTypeScopeKey(name string) string { return "\x00ttcn3:component-type:" + name }
+
+func extendedNames(extends []syntax.Expr) []string {
+	var out []string
+	for _, e := range extends {
+		if n := syntax.Name(e); n != "" {
+			out = append(out, n)
+		}
+	}
+	return out
+}
+
+// lookupComponentType finds component type name as module sees it: in its
+// scope, then the run's flat one.
+func lookupComponentType(root runtime.Scope, module, name string) (componentType, bool) {
+	if v, ok := moduleScopeOf(root, module).Get(componentTypeScopeKey(name)); ok {
+		if c, ok := v.(componentType); ok {
+			return c, true
+		}
+	}
+	return componentType{}, false
+}
+
+// typeParents are the component types a component type extends, named as
+// in the module that declares it.
+type typeParents struct {
+	module string
+	names  []string
+}
+
 // registerComponentTypeParents records the component types the component
 // type declared with body extends (ETSI ES 201 873-1 6.2.10.2): by the
-// declaration itself, so that a like-named type of another module has
-// its own.
-func registerComponentTypeParents(body *syntax.BlockStmt, extends []syntax.Expr) {
+// declaration itself, so that a like-named type of another module has its
+// own, and with the declaring module, in which the names resolve.
+func registerComponentTypeParents(env runtime.Scope, body *syntax.BlockStmt, extends []syntax.Expr) {
 	if body == nil || len(extends) == 0 {
 		return
 	}
@@ -3361,35 +3475,49 @@ func registerComponentTypeParents(body *syntax.BlockStmt, extends []syntax.Expr)
 	}
 	componentTypeBodiesMu.Lock()
 	defer componentTypeBodiesMu.Unlock()
-	componentTypeParents[body] = parents
+	componentTypeParents[body] = typeParents{module: moduleNameFromEnv(env), names: parents}
 }
 
 // bindComponentType binds into env the members of component type
 // compTypeName — those it inherits first, then its own, which may
 // override none of them (6.2.10.2) — as a component of that type has them.
 func bindComponentType(env runtime.Scope, moduleName, compTypeName string) {
-	var bind func(name string, seen map[string]bool)
-	bind = func(name string, seen map[string]bool) {
-		if seen[name] {
+	root := runtime.RootScope(env)
+	var bind func(module, name string, seen map[*syntax.BlockStmt]bool)
+	bind = func(module, name string, seen map[*syntax.BlockStmt]bool) {
+		// The run's own record of the type; else, for a type bound
+		// some other way, the registry.
+		var body *syntax.BlockStmt
+		var parents typeParents
+		declaring := module
+		if c, ok := lookupComponentType(root, module, name); ok {
+			body, parents = c.body, typeParents{module: c.module, names: c.extends}
+			declaring = c.module
+		} else {
+			body = componentTypeBody(module, name)
+			componentTypeBodiesMu.RLock()
+			parents = componentTypeParents[body]
+			componentTypeBodiesMu.RUnlock()
+		}
+		if body == nil || seen[body] {
 			return
 		}
-		seen[name] = true
-		body := componentTypeBody(moduleName, name)
-		if body == nil {
-			return
-		}
-		componentTypeBodiesMu.RLock()
-		parents := componentTypeParents[body]
-		componentTypeBodiesMu.RUnlock()
-		for _, p := range parents {
-			bind(p, seen)
+		seen[body] = true
+		for _, p := range parents.names {
+			bind(parents.module, p, seen)
 		}
 		// __SCOPE__ in a member's initialiser is its component type
 		// (ETSI D.5).
 		env.Set(runtime.ScopeNameKey, runtime.NewCharstring(name))
-		bindComponentMembers(env, body)
+		// The members' initialisers name what the declaring module
+		// sees; the members are the component's.
+		members := env
+		if e, ok := env.(*runtime.Env); ok && declaring != "" {
+			members = e.View(moduleScopeOf(root, declaring))
+		}
+		bindComponentMembers(members, body)
 	}
-	bind(compTypeName, map[string]bool{})
+	bind(moduleName, compTypeName, map[*syntax.BlockStmt]bool{})
 }
 
 func componentTypeBody(moduleName, compTypeName string) *syntax.BlockStmt {

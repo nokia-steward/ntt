@@ -1413,6 +1413,11 @@ type Function struct {
 	// sees the variables of the component it runs on (ComponentRef.Vars).
 	RunsOn bool
 
+	// Home is the scope the function was declared in — its module's — which
+	// a call of it resolves names in after the component's variables,
+	// whatever Env a start gave it.
+	Home Scope
+
 	// Isolated marks a function declared without runs on, mtc or system:
 	// it sees no component's variables, so nothing it does can change the
 	// value an `in` parameter was given, other than writing the parameter.

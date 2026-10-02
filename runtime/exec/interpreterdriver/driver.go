@@ -23,6 +23,7 @@ type Driver struct {
 	cases    []string
 	owner    map[string]string      // testcase name -> file path
 	trees    map[string]*ttcn3.Tree // file path -> parsed tree
+	files    []string               // the parsed files, in the order given
 	modParam map[string]string      // cfg [MODULE_PARAMETERS]
 }
 
@@ -85,6 +86,9 @@ func New(files []string) *Driver {
 		tree := ttcn3.ParseFile(p)
 		if tree == nil || tree.Root == nil {
 			continue
+		}
+		if _, dup := d.trees[p]; !dup {
+			d.files = append(d.files, p)
 		}
 		d.trees[p] = tree
 		for _, modNode := range tree.Modules() {
@@ -155,11 +159,10 @@ func (d *Driver) Run(ctx context.Context, name string) (report.Verdict, string, 
 
 	trees := make([]*ttcn3.Tree, 0, len(d.trees))
 	trees = append(trees, tree)
-	for p, t := range d.trees {
-		if p == path || t == nil {
-			continue
+	for _, p := range d.files {
+		if t := d.trees[p]; p != path && t != nil {
+			trees = append(trees, t)
 		}
-		trees = append(trees, t)
 	}
 	// Deliberately leaves DeterministicClock and DeterministicScheduler
 	// off: this driver executes real test suites, so timers must pace real

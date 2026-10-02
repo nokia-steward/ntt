@@ -189,3 +189,38 @@ func TestModuleParamBareNameAccepted(t *testing.T) {
 		t.Errorf("verdict = %s, want pass (bare name should be accepted when unique)", v)
 	}
 }
+
+// TestModuleParamBareNameSetsEveryModule: a bare name sets the parameter
+// in each module declaring it, as each module's functions read it; a
+// qualified name, in that module only, and over a bare one.
+func TestModuleParamBareNameSetsEveryModule(t *testing.T) {
+	a := ttcn3.Parse(`module A {
+		modulepar integer PX_N := 0;
+		modulepar integer PX_Q := 0;
+		function aN() return integer { return PX_N }
+		function aQ() return integer { return PX_Q }
+	}`)
+	b := ttcn3.Parse(`module B {
+		modulepar integer PX_N := 0;
+		modulepar integer PX_Q := 0;
+		function bN() return integer { return PX_N }
+		function bQ() return integer { return PX_Q }
+	}`)
+	m := ttcn3.Parse(`module M {
+		import from A all;
+		import from B all;
+		type component C {}
+		testcase tc() runs on C {
+			if (aN() == 5 and bN() == 5 and aQ() == 0 and bQ() == 7) { setverdict(pass) }
+			else { setverdict(fail, aN(), " ", bN(), " ", aQ(), " ", bQ()) }
+		}
+	}`)
+	for _, order := range [][]*ttcn3.Tree{{m, a, b}, {m, b, a}} {
+		v, reason, err := interpreter.RunTestcaseWith(order, "M.tc", interpreter.TestcaseOptions{
+			ModuleParameters: map[string]string{"PX_N": "5", "B.PX_Q": "7", "PX_Q": "0"},
+		})
+		if err != nil || v != runtime.PassVerdict {
+			t.Errorf("verdict = %s (%s) %v, want pass", v, reason, err)
+		}
+	}
+}
