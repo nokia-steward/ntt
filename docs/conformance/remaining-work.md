@@ -662,10 +662,15 @@ changed only as intended. Found, older than this work:
   `{field2 := 4, field1 := 3}`. A record holds its fields in a map, which
   `Inspect` and the TCI-TL conversion walk as it comes. 72 of the 138
   files whose two logs differ differ only in this.
-- **On the real clock, idle components slow an exchange a hundredfold**:
+- *Fixed 2026-10-06: a message wakes the component it is queued for
+  (TestcaseExec.WakeChan); 640 → 23000 round trips a second beside 20
+  idle PTCs, 29000 alone. What is left is each idle PTC's 2 ms backstop.*
+  **On the real clock, idle components slow an exchange a hundredfold**:
   an MTC/echo ping-pong runs at about 37000 round trips a second, and at
   about 290 with 20 PTCs parked in an alt on a long timer. It bears on
   live testing and profiling.
+- `alt { [] any from pa.receive(8) {} }` over a port array never takes a
+  message waiting on `pa[2]` (`pa[2].receive` and `any port.receive` do).
 - `any from pa.getcall(...)` over a port array does not match (5
   conformance files, Sem_220302_getcall_operation_007, _010 to _013).
 - The C test-port bridge's `TestRegisterAndSend` fails when run more than

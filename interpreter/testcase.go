@@ -2287,6 +2287,7 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 	// This alt's wait, told from any other one — of the same alt
 	// statement too, and from itself before a repeat (interleave.go).
 	waitAt := new(byte)
+	var wake <-chan struct{}
 	// This alt is a default's altstep: a repeat in it re-evaluates the
 	// alt that invoked the default (ETSI 20.5.2).
 	isDefault := defaultCtx.active()
@@ -2343,6 +2344,9 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		}
 		freeze := altExec != nil && !deterministicSchedulerEnabled(env)
 		if freeze {
+			// What arrives from here on wakes this alt's wait
+			// (blockForAltEvents), though it came during the snapshot.
+			wake = altExec.WakeChan(currentCompID(altExec))
 			altExec.BeginAltRound(goroutineID())
 		}
 		for _, s := range n.Body.Stmts {
@@ -2505,7 +2509,7 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			}
 		}
 		waiting = true
-		if !blockForAltEvents(n, waitAt, env) {
+		if !blockForAltEvents(n, waitAt, wake, env) {
 			// Nothing to wait for (only boolean / unmodelled guards) or
 			// this PTC was stopped: conclude without fabricating a
 			// verdict, per real alt semantics (the caller's outer
@@ -2522,7 +2526,7 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 // whose 2ms backstop also covers component / timer guards that raise no
 // MessageReady signal. Returns true to re-snapshot, false when there is
 // nothing to wait for or the PTC was stopped.
-func blockForAltEvents(n *syntax.AltStmt, at interface{}, env runtime.Scope) bool {
+func blockForAltEvents(n *syntax.AltStmt, at interface{}, wake <-chan struct{}, env runtime.Scope) bool {
 	// In an interleave branch body, the interleave waits (interleave.go).
 	if currentInterleaveBranch() != nil {
 		vd, hasVD := nextAltTimerVirtualDeadline(n, env)
@@ -2565,13 +2569,13 @@ func blockForAltEvents(n *syntax.AltStmt, at interface{}, env runtime.Scope) boo
 		// concurrent PTCs deliver in real time even under the virtual
 		// clock. altHasEventGuard gates giving up on pure-boolean alts.
 		if altHasEventGuard(n) {
-			return waitForAltCombined(0, false, env)
+			return waitForAltCombined(0, false, wake, env)
 		}
 		return false
 	}
 	dur, hasTimer := nextAltTimerDeadlineLenient(n, env)
 	if hasTimer || altHasEventGuard(n) {
-		return waitForAltCombined(dur, hasTimer, env)
+		return waitForAltCombined(dur, hasTimer, wake, env)
 	}
 	return false
 }
@@ -3191,7 +3195,10 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 // (when haveTimer), the PTC's own stop, or a 2ms backstop that covers a
 // coalesced cap-1 MessageReady. Returns true to re-enter the alt first
 // pass, false to unwind (the testcase or this PTC was stopped).
-func waitForAltCombined(dur time.Duration, haveTimer bool, env runtime.Scope) bool {
+// wake, when not nil, is the alt's WakeChan, taken before its snapshot:
+// any message since then ends the wait, whichever waiter MessageReady
+// woke — with many components waiting, it is seldom this one.
+func waitForAltCombined(dur time.Duration, haveTimer bool, wake <-chan struct{}, env runtime.Scope) bool {
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil || exec.Stopped() {
 		return false
@@ -3214,6 +3221,8 @@ func waitForAltCombined(dur time.Duration, haveTimer bool, env runtime.Scope) bo
 	ready := exec.MessageReady()
 	select {
 	case <-ready:
+		return !exec.Stopped()
+	case <-wake:
 		return !exec.Stopped()
 	case <-timerC:
 		return !exec.Stopped()

@@ -331,6 +331,13 @@ Independent of the two clocks:
   clock, as expired default timers did before.
 - **A call's signature no longer reaches a PTC** for the unqualified
   `getreply` / `catch` rule (22.3.1 h).
+- **On the real clock, idle components no longer slow an exchange.** A
+  message woke one waiting component of all, whichever came first; with
+  others parked in an alt on a long timer it was seldom the one it was
+  for, which then waited for the 2 ms backstop. An MTC/echo ping-pong ran
+  about 29000 round trips a second alone and 640 beside 20 idle PTCs; it
+  now runs about 23000. A message wakes the component it is queued for,
+  and only it; a stop wakes them all.
 - **A record's fields are written in their declaration order** — by
   `log()`, in a verdict's reason and in the test log, where Annex B lists
   them so. A record held its fields in a map and wrote them as the map

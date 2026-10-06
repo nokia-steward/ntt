@@ -259,6 +259,11 @@ type TestcaseExec struct {
 	// all the level-triggered "retry the first pass" path needs.
 	msgReadyOnce sync.Once
 	msgReady     chan struct{}
+	// wakes holds, per component, a channel closed when something
+	// arrives for it — a message on one of its ports — or for everyone:
+	// a stop (WakeChan). msgReady reaches one waiter of all.
+	wakeMu sync.Mutex
+	wakes  map[int64]chan struct{}
 }
 
 // PTCExit is the per-PTC cancellation + completion envelope. The
@@ -559,6 +564,57 @@ func (t *TestcaseExec) MessageReady() <-chan struct{} {
 	return t.msgReady
 }
 
+// WakeChan returns a channel closed by the next message to component
+// compID — on one of its ports — or the next stop or other event that
+// signals MessageReady, for every waiter that took it, where MessageReady
+// wakes just one. Taken before an alt's snapshot, it tells of an event
+// during the snapshot as well as after it. A message to another component
+// does not close it: with many components waiting, waking all of them
+// for each message made them all look again, together.
+func (t *TestcaseExec) WakeChan(compID int64) <-chan struct{} {
+	t.wakeMu.Lock()
+	defer t.wakeMu.Unlock()
+	if t.wakes == nil {
+		t.wakes = map[int64]chan struct{}{}
+	}
+	ch := t.wakes[compID]
+	if ch == nil {
+		ch = make(chan struct{})
+		t.wakes[compID] = ch
+	}
+	return ch
+}
+
+// signalMessageFor wakes the waiters for the component owning queue port
+// (a PTC's ports are qualified by its id; the MTC's are not), and one
+// MessageReady waiter, and the scheduler.
+func (t *TestcaseExec) signalMessageFor(port string) {
+	t.msgReadyOnce.Do(func() {
+		t.msgReady = make(chan struct{}, 1)
+	})
+	select {
+	case t.msgReady <- struct{}{}:
+	default:
+	}
+	t.mu.Lock()
+	owner := t.mtcID
+	t.mu.Unlock()
+	if strings.HasPrefix(port, portQualPrefix) {
+		if i := strings.IndexByte(port, '/'); i > len(portQualPrefix) {
+			if id, err := strconv.ParseInt(port[len(portQualPrefix):i], 10, 64); err == nil {
+				owner = id
+			}
+		}
+	}
+	t.wakeMu.Lock()
+	if ch := t.wakes[owner]; ch != nil {
+		close(ch)
+		delete(t.wakes, owner)
+	}
+	t.wakeMu.Unlock()
+	t.SchedSignal()
+}
+
 // signalMessageReady delivers one coalesced wake-up to the alt
 // scheduler. Non-blocking: a buffer-full channel means an earlier
 // enqueue already armed the wake-up and no scheduler has consumed
@@ -572,6 +628,12 @@ func (t *TestcaseExec) signalMessageReady() {
 	case t.msgReady <- struct{}{}:
 	default:
 	}
+	t.wakeMu.Lock()
+	for id, ch := range t.wakes {
+		close(ch)
+		delete(t.wakes, id)
+	}
+	t.wakeMu.Unlock()
 	// Under the quiescence scheduler, waking parked peers is a broadcast
 	// (the cap-1 msgReady bus above can only reliably wake one waiter).
 	t.SchedSignal()
@@ -897,7 +959,7 @@ func (t *TestcaseExec) EnqueueMessageFrom(port string, msg Object, sender Object
 	t.ports[port] = append(t.ports[port], pm)
 	t.mu.Unlock()
 	t.tlDetected(port, pm)
-	t.signalMessageReady()
+	t.signalMessageFor(port)
 }
 
 // PeekMessage returns the head of the named port's queue without
@@ -1512,7 +1574,7 @@ func (t *TestcaseExec) EnqueueEnvelope(port string, msg PortMessage) {
 	t.ports[port] = append(t.ports[port], msg)
 	t.mu.Unlock()
 	t.tlDetected(port, msg)
-	t.signalMessageReady()
+	t.signalMessageFor(port)
 }
 
 // RegisterComponentTimer records that timer th was started on component

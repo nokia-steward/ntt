@@ -197,6 +197,11 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) (result runt
 				return r
 			}
 		}
+		// What arrives from here on wakes this round's wait.
+		var wake <-chan struct{}
+		if wx := runtime.FindTestcaseExec(env); wx != nil && !deterministicSchedulerEnabled(env) {
+			wake = wx.WakeChan(currentCompID(wx))
+		}
 		// The bodies that wait look again, in order.
 		progressed := false
 		for i, br := range running {
@@ -299,7 +304,7 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) (result runt
 			lexec.TLScanEnd(currentCompID(lexec))
 		}
 		waiting = true
-		if !blockForInterleave(n, running, waitAt, env) {
+		if !blockForInterleave(n, running, waitAt, wake, env) {
 			return nil
 		}
 	}
@@ -309,7 +314,7 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) (result runt
 // blockForInterleave waits, as the component, for the earliest of what
 // the interleave's branches wait for: a guard of a branch not yet taken,
 // or what a body waits for. Returns true to look again.
-func blockForInterleave(n *syntax.AltStmt, running []*ilBranch, at interface{}, env runtime.Scope) bool {
+func blockForInterleave(n *syntax.AltStmt, running []*ilBranch, at interface{}, wake <-chan struct{}, env runtime.Scope) bool {
 	vd, hasVD := nextAltTimerVirtualDeadline(n, env)
 	rd, hasRD := nextAltTimerDeadlineLenient(n, env)
 	events := altHasEventGuard(n)
@@ -349,12 +354,12 @@ func blockForInterleave(n *syntax.AltStmt, running []*ilBranch, at interface{}, 
 			return true
 		}
 		if events {
-			return waitForAltCombined(0, false, env)
+			return waitForAltCombined(0, false, wake, env)
 		}
 		return false
 	}
 	if hasRD || events {
-		return waitForAltCombined(rd, hasRD, env)
+		return waitForAltCombined(rd, hasRD, wake, env)
 	}
 	return false
 }
