@@ -331,6 +331,17 @@ Independent of the two clocks:
   clock, as expired default timers did before.
 - **A call's signature no longer reaches a PTC** for the unqualified
   `getreply` / `catch` rule (22.3.1 h).
+- **Long charstrings and large parameters cost what they should.** A
+  charstring was copied on every assignment and call, and `s := s & c`
+  copied the whole of it each time; a record or list passed to a `runs
+  on` function was copied on every call. A scanner building a
+  100000-character string and calling a helper per character, and per
+  element of a 20000-element list, ran past a minute; it now takes under
+  one second. A charstring is never changed in place — an element
+  assignment makes a new one — so copies share it, and appending to one
+  extends it in place when nothing else did; an `in` parameter of a
+  function that changes nothing but its own variables, calls none of the
+  suite's functions and does not wait is the actual itself.
 - **On the real clock, idle components no longer slow an exchange.** A
   message woke one waiting component of all, whichever came first; with
   others parked in an alt on a long timer it was seldom the one it was

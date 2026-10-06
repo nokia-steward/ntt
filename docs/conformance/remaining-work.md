@@ -611,6 +611,10 @@ passed over for a thousand turns — and a parameter's default and a
   file (some tools let the later line win).
 - An index-range array declared without an initialiser
   (`var charstring a[2..3]`) is stored at the wrong offsets.
+- *Partly fixed 2026-10-06: charstrings are shared (never changed in
+  place) and appended to in place; a function that keeps to itself gets
+  its actuals uncopied. A record or list is still copied when assigned,
+  declared, sent, or passed to a function that writes, calls or waits.*
 - Copying costs time: assigning, declaring or passing (to a function with
   `runs on`) a long charstring, record or list copies it, so a scanner
   calling a helper once per character of a 100000-character string is

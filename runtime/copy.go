@@ -6,9 +6,8 @@ package runtime
 // array or map gives the target its own value, so a later change to one
 // is not seen through the other. References — to components, objects,
 // timers, ports, functions, defaults — are shared, as the standard has
-// them. A charstring is copied too, since an element assignment changes
-// it in place; other values are never changed in place and are returned
-// as they are.
+// them. Values never changed in place — charstrings among them, whose
+// element assignment makes a new one — are returned as they are.
 func CopyValue(v Object) Object {
 	switch x := v.(type) {
 	case *Record:
@@ -31,12 +30,9 @@ func CopyValue(v Object) Object {
 		}
 		return &cp
 	case *String:
-		if x == nil {
-			return x
-		}
-		cp := *x
-		cp.Value = append([]rune(nil), x.Value...)
-		return &cp
+		// A charstring is never changed in place (String.WithRuneAt):
+		// the copy can be the value itself.
+		return x
 	case *Map:
 		if x == nil {
 			return x

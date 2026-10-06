@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 	"unicode"
 
@@ -948,6 +949,10 @@ func NewEnumValue(enumType *EnumType, key string, id int) (*EnumValue, error) {
 type String struct {
 	Value []rune
 	ascii bool
+	// tail, when not nil, is shared by the strings whose Value lies in one
+	// rune array with room past its end: the length of it claimed so far
+	// (ConcatStrings).
+	tail *atomic.Int64
 	// IsPattern marks the string as the result of a `pattern "..."`
 	// expression; the matcher treats `?` / `*` / `#N` etc. as
 	// TTCN-3 pattern operators only when this flag is set. Plain
@@ -1045,6 +1050,56 @@ func (s *String) cloneIfInterned() (*String, bool) {
 	return &String{Value: cp, ascii: s.ascii, IsPattern: s.IsPattern}, true
 }
 
+// WithRuneAt returns a new string: s with its element i set to r — or,
+// when set is false, only grown to hold i — padded with spaces up to i.
+// A string is never changed in place, so that copies of it can share it
+// (CopyValue).
+func (s *String) WithRuneAt(i int, r rune, set bool) *String {
+	n := len(s.Value)
+	if i >= n {
+		n = i + 1
+	}
+	cp := make([]rune, n)
+	copy(cp, s.Value)
+	for j := len(s.Value); j < n; j++ {
+		cp[j] = ' '
+	}
+	ascii := s.ascii
+	if set {
+		cp[i] = r
+		ascii = ascii && r < 128
+	}
+	return &String{Value: cp, ascii: ascii, IsPattern: s.IsPattern, NoCase: s.NoCase, PatternComplex: s.PatternComplex}
+}
+
+// ConcatStrings returns x followed by y, as a new string. Strings are
+// never changed in place, so the new one may extend x's rune array in
+// place, if it has room and no other string has extended it from there
+// already: appending to a string in a loop then costs what the
+// appended part does, not the whole string each time.
+func ConcatStrings(x, y *String) *String {
+	n, m := len(x.Value), len(y.Value)
+	ascii := x.ascii && y.ascii
+	if m == 0 {
+		// A string of its own (a caller may mark it a pattern), sharing
+		// x's runes.
+		return &String{Value: x.Value[:n:n], ascii: ascii}
+	}
+	if x.tail != nil && cap(x.Value)-n >= m && x.tail.CompareAndSwap(int64(n), int64(n+m)) {
+		return &String{Value: append(x.Value, y.Value...), ascii: ascii, tail: x.tail}
+	}
+	c := n + m
+	if n > 0 {
+		c += c / 2 // room to grow, should it be appended to
+	}
+	cp := make([]rune, n+m, c)
+	copy(cp, x.Value)
+	copy(cp[n:], y.Value)
+	tail := new(atomic.Int64)
+	tail.Store(int64(n + m))
+	return &String{Value: cp, ascii: ascii, tail: tail}
+}
+
 // CloneIfInterned is the exported form of cloneIfInterned for callers
 // outside this package (the interpreter's index-assignment path
 // needs it to copy-on-write before mutating).
@@ -1089,10 +1144,10 @@ func (s *String) Len() int {
 }
 
 func (s *String) Get(i int) Object {
-	if 0 <= i || i < len(s.Value) {
-		ch := NewUniversalString(string(s.Value[i]))
-		ch.ascii = s.ascii
-		return ch
+	if 0 <= i && i < len(s.Value) {
+		// NewUniversalString may hand out a shared one-character
+		// string, which must not be changed.
+		return NewUniversalString(string(s.Value[i]))
 	}
 	return Undefined
 }

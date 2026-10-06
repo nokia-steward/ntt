@@ -2883,7 +2883,12 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 
 	case x.Type() == runtime.CHARSTRING:
 		xs, ys := x.(*runtime.String), y.(*runtime.String)
-		ret := evalStringBinary(string(xs.Value), string(ys.Value), op, env)
+		var ret runtime.Object
+		if op == syntax.CONCAT {
+			ret = runtime.ConcatStrings(xs, ys)
+		} else {
+			ret = evalStringBinary(string(xs.Value), string(ys.Value), op, env)
+		}
 		// `pattern "..."` & "..." (or any combination with a
 		// pattern operand) yields a pattern - the wildcard
 		// operators in the resulting blob must keep their
@@ -3836,7 +3841,7 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 		// `a[i] := v`: evaluate the container and store the value at
 		// the index. If the container isn't actually a list (we soft-
 		// skip many decls) just no-op so we don't error the testcase.
-		container := eval(l.X, env)
+		container, store := evalSlot(l.X, env)
 		if runtime.IsError(container) {
 			return container
 		}
@@ -3905,7 +3910,11 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 			case *syntax.Ident:
 				env.Set(lx.String(), container)
 			default:
-				storeReceiver(l.X, container, env)
+				if store != nil {
+					store(container)
+				} else {
+					storeReceiver(l.X, container, env)
+				}
 			}
 		}
 		if list, ok := container.(*runtime.List); ok && idx.Type() == runtime.INTEGER {
@@ -3934,21 +3943,21 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 		if s, ok := container.(*runtime.String); ok && idx.Type() == runtime.INTEGER {
 			i := idx.(runtime.Int).Int64()
 			if i >= 0 {
-				// Copy-on-write before mutating an interned
-				// ASCII-single-rune cache entry; otherwise
-				// the in-place edit would corrupt every
-				// other holder of "X" / body[k] / etc. A
-				// variable holds a charstring of its own
-				// (runtime.CopyValue), so no other does.
-				if cloned, swapped := s.CloneIfInterned(); swapped {
-					s = cloned
-					storeReceiver(l.X, s, env)
-				}
-				for int64(len(s.Value)) <= i {
-					s.Value = append(s.Value, ' ')
-				}
-				if r, ok := val.(*runtime.String); ok && r.Len() > 0 {
-					s.Value[i] = r.Value[0]
+				// A new string, stored back: charstrings are shared
+				// by the variables holding them (runtime.CopyValue),
+				// so none is changed in place.
+				r, ok := val.(*runtime.String)
+				set := ok && r.Len() > 0
+				if set || int(i) >= s.Len() {
+					var c rune
+					if set {
+						c = r.Value[0]
+					}
+					if store != nil {
+						store(s.WithRuneAt(int(i), c, set))
+						return nil
+					}
+					return storeReceiver(l.X, s.WithRuneAt(int(i), c, set), env)
 				}
 			}
 		}
@@ -4016,6 +4025,142 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 	// testcase still runs.
 	return nil
 }
+
+// evalSlot evaluates lx, the container of an element assignment, and
+// returns with it what writes a new value into lx's place when lx is an
+// element of a list or a field of a record — each found once, so an index
+// with a side effect (`l[inc()][0] := "Z"`) is not evaluated again, and an
+// array's own lower bound is honoured. A nil writer: write back with
+// storeReceiver.
+func evalSlot(lx syntax.Expr, env runtime.Scope) (runtime.Object, func(runtime.Object)) {
+	switch x := lx.(type) {
+	case *syntax.IndexExpr:
+		parent := eval(x.X, env)
+		if runtime.IsError(parent) {
+			return parent, nil
+		}
+		switch c := parent.(type) {
+		case *runtime.List:
+			idx := eval(x.Index, env)
+			if runtime.IsError(idx) {
+				return idx, nil
+			}
+			i, isInt := idx.(runtime.Int)
+			if !isInt {
+				// `l[ix]` with a record of integers walks into nested
+				// lists (6.2.7); any other index is for the indexing to
+				// answer — an error, most likely.
+				if il, ok := idx.(*runtime.List); ok && allInts(il) {
+					return indexValueOf(parent, idx, env), func(v runtime.Object) { multiIndexStore(parent, il.Elements, v) }
+				}
+				return indexValueOf(parent, idx, env), nil
+			}
+			pos := int(i.Int64()) - c.IndexOffset
+			if pos < 0 {
+				return indexValueOf(parent, idx, env), nil
+			}
+			write := func(v runtime.Object) {
+				for len(c.Elements) <= pos {
+					c.Elements = append(c.Elements, runtime.Undefined)
+				}
+				c.Elements[pos] = v
+			}
+			if pos >= len(c.Elements) {
+				return runtime.Undefined, write
+			}
+			return c.Elements[pos], write
+		case *runtime.Map:
+			key := eval(x.Index, env)
+			if runtime.IsError(key) {
+				return key, nil
+			}
+			v, ok := c.Get(key)
+			if !ok {
+				v = runtime.Undefined
+			}
+			return v, func(nv runtime.Object) {
+				c.Delete(key)
+				c.Set(key, nv)
+			}
+		}
+		// Anything else: index what was evaluated, not the expression
+		// again.
+		return indexValue(parent, x, env), nil
+	case *syntax.SelectorExpr:
+		parent := eval(x.X, env)
+		if runtime.IsError(parent) {
+			return parent, nil
+		}
+		name := syntax.Name(x.Sel)
+		switch c := parent.(type) {
+		case *runtime.Record:
+			v, ok := c.Fields[name]
+			if !ok {
+				v = runtime.Undefined
+			}
+			return v, func(nv runtime.Object) { c.Set(name, nv) }
+		case *runtime.List:
+			for i, f := range c.FieldNames {
+				if f == name && i < len(c.Elements) {
+					return c.Elements[i], func(nv runtime.Object) { setField(c, name, nv) }
+				}
+			}
+		}
+		return selectValue(parent, x, env), nil
+	}
+	return eval(lx, env), nil
+}
+
+// indexValueOf is parent[idx] for a parent and an index both evaluated
+// already.
+func indexValueOf(parent, idx runtime.Object, env runtime.Scope) runtime.Object {
+	tmp := runtime.NewEnv(env)
+	tmp.Set(slotParentKey, parent)
+	tmp.Set(slotIndexKey, idx)
+	return eval(&syntax.IndexExpr{X: slotParent, Index: slotIndex}, tmp)
+}
+
+// indexValue is parent[index] for a parent already evaluated: the index
+// expression evaluated once, in a scope binding the parent.
+func indexValue(parent runtime.Object, x *syntax.IndexExpr, env runtime.Scope) runtime.Object {
+	tmp := runtime.NewEnv(env)
+	tmp.Set(slotParentKey, parent)
+	return eval(&syntax.IndexExpr{X: slotParent, Index: x.Index}, tmp)
+}
+
+// selectValue is parent.sel for a parent already evaluated.
+func selectValue(parent runtime.Object, x *syntax.SelectorExpr, env runtime.Scope) runtime.Object {
+	tmp := runtime.NewEnv(env)
+	tmp.Set(slotParentKey, parent)
+	return eval(&syntax.SelectorExpr{X: slotParent, Sel: x.Sel}, tmp)
+}
+
+// slotParent names, in a scope of indexValue or selectValue, the value
+// already evaluated.
+const (
+	slotParentKey = "\x00ttcn3:slot-parent"
+	slotIndexKey  = "\x00ttcn3:slot-index"
+)
+
+var (
+	slotParent = &syntax.Ident{Tok: nameTok(slotParentKey)}
+	slotIndex  = &syntax.Ident{Tok: nameTok(slotIndexKey)}
+)
+
+// nameTok is an identifier token of the interpreter's own making, for an
+// expression it builds (slotParent); it stands nowhere in a source.
+type nameTok string
+
+func (t nameTok) Kind() syntax.Kind                { return syntax.IDENT }
+func (t nameTok) Pos() int                         { return -1 }
+func (t nameTok) End() int                         { return -1 }
+func (t nameTok) FirstTok() syntax.Token           { return t }
+func (t nameTok) LastTok() syntax.Token            { return t }
+func (t nameTok) Children() []syntax.Node          { return nil }
+func (t nameTok) Inspect(f func(syntax.Node) bool) { f(t) }
+func (t nameTok) String() string                   { return string(t) }
+func (t nameTok) PrevTok() syntax.Token            { return nil }
+func (t nameTok) NextTok() syntax.Token            { return nil }
 
 // isPortReference reports, without evaluating anything, whether e names
 // a port: a port identifier, or an element of a port array (`pa[i]`).
@@ -4285,6 +4430,172 @@ func paramWritten(body *syntax.BlockStmt, name string) bool {
 }
 
 var writtenNames sync.Map // *syntax.BlockStmt -> map[string]bool
+
+// keepsToItself reports whether a call of fn can change nothing but its
+// own locals and parameters: it writes no other variable, calls no
+// function of the suite's, and does nothing that waits — so no activated
+// default runs while it does. A component's variable passed to it as an
+// `in` parameter then cannot change under it, and needs no copy. The
+// answer is cached per body.
+func keepsToItself(fn *runtime.Function) bool {
+	if fn == nil || fn.Body == nil {
+		return false
+	}
+	if v, ok := keepsToItselfCache.Load(fn.Body); ok {
+		return v.(bool)
+	}
+	ok := computeKeepsToItself(fn)
+	keepsToItselfCache.Store(fn.Body, ok)
+	return ok
+}
+
+var keepsToItselfCache sync.Map // *syntax.BlockStmt -> bool
+
+// waitingOps are the operations that may wait, and so let an activated
+// default run.
+var waitingOps = map[string]bool{
+	"receive": true, "trigger": true, "check": true, "getcall": true, "getreply": true,
+	"catch": true, "timeout": true, "done": true, "killed": true, "call": true,
+}
+
+func computeKeepsToItself(fn *runtime.Function) bool {
+	if fn.Catch != nil || fn.Finally != nil || !plainParams(fn) {
+		return false
+	}
+	own := map[string]bool{}
+	for _, p := range fn.Params.List {
+		if p != nil && p.Name != nil {
+			own[p.Name.String()] = true
+		}
+	}
+	// Its own: the variables of its body's top level and of its for
+	// loops — not of an inner block, whose name another write after the
+	// block may mean something else by.
+	declare := func(st syntax.Node) {
+		ds, ok := st.(*syntax.DeclStmt)
+		if !ok {
+			return
+		}
+		if vd, ok := ds.Decl.(*syntax.ValueDecl); ok {
+			for _, d := range vd.Decls {
+				if d != nil && d.Name != nil {
+					own[syntax.Name(d.Name)] = true
+				}
+			}
+		}
+	}
+	for _, st := range fn.Body.Stmts {
+		declare(st)
+	}
+	syntax.Inspect(fn.Body, func(n syntax.Node) bool {
+		if f, ok := n.(*syntax.ForStmt); ok && f.Init != nil {
+			declare(f.Init)
+		}
+		return true
+	})
+	scope := fn.Home
+	if scope == nil {
+		scope = fn.Env
+	}
+	ok := true
+	syntax.Inspect(fn.Body, func(n syntax.Node) bool {
+		if !ok {
+			return false
+		}
+		switch x := n.(type) {
+		case *syntax.AltStmt, *syntax.CommClause:
+			ok = false
+		case *syntax.SelectorExpr:
+			if waitingOps[syntax.Name(x.Sel)] {
+				ok = false
+			}
+		case *syntax.CallExpr:
+			switch f := x.Fun.(type) {
+			case *syntax.Ident:
+				// Only a predefined function (ETSI Annex C): one the
+				// suite declares, or one held in a parameter or
+				// variable, may change anything.
+				name := f.String()
+				if own[name] || !predefinedFunctions[name] {
+					ok = false
+				} else if scope != nil {
+					if v, found := scope.Get(name); found {
+						if _, user := forceThunk(v).(*runtime.Function); user {
+							ok = false
+						}
+					}
+				}
+			case *syntax.SelectorExpr:
+				// Port and timer operations that do not wait; not a
+				// qualified function, a method, or anything else.
+				if !harmlessOps[syntax.Name(f.Sel)] {
+					ok = false
+				}
+			default:
+				ok = false
+			}
+		}
+		return ok
+	})
+	if !ok {
+		return false
+	}
+	for name := range collectWrittenNames(fn.Body) {
+		if !own[name] {
+			return false
+		}
+	}
+	return true
+}
+
+// predefinedFunctions are the predefined functions (ETSI ES 201 873-1
+// Annex C) and operations a function that keeps to itself may call: none
+// changes a variable.
+var predefinedFunctions = map[string]bool{
+	"lengthof": true, "sizeof": true, "sizeoftype": true, "ispresent": true, "isbound": true,
+	"ischosen": true, "isvalue": true, "istemplatekind": true, "match": true, "valueof": true,
+	"log": true, "setverdict": true, "getverdict": true, "rnd": true, "testcasename": true,
+	"int2char": true, "int2unichar": true, "int2bit": true, "int2hex": true, "int2oct": true,
+	"int2str": true, "int2float": true, "int2enum": true, "float2int": true, "float2str": true,
+	"char2int": true, "char2oct": true, "unichar2int": true, "unichar2char": true, "unichar2oct": true,
+	"bit2int": true, "bit2hex": true, "bit2oct": true, "bit2str": true,
+	"hex2int": true, "hex2bit": true, "hex2oct": true, "hex2str": true,
+	"oct2int": true, "oct2bit": true, "oct2hex": true, "oct2str": true, "oct2char": true, "oct2unichar": true,
+	"str2int": true, "str2hex": true, "str2oct": true, "str2float": true, "enum2int": true,
+	"substr": true, "replace": true, "regexp": true, "any2unistr": true, "isvalue_or_omit": true,
+}
+
+// harmlessOps are the selector operations a function that keeps to itself
+// may perform: they change no variable.
+var harmlessOps = map[string]bool{
+	"send": true, "start": true, "stop": true, "read": true, "running": true,
+	"clear": true, "halt": true, "reply": true, "raise": true,
+}
+
+// plainParams reports whether fn's parameters are bound once, from the
+// actuals alone: none @lazy or @fuzzy (evaluated, in the caller's scope,
+// while fn runs) and none with a default (evaluated after the others are
+// bound).
+func plainParams(fn *runtime.Function) bool {
+	if fn.Params == nil {
+		return true
+	}
+	for _, p := range fn.Params.List {
+		if p == nil {
+			continue
+		}
+		if p.Value != nil {
+			return false
+		}
+		if p.Modif != nil && p.Modif.Kind() != syntax.ILLEGAL {
+			switch strings.ToLower(p.Modif.String()) {
+			case "@lazy", "@fuzzy":
+				return false
+			}
+		}
+	}
+	return true
+}
 
 func collectWrittenNames(body *syntax.BlockStmt) map[string]bool {
 	names := map[string]bool{}
@@ -6371,7 +6682,7 @@ func bindFunctionParams(fn *runtime.Function, args []runtime.Object) *runtime.En
 				// unless nothing could tell it from the actual's: an
 				// `in` parameter of an isolated function that is never
 				// written. Copying a large value on every call is costly.
-				if modif == "" && fn.Isolated && !paramWritten(fn.Body, param.Name.String()) {
+				if modif == "" && (fn.Isolated && fn.Catch == nil && fn.Finally == nil && plainParams(fn) || keepsToItself(fn)) && !paramWritten(fn.Body, param.Name.String()) {
 					fenv.Set(param.Name.String(), args[i])
 					continue
 				}
