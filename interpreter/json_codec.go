@@ -464,6 +464,7 @@ func fromJSONValue(x interface{}, t jsonType, env runtime.Scope) (runtime.Object
 				continue
 			}
 			name := f.Name.String()
+			rec.Order = append(rec.Order, name)
 			jv, present := m[name]
 			if !present || jv == nil {
 				if f.Optional != nil {

@@ -3458,14 +3458,13 @@ func mergeFieldReassignment(existing, fresh runtime.Object, lhs syntax.Expr, env
 		return nil, false
 	}
 	out := runtime.NewRecord()
-	for name, val := range old.Fields {
-		out.Set(name, val)
+	for _, name := range old.Names() {
+		out.Set(name, old.Fields[name])
 	}
-	for name, val := range next.Fields {
-		if val == runtime.Undefined {
-			continue
+	for _, name := range next.Names() {
+		if val := next.Fields[name]; val != runtime.Undefined {
+			out.Set(name, val)
 		}
-		out.Set(name, val)
 	}
 	return out, true
 }
@@ -3773,6 +3772,13 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 		if out, ok := remapStructByPosition(val, structDeclOf(lvalueTypeDesc(rhs, env)), structDeclOf(dstTd)); ok {
 			val = out
 		}
+		// Written in the target type's declaration order, and its
+		// fields in theirs.
+		if rec, ok := val.(*runtime.Record); ok {
+			if st := structDeclOf(dstTd); st != nil && st.KindTok.Kind() != syntax.UNION {
+				val = coerceRecordFields(rec, dstTd, env)
+			}
+		}
 		// ETSI 6.2.7 / 6.3.1: a value assigned to a constrained array
 		// subtype (`type integer T[1..2]`) adopts the type's declared
 		// lower index bound, so `v[lo]` reads the first element. Copy the
@@ -3987,6 +3993,9 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 				rec = implicitOmitRecord(st)
 			} else {
 				rec = runtime.NewRecord()
+				if st != nil {
+					rec.Order = structFieldNames(st)
+				}
 			}
 			rec.Set(fid.String(), val)
 			return storeReceiver(l.X, rec, env)
@@ -4093,7 +4102,11 @@ func storeReceiver(recv syntax.Expr, val runtime.Object, env runtime.Scope) runt
 	case *syntax.SelectorExpr:
 		parent := eval(r.X, env)
 		if parent == nil || parent == runtime.Undefined || parent == runtime.Omit || parent == runtime.Any || parent == runtime.AnyOrNone {
-			parent = runtime.NewRecord()
+			rec := runtime.NewRecord()
+			if st := structDeclOf(lvalueTypeDesc(r.X, env)); st != nil {
+				rec.Order = structFieldNames(st)
+			}
+			parent = rec
 		}
 		if fid, ok := r.Sel.(*syntax.Ident); ok {
 			setField(parent, fid.String(), val)
@@ -5091,6 +5104,7 @@ func implicitOmitRecord(st *syntax.StructTypeDecl) *runtime.Record {
 	if st == nil {
 		return rec
 	}
+	rec.Order = structFieldNames(st)
 	for _, f := range st.Fields {
 		if f == nil || f.Name == nil || f.Optional == nil {
 			continue
@@ -5210,6 +5224,22 @@ func coerceRecordFields(rec *runtime.Record, td *runtime.TypeDesc, env runtime.S
 	if rec == nil || td == nil || td.Struct == nil {
 		return rec
 	}
+	// Written in the type's declaration order. A value out of that order
+	// becomes a new one: the given one may be another's — a constant a
+	// template or a receive refers to, which other components read.
+	own := false
+	ownIt := func() {
+		if !own {
+			out := &runtime.Record{Fields: make(map[string]runtime.Object, len(rec.Fields)), Order: structFieldNames(td.Struct)}
+			for k, v := range rec.Fields {
+				out.Fields[k] = v
+			}
+			rec, own = out, true
+		}
+	}
+	if !inOrder(rec, td.Struct) {
+		ownIt()
+	}
 	for _, f := range td.Struct.Fields {
 		if f == nil || f.Name == nil {
 			continue
@@ -5220,11 +5250,42 @@ func coerceRecordFields(rec *runtime.Record, td *runtime.TypeDesc, env runtime.S
 			continue
 		}
 		if sub := fieldStructTypeDesc(f, env); sub != nil {
-			rec.Fields[name] = coerceToStruct(cur, sub, env)
+			if nv := coerceToStruct(cur, sub, env); nv != cur {
+				ownIt()
+				rec.Fields[name] = nv
+			}
 		}
 		tagSetOf(rec.Fields[name], fieldListKind(f, env))
 	}
 	return rec
+}
+
+// inOrder reports whether rec's fields are written in st's declaration
+// order already.
+func inOrder(rec *runtime.Record, st *syntax.StructTypeDecl) bool {
+	i := 0
+	for _, f := range st.Fields {
+		if f == nil || f.Name == nil {
+			continue
+		}
+		if i >= len(rec.Order) || rec.Order[i] != f.Name.String() {
+			return false
+		}
+		i++
+	}
+	return i == len(rec.Order)
+}
+
+// structFieldNames lists a record, set or union type's fields in their
+// declaration order, the order its values are written in.
+func structFieldNames(st *syntax.StructTypeDecl) []string {
+	names := make([]string, 0, len(st.Fields))
+	for _, f := range st.Fields {
+		if f != nil && f.Name != nil {
+			names = append(names, f.Name.String())
+		}
+	}
+	return names
 }
 
 // coerceToUnionDefault wraps a scalar assigned to a union type that
@@ -9813,11 +9874,11 @@ func mergeTemplateMod(base, mod runtime.Object) (runtime.Object, bool) {
 		return nil, false
 	}
 	out := runtime.NewRecord()
-	for k, v := range br.Fields {
-		out.Fields[k] = v
+	for _, k := range br.Names() {
+		out.Set(k, br.Fields[k])
 	}
-	for k, v := range mr.Fields {
-		out.Fields[k] = v
+	for _, k := range mr.Names() {
+		out.Set(k, mr.Fields[k])
 	}
 	return out, true
 }
@@ -10434,8 +10495,8 @@ func stripEmbedTrailingEmpties(rec *runtime.Record) runtime.Object {
 		return nil
 	}
 	out := runtime.NewRecord()
-	for k, fv := range rec.Fields {
-		out.Fields[k] = fv
+	for _, k := range rec.Names() {
+		out.Set(k, rec.Fields[k])
 	}
 	out.Fields["embed_values"] = &runtime.List{
 		ListType:    list.ListType,
@@ -10455,10 +10516,10 @@ func collapseAllOmitRecordField(rec *runtime.Record, field string) runtime.Objec
 		return rec
 	}
 	out := runtime.NewRecord()
-	for k, v := range rec.Fields {
-		out.Fields[k] = v
+	for _, k := range rec.Names() {
+		out.Set(k, rec.Fields[k])
 	}
-	out.Fields[field] = runtime.Omit
+	out.Set(field, runtime.Omit)
 	return out
 }
 
@@ -12827,8 +12888,9 @@ func materialiseJSONDefaultFields(head runtime.Object, td *runtime.TypeDesc, env
 		return out
 	case *runtime.Record:
 		out := runtime.NewRecord()
-		for k, fv := range v.Fields {
-			out.Fields[k] = fv
+		out.Order = structFieldNames(td.Struct)
+		for _, k := range v.Names() {
+			out.Set(k, v.Fields[k])
 		}
 		for _, f := range td.Struct.Fields {
 			if f == nil || f.Name == nil || f.Optional == nil {

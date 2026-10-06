@@ -1715,9 +1715,12 @@ func NewMap() *Map {
 	return &Map{pairs: make(map[hashKey][]pair)}
 }
 
-// TODO(5nord) For simplicity we reuse the Map implementation. We should implement proper record semantics later.
+// Record is a record, set or union value: its fields by name, and the
+// order to write them in — its type's declaration order once the value
+// has a type, else the order they were set in (Names).
 type Record struct {
 	Fields map[string]Object
+	Order  []string
 }
 
 func (r *Record) Get(name string) (Object, bool) {
@@ -1726,16 +1729,52 @@ func (r *Record) Get(name string) (Object, bool) {
 }
 
 func (r *Record) Set(name string, val Object) Object {
+	if _, ok := r.Fields[name]; !ok && !r.ordered(name) {
+		r.Order = append(r.Order, name)
+	}
 	r.Fields[name] = val
 	return nil
+}
+
+func (r *Record) ordered(name string) bool {
+	for _, n := range r.Order {
+		if n == name {
+			return true
+		}
+	}
+	return false
+}
+
+// Names lists the record's fields in the order to write them in: Order's
+// first, then any other, by name.
+func (r *Record) Names() []string {
+	names := make([]string, 0, len(r.Fields))
+	seen := make(map[string]bool, len(r.Fields))
+	for _, n := range r.Order {
+		if _, ok := r.Fields[n]; ok && !seen[n] {
+			names = append(names, n)
+			seen[n] = true
+		}
+	}
+	if len(names) < len(r.Fields) {
+		var rest []string
+		for n := range r.Fields {
+			if !seen[n] {
+				rest = append(rest, n)
+			}
+		}
+		sort.Strings(rest)
+		names = append(names, rest...)
+	}
+	return names
 }
 
 func (r *Record) Type() ObjectType { return RECORD }
 func (r *Record) Inspect() string {
 	var buf bytes.Buffer
 	fields := []string{}
-	for key, val := range r.Fields {
-		fields = append(fields, fmt.Sprintf("%s := %s", key, val.Inspect()))
+	for _, key := range r.Names() {
+		fields = append(fields, fmt.Sprintf("%s := %s", key, r.Fields[key].Inspect()))
 	}
 	buf.WriteString("{")
 	buf.WriteString(strings.Join(fields, ", "))

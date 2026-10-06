@@ -652,7 +652,12 @@ The corpus report is the same byte for byte with one job and with eight.
 The reviews' 170 probe files, run on the build before this work and after,
 changed only as intended. Found, older than this work:
 
-- **A record's fields are written in no particular order** — by `log()`
+- *Fixed 2026-10-06: a record keeps the order of its fields — its type's
+  declaration order once it has a type — and writes them in it. A value
+  that never takes a type keeps the order it was written in: an element
+  of a record of literal, a function's result, a value redirect, a
+  parameterised template, a record inside a union's alternative.*
+  **A record's fields are written in no particular order** — by `log()`
   and in the test log, where the Annex B value lists them as declared:
   `{field2 := 4, field1 := 3}`. A record holds its fields in a map, which
   `Inspect` and the TCI-TL conversion walk as it comes. 72 of the 138

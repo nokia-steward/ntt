@@ -47,7 +47,6 @@ var altBodyCtx altContext
 // guard ever matches.
 var defaultCtx altContext
 
-
 // defaultBranchState tracks, per goroutine, whether an alt guard actually
 // matched while runDefaults was evaluating an activated default. runDefaults
 // arms it before eval-ing each default and reads it after; the alt evaluator

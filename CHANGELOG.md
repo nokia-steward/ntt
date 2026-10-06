@@ -331,6 +331,12 @@ Independent of the two clocks:
   clock, as expired default timers did before.
 - **A call's signature no longer reaches a PTC** for the unqualified
   `getreply` / `catch` rule (22.3.1 h).
+- **A record's fields are written in their declaration order** — by
+  `log()`, in a verdict's reason and in the test log, where Annex B lists
+  them so. A record held its fields in a map and wrote them as the map
+  went: `{field2 := 4, field1 := 3}`, and in another order on another run,
+  which alone made one in two of the corpus files whose logs differ
+  between the two clocks differ.
 - **`interleave` interleaves** (ETSI 20.4). A branch body ran to its end
   once its guard matched, and a receive in it did not wait, so two
   branches that depend on each other deadlocked — the first one's body

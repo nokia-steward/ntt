@@ -23,11 +23,11 @@ import (
 
 // ilBranch is an interleave branch body running as a coroutine.
 type ilBranch struct {
-	resume chan bool    // the interleave hands the body the turn; false: give up
-	yield  chan ilEvent // the body hands it back
+	resume chan bool     // the interleave hands the body the turn; false: give up
+	yield  chan ilEvent  // the body hands it back
 	done   chan struct{} // the body's goroutine has ended
-	at     interface{}  // where the body waits now (ilEvent.at)
-	wait   ilEvent      // what it waits for
+	at     interface{}   // where the body waits now (ilEvent.at)
+	wait   ilEvent       // what it waits for
 }
 
 // ilEvent is what a body tells the interleave when it hands the turn back:

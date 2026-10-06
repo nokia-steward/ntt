@@ -437,13 +437,8 @@ func TLValue(o Object) tl.Value {
 	case *EnumValue:
 		return tl.Value{Kind: "enumerated", Text: v.Key()}
 	case *Record:
-		names := make([]string, 0, len(v.Fields))
-		for n := range v.Fields {
-			names = append(names, n)
-		}
-		sort.Strings(names)
 		out := tl.Value{Kind: "record"}
-		for _, n := range names {
+		for _, n := range v.Names() {
 			f := TLValue(v.Fields[n])
 			f.Name = n
 			out.Elems = append(out.Elems, f)

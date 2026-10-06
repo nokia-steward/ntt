@@ -304,3 +304,61 @@ func TestJSONTypesOfAnotherModulesDefinitions(t *testing.T) {
 		}
 	}
 }
+
+// TestRecordFieldOrder: a record value is written with its fields in its
+// type's declaration order, however it was written.
+func TestRecordFieldOrder(t *testing.T) {
+	src := `module M {
+		type component C {}
+		type record R { integer field1, integer field2, charstring field3 optional }
+		testcase tc() runs on C {
+			var R r := { field3 := "c", field2 := 2, field1 := 1 };
+			var R s;
+			s.field2 := 4; s.field1 := 3; s.field3 := omit;
+			var R u;
+			u := { field2 := 6, field3 := "e", field1 := 5 };
+			setverdict(pass, r, s, u);
+		}
+	}`
+	for i := 0; i < 5; i++ {
+		v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", clocks[0].opts)
+		if err != nil || v != runtime.PassVerdict {
+			t.Fatalf("%s (%s) %v", v, reason, err)
+		}
+		want := `{field1 := 1, field2 := 2, field3 := "c"} {field1 := 3, field2 := 4, field3 := omit} {field1 := 5, field2 := 6, field3 := "e"}`
+		if reason != want {
+			t.Fatalf("reason %q, want %q", reason, want)
+		}
+	}
+}
+
+// TestSharedConstantIsNotReordered: components receiving with a module
+// constant of another record type, at once, leave it as it is — written
+// in its own type's order, and not written at all (go test -race).
+func TestSharedConstantIsNotReordered(t *testing.T) {
+	src := `module M {
+		type record A { integer x, integer y }
+		type record B { integer y, integer x }
+		type port P message { inout A }
+		type component C { port P p }
+		const B c_b := { y := 1, x := 2 };
+		template A t_a := c_b;
+		function loop() runs on C {
+			for (var integer i := 0; i < 50; i := i + 1) { p.send(t_a); p.receive(A:t_a) }
+			setverdict(pass, c_b);
+		}
+		testcase tc() runs on C {
+			var C a := C.create, b := C.create, c := C.create;
+			connect(a:p, a:p); connect(b:p, b:p); connect(c:p, c:p);
+			a.start(loop()); b.start(loop()); c.start(loop());
+			all component.done;
+			if (getverdict == pass) { setverdict(pass, c_b) }
+		}
+	}`
+	for _, k := range clocks {
+		v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", k.opts)
+		if err != nil || v != runtime.PassVerdict || reason != "{y := 1, x := 2}" {
+			t.Errorf("%s clock: %s (%s) %v", k.name, v, reason, err)
+		}
+	}
+}

@@ -15,7 +15,7 @@ func CopyValue(v Object) Object {
 		if x == nil {
 			return x
 		}
-		out := &Record{Fields: make(map[string]Object, len(x.Fields))}
+		out := &Record{Fields: make(map[string]Object, len(x.Fields)), Order: append([]string(nil), x.Order...)}
 		for k, f := range x.Fields {
 			out.Fields[k] = CopyValue(f)
 		}
