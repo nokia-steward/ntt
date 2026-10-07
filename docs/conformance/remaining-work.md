@@ -600,7 +600,8 @@ passed over for a thousand turns — and a parameter's default and a
 - On the real clock, a control part's own timer wait is not cut short by
   `--timeout`; its loops are. An `alt` in a control part with no branch
   ready returns at once.
-- `var R x` declared in an inner block (`if (...) { var R x ... }`)
+- *Fixed 2026-10-07: a block that declares anything has a scope of its
+  own.* `var R x` declared in an inner block (`if (...) { var R x ... }`)
   overwrites the value of a like-named variable of the enclosing block.
 - A testcase run on its own, not from a control part, has its
   parameters unbound and untyped (its JSON encoding falls back).

@@ -1172,6 +1172,12 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		}
 		return &runtime.List{ListType: runtime.VALUE_LIST, Elements: elems}
 	case *syntax.BlockStmt:
+		// A block's declarations are its own (ETSI 5.2.2): a sibling
+		// block — another branch of an interleave, running between this
+		// one's statements — may declare the same names.
+		if declaresAny(n.Stmts) {
+			return evalBlockStmts(n.Stmts, runtime.NewEnv(env))
+		}
 		return evalBlockStmts(n.Stmts, env)
 
 	case *syntax.ExprStmt:
@@ -1805,6 +1811,11 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		}
 
 	case *syntax.ForStmt:
+		// A loop variable it declares is the loop's own (ETSI 5.2.2):
+		// another interleave branch's loop may declare the same.
+		if _, decl := n.Init.(*syntax.DeclStmt); decl {
+			env = runtime.NewEnv(env)
+		}
 		if n.Init != nil {
 			val := eval(n.Init, env)
 			if runtime.IsError(val) {
@@ -3871,7 +3882,7 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 				m = runtime.NewMap()
 				switch lx := l.X.(type) {
 				case *syntax.Ident:
-					env.Set(lx.String(), m)
+					assignOrSet(env, lx.String(), m)
 				default:
 					storeReceiver(l.X, m, env)
 				}
@@ -3893,7 +3904,7 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 			seed := container
 			container = &runtime.List{ListType: runtime.RECORD_OF}
 			if name, ok := l.X.(*syntax.Ident); ok {
-				env.Set(name.String(), container)
+				assignOrSet(env, name.String(), container)
 			}
 			_ = seed
 		}
@@ -3908,7 +3919,7 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 			container = &runtime.List{ListType: runtime.RECORD_OF}
 			switch lx := l.X.(type) {
 			case *syntax.Ident:
-				env.Set(lx.String(), container)
+				assignOrSet(env, lx.String(), container)
 			default:
 				if store != nil {
 					store(container)
@@ -4024,6 +4035,16 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 	// CallExpr, etc.). Swallow the assignment so the rest of the
 	// testcase still runs.
 	return nil
+}
+
+// declaresAny reports whether stmts declare anything of their own.
+func declaresAny(stmts []syntax.Stmt) bool {
+	for _, st := range stmts {
+		if _, ok := st.(*syntax.DeclStmt); ok {
+			return true
+		}
+	}
+	return false
 }
 
 // evalSlot evaluates lx, the container of an element assignment, and
@@ -6641,7 +6662,9 @@ func applyFunctionStopped(fn *runtime.Function, args []runtime.Object) (runtime.
 			raw = runtime.Undefined
 		}
 	} else {
-		raw = eval(fn.Body, fenv)
+		// The body's statements in the call's own scope, where the
+		// catch and finally clauses see its variables.
+		raw = evalBlockStmts(fn.Body.Stmts, fenv)
 	}
 	if len(fn.Catch) > 0 || fn.Finally != nil {
 		raw = runExceptionHandlers(raw, fn.Catch, fn.Finally, fenv)
@@ -10396,6 +10419,30 @@ func (c callBlock) Equal(o runtime.Object) bool {
 	return ok && other.outer == c.outer
 }
 
+// assignOrSet writes name where it is bound — an enclosing scope's
+// variable, not a shadow of it in a block's scope — or binds it here if
+// nothing does.
+func assignOrSet(env runtime.Scope, name string, val runtime.Object) {
+	if a, ok := env.(runtime.Assigner); ok && a.Assign(name, val) {
+		return
+	}
+	env.Set(name, val)
+}
+
+// prepopulate binds a redirect's target ahead of a match, in
+// redirectScope — unless a scope further out binds the name: then the
+// redirect itself writes it there, and nothing must shadow it meanwhile
+// (nor change it early: a default may read it before the match).
+func prepopulate(env runtime.Scope, name string, val runtime.Object) {
+	target := redirectScope(env)
+	if e, ok := target.(*runtime.Env); ok {
+		if owner := e.Owner(name); owner != nil && owner != e {
+			return
+		}
+	}
+	target.Set(name, val)
+}
+
 // redirectScope is where a redirect's target is bound ahead of a match
 // (prePopulateRedirects): env, or for a blocking call's response block,
 // which has a scope of its own, the scope the call was made in.
@@ -12671,7 +12718,7 @@ func prePopulateRedirectExpr(r *syntax.RedirectExpr, exec *runtime.TestcaseExec,
 	if cur, ok := env.Get(id.String()); ok && cur != runtime.Undefined && cur != runtime.Null {
 		return
 	}
-	redirectScope(env).Set(id.String(), latest)
+	prepopulate(env, id.String(), latest)
 }
 
 // applyRedirect realises `-> value v_val` and `-> sender v_addr` on

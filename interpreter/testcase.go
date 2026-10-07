@@ -522,7 +522,12 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 	if lexec := tlExec(tcEnv); lexec != nil {
 		tlScope(lexec, tcNode, "tliSEnter", module, fnName, "testcase", tcNode.Params, tcEnv, nil)
 	}
-	r := eval(tcNode.Body, tcEnv)
+	// The body's statements in the testcase's own scope, where its catch
+	// and finally clauses see its variables.
+	var r runtime.Object
+	if tcNode.Body != nil {
+		r = evalBlockStmts(tcNode.Body.Stmts, tcEnv)
+	}
 	if len(tcNode.Catch) > 0 || tcNode.Finally != nil {
 		r = runExceptionHandlers(r, tcNode.Catch, tcNode.Finally, tcEnv)
 	}
@@ -3080,7 +3085,7 @@ func prePopulateRedirects(g syntax.Node, env runtime.Scope) {
 		if cur, ok := env.Get(id.String()); ok && cur != runtime.Undefined && cur != runtime.Null {
 			return true
 		}
-		redirectScope(env).Set(id.String(), latest)
+		prepopulate(env, id.String(), latest)
 		return true
 	})
 }

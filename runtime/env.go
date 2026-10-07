@@ -90,6 +90,9 @@ func (env *Env) Binds(name string) bool {
 
 func (env *Env) Set(name string, val Object) Object {
 	env.mu.Lock()
+	if env.store == nil {
+		env.store = make(map[string]Object)
+	}
 	env.store[name] = val
 	env.mu.Unlock()
 	return val
@@ -131,10 +134,9 @@ func RootScope(s Scope) Scope {
 }
 
 func NewEnv(outer Scope) *Env {
-	return &Env{
-		outer:    outer,
-		bindings: &bindings{store: make(map[string]Object)},
-	}
+	// The map is made by the first Set: many scopes — a block's, a
+	// call's — bind little or nothing.
+	return &Env{outer: outer, bindings: &bindings{}}
 }
 
 // Each calls f for every binding env itself holds (not an enclosing

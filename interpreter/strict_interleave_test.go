@@ -1110,3 +1110,83 @@ func TestDefaultRepeat(t *testing.T) {
 		}
 	}
 }
+
+// TestBlocksHaveTheirOwnDeclarations: a block's declarations are its own
+// (ETSI 5.2.2) — two interleave branches each declaring v, running
+// between each other's statements, keep theirs; sibling blocks declare
+// the same name with types of their own; a block's variable is gone
+// after it.
+func TestBlocksHaveTheirOwnDeclarations(t *testing.T) {
+	src := `module M {
+		type port P message { inout integer }
+		type component C { port P p1, p2 }
+		type record R { integer n }
+		testcase tc() runs on C {
+			connect(self:p1, self:p1); connect(self:p2, self:p2);
+			var integer a := 0, b := 0;
+			p1.send(1);
+			interleave {
+				[] p1.receive(integer:1) { var integer v := 10; p2.send(2); p1.receive(integer:3); a := v }
+				[] p2.receive(integer:2) { var integer v := 20; p1.send(3); b := v }
+			}
+			if (a != 10 or b != 20) { setverdict(fail, "interleave branches ", a, " ", b); stop }
+			var integer k := 0;
+			if (k == 0) { var R s := { n := 1 }; k := k + s.n } else { var charstring s := "x"; k := 99 }
+			if (k == 1) { var charstring s := "y"; if (s != "y") { setverdict(fail, "sibling ", s); stop } }
+			setverdict(pass);
+		}
+	}`
+	for _, k := range clocks {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		opts := k.opts
+		opts.Context = ctx
+		v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", opts)
+		cancel()
+		if err != nil || v != runtime.PassVerdict {
+			t.Errorf("%s clock: %s (%s) %v", k.name, v, reason, err)
+		}
+	}
+}
+
+// TestBlockWritesReachOuterVariables: a block with declarations of its own
+// still writes the variables around it — a list filled in a loop through
+// a temporary, an unbound array or map element, a sender redirect — and a
+// function's catch and finally clauses see its body's variables.
+func TestBlockWritesReachOuterVariables(t *testing.T) {
+	src := `module M {
+		type port P message { inout integer }
+		type component C { port P p }
+		type record of integer RoI;
+		type map from charstring to integer MT;
+		type integer A[3];
+		function f() return integer exception(integer) {
+			var integer x := 5;
+			raise 1;
+			return 0;
+		} catch (integer e) { return x + e }
+		testcase tc() runs on C {
+			connect(self:p, self:p);
+			var RoI r;
+			for (var integer i := 0; i < 3; i := i + 1) { var integer x := i * 2; r[i] := x }
+			if (lengthof(r) != 3 or r[2] != 4) { setverdict(fail, "list ", r); stop }
+			var A a;
+			if (true) { var integer z := 7; a[0] := z }
+			if (a[0] != 7) { setverdict(fail, "array ", a); stop }
+			var MT m;
+			if (true) { var integer z := 8; m["k"] := z }
+			if (m["k"] != 8) { setverdict(fail, "map ", m); stop }
+			var C who;
+			p.send(1);
+			if (true) { var integer z := 0; p.receive(integer:?) -> sender who }
+			if (not isbound(who)) { setverdict(fail, "sender"); stop }
+			if (f() != 6) { setverdict(fail, "catch ", f()); stop }
+			setverdict(pass);
+		}
+	}`
+	for _, k := range clocks {
+		v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", k.opts)
+		if err != nil || v != runtime.PassVerdict {
+			t.Errorf("%s clock: %s (%s) %v", k.name, v, reason, err)
+		}
+	}
+}

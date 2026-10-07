@@ -331,6 +331,15 @@ Independent of the two clocks:
   clock, as expired default timers did before.
 - **A call's signature no longer reaches a PTC** for the unqualified
   `getreply` / `catch` rule (22.3.1 h).
+- **A block's declarations are its own** (ETSI 5.2.2). An `if` branch or
+  a plain `{ }` block declared into the scope around it, so two branches
+  of an interleave — running between each other's statements — that each
+  declared `var integer v` shared one `v`, and the second's value was the
+  first's. A block that declares anything now has a scope of its own —
+  so a `do { var integer x ... } while (x < 2)` condition no longer sees
+  the body's `x`, which it may not.
+  (And a scope makes its table at its first binding: an exchange on the
+  real clock runs about twice as fast.)
 - **Long charstrings and large parameters cost what they should.** A
   charstring was copied on every assignment and call, and `s := s & c`
   copied the whole of it each time; a record or list passed to a `runs
