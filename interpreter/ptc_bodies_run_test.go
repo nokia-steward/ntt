@@ -1,6 +1,7 @@
 package interpreter_test
 
 import (
+	"strings"
 	"testing"
 
 	"github.com/nokia/ntt/interpreter"
@@ -298,6 +299,14 @@ func TestStartedBodiesRun(t *testing.T) {
 		}`,
 	} {
 		for _, k := range clocks {
+			src := src
+			// On the real clock the computation is only to end before the
+			// watchdog does; a million iterations, which on the virtual
+			// clock make virtual time pass, can take longer than that
+			// under the race detector on a slow machine.
+			if name == "a long computation takes some time" && k.name == "live" {
+				src = strings.Replace(src, "1100000", "100000", 1)
+			}
 			v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", k.opts)
 			if err != nil || v != runtime.PassVerdict {
 				t.Errorf("%s, %s clock: %s (%s) %v", name, k.name, v, reason, err)

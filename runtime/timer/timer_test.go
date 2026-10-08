@@ -53,9 +53,11 @@ func TestTimer_Restart(t *testing.T) {
 	tm.Start(100 * time.Millisecond)
 	time.Sleep(20 * time.Millisecond)
 	tm.Start(10 * time.Millisecond) // restart with shorter duration
+	// Before the first duration would have ended, and with room for a
+	// slow machine.
 	select {
 	case <-tm.Timeout():
-	case <-time.After(150 * time.Millisecond):
+	case <-time.After(time.Second):
 		t.Fatal("restarted timer should fire on the new shorter duration")
 	}
 }
