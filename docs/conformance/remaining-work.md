@@ -1,0 +1,1411 @@
+# Remaining Conformance Work
+
+State as of 2026-08-20: **4754 / 4948 matched (96.53%)**, 23 skipped
+(inconclusive / no-verdict), **194 real misses** in the inventory.
+
+**2026-08-20 (b) — `to <component>` unicast routing, +8, 0 regressions.**
+`p.send(v) to c`, `p.reply(...) to c` and `p.raise(S,v) to c` broadcast to
+every connected peer under the scheduler — the `to` address only tagged the
+sender, it did not restrict delivery — so a sibling PTC received a value or
+caught an exception meant for another. And a **bare** `p.getreply` /
+`p.getcall` / `p.catch` guard peeked the *unqualified* port name instead of
+the current PTC's per-component key, so a reply/exception routed to the
+PTC's qualified queue was invisible and its call block hung. Both are fixed
+(routeProcEnvelopeTo / the send `to` filter honour the addressed component
+set; the bare-guard path qualifies via PortKey). Recovered the 5 fixtures
+the all-done change had exposed (SendOperation_005/006, raise_002/003/004)
+plus 3 more that were timing out (check_operation_033/034/106). Combined
+with the all-done change this session is **net +7 over 4747, zero
+regressions**, and the multi-PTC `to`-routing tier described under "Async
+multi-PTC message echo" is now largely closed.
+
+**2026-08-20 (a) — `all component.done` now blocks (ETSI 21.3.7), net −1
+(superseded by (b) above).** It
+answered a non-blocking snapshot the statement context discarded, so under
+the cooperative scheduler a started PTC was never granted the token and its
+body never ran — its verdict silently lost. Making it park like the
+singular `.done` **gained 4** fixtures whose PTC verdict now propagates
+(`Sem_160102_predefined_functions_091`,
+`Sem_210102_disconnect_and_unmap_operations_001/002/003`) and **exposed 5**
+whose old `pass` was hollow: the PTC body was skipped, so nothing could
+fail. With the body now running they hit the still-unfixed multi-PTC
+send-routing / raise defects and fail honestly
+(`Sem_220201_SendOperation_005/006` → fail, `Sem_220305_raise_operation_002/003/004`
+→ error). Those five are the same deep tier described under "Async
+multi-PTC message echo" below; the change surfaces them rather than
+creating them. Net −1 on the number, more correct on the semantics.
+
+Earlier state (2026-08-10): 4747 / 4948 matched (96.39%), 178 real misses.
+
+The rate went **down** on purpose. It read 4813 / 97.73% on 2026-08-04,
+and part of that was fiction: two mechanisms in the engine existed to make
+fixtures pass, 74 files rested on them, and some of those files tested
+nothing at all. Both are gone. See "The correction" below - that section is
+the most useful thing in this document.
+
+Baseline and the full miss inventory live in
+[`testdata/conformance-baseline.json`](../../testdata/conformance-baseline.json)
+and [`current-misses.json`](current-misses.json); regenerate with
+[`refresh_artifacts.py`](refresh_artifacts.py). The baseline records the
+last measurement and may move down; the ratchet is `--regress` on the
+conformance command, enforced per commit by CI.
+
+The incremental "one clean fix per slice" phase is complete: the easy
+positive-test bugs have been closed. What remains does **not** yield
+isolated low-risk commits. Every change must still pass the full
+conformance run (`--regress 0.5`, 0 per-file regressions) and `go test
+-race ./...`, which is where the external test-port coverage lives.
+
+## This branch is the product
+
+This work is a fork, not a queue of upstream contributions, and the
+document is written from that position. The engine is judged on whether
+it implements TTCN-3 correctly for the people running it here; the ETSI
+suite is the instrument for measuring that, not the goal.
+
+That distinction decides what gets kept. A change that raises the match
+rate while making the semantics less defensible is not worth taking, and a
+change that is clearly right but flat on the corpus is. Taken to its
+conclusion on 2026-08-10: engine behaviour that existed only to make
+fixtures pass was deleted even though it cost 1.34 points, because a number
+produced that way is not evidence of anything.
+
+Of the 178 real misses, **102 expect `reject`** (75 reach `pass`, 27 reach
+`none`). That is still the largest block and stays out of scope until there
+is a reason beyond the number to go after it. Most of the rest are the 74
+files the correction stopped fabricating verdicts for.
+
+## One engine (2026-08-03)
+
+There is now a single evaluator: a cooperative discrete-event scheduler
+with a virtual clock. The legacy "approximate" evaluator and its
+verdict-preferring heuristic are deleted, along with the
+`SemanticsProfile` toggle and the `--approximate`, `--profile` and
+`--differential` flags. `DeterministicClock` and `DeterministicScheduler`
+remain as options, because a driver running real suites wants timers to
+pace real I/O; that is the only axis left.
+
+This closed the two features that this document previously listed as the
+main path forward — **1a** (strict procedure-payload matching) and **1b**
+(async multi-PTC echo) — because concurrent PTCs now genuinely fork,
+interleave deterministically and block on real matches instead of being
+modelled. Both sections are marked DONE below.
+
+Losing `--differential` removes the built-in way to compare two engines.
+The replacement is [`diff_runs.py`](diff_runs.py), which diffs two
+`--json` reports file by file and reports per-file provenance moves the
+pass-rate gate cannot see. It compares two commits rather than two
+engines.
+
+### Match rate versus real execution
+
+The suite match rate is only part of the picture: the harness also
+reports a **real-execution** rate (files whose verdict came from actually
+executing the testcase rather than from a parse/semantic rejection),
+currently **2442 files, 49.58%**.
+
+That number cannot approach 100%, and it is worth being precise about why
+before treating it as a target. A file annotated `@verdict pass reject`
+expects a rejection, and a completed run always yields a TTCN-3 verdict
+(`pass`/`fail`/`inconc`/`none`/`error`) — never the string `reject`. Such
+a file can therefore never be counted as `executed` and matching; the best
+it reaches is `exec-reject`, which is deliberately excluded from the
+real-execution rate. 2200 of the 4925 considered files expect `reject`,
+so the ceiling is **2725 / 4925 = 55.33%**.
+
+Total headroom is thus 227 files (+4.61 points), not the ~49 points the
+raw figure suggests — and almost none of it is honestly reachable. 206 of
+the 207 `parse-only` files carry an explicit ETSI `noexecution`
+directive, including all 24 whose control part is the only executable
+thing in them, so executing them would mean overriding an instruction not
+to. What is genuinely left is the handful of files that fail for real
+reasons, which is a match-rate question rather than a real-execution one.
+
+One related caveat: the 23 "skipped" files are not inconclusive tests.
+They all carry `@verdict pass reject`, parsed and analyzed cleanly, had no
+testcase, and were demoted out of the denominator rather than counted as
+misses. They are negative tests the analyzer fails to catch. Fixing that
+would *lower* the reported match rate by moving them into the denominator.
+
+## The correction (2026-08-10)
+
+Two mechanisms in the engine existed so that fixtures would pass. Both are
+gone, in that order, each with its own commit and baseline update.
+
+**A deadlock is an error.** When every component was parked and no timer
+could advance the clock, the scheduler released everyone so their blocked
+alts concluded as though nothing had matched. Quiescence is a *provable*
+deadlock in the loopback model - there is no outside, so nothing can ever
+arrive - and it now produces an `error` verdict naming it. Guarded on no
+external port driver being bound, where a real peer may still send and the
+inference fails. Measured: **-51, +7** (4813 -> 4769). Six of the seven
+gains are `NegSem` fixtures that expect a rejection and now get one.
+
+**An undeclared verdict stays `none`.** ETSI 22.4.1 says the verdict starts
+at `none` and setverdict moves it; the engine coerced it to `pass`, which
+made a testcase that does nothing look successful. Measured: **-28, +1**
+(4769 -> 4744). 26 of the 28 explicitly assert `ttcn3verdict:pass`, so they
+are real defects now failing honestly.
+
+The harness was also over-reading the annotation: a bare `@verdict pass
+accept` with no `ttcn3verdict:` tag and no `setverdict` in the source
+asserts only that the run is acceptable, so `none` satisfies it. Correcting
+that recovered exactly 2 files. Applying it to `reject` fixtures as well
+would have handed a match to 21 negative files we genuinely fail, which
+measurement caught before it landed.
+
+### What the fixtures were actually doing
+
+Some of the 74 files were passing **vacuously** - not "passing for the
+wrong reason" but not testing their subject at all.
+`Sem_2204_the_check_operation_025` sets `pass` after its alt whether or not
+`check(getcall)` matched, so 35 `Sem_2204_*` files were reporting on a
+`check` operation that never ran.
+
+The same was true of the Go suite, which matters more, because those tests
+were the reason to believe the engine worked. Six were vacuous:
+
+- Four `TestStrictSched_*` procedure tests in which **the PTC bodies never
+  ran at all** - not the server's `getcall`, not its safety timer, not the
+  client's `call`. Nothing they describe was exercised.
+- `TestStrictInterleave_BlockingBodyRunsOnSnapshotEvaluator`, whose nested
+  alt never matched.
+- `TestAsyncPTC_InjectWakesAltAndBodyRuns`, which hid a **user-facing** bug
+  (below).
+
+All six are kept, pointed at what the engine really does, each naming what
+must be restored when the gap closes. A green test that asserts nothing is
+worse than a red one.
+
+### Where the 74 files went
+
+47 chapter 22 (procedure-based communication and `check`), 14 chapter 21
+(configuration operations), 13 spread thinly. Progress since:
+
+- **Procedure responder bodies now run for real** (+3, 4744 -> 4747). The
+  syntactic predicate that declared a body containing any procedure
+  operation unrunnable predates the scheduler, which can now run and park
+  it. One shape stays carved out and the carve-out is measured: a bare
+  finite responder started before any call is queued would fall through its
+  non-blocking `getcall` and reply to nobody.
+- Running the bodies is **necessary but not sufficient**. The four
+  `TestStrictSched_*` tripwires still report no verdict, so a client/server
+  pair still cannot complete a call/reply round trip. The next layer is
+  matching and routing, not scheduling.
+
+### Newly found, not yet fixed
+
+- *Fixed 2026-08-18.* **An injected message never reaches a driver-bound PTC.** The path a real
+  C/C++ test port uses. Diagnosed precisely: the daemon body runs, the
+  message lands in the queue under exactly the key its receive reads, it is
+  still there unconsumed at the end, the alt re-polls every 2ms for the
+  full 500ms, and neither a typed nor a bare `srv.receive` observes it. Not
+  a lost wake-up, not a template mismatch - guard evaluation for a
+  driver-bound port. Tripwire:
+  `TestAsyncPTC_InjectDoesNotReachADriverBoundPTC`.
+- **A stopped `alive` component cannot be restarted** (ETSI 21.3.3), which
+  is `Sem_210303_Stop_test_component_005..010`. Two layers: `start` does
+  not clear the component's `done` flag, so the following `comp.done` is
+  satisfied by the previous run and the MTC leaves before the new body is
+  scheduled; and with that cleared, the re-forked PTC goroutine still never
+  gets scheduled. Tripwire:
+  `TestRestartAfterStop_DoesNotRunTheNewBehaviour`.
+- *Fixed 2026-10-02: a branch body that waits lets the others go on
+  (interleave.go).* **Interleave does not suspend a blocked branch.**
+  `Sem_2004_InterleaveStatement_001` needs branch 2 to run while branch 1's
+  body is blocked in a nested alt - coroutine-style interleaving inside one
+  component. Note the suite treats a nested alt in an interleave body as
+  legal: `NegSem_2004_InterleaveStatement_001` has the same construct and
+  blames its `for` loop.
+- **Timer-only PTC bodies still do not run.** Dropping `timeout` from the
+  skip predicate is now possible in principle (the virtual clock removed
+  the original excuse) but measured **-7 / +0**, so it is out. Reverted
+  rather than absorbed. Re-measured 2026-09-28 as **-4 / +5**, with the
+  cause of most of the -4 identified; see §1s.
+
+## The executed-but-wrong slice (2026-08-04)
+
+Thirteen files executed cleanly and produced a semantically wrong
+verdict — the most damning category in the suite, because each one is the
+engine confidently getting TTCN-3 wrong. Eleven are fixed; the corpus
+moved 4803 → 4813 (the eleventh is offset by `Sem_5010205_OfOperator_001`,
+the mislabelled fixture Bucket 2 predicted would flip).
+
+Landed, each its own commit with zero per-file regressions:
+
+- **Assignment notation on a record** leaves unmentioned fields alone
+  (ETSI 6.2), **union alternative access under `?`** yields `?`, and
+  **template concatenation** expands a `? length(n)` run to n units.
+- **An enumerated value beats a clashing local definition** in a
+  comparison (ETSI 8.2.3.1).
+- **The object cast `=>` and the `of` type test** (ETSI 5.1.2.5/5.1.2.6).
+- **A default that stops the component, or breaks, unwinds its caller**
+  (ETSI 20.5.1): `runDefaults` discarded the altstep result, so the
+  statements after the alt ran anyway.
+- **External functions bind through a registry** (see 1d below).
+- **`encvalue_o` / `decvalue_o` for bitstrings, records and short input**
+  (see 1d below).
+
+Two did not land, and both stopped at the same wall: the engine has
+scaffolding that hides broken semantics, and removing the scaffolding
+fails dozens of files at once.
+
+- **`Sem_2303_timer_stop_004`** expects `none`. ETSI 22.4.1 says an
+  undeclared verdict stays `none`, and the engine coerces it to `pass`
+  ([`interpreter/testcase.go`](../../interpreter/testcase.go), the
+  comment above the coercion). Removing the coercion costs **64 files** —
+  and only 4 of them lack `setverdict` altogether. The other 60 *call*
+  `setverdict` on a branch that never executes, so the coercion is
+  fabricating the verdict their broken control flow never reached.
+  Prerequisite: fix why those branches do not run.
+- **`Sem_2601_ExecuteStatement_003`** expects `error` from a testcase
+  whose `alt { [] any port.receive { repeat; } }` blocks forever. Leaving
+  the scheduler's deadlocked participants parked - which is what the
+  standard asks for, since an alt with no match and no `[else]` blocks
+  rather than concludes - does produce that `error`. It also turns **51
+  other files into timeouts**: their alts cannot fire for reasons of our
+  own, and the deadlock release is what lets them fall through to a
+  verdict. Recorded at the release in
+  [`runtime/scheduler.go`](../../runtime/scheduler.go).
+
+Both are the same finding from two directions, and it is the most useful
+thing this slice produced: **the deadlock release and the verdict
+coercion are load-bearing for ~115 files between them**, which is a
+measurement of how much of the alt / event-delivery model is still
+missing. Neither should be removed alone. The order is: make those alts
+fire for real, then drop the release, then drop the coercion.
+
+One incidental finding worth its own line: a PTC started with
+`comp.start(f)` runs **inline on the parent's goroutine** unless the
+deterministic scheduler is on or a narrow syntactic predicate
+(`startBodyDoesPortComm` and friends in
+[`interpreter/interpreter.go`](../../interpreter/interpreter.go)) decides
+to fork it. Under the plain path an MTC cannot feed a PTC that blocks on
+`receive`, which is one concrete source of the 51 files above.
+
+## Execution triage 2026-06-17 — the `reject->pass` bulk is NOT low-hanging
+
+A planned push to add semantic-analyzer rejections (106 of 160 misses are
+`reject->pass`) was triaged against the live fixtures. **No safe, simple
+static check was found** — each candidate is contradictory, needs complex
+topology/flow analysis, is a runtime error, or needs a deep model change:
+
+- **`0503_Ordering_002/003`** — CONTRADICTORY (Bucket 2). `NegSem_002` is the
+  *identical* decl-after-statement construct as the positive `Sem_0503_003`
+  ("declaration in the middle of the block are allowed"); `NegSem_003` ≡
+  `Sem_0503_004`. V4 (must precede) vs V5 (relaxed). Rejecting washes.
+- **`0901_communication_ports`** (×6) — NOT "port appears twice". It is the
+  full ETSI Figure 6/7 connection-scheme matrix: positives `Sem_0901_003/009`
+  connect one port to *multiple* peers (allowed); only the two-TSI-port
+  subset (`NegSem_002/007`) is a candidate, and it needs static mtc/system
+  detection. High risk, ~2 tests.
+- **`220201/220202/220203`** send/receive/trigger NegSem — RUNTIME errors
+  (`send` on a disconnected port, `@decoded` decode failure, missing `to` on
+  a one-to-many connection), not static rejections. Need real codec /
+  connection-state modelling.
+- **`150605_Referencing_union_alternatives_002`** (`pass->fail`) —
+  irreconcilable without **tracking which union alternative is chosen**.
+  Making `(?:U).alt` propagate `?` (so `ispresent` is true) forces
+  `ischosen((?:U).alt)` false, but `ischosen({alt:=?}.alt)` must stay true;
+  the model distinguishes them only by value (`Any` vs `Undefined`), so a
+  single rule can't satisfy both. Two attempts (blanket, then type-aware)
+  regressed `ischosen` / `ispresent` siblings; both reverted.
+
+**Conclusion:** the safe-win seam is exhausted. Remaining progress requires
+a *deep feature* (multi-PTC scheduling, procedure-signature qualification,
+union-alternative tracking, a real RAW codec, or connection-topology
+analysis) — each a dedicated, higher-risk effort — or leaving the
+contradictory/runtime clusters alone. See buckets + slice notes below.
+
+---
+
+## Bucket 1 — Large, dedicated features (the real path forward)
+
+These are worth doing; each is a multi-hour focused slice with real
+regression risk on a load-bearing path. Listed by ROI.
+
+### 1s. Regressions in §1t–§1y, T1 and T2, found by review — FIXED 2026-09-28
+
+A double-check of the commits from §1x to T2 found that several
+of them broke things on the **default** clock, the one the corpus runs on.
+The gate stayed at 0/0 throughout because no fixture has these shapes. Two
+methods found them: probing the shapes *next to* each fix's motivating case,
+and an independent review of the diff aimed at breaking it rather than
+confirming it.
+Every item below was reproduced against a binary built before the change and
+one built after, and has a test that fails when the fix is reverted.
+
+Regressions, fixed:
+
+- **Expired default timers livelocked the virtual clock** (T2). The alt
+  deadline scan counted a default timer that had already expired but that
+  the default did not take (a false guard, an `@nodefault` alt, an altstep
+  that resolves the timer elsewhere). The alt parked until a deadline in the
+  past, woke at once to the same state, and repeated while holding the
+  runner token: a core pegged for seconds, verdict `none`, where it had been
+  an instant pass. The defaults are consulted before the alt blocks, so an
+  expired default timer has had its chance; only future default deadlines
+  count now. `TestBothClocks_ExpiredDefaultTimerDoesNotStallTheAlt`.
+- **ETSI 22.3.1 reached too far** (T2): a PTC lost its defaults while the
+  MTC was in a call block, and so did an alt nested in a branch body.
+  `TestBothClocks_CallBlockKeepsOtherComponentsDefaults`,
+  `TestBothClocks_NestedAltInCallBlockKeepsDefaults`.
+- **`if (c.done)` said `true` for a running component** (§1u). Now an error;
+  see the correction under §1u. `TestBothClocks_DoneIsNotAValue`.
+- **`p.call(...) to <address>` never reached the port driver** (§1v). On a
+  port mapped to the system the address names something behind the
+  driver's transport; the call is sent to the driver again, as an unaddressed
+  one is. `TestGoPort_ProcedureCallToAddressReachesDriver`.
+- **The real-clock `.done` / `.killed` wait** (§1y, §1t) took the first
+  unfinished PTC and waited on it alone, so `any component.done` returned
+  when the *slowest* PTC finished; it busy-spun on `.killed` of an `alive`
+  PTC whose behaviour had ended; and it gave up on every PTC as soon as one
+  had nothing to wait on, which could lose the others' verdicts. It now
+  waits on all of them at once and re-checks.
+  `TestBothClocks_AnyComponentDoneReturnsOnFirst`,
+  `TestLiveClock_KilledOnExitedAliveComponentDoesNotSpin`.
+- **A standalone `any timer.timeout` jumped the virtual clock** (T1)
+  instead of parking as `T.timeout` does, so another component's earlier
+  event happened late, and with a forked PTC live it slept in real time.
+  `TestBothClocks_AggregateTimeoutLetsEarlierEventsHappen`.
+- **Defaults were per testcase, not per component** (made visible by T2).
+  One component's alt could invoke another's default — the MTC's safety-net
+  timer ended a PTC's alt — and a bare `deactivate;` cleared every
+  component's (ETSI 20.5, 20.5.3). A default now records its owner.
+  `TestBothClocks_DefaultsBelongToTheirComponent`,
+  `TestBothClocks_DeactivateClearsOnlyOwnDefaults`.
+
+Per-file against all 4948: 0 gained, 0 lost, 4754 unchanged. `go test
+-race ./...` green.
+
+**Found while building TCI-TL test logging, and fixed (2026-09-28):** under
+`--live` an echo PTC — `alt { [] p.receive(req) { p.send(rsp) } }` — ran
+inline on the MTC's goroutine and blocked it, so the testcase ended with
+no verdict. On the real clock a port-communicating body was forked only
+when it would otherwise be skipped; a body that is neither skipped nor
+forked runs inline. It now forks as it does under the scheduler, which is
+what made the done-but-not-killed gap above reachable on the real clock
+too. `TestBothClocks_EchoPTCRuns`. A test comparing each component's logged
+operations across the two clocks hung on its first run.
+
+**Found while logging the rest of TCI-TL, and fixed (2026-09-30):**
+
+- **`p.clear` was a no-op.** The selector fell through to nothing and the
+  queue kept its messages (ETSI 22.5.1). No fixture clears a queue and then
+  receives from it, so the corpus never showed it.
+- **`c.running` was true for a component never started.** It tested only
+  that the component was alive and not done (ETSI 21.3.5 says inactive).
+- **A list value holding a mixed list was written as a uniform list**, so
+  its log failed the schema: the kind of each element was decided before
+  the element itself was resolved to a record. Found by logging `tliVar`
+  over the corpus.
+
+Per-file against all 4948: 0 gained, 0 lost; with logging on, every
+verdict the same and every event valid.
+
+**Found along the way, older than this work, not fixed:**
+
+- *Fixed 2026-09-30, +17, 0 lost (with the next four defects it
+  uncovered, see CHANGELOG).* **A receiving operation used as a statement
+  did not wait** (ETSI 20.1). `p.receive(t);` with nothing queued yet returns at once and ends
+  the behaviour, so a plain request/response exchange — MTC sends, PTC
+  receives and answers, MTC receives — ends with verdict `none` on both
+  clocks; written as `alt { [] p.receive(t) {} }` it passes. This is the
+  handshake item above. Evaluating the statement as the one-alternative
+  alt the standard defines measures **-24** (33 lost, 9 gained); on the
+  MTC only, **-23**. The losses rest on two further defects, to be fixed
+  first: the alt guard `[] any port.getreply` (bare, a procedure operation
+  on `any port`) never matched — *fixed 2026-09-30, +7 (Sem_2204 037,
+  038, 061, 062, 085, 086, 110), 0 lost* — and a PTC body the engine runs
+  inline deadlocks the MTC once its own standalone `getcall` waits.
+- **Found reviewing the standalone-receive fix, older than it, not fixed:**
+  - *Fixed 2026-09-30.* (+3: Sem_220301_CallOperation_011, _013,
+    Sem_2003_the_repeat_statement_002; and _003 with an altstep alternative that repeats.)
+    `p.call(S:{}) to c { ... }`, a blocking call with `to`, is never sent:
+    the call-statement path accepts only a bare call expression.
+  - *Fixed 2026-09-30.* `-> param (x)` binds a list, which then fails with a type mismatch.
+  - *Fixed 2026-09-30.* `pa[1].receive` on a port array connected to PTCs never matches, and
+    `any from pa.receive(...) -> @index value i` does not bind `i`.
+  - *Fixed 2026-09-30.* Under `--live`, a testcase still waiting when `--timeout` expires
+    reports the verdict it had then, where `execute()` with a timeout
+    gives `error`.
+  - *Fixed 2026-10-02.* A receive inside an `interleave` branch body does
+    not wait: the engine does not expand interleave into its alternatives
+    (20.4).
+  - On `--live`, each `start` of a PTC that blocks costs its starter the
+    50 ms start barrier.
+  - A blocking signature called with no response block and no `nowait`
+    is sent without waiting, where the standard makes it an error.
+- **Found reviewing the started-bodies change, not fixed:**
+  - *Fixed 2026-09-30.* (Each million or so iterations with no wait count as a
+    second of virtual time.) A loop that waits on a zero-length timer for good
+    (`while (true) { t.start(0.0); t.timeout }`) takes no virtual time, so
+    on the virtual clock nothing else ever runs.
+  - *Fixed 2026-09-30.* `c.call(f())` on a component still models a body that waits on a
+    timer instead of running it.
+  - *Fixed 2026-09-30.* `ntt exec` does not enforce an `execute()` timeout, and a testcase
+    that runs out the harness budget reports its current verdict rather
+    than `error` (26).
+- *Fixed 2026-09-30.* (+2: Sem_1101_ValueVars_001, Sem_1102_TemplateVars_001, with
+  value semantics.) **A field assignment to a record initialised positionally is lost.**
+  After `var R r := {1, 2}`, `r.a := 3` leaves `r.a` at 1; initialised as
+  `{a := 1, b := 2}` it works.
+- *Fixed 2026-09-30.* **A port index expression is evaluated twice** in `pa[f()].send(1)` and
+  `pa[f()].receive(1)`: `f()` runs twice.
+- *Fixed 2026-09-30, with the restart below.* **A restarted `alive`
+  component reports `.running` false**, and under `--live` so does a PTC
+  blocked in a receive.
+- *Fixed 2026-09-30.* (+1: Sem_160201_invoking_altsteps_004.) **An altstep used as an alt branch** (`[] a()`) deadlocks on the
+  virtual clock.
+- *Fixed 2026-09-30.* **`p.check(from system)` on a mapped port never matches.**
+- *Fixed 2026-09-30.* **`action()` is not implemented** ("identifier not found"). The corpus's
+  eleven `action` fixtures are all negative-syntax or negative-semantic
+  ones, which match only because the engine fails on them. `tliAction` is
+  therefore never logged.
+
+- *Fixed 2026-09-30: every started body runs except an endless
+  computation, which is modelled; +5, 0 lost.* **A PTC body with a timer
+  and no port communication never runs**, on either clock: `startBodyShouldSkip` treats any `.timeout` as a reason to
+  skip the whole body and model only its duration, so a `setverdict(fail)`
+  in it — even one before the timer — is lost and the testcase reports
+  `pass`. Running such bodies on the scheduler now measures **-4 / +5**
+  (it was -7 / +0 in August). Three of the four are the next item, and the
+  fourth came from also forking `while (true) {}`, which a real change
+  would not do.
+- *Fixed 2026-09-28.* **A forked non-alive PTC is done but never killed.**
+  A forked body recorded only done; the inline path also recorded the
+  component as no longer alive (ETSI 21.3.2, 21.3.8). `.killed` stayed
+  false for good, so the statement form deadlocked.
+  `TestBothClocks_FinishedPTCIsKilled`.
+- *Fixed 2026-09-30: a receive used as a statement did not wait (below).*
+  **A two-way handshake ends in `none` on the virtual clock** — PTC sends,
+  MTC receives and replies, PTC receives — with no defaults involved.
+- *Fixed by 2026-09-30 (re-probed: already so at 9f399ebe).* **Under
+  `--live`, the snapshot guard `c.done` is true for a PTC still blocked on
+  a port.**
+- *Fixed 2026-09-30.* **`c.done -> value v;` as a statement does not block.**
+- *Fixed 2026-09-30.* **An inline `[false] T.timeout` guard livelocks the scheduler** the same
+  way expired default timers did; the fix above was kept to defaults.
+- *Fixed 2026-09-30.* Three layers: `start` did not clear `done`; the
+  stopped behaviour unwinds without the scheduler's token, which the
+  scheduler took for a deadlock (and, when stopped before its first turn,
+  forgot at once); and finishing, it finished the new behaviour by
+  component id. Its defaults also outlived it (21.3.2).
+  **Restarting a stopped `alive` component** gives `none` on the virtual
+  clock and `pass` under `--live` (see "Newly found"). Under `--live` the
+  stopped behaviour also keeps running past the end of its testcase: its
+  timer fires and it terminates during the next testcase, which
+  `ntt log diff` over two logs of the same suite showed.
+- *Fixed 2026-09-30.* (Not reproduced; a PTC's environment now shadows the
+  signature.) **The call signature still leaks into PTCs** for the unqualified
+  `getreply` / `catch` rule (22.3.1 h), which reads it from scope.
+- *Fixed 2026-09-30.* **`any port.getcall` / `getreply` / `catch` as a statement takes
+  nothing** (ETSI 22.5): the name `any port` reaches the procedure path as
+  if it were a port, which has no queue. The call stays queued for a later
+  receive to take. Found by the TCI-TL review.
+- *Fixed 2026-09-30.* **A `send`'s `to` clause is evaluated twice**, once to tag the message
+  and once to route it, so a side effect in it (`to f()`) runs twice.
+  Found by the TCI-TL review; the log itself evaluates nothing again.
+
+### 1r. Review and finish — 2026-09-30
+
+The items marked *Fixed 2026-09-30* above, each with a test on both clocks
+that fails without it: 4787 → 4794 matched, +7, 0 lost; with logging on,
+every verdict the same and every event valid. Two independent reviews
+found, and this work fixed before it went in: on the virtual clock a
+component computing let time pass (a guard timer fired during a finite
+computation, even the component's own); values were shared by a sent
+message, a redirect, a component variable's initial value and a
+parameter; a limit reached while PTCs were being stopped made a finished
+testcase an error; and every `in` parameter was copied (now only those a
+function that sees no component state writes). The second found the first
+fix's time passing too eager — straight to the next timer, so a long
+computation used up a watchdog — charstrings shared on element
+assignment, the arguments of `start` and `activate` shared with the
+caller, and an altstep alternative's `inout` parameters never written
+back. The third found time passing beyond a woken component's timer, and
+the charstring fix losing an element assignment to a component variable
+and evaluating an index twice; charstrings are now copied when assigned
+instead. A fourth check found a component, woken or started, starved
+while two others exchanged at one instant — it now runs after being
+passed over for a thousand turns — and a parameter's default and a
+`@lazy` parameter sharing the value they came from.
+
+**Found, not fixed:**
+
+- *Fixed 2026-10-02: each started branch body runs as a coroutine of the
+  component, waiting where the component would and handing the turn back
+  to the interleave (interleave.go); Sem_2004_InterleaveStatement_001 and
+  _002 now pass.* A receive in an `interleave` branch body does not wait (ETSI 20.4); two
+  branches that depend on each other deadlock
+  (`TestStrictInterleave_MutuallyDependentBranchesDeadlock`). The fix is to
+  run each branch body as a participant of its own, acting as the
+  component, so that a blocked branch parks while its siblings run; on
+  the real clock the branches need a baton of their own.
+- *Fixed 2026-10-01 (see CHANGELOG; 0 gained, 0 lost — no conformance
+  fixture tells the copies apart).* A function called from a PTC reads and writes the module-level copy of a
+  component variable, not the PTC's own: `function g() runs on C { n := n
+  + 1 }` called from a PTC's behaviour leaves the PTC's `n` unchanged. And a
+  component variable initialised from a module constant (`var R cr :=
+  c_R`) is undefined in the MTC: the MTC's members are bound when the
+  module is loaded, before the constant has its value.
+- Starting a non-alive component again after its behaviour ended is
+  accepted (ETSI 21.3.2 makes it an error).
+- `any from cs.done -> @index value i` binds nothing.
+- A class declared `runs on C` (ES 203 790) does not see the component's
+  variables in its methods.
+- *Fixed 2026-10-02 with the scope per module: a component type and what
+  it extends are looked up in the run's scopes, in the declaring module.*
+  Component types are registered under the testcase's module, whichever
+  module declares them, so of two like-named component types in different
+  modules one wins: a type extending `Base` in module X can get module M's
+  `Base`, and its own members then fall back to one copy every component
+  shares.
+- An error in a PTC's behaviour (an unknown identifier, say) ends it with
+  verdict `none`, not `error`; the testcase can then pass on the MTC's
+  verdict alone.
+- `match(v, t)` with `v` undefined is true.
+- *Fixed 2026-10-02: a module resolves its own names first (a scope per
+  module, inside the flat one), so a like-named definition elsewhere no
+  longer stands in for its own, and the log names a function's module; a
+  qualified reference (`A.c_x`) names module A's definition; modules load
+  in the order their files are given; 0 gained, 0 lost. A name a module
+  does not define still resolves to any module's, imported or not, and
+  each module's scope costs about a fifth more time to set up a run.*
+  **Names resolve across modules without an import.** All modules of a
+  run share one flat scope, so a module's own constant can be shadowed by
+  a like-named definition of a module it does not import: in module A,
+  `x == c_closed` compares with module B's record `c_closed` instead of
+  A's charstring, and fails with a type mismatch. The same flat scope is
+  why like-named component types mix (above), and why the test log names
+  the calling testcase's module, not the function's, for a function's
+  variables. A scope per module, with imports, is the fix; it is the
+  first item after interleave.
+- A typed template's type is checked against what a value can be, and
+  some differences are not visible: the length or range of a subtype, an
+  enumerated value of another enumerated type, a record of another type
+  with the same field names, a qualified type name (`M.T:?`), `anytype`.
+  On a port mapped to the system with no driver, whose loopback stands in
+  for the SUT's codec, a string-typed template still takes a value of any
+  type.
+- A component type's `template` members are not bound.
+- An `execute()` timeout held in a control-part variable
+  (`var float x := 1.0; execute(tc(), x)`) is not applied when `ntt exec`
+  runs the testcase by name, reading the control part without running it;
+  running the control part (`Module.control`) applies it.
+- The JSON codec applies no JSON `variant` attributes (ES 201 873-11
+  Annex B: `name as`, `as value`, `omit as null`, ...): a type carrying one,
+  or whose fields' types do, is left to the round-trip placeholder codec,
+  as before. `refers` and `anytype` are not encoded either.
+- On the real clock, a control part's own timer wait is not cut short by
+  `--timeout`; its loops are. An `alt` in a control part with no branch
+  ready returns at once.
+- *Fixed 2026-10-07: a block that declares anything has a scope of its
+  own.* `var R x` declared in an inner block (`if (...) { var R x ... }`)
+  overwrites the value of a like-named variable of the enclosing block.
+- A testcase run on its own, not from a control part, has its
+  parameters unbound and untyped (its JSON encoding falls back).
+- Module parameters still live in the shared scope too: a module that
+  imports `p` from module A, where module B declares a `p` as well, may
+  read B's. A `.cfg` setting a parameter both by its bare and its
+  qualified name gives the qualified one, whatever their order in the
+  file (some tools let the later line win).
+- An index-range array declared without an initialiser
+  (`var charstring a[2..3]`) is stored at the wrong offsets.
+- *Partly fixed 2026-10-06: charstrings are shared (never changed in
+  place) and appended to in place; a function that keeps to itself gets
+  its actuals uncopied. A record or list is still copied when assigned,
+  declared, sent, or passed to a function that writes, calls or waits.*
+- Copying costs time: assigning, declaring or passing (to a function with
+  `runs on`) a long charstring, record or list copies it, so a scanner
+  calling a helper once per character of a 100000-character string is
+  about twenty times slower than when the values were shared. Copy on
+  write would make passing free again.
+- On the virtual clock, a component spinning until an `execute()` limit
+  costs about a second of real time per second of the limit.
+- *Fixed 2026-10-02: `.running` reads the clock, and an expired timer's
+  timeout is kept. Still, on the virtual clock, a loop that only polls —
+  `while (t.running and c.running) {}`, or an alt with `[else]` in it —
+  never waits, so no other component's timer can fire meanwhile; after a
+  thousand polls at one instant the timer is taken to have run out. A
+  loop computing a lot between its polls lets virtual time pass, as any
+  long computation does (about a second of it per million iterations),
+  and so runs to the deadline, at that cost in real time. And `all
+  timer.running` also asks timers of blocks that have ended.*
+  `while (t.running) { ... }` stops after a few iterations on either
+  clock: `t.running` counts polls instead of reading the clock.
+- An activated default does not fire in a blocking receive or alt inside
+  a function without `runs on` called from a component.
+- In an interleave branch body, a few waits still wait as the whole
+  component instead of letting the other branches go on: `any from` over a
+  timer array, `c.call(f())`, and starting a component whose previous
+  behaviour is still ending. A body given up when the interleave is left
+  still logs the end of the alt it waited in.
+- An alt that repeats for good — a default `[else] { repeat }` beside a
+  timer that can never fire on the virtual clock, since nothing waits —
+  ends quietly after about a million rounds, as if it had finished.
+- `p.getreply(S2:{-} value ?)` takes a reply to another signature, S1,
+  so of two blocking calls in a row the second can take the first's
+  reply. And in a blocking call's block, a getreply's `-> value v
+  param(...)` redirects leave their variables unset (its `sender`
+  redirect works).
+
+**Testing after it, 2026-10-01.** Every conformance file that executes
+(2617) was run on both clocks with logging on: the verdicts are the same
+on both for all of them, and 2479 log the same actions (`ntt log diff`).
+The corpus report is the same byte for byte with one job and with eight.
+The reviews' 170 probe files, run on the build before this work and after,
+changed only as intended. Found, older than this work:
+
+- *Fixed 2026-10-06: a record keeps the order of its fields — its type's
+  declaration order once it has a type — and writes them in it. A value
+  that never takes a type keeps the order it was written in: an element
+  of a record of literal, a function's result, a value redirect, a
+  parameterised template, a record inside a union's alternative.*
+  **A record's fields are written in no particular order** — by `log()`
+  and in the test log, where the Annex B value lists them as declared:
+  `{field2 := 4, field1 := 3}`. A record holds its fields in a map, which
+  `Inspect` and the TCI-TL conversion walk as it comes. 72 of the 138
+  files whose two logs differ differ only in this.
+- *Fixed 2026-10-06: a message wakes the component it is queued for
+  (TestcaseExec.WakeChan); 640 → 23000 round trips a second beside 20
+  idle PTCs, 29000 alone. What is left is each idle PTC's 2 ms backstop.*
+  **On the real clock, idle components slow an exchange a hundredfold**:
+  an MTC/echo ping-pong runs at about 37000 round trips a second, and at
+  about 290 with 20 PTCs parked in an alt on a long timer. It bears on
+  live testing and profiling.
+- `alt { [] any from pa.receive(8) {} }` over a port array never takes a
+  message waiting on `pa[2]` (`pa[2].receive` and `any port.receive` do).
+- `any from pa.getcall(...)` over a port array does not match (5
+  conformance files, Sem_220302_getcall_operation_007, _010 to _013).
+- The C test-port bridge's `TestRegisterAndSend` fails when run more than
+  once in a process (`-count=2`): its fixture's call counter is not reset.
+
+In order of what they cost a suite: component variables seen through a
+`runs on` function called from a PTC (*fixed 2026-10-01*); interleave; a
+record's field order;
+the real clock's throughput with idle components; copying long values;
+then the small ones above.
+
+### 1y. `comp.done` does not block on the real clock — FIXED 2026-09-14
+
+Found 2026-09-09 by a Windows CI failure in a test of the built-in TCP port,
+which is a slower runner losing a race the faster ones win.
+
+`comp.done` and `comp.killed` park properly under the cooperative scheduler
+(`blockUntilComponentState`), and `all component.done` was given the same
+treatment. Both are gated on `deterministicSchedulerEnabled`. On the
+**real-clock path** — `ntt exec --live`, which is what an external transport
+forces — they fall through to a non-blocking snapshot. A testcase that forks
+PTCs and then waits on `.done` therefore does not wait: it reaches the end
+of its body, and teardown stops the PTCs (stop-first, by design) before they
+have done their work. ETSI 21.3.7 says the operation blocks.
+
+Anything driving a live SUT from PTCs is exposed, because that is exactly
+the shape: fork a worker per node, wait for them, assert.
+
+**Attribution corrected 2026-09-14.** Two CI failures were recorded here —
+`TestPerComponentAddressesScale` on Windows and
+`TestExecPerComponentAddress_PTCType` on Linux — as evidence for this entry.
+They were **§1x**, not this: the worker bodies contained a timer, so the
+real-clock fork predicate skipped them entirely and they never ran, which
+presents identically (a PTC that appears not to have waited is
+indistinguishable from one that never started). Both pass with §1x fixed,
+including with `.done` restored in place of the event-based workaround. The
+workarounds in those tests are now belt-and-braces rather than load-bearing,
+and are kept because this entry is still open. That is the hazard in
+miniature: the failure is timing-dependent, so it looks like flakiness and
+gets re-run rather than diagnosed. The workaround is
+to wait on an event instead — have each worker report completion over a
+connected port and receive those reports — which is what
+`TestPerComponentAddressesScale` now does, with a comment saying why.
+
+**Fixed 2026-09-14.** The first attempt was reverted, and the reason is
+the useful part: the wait was added *inside* `blockUntilComponentState`,
+but the gate is at the **call site** —
+
+    if deterministicSchedulerEnabled(env) && !altCtx.active() {
+        return blockUntilComponentState(ref, "done", env)
+    }
+    return runtime.NewBool(compDone(ref, env))   // live went here
+
+so a live run never reached the helper at all. An instrumented build showed
+the new branch never executing, which is what pointed at the call site.
+Both call sites — the singular `comp.done`/`.killed` in interpreter.go and
+the `all`/`any component` form in testcase.go — are now gated only on
+`!altCtx.active()`, since inside an alt guard the alt owns the blocking on
+either clock. The helpers gained a real-clock branch that waits on each
+forked PTC's `DoneChan` against a new close-once `TestcaseExec.StopChan()`,
+so a PTC that never finishes cannot hang the run.
+
+One wrinkle worth recording: the real-clock branch returns the predicate
+rather than `Undefined`. With the scheduler off, this path also serves
+value contexts such as `if (p.done)` that previously got a plain
+non-blocking bool, and returning `Undefined` broke
+`TestStrictComp_ModeledDoneUsesVirtualClock`. Blocking must not cost those
+contexts their value.
+
+*Superseded 2026-09-28 (§1s).* There are no such contexts: the grammar has
+`.done` only as a statement and as an alt guard (ES 201 873-1 BNF 268/507),
+so `if (p.done)` is not TTCN-3. It is now an error, and the test above uses
+the legal non-blocking form, `alt { [] p.done {…} [else] {…} }`.
+
+Verified by `TestLiveClock_DoneBlocksAndPreservesPTCVerdict`, which runs one
+source under both clocks and requires the PTC's `fail` to survive in both.
+Re-gating the call site makes it fail. Gate unchanged: 4754, exit 0.
+
+### 1x. A PTC body that waits on a timer is skipped under `--live` — FIXED 2026-09-14
+
+Found 2026-09-14 while measuring whether the same suite produces the same
+verdicts under both clocks. It does, for 7 of 8 testcases in a probe suite
+covering connected receive, timer guards, soonest-deadline ordering, alt
+snapshot precedence, boolean guards, undeclared verdicts and interleave.
+The eighth diverges, and the divergence is not a race.
+
+    PTC body: p.send("before"); timer d := 0.05; d.start; d.timeout; p.send("after");
+
+    virtual clock -> pass ("both phases delivered")
+    --live        -> fail ("PTC never ran at all")
+
+Not even the send *before* the timer arrives. A send-only PTC body
+(`p.send("m")`) works under both clocks, so this is keyed on the body's
+shape, not on forking in general.
+
+**Mechanism.** `startBodyBlocksOnComm` (interpreter/interpreter.go) decides
+whether a started PTC gets a real goroutine, and deliberately forks only for
+`getcall` and a blocking `call{...}`. Its reasoning is sound on its own
+terms — forking one half of a pair whose counterpart is not forked makes it
+wait for traffic that never comes. Every other body stays on the synchronous
+model path, which the cooperative scheduler backs with timer modelling. The
+real clock has no such modelling, so a body the model cannot execute
+inline is simply not executed.
+
+**Why it matters more than the fixture count suggests.** "Wait, then act" is
+an ordinary shape for a PTC driving a live SUT — pace a request, retry after
+a backoff, stagger a fan-out. Under `--live` those bodies do nothing, and
+they do it silently: the testcase fails on its own guard timer with no
+indication that the PTC never started. It is the same family as §1y
+(`comp.done` not blocking under `--live`): the live path lacks what the
+cooperative scheduler provides, and the symptom is an unexplained timeout.
+
+**Fixed** by distinguishing the two clock paths rather than loosening one
+predicate, which is what kept the conformance corpus still. The scheduler
+branch already used the broad `startBodyDoesPortComm`; the real-clock branch
+now uses it too, and the narrow `startBodyBlocksOnComm` is no longer reached
+from there. Because the corpus runs under the scheduler, that branch cannot
+move it — confirmed: 4754 matched, identical provenance counts, gate exit 0.
+This is why the August attempt cost -7 and this one costs nothing: that one
+widened the shared predicate, this one widens only the path where the
+argument for narrowness does not apply.
+
+Verified by `TestLiveClock_PTCBodyWithTimerRuns`, which runs one source under
+both clocks and asserts the verdicts agree. Reverting the one-line predicate
+change makes it fail with the original symptom ("PTC never ran at all"), so
+the test is load-bearing. The 8-case equivalence probe that found this now
+reports **8/8 identical verdicts** across the two clocks, up from 7/8.
+
+### 1w. A forked PTC's verdict is lost under `--live` — FIXED 2026-09-14 (same defect as §1y)
+
+Recorded briefly as an independent verdict-*merging* bug on the strength of
+this claim: *"the PTC demonstrably runs (full delay elapses, sends arrive),
+so this is verdict merging, not scheduling."* **That claim was wrong**, and
+checking it is what produced the §1y fix.
+
+The evidence for "the PTC runs" was elapsed wall time — but end-of-testcase
+teardown (`WaitPTCs`) joins PTCs with a grace period, so wall time is a
+misleading proxy: the clock advances whether or not the PTC got anywhere. A
+probe that sends immediately before `setverdict` and asks the MTC which
+sends actually arrived settles it:
+
+    virtual -> "PTC reached setverdict"
+    --live  -> "only the early send - PTC was CUT OFF"
+
+So the verdict was never *set*, not set-and-lost. The PTC was stopped by
+teardown because `comp.done` had not waited for it — i.e. this is §1y seen
+through its worst symptom, a **hollow pass**, and it disappeared when §1y
+was fixed.
+
+Kept as its own entry because the symptom is worth naming: the corpus runs
+under the virtual clock, where merging works, so no fixture could have
+caught this and the gate would have stayed green for as long as it went
+unnoticed. Gates protect the paths they cover.
+
+Method note, since it cost a wrong entry: *wall-clock elapsed time is not
+evidence that a component ran.* Ask what it observably produced.
+
+### 1v. `to <component>` was ignored under `--live` — FIXED 2026-09-14
+
+Found 2026-09-14 by broadening the two-clock probe, and found by a method
+worth recording as much as the defect is.
+
+`p.send(v) to c`, `p.call(...) to (...)`, `p.reply(...) to c` and
+`p.raise(...) to c` all routed to the addressed component under the
+cooperative scheduler and **broadcast to every connected peer** on the real
+clock. A sibling PTC therefore received a value, or caught an exception,
+meant for another component — and nothing reported it. Silent mis-delivery
+is worse than the earlier two live-only defects (§1x, §1y), which caused
+silent non-execution: a test can at least notice that nothing happened.
+
+The virtual-clock path was fixed for exactly this in August
+(`Sem_220201_SendOperation_005`, `Sem_220305_raise_operation_002`). The
+real-clock path was never brought along.
+
+**The gate's stated justification was false.** At interpreter.go:2589 the
+comment read: *"Without the scheduler there are no per-component keys, so
+keep the loopback name-collision routing."* There are. `PortKey`,
+`PortKeyFor` and `ConnectedPeers` consult only the MTC id, the current
+component and the connection map — none of which involve the scheduler.
+The routing the gate was protecting works identically on both paths, so
+removing the gate at all three sites (2577, 2589, 11061) is the whole fix.
+The scheduler path already took the unicast branch, so its behaviour is
+unchanged and the corpus provably cannot move: 4754, provenance counts
+identical, gate exit 0.
+
+Verified by `TestLiveClock_ToAddressUnicasts`, four subtests (send, call,
+reply, raise), each running one source under both clocks and failing if a
+second receiver sees traffic addressed to the first. Re-gating makes all
+four fail.
+
+**How it was found.** The probe was broadened by two strategies in
+parallel. Six shapes chosen by informed intuition — `interleave` with
+timers, nested `alt` with component operations, `any component.running`,
+timer `.read`/`.stop` in forked bodies, two-PTC procedure call/reply —
+found **nothing**. Six shapes derived mechanically, by enumerating every
+`deterministicSchedulerEnabled` / `SchedulerActive` / `useVirtualClock`
+branch in the interpreter and writing one shape per branch that changes
+behaviour, found **four** (the four above, one root cause).
+
+That asymmetry is the transferable result: in a two-clock engine the
+divergence candidates are not the shapes a tester imagines but the
+conditional branches that distinguish the clocks, and those can be listed
+from the source with `grep`. It also gives probe-broadening a stopping
+condition — one shape per behaviour-changing gated branch — instead of
+being open-ended.
+
+### 1u. Two more clock divergences, from auditing the remaining gated branches — FIXED 2026-09-14
+
+The §1v enumeration listed every branch that selects between the clocks.
+Four had not been probed; auditing them found two more divergences, and —
+worth as much — cleared two.
+
+**Cleared.** The `alt`/`interleave` snapshot freeze (testcase.go:1955,
+2096) and the PTC start barrier (interpreter.go:7916) agree on both paths.
+The freeze is the interesting negative: its gate is *inverted*, the freeze
+existing only on the real clock because the cooperative scheduler's single
+runner already excludes a mid-scan arrival. Two different mechanisms, one
+semantics — and a 25-round race probe never let a catch-all clause beat an
+earlier specific one on either path.
+
+**Divergence 1: a default that re-asserts a verdict went undetected under
+`--live`** (interpreter.go:9242). A fired default branch was detected two
+ways: directly, by a flag armed around the altstep evaluation, and
+indirectly, by the testcase verdict changing. Only the indirect test ran
+off the scheduler, and the code's own comment says it "misses a default
+that re-asserts an already-set verdict". So the alt never learned the
+default had fired and waited out its guard timer:
+
+    virtual -> pass
+    --live  -> fail ("alt timed out: default branch not detected")
+
+The direct mechanism has no scheduler dependency, so the fix is to arm and
+check it on both paths.
+
+**Divergence 2: `comp.done` in a value context returned Undefined** —
+and this one runs the other way, the **virtual** path being the wrong one.
+`blockUntilComponentState` returned `runtime.Undefined` on the scheduler
+path, which is harmless for the statement form but reads as false in
+`if (q.done)`:
+
+    virtual -> fail ("done read as false/undefined in a value context")
+    --live  -> pass
+
+Pre-existing, and confirmed so against a binary built before the §1y work.
+It sits on the path the conformance corpus runs, and no fixture catches it
+because the corpus does not use `.done` as a value this way. A reminder
+that the gate protects the corpus, not the language.
+
+Both fixed; `TestBothClocks_DefaultReassertingVerdictIsDetected` and
+`TestBothClocks_DoneInValueContextReturnsBool` run one source under both
+clocks and require the same verdict. Reverting either fix fails its test,
+on the clock it belongs to. Gate unchanged: 4754, exit 0.
+
+*Correction 2026-09-28 (§1s): Divergence 2 was misdiagnosed and its fix
+made things worse.* The answer was wrong, but so was the question: `.done`
+has no value form. The fix returned the predicate after blocking, and a
+value context has nothing to block for — with the PTC waiting on a port,
+the scheduler's deadlock release decided the answer, and `if (q.done)` said
+`true` for a component still running (it had said `false`, correctly by
+accident). The test only covered a PTC that had already finished. A value
+context is now an error; the test is `TestBothClocks_DoneIsNotAValue`.
+
+### T2. Timer-only defaults never fire — FIXED 2026-09-22
+
+`invokeDefaults` skipped any activated default whose only alternative was a
+timer timeout, so the classic *"if this hangs longer than N seconds, fail"*
+safety net never fired on either clock. ETSI 20.5.1 invokes an activated
+default whenever no alternative of the alt matches.
+
+The skip was the symptom. The cause was that an activated default's timer
+was **invisible to the alt's block step**: a default supplies alternatives
+to every alt, so its timer guard must influence when the alt wakes. It did
+not, so the virtual clock never advanced to the default's deadline, the
+timer was never expired when defaults were consulted, and the default could
+not fire. The real clock advances regardless, which is why removing the
+skip on its own made the two disagree.
+
+**Built in four steps, measured per-file after each. The step-by-step
+measurement is what found the real problem.**
+
+| step | change | per-file result |
+| --- | --- | --- |
+| A | thread scope through `considerComm` (pure refactor) | 0 changed |
+| B | virtual scanner considers activated defaults | **-5, all timeouts** |
+| B+D | …and remove the `isTimerOnlyDefault` skip | **-1** |
+| B+C+D | …and implement ETSI 22.3.1 | **0** |
+| +lenient | real-clock scanner too | **0** |
+
+Step B alone losing five files to timeouts is the ordering dependency: the
+clock advances to a default's deadline while the default is still skipped,
+so nothing fires and the alt spins. B and D belong together.
+
+**Step C is the discovery.** With B+D applied, one fixture regressed —
+`Sem_220301_CallOperation_008`, whose stated purpose is *"verify that
+defaults are not executed in response and exception handling part of a call
+operation"*. ETSI 22.3.1: the response part of a `call` "is executed like
+an alt statement without any active default." **The engine never
+implemented that rule.** It went unnoticed because the only fixture
+covering it uses a timer-only default, which the skip happened to suppress
+— so the skip was masking a second missing rule, and removing it exposed
+that rule as a regression rather than causing one.
+
+`runDefaults` now returns early inside a call response block
+(`currentCallSignature(env) != ""`), and the deadline scanners skip
+defaults there too, since parking on a deadline that cannot fire would hang
+the block until its own call timeout.
+
+*Superseded 2026-09-28 (§1s).* Both halves of this change regressed the
+default clock in shapes no fixture has. The call signature is a scope
+marker, inherited by every PTC started beneath the call and by every alt
+nested in the block's branch bodies, so those lost their defaults too. The
+response block is now marked by node, as the synthetic alt it is evaluated
+as, and treated exactly like `@nodefault`. Separately, the scanners counted
+default timers that had already expired; see §1s for the livelock that
+caused.
+
+**Verification.** Per-file diff against all 4948: 0 gained, 0 lost, 4754
+unchanged, gate exit 0. The probe fires on **both** clocks. Every two-clock
+probe suite still agrees. `go test ./...` and `-race` green. Both new tests
+are A/B-proven: reverting the 22.3.1 guard fails the call-block test on the
+live clock, reverting the scanner change fails the safety-net test on the
+virtual clock.
+
+Method note: the plan predicted two changes and the build needed three. The
+third was found only because the steps were measured separately — a single
+combined change would have shown -1 with no indication which part caused
+it, and the tempting read of a one-file regression is that the fixture is
+stale. It was not; it was the only thing testing a rule we did not have.
+
+### T1. `any timer.timeout` was a no-op outside an alt — FIXED 2026-09-21
+
+**The original description of this entry was wrong, and correcting it is
+the interesting part.** It read: *"`any timer.timeout` blocks correctly —
+0.41 s for a 0.4 s timer, the same as a named `t.timeout` — but leaves the
+fired timer running."* The first half was false. The 0.41 s was **not** the
+statement blocking; it was testcase teardown waiting out a still-running
+timer. A control testcase containing no timeout statement at all took the
+same 0.41 s, which is what settled it. The timing had also been taken with
+`--pattern`, which was not filtering — three testcases were running where
+one was intended — so the figure was a whole-file total attributed to a
+single statement. Two measurement errors pointing the same way.
+
+What it actually did: `evalTimerAggregate` implemented `timeout` only for
+the alt-guard case and returned `false` outside an alt —
+
+    if !altCtx.active() {
+        return runtime.NewBool(false), true
+    }
+
+— so a standalone `any timer.timeout` was a **silent no-op**. It did not
+wait, did not consume a timeout, and left the timer running. That is worse
+than the entry claimed: not a missing side effect but a missing operation.
+
+ETSI 23.7 draws no distinction between the named and aggregate forms here,
+and the singular `T.timeout` has always blocked in that position, with the
+implementation of that blocking sitting a few hundred lines away. The fix
+mirrors it: advance the virtual clock to the deadline so a later `.read` is
+exact, wait out the real remainder when the clock is real, then consume —
+`any` on the earliest deadline, consuming that timer; `all` on the latest,
+consuming every running timer. No running timer means nothing to wait for,
+reported as false rather than blocking forever.
+
+Conformance-neutral, and measured per-file rather than by the aggregate:
+**0 gained, 0 lost**, 4754 unchanged. 68 corpus files use an aggregate
+timeout outside an alt, so this was worth checking rather than assuming.
+
+Verified by `TestBothClocks_AggregateTimeoutBlocksOutsideAlt` across `any`,
+`all` and the no-running-timer case, each under both clocks. Restoring the
+early return fails it.
+
+Method note, since two independent measurement errors produced one
+confident wrong sentence: **a duration attributed to a statement needs a
+control that omits the statement.** Both errors here were caught by running
+one — the wall clock cannot tell you what it was waiting for.
+
+### 1t. `.done` on a modelled PTC diverged — FIXED 2026-09-22
+
+The last of the family. A PTC whose body does no port communication is
+never forked; its completion is modelled from the body's duration. The
+cooperative scheduler parks and advances the virtual clock to that modelled
+deadline. The real clock had no goroutine to wait on, so it returned
+immediately and reported the component as not done:
+
+    var W q := W.create;  q.start(naps());   // naps() = a 0.3s timer, no port comm
+    q.done;
+
+    virtual -> waited for the modelled duration
+    --live  -> returned before the modelled duration elapsed
+
+Pre-existing, and confirmed so against a binary built before the
+`comp.done` work — though the shape of it is partly mine: the early return
+when a component has no registered exit was written conservatively during
+§1y, to avoid hanging on something with nothing to wait for. It is right
+that a component with nothing modelled and no goroutine should not block;
+it was wrong to treat a *modelled* component the same way.
+
+ETSI 21.3.7 makes `.done` blocking, so the real clock now waits out the
+remaining real time to the modelled completion, bounded by the same stop
+channels as the forked case. Conformance-neutral, per-file: 0 gained, 0
+lost, 4754 unchanged.
+
+Verified by `TestBothClocks_DoneWaitsForModelledPTC`, which asserts on
+elapsed time rather than on the verdict alone — a probe that only asked
+"is it done now" cannot tell waiting from answering early. Reverting fails
+it on the live clock.
+
+### 1z. `decvalue` structured decode — SCOPED, not started
+
+Raised 2026-09-09 by a suite driving a REST service through the built-in
+HTTP port: its assertions were substring matches against a JSON body, which
+cannot show that the *right* element of an array changed. The route from
+TTCN-3 to the JSON codec is `decvalue_unichar`, and it is narrower than it
+looks. Scoped here so the next attempt starts from the shape rather than
+repeating the reconnaissance.
+
+**Do not read `builtins.DecValue`.** It is a stub that returns `Undefined`,
+and it is **not the live path** — the interpreter intercepts `decvalue` /
+`decvalue_unichar` / `decvalue_o` at the call site (`evalDecValue`) and never
+reaches it. Concluding "decvalue is unimplemented" from that stub is the
+mistake to avoid; it cost someone an investigation already.
+
+**What already works.** `evalDecValue` has a JSON branch
+(`decodeExplicitJSON`) that decodes **scalars and enumerated values**, and
+implements the error-behaviour spec (`ET_UNDEF` / `EB_IGNORE`, return code 2
+for undecodable input). It requires an explicit third argument —
+`decvalue_unichar(body, v, "JSON")` — and does **not** read
+`with { encode "JSON" }` off the type.
+
+**The gap is structured decode only**: a JSON object into a record, and a
+JSON array into a `record of`.
+
+**Why it is smaller than the stub comment suggests.** That comment ("expects
+data shaped types we don't model yet") predates the type machinery:
+`TypeDesc.Struct` now carries a record's declared field names and types,
+`declaredTypeBinding` already resolves a target's declared type (the enum
+path uses it), and `assignToLHS` handles write-back. The work is one
+recursive type-directed converter plus tests — afternoon-scale.
+
+**The risk is the gate, not the difficulty.** The ETSI suite exercises
+`decvalue` heavily and those fixtures currently fail in a *known* way, so a
+partial implementation can move the number in either direction. Measure the
+per-file delta before committing, as with any Bucket 1 slice; that is the
+reason this wants a dedicated slot rather than being squeezed in.
+
+A useful first slice, from the asking suite: object into a record of
+`charstring` / `integer` / nested record / `record of` fields, returning
+non-zero when the body does not fit. Encoding, unions, optionality
+subtleties and the alias machinery are not needed for it.
+
+### 1a. Strict procedure-payload matching — DONE
+**Closed 2026-07-28.** The previously listed fixtures
+(`Sem_220302_getcall_operation_020/021`,
+`Sem_2204_the_check_operation_090/094`) all match now: procedure receives
+honour the signature parameter and value/exception template under the
+strict engine instead of firing on "an envelope of this kind arrived".
+Chapter 22 retains 22 misses, but every one is a `reject->pass` negative
+fixture (a static-rejection question, Bucket 3), not a payload-matching
+failure. The history below is kept for context.
+
+**DONE 2026-07-06 (+2): signature qualification.** `call`/`reply`/`raise`
+now record `PortMessage.Signature` (the signature identifier peeled from
+the `S:{…}` / bare-`S` argument via `procSignatureName`), the blocking
+`call(S,…){ }` handler stashes S on the scope (`procCallSigKey`,
+save/restore for nesting), and an **unqualified** `getreply`/`catch`
+inside that block now skips a queued head whose known signature differs
+(the filter lives in `commGuardMatches` for the bare `[] p.getreply`
+guard and in `evalPortReceiveInfo` for the `from`-qualified variant).
+This fixed `Sem_220301_CallOperation_019/020` (ETSI 22.3.1 h: unqualified
+getreply/catch treat only the called procedure's reply/exception) with
+0 per-file regressions. It is deliberately scoped to the *implicit*
+call-block qualifier and leaves explicit-signature / getcall matching
+lenient, so the 119 `Sem_2204` check fixtures are untouched. Guarded by
+`interpreter/proc_signature_test.go`.
+
+The remaining ~6 need the harder, coupled change below. The loopback
+model still matches those procedure receives **leniently** — a
+`getreply`/`catch`/`getcall` fires on "an envelope of this kind arrived",
+ignoring the signature/parameter template (see the comment at
+`interpreter/interpreter.go` `evalPortReceiveInfo`, the
+`payloadOk := isProc || …` line). This is load-bearing: making it strict
+in isolation broke 17 check tests (057–088) in a prior attempt because
+deferred responders then enqueued replies that lenient `check` wrongly
+matched. The two requirements are coupled and must land together:
+
+- **Strict payload/param match** for procedure receives (honour the
+  `getreply(S:{…} value ?)` / `catch(S, T)` template), and
+- **Deferred-responder timing**: a server PTC whose `getcall;reply/raise`
+  body was deferred (caller issued a non-blocking `call` before the
+  server was started) must run before the caller's receive. A targeted
+  trigger (run pending responders at start when a call is already queued,
+  via a `HasPendingCall`-style check) avoids the over-broad
+  "run at every receive" that caused the regressions.
+
+The signature is now recorded on every `call`/`reply`/`raise` envelope
+(see the 1a DONE note above), so a strict-match attempt can rely on
+`PortMessage.Signature` being populated; the remaining risk is purely in
+flipping the lenient `payloadOk` for the `check`/getcall paths without
+regressing the 119 `Sem_2204` fixtures.
+
+### 1b. Async multi-PTC message echo — DONE
+**Closed 2026-07-28** by path (a) below: the strict cooperative scheduler
+forks every port-communicating PTC and parks alts on real port traffic,
+so an MTC↔PTC round-trip completes. `Sem_060210_ReuseofComponentTypes_002/003`,
+`Sem_2004_InterleaveStatement_002/013` and
+`Sem_1400_procedure_signatures_004` all match now.
+`Sem_200501_the_default_mechanism_008`, the last fixture from this
+cluster, was fixed on 2026-08-04 — not by scheduling at all, but because
+a `stop` in an activated default was being discarded (see "The
+executed-but-wrong slice"). Original analysis retained below — note that it
+names `evalAltStmtBestEffort`, `waitForAltPortTraffic` and
+`altHasExternalPortGuard`, all deleted on 2026-08-03 with the approximate
+engine, so it is history rather than a map of the current code.
+
+**~6 tests**, and **not one mechanism**: `Sem_060210_ReuseofComponentTypes_002/003`
+is a server-PTC echo (`while(true){alt{receive->send}}`); `Sem_2004_InterleaveStatement_002/013`
+is interleave + self-loop; `Sem_200501_the_default_mechanism_008` is default
++ stop + self-loop; `Sem_1400_procedure_signatures_004` is multi-PTC
+`all component.done`. They do **not** share one fix.
+
+A server PTC started with a `receive…send` body must process a message
+the MTC sends *after* `start`. **Attempt 2026-06-18 (reverted):** forking
+the `while(true)` receive-echo body as a goroutine (relaxing the
+`AliveModifier` gate on the existing daemon-style fork) makes it run, but
+the round-trip still fails — `evalAltStmtBestEffort` only parks-and-wakes
+(`waitForAltPortTraffic`) for ports with an **external driver**
+(`altHasExternalPortGuard`); a **loopback** alt falls to the legacy
+verdict-preferring heuristic and never blocks for the peer's echo. So the
+forked server and the MTC never synchronise.
+
+Two viable paths, both substantial: **(a)** real concurrent scheduling
+for loopback alts (extend `waitForAltPortTraffic` parking to loopback
+ports under forked PTCs) — touches the most load-bearing path, very high
+regression risk; or **(b)** a **synchronous message-responder**
+(register the server's alt at `start`; when the MTC's `receive` misses,
+run the responder's alt once to drain+echo, then retry) — analogous to
+the procedure `RunDeferredResponders`, no concurrency, but it must
+interact correctly with the legacy alt heuristic. Neither is a clean
+commit.
+
+### 1c. Structural record/list type compatibility — essentially done
+**~1 test left:** `Sem_060302_structured_types_010` (needs external
+functions; tracked under 1d).
+
+Assigning a value to a variable of a structurally-compatible type with
+**different field names** or **constrained dimensions** maps members by
+position (ETSI 6.3.2 / 6.2.7). Implemented:
+
+- **Record/set field-name remap** — out/inout-param writeback
+  (`coerceWritebackStruct`) and the plain `v2 := v1` assignment
+  (`evalAssign`), sharing `remapStructByPosition`: when both sides resolve
+  to distinct struct declarations of the same field count with different
+  names, the value is relabelled to the target's names. Fixed
+  `Sem_050402_actual_parameters_184`, `Sem_060302_structured_types_001`.
+- **Constrained array-subtype index offset** — `type integer T[1..2]`
+  records its lower index bound on `TypeDesc.IndexOffset` (subtype
+  registry); a list assigned to such a variable adopts it (copy-on-write
+  so the source keeps its own offset). Fixed
+  `Sem_060301_non_structured_types_002`.
+
+Enum-synonym, record-of / set-of, same-alternative union, and
+length-restricted string/bitstring/hexstring subtype assignment already
+worked. None of this checks field-*type* compatibility — it is scoped to
+differently-named or differently-indexed layouts only.
+
+### 1d. Smaller dedicated items — investigated, no clean win
+Each item below was scoped against the live fixtures; none yields a
+safe, generalisable commit. Captured here so they are not re-attempted.
+
+- **External functions — DONE 2026-08-04** (`Sem_160103_external_functions_001/002`,
+  `Sem_060302_structured_types_010`). This entry previously read "gaming —
+  do not implement", on the grounds that the return values are
+  host-defined. They are, and that is the point: an `external function`
+  has no TTCN-3 body because a deployment's SUT adapter supplies one
+  (ETSI 16.1.3), so the engine's job is to make that binding possible, not
+  to guess. [`runtime/extfunc.go`](../../runtime/extfunc.go) is the
+  registry; the harness binds the three fixtures that document their own
+  contract in a doc comment, in
+  [`conformance_extfuncs.go`](../../conformance_extfuncs.go), so nothing
+  fixture-specific sits in the engine. An unbound external function still
+  yields Undefined — 472 fixtures declare one, and erroring at the call
+  would fail them for an unrelated reason.
+- **RAW `encvalue_o` / `decvalue_o` — DONE 2026-08-04**
+  (`Sem_160102_predefined_functions_107/110`). A bitstring is
+  left-aligned into whole octets behind a 32-bit little-endian bit count,
+  so `encvalue_o('011'B)` is `'0300000060'O`; a record encodes its fields
+  in order, giving `'74657374546578740005000000'O` for `{"testText", 5}`
+  exactly as 107 documents; and `decvalue_o` returns 2 when the input is
+  shorter than the output slot's declared field width. Everything else
+  keeps the round-trip placeholder rather than an invented encoding, so
+  this is still **not** a real RAW codec — item 3 under "Suggested order"
+  stands.
+- **Template field building / union alt access — DONE 2026-08-04**
+  (`Sem_150605_Referencing_union_alternatives_002`,
+  `Sem_1511_ConcatenatingTemplatesOfStringAndListTypes_013`). The 2026-06
+  attempt described below regressed 6 files because it propagated the
+  wildcard blanketly from `left == runtime.Any`, where the type is gone.
+  What worked was resolving it where the type is still in hand: the
+  selector path returns `AnyOrNone` for an optional field and `Any` for a
+  mandatory one, *after* the attribute-access branches, so `ischosen` and
+  ordinary field referencing are untouched. History of the failed attempt:
+  mirroring the IndexExpr `left == Any` rule into the SelectorExpr path
+  fixed the target but broke `Sem_07010802_ischosen_operator_001`,
+  `Sem_150602_ReferencingRecordAndSetFields_003/004`,
+  `Sem_160102_predefined_functions_022` and `Sem_27010200_general_015`.
+- **Control-part conditional selection** (`Sem_2602_TheControlPart_001`):
+  the harness runs the first testcase; this file's control part only
+  `execute()`s the second under `if(true)`. Honouring control-part
+  selection is a harness change affecting ~2883 control-part files — high
+  risk; see also the masking note in `current-misses.md`.
+
+---
+
+## Bucket 2 — Contradictory / mislabeled fixtures (intentionally NOT fixed)
+
+The suite ships fixtures whose `@verdict` contradicts a sibling or the
+modern spec. The interpreter resolves these toward the modern/positive
+reading; "fixing" the negative would just flip which side fails (a wash).
+**Do not reject these without re-checking the whole gate.**
+
+- **V4-vs-V5 parametrization** (`050401_formal_parameters` ×8,
+  `050402_actual_parameters` ×6): `in/out` timer & port parameters are
+  *rejected* by `NegSem_05040103/04_*` but *accepted* by the positive
+  `Sem_05040101_026/027/030/031` (identical construct). V5 allows them; we
+  allow them. The rule is already coded-but-disabled in
+  `ttcn3/semantic/parametrization.go` (`checkParamList`, `_ = dirKind`).
+- **`Sem_5010206_Casting_001` vs `OfOperator_001`**: as predicted here,
+  implementing the `=>` / `of` class operators correctly (2026-08-04)
+  fixed `Casting_001` and broke `Sem_5010205_OfOperator_001`, which is
+  mislabelled `@verdict pass reject` over a valid positive body and was
+  only matching because `of` used to error. A wash on the corpus, kept
+  because the operators are now right.
+- **`NegSem_2707_OptionalAttributes_002`**: ETSI's own comment says it is
+  not actually forbidden.
+
+---
+
+## Bucket 3 — Risky semantic rejections (would regress positives)
+
+~Several reject→pass clusters want the IUT to *reject* referencing an
+uninitialised / `*` value. The loopback model deliberately returns
+Undefined for unmodelled/uninitialised reads to keep positive tests
+running; erroring would regress many.
+
+- `150603_referencing_record_of_and_set_elements` ×5 — reference
+  uninitialised / AnyValueOrNone record-of element.
+- `060207_arrays` ×3 — reference uninitialised array element.
+- `060212_addressing_entities_inside_sut` ×3, `060215_map_types` ×4,
+  `1508_template_restrictions` ×7 (omit/present restriction violations),
+  `0901_communication_ports` ×7 (illegal port-type member usage).
+
+These need a precise, narrowly-scoped semantic check per cluster that
+fires only on the genuinely-invalid construct — each is its own small,
+carefully-gated analysis pass, not a blanket "error on Undefined".
+
+---
+
+## Suggested order
+
+**1a**, **1b** and **1c** are done (`060302_010`, the file 1c was waiting
+on, landed with the external-function registry). **1d** is done too: all
+four items it listed as unsafe were closed on 2026-08-04, three of them by
+rejecting the framing rather than the feature. What remains:
+
+**Engine convergence is done** (2026-08-03) — see "One engine" above.
+Both interleave fallbacks and the second, mis-gated altstep fallback are
+closed, the approximate engine and the profile toggle are deleted, and
+the corpus never moved: every step held 4798 / 4948 with zero per-file
+changes. Deleting the blocking-body fallback needed no branch-suspension
+machinery, because measurement showed that fallback changed no verdict.
+
+What remains:
+
+1. **Execute `control {}` as a program — largely DONE (2026-08-03).**
+   `RunControlWith` runs a module's control part, `execute(TC(args))`
+   runs a testcase and yields its verdict, and the module's verdict is
+   the worst over the testcases the control part actually ran (ETSI 26.2).
+   The harness routes a module through its control part only when that
+   part decides something a single-testcase run cannot reproduce —
+   several executes, or one carrying a timeout or host operand — so the
+   overwhelmingly common `control { execute(TheOnlyTestcase()); }` keeps
+   the direct path. +5 fixtures, 0 regressions.
+
+   Two corrections to the scoping this item was originally written from.
+   The "24 files whose control part is the only executable thing" are
+   **not** a clean slice: every one of them carries an ETSI `noexecution`
+   directive, as does all but one of the 207 `parse-only` files. Executing
+   them would override an explicit instruction not to, so the
+   real-execution rate is effectively not growable through this lever at
+   all — the gain here is match rate.
+
+   What is left in this area:
+   - **Control-level timers, alts and defaults.** A control part can
+     start timers and activate defaults that call `execute`
+     (Sem_2601_ExecuteStatement_010); the control scope has no
+     TestcaseExec, so those do nothing today.
+   - Module-qualified identifiers in a control body
+     (Sem_08020305_ImportingAllDefinitionsOfAModule_004) and
+     `testcasename()` returning empty under the control path.
+   - `Sem_2601_ExecuteStatement_003` is **done**: a deadlock now reports
+     itself as `error`, which is what the fixture asked for.
+2. **Finish the procedure-communication round trip.** 47 of the 74 files
+   the correction exposed, and the four `TestStrictSched_*` tripwires. The
+   bodies now run; what still fails is a client/server pair completing a
+   call/reply, which is matching and routing. This is the largest single
+   block of honest misses in the suite and the highest-value item here.
+3. **The newly-found defects** under "The correction", each with a
+   tripwire test carrying its diagnosis: the stopped `alive` component that
+   cannot be restarted, and interleave not suspending a blocked branch. (The
+   injected message that never reached a driver-bound PTC was fixed on
+   2026-08-18.) §1s adds eight more, the first two of which — timer-only PTC
+   bodies and `compKilled` — are one change that closes a false `pass`.
+4. **Bucket 3 clusters**, one precise, narrowly-scoped analysis pass at a
+   time. 102 of the 178 real misses expect `reject`, so the remaining
+   match-rate does live here — but see the 2026-06-17 triage above: none of
+   it is low-hanging, spread across 23 clusters, and matching-core changes
+   regress easily.
+5. **Wire `runtime/codec`.** Filed here rather than under real execution:
+   it is worth only ~2 real-execution conversions but up to 13 match-rate
+   fixes, all of them the `22_communication_operations` `reject->pass`
+   cluster that needs decoding to actually *fail* on malformed input,
+   which the current placeholder cache can never do. The codecs exist and
+   are tested; the work is the bridge, and the risk is that a real codec
+   produces different bytes than the placeholder for the files that
+   currently match through it. Note that `encvalue_o` / `decvalue_o` now
+   produce real bytes for bitstrings and records (1d) — that is a handful
+   of shapes, not the bridge.
+6. **Do not** pursue cross-module symbol resolution via `ttcn3/types` as a
+   conformance lever. `TypeOf` handles literals and operators only, so
+   this means writing a symbol table from scratch, while the existing
+   flat-directory hack in `conformance.go` already gets 454 of the 555
+   nominally-unresolvable files executing and matching. Measured return:
+   one file.
+7. Leave **Bucket 2** as-is unless the suite revision is reconciled.

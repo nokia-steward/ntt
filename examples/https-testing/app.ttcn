@@ -1,0 +1,108 @@
+/* Drives a REST/JSON service over HTTPS from TTCN-3.
+ *
+ * One request/response exchange is a record pair: send {method, path,
+ * body}, receive {status, body}. A request that never completes is a
+ * DIFFERENT inbound type, so a suite can tell "the service said no" from
+ * "the service was not there" without waiting for a guard timer.
+ *
+ * Nothing here binds the transport: the base URL and TLS settings live in
+ * app.cfg. Pointing this suite at another endpoint is a config edit.
+ */
+module app {
+
+    type record HttpRequest  { charstring method, charstring path, charstring body }
+    type record HttpResponse { integer status, charstring body }
+
+    /* Declare the reason values EXPLICITLY, exactly as written here.
+     * A TTCN-3 enumeration numbers its labels by declaration order unless
+     * the values are given, and matching compares the integer as well as
+     * the label — so tidying these lines into alphabetical order without
+     * the numbers would silently stop every TransportError template from
+     * matching, with no error. */
+    type enumerated TransportErrorReason {
+        refused(0), unreachable(1), timeout(2), dns(3),
+        tls(4), other(5), reset(6), oversize(7)
+    }
+    type record TransportError { TransportErrorReason reason, charstring detail }
+
+    type port P message { out HttpRequest; in HttpResponse, TransportError }
+    type component C { port P p }
+
+    /* Functional: the service answers its liveness probe over TLS. */
+    testcase tc_health() runs on C system C {
+        timer g := 10.0;
+        map(self:p, system:p);
+        g.start;
+        p.send(HttpRequest:{ method := "GET", path := "/healthz", body := "" });
+        alt {
+            [] p.receive(HttpResponse:{ status := 200, body := ? }) { setverdict(pass); }
+            [] p.receive(TransportError:{ reason := refused, detail := ? }) {
+                setverdict(fail, "nothing is listening - is the SUT started?");
+            }
+            [] p.receive(TransportError:{ reason := tls, detail := ? }) {
+                setverdict(fail, "TLS failed - check ca_cert / insecure_skip_verify in app.cfg");
+            }
+            [] p.receive(TransportError:{ reason := ?, detail := ? }) {
+                setverdict(fail, "the request did not complete");
+            }
+            [] g.timeout { setverdict(fail, "no response"); }
+        }
+        unmap(self:p, system:p);
+    }
+
+    /* Functional: the JSON body carries the field we expect. */
+    testcase tc_reports_status() runs on C system C {
+        timer g := 10.0;
+        map(self:p, system:p);
+        g.start;
+        p.send(HttpRequest:{ method := "GET", path := "/api/v1/status", body := "" });
+        alt {
+            [] p.receive(HttpResponse:{ status := 200, body := pattern "*""state""*" }) { setverdict(pass); }
+            [] p.receive(HttpResponse:{ status := ?, body := ? }) { setverdict(fail, "unexpected body shape"); }
+            [] p.receive(TransportError:{ reason := ?, detail := ? }) { setverdict(fail, "the request did not complete"); }
+            [] g.timeout { setverdict(fail, "no response"); }
+        }
+        unmap(self:p, system:p);
+    }
+
+    /* Profiling: a loop of round trips. `ntt exec --profile` turns this
+     * same testcase into a latency/throughput sample without changing it. */
+    testcase tc_load() runs on C system C {
+        timer g := 60.0;
+        var integer i := 0;
+        map(self:p, system:p);
+        g.start;
+        while (i < 50) {
+            p.send(HttpRequest:{ method := "GET", path := "/api/v1/status", body := "" });
+            alt {
+                [] p.receive(HttpResponse:{ status := 200, body := ? }) { i := i + 1; }
+                [] p.receive(TransportError:{ reason := ?, detail := ? }) {
+                    setverdict(fail, "the SUT stopped completing requests"); i := 50;
+                }
+                [] g.timeout { setverdict(fail, "the SUT stopped responding"); i := 50; }
+            }
+        }
+        setverdict(pass);
+        unmap(self:p, system:p);
+    }
+
+    /* A per-request budget, timed on the real clock. A stopwatch timer
+     * still needs a default duration (ETSI 12); it is only ever read. */
+    testcase tc_latency_budget() runs on C system C {
+        timer g := 10.0;
+        timer rtt := 60.0;
+        map(self:p, system:p);
+        g.start;
+        rtt.start;
+        p.send(HttpRequest:{ method := "GET", path := "/healthz", body := "" });
+        alt {
+            [] p.receive(HttpResponse:{ status := 200, body := ? }) {
+                if (rtt.read < 1.0) { setverdict(pass); }
+                else { setverdict(fail, "round trip exceeded the 1s budget"); }
+            }
+            [] p.receive(TransportError:{ reason := ?, detail := ? }) { setverdict(fail, "the request did not complete"); }
+            [] g.timeout { setverdict(fail, "no reply"); }
+        }
+        unmap(self:p, system:p);
+    }
+}

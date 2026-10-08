@@ -1,0 +1,1302 @@
+package interpreter_test
+
+import (
+	"context"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/nokia/ntt/interpreter"
+	"github.com/nokia/ntt/runtime"
+	"github.com/nokia/ntt/ttcn3"
+)
+
+func runStrict(t *testing.T, qname, src string) (runtime.Verdict, string) {
+	t.Helper()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, qname,
+		interpreter.TestcaseOptions{})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith(%s): %v", qname, err)
+	}
+	return v, reason
+}
+
+// runStrictDet runs a logical alt/interleave test under the deterministic
+// scheduler + virtual clock, so a timer guard (e.g. `t := 0.05`) fires on
+// the virtual clock — deterministically — instead of racing a real 50ms
+// deadline on a slow/loaded CI runner. Use it for tests that only care
+// about WHICH clause fires, not how long the wait took; use runStrict for
+// tests that assert real-clock timing (e.g. TestStrictAlt_TimerGuardFires).
+func runStrictDet(t *testing.T, qname, src string) (runtime.Verdict, string) {
+	t.Helper()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, qname,
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith(%s): %v", qname, err)
+	}
+	return v, reason
+}
+
+// TestStrictAlt_ConnectedPeerReceive covers the ProfileStrict snapshot
+// alt evaluator + connection-topology routing: a connected peer sends,
+// and the MTC's alt receives it on the connected port. Under the strict
+// profile a send on a connected port must reach the PEER's queue (not
+// the sender's own), and the alt must match by real guard evaluation —
+// not the verdict-preferring heuristic. Mirrors
+// Sem_2002_TheAltStatement_016.
+func TestStrictAlt_ConnectedPeerReceive(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		function fsend() runs on C { p.send("ping"); }
+		testcase tc() runs on C system C {
+			var C peer := C.create;
+			connect(self:p, peer:p);
+			peer.start(fsend());
+			alt {
+				[] p.receive(charstring:"ping") { setverdict(pass); }
+				[] p.receive { setverdict(fail, "wrong message"); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (connected send must reach the peer's queue)", v, reason)
+	}
+}
+
+// TestStrictAlt_TimerGuardFires covers honest snapshot blocking: the
+// receive guard never matches (nothing is queued), so the alt blocks and
+// the timer guard fires for real — instead of the approximate model
+// fabricating a verdict. Uses a short real timer so the test is fast.
+func TestStrictAlt_TimerGuardFires(t *testing.T) {
+	start := time.Now()
+	v, reason := runStrict(t, "M.tc", `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer t := 0.05;
+			t.start;
+			alt {
+				[] p.receive(charstring:"never") { setverdict(fail, "unexpected message"); }
+				[] t.timeout { setverdict(pass); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass via the timer guard", v, reason)
+	}
+	// The timer really elapses (~50ms); the approximate heuristic would
+	// return in ~0ms by faking the branch.
+	if elapsed := time.Since(start); elapsed < 40*time.Millisecond {
+		t.Fatalf("alt returned in %v; the strict timer guard should have waited ~50ms", elapsed)
+	}
+}
+
+// TestStrictAlt_ContextCancelsBlockedAlt covers cancellable execution: a
+// strict alt with only a receive guard that never matches blocks
+// forever; a deadline context must stop the run so the goroutine
+// terminates (no leak / hang) rather than spinning on the backstop.
+func TestStrictAlt_ContextCancelsBlockedAlt(t *testing.T) {
+	src := `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			alt {
+				[] p.receive(charstring:"never") { setverdict(pass); }
+			}
+		}
+	}`
+	tree := parse(t, src)
+	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
+	defer cancel()
+
+	done := make(chan struct{})
+	go func() {
+		_, _, _ = interpreter.RunTestcaseWith([]*ttcn3.Tree{tree}, "M.tc",
+			interpreter.TestcaseOptions{Context: ctx})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		// good: the blocked alt was cancelled and the run returned.
+	case <-time.After(3 * time.Second):
+		t.Fatal("blocked strict alt was not cancelled by context (leak/hang)")
+	}
+}
+
+// TestStrictAlt_DeterministicClockFiresTimerInstantly covers the
+// deterministic clock: a 30s timer guard fires virtually-instantly
+// (virtual-clock advance, no real sleep) with the correct verdict — the
+// property that removes real-timer "pass->timeout" artifacts from the
+// strict differential.
+func TestStrictAlt_DeterministicClockFiresTimerInstantly(t *testing.T) {
+	src := `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer t := 30.0;
+			t.start;
+			alt {
+				[] p.receive(charstring:"never") { setverdict(fail, "unexpected message"); }
+				[] t.timeout { setverdict(pass); }
+			}
+		}
+	}`
+	start := time.Now()
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
+		interpreter.TestcaseOptions{DeterministicClock: true})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass via the timer guard", v, reason)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Fatalf("deterministic 30s timer took %v; it must fire instantly (virtual clock)", elapsed)
+	}
+}
+
+// TestStrictAlt_DeterministicClockSoonestTimerWins guards deadline
+// ordering: the block step advances to the SOONEST timer deadline, so a
+// 5s timer wins over a 30s one even though the 30s clause is listed
+// first — not naive source order.
+func TestStrictAlt_DeterministicClockSoonestTimerWins(t *testing.T) {
+	src := `module M {
+		type component C { }
+		testcase tc() runs on C system C {
+			timer t_long := 30.0;
+			timer t_short := 5.0;
+			t_long.start;
+			t_short.start;
+			alt {
+				[] t_long.timeout { setverdict(fail, "long timer fired first"); }
+				[] t_short.timeout { setverdict(pass); }
+			}
+		}
+	}`
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
+		interpreter.TestcaseOptions{DeterministicClock: true})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (soonest timer must win)", v, reason)
+	}
+}
+
+// TestStrictProc_ConnectedCallReply covers strict connection routing for
+// procedure-based communication: a caller's `call` must reach the
+// connected server's queue, and the server's `reply` must reach the
+// caller's queue. Without proc routing under strict the call/reply land
+// on the sender's own queue and the caller's getreply never matches.
+func TestStrictProc_ConnectedCallReply(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		signature S() return integer;
+		type port P procedure { inout S }
+		type component C { port P p }
+		function server() runs on C {
+			p.getcall(S:?);
+			p.reply(S:{} value 42);
+		}
+		testcase tc() runs on C system C {
+			var C peer := C.create;
+			connect(self:p, peer:p);
+			p.call(S:{}, nowait);
+			peer.start(server());
+			peer.done;
+			alt {
+				[] p.getreply(S:?) { setverdict(pass); }
+				[else] { setverdict(fail, "no reply reached the caller"); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (connected call/reply routing)", v, reason)
+	}
+}
+
+// TestStrictProc_CheckHonoursTemplate covers strict procedure-payload
+// matching: `check(getreply(S:{p:=(100..200)} value ?))` must NOT match a
+// reply whose parameter is out of range (here p_par1=1), so the fail
+// branch does not fire and the bare-getreply fallback passes. Under the
+// lenient (approximate) match the check wrongly fires. Mirrors
+// Sem_2204_the_check_operation_057.
+func TestStrictProc_CheckHonoursTemplate(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		signature S(out integer p_par1) return integer;
+		type port P procedure { inout S }
+		type component C { port P p }
+		function f() runs on C {
+			p.getcall;
+			p.reply(S:{ p_par1 := 1 } value 5);
+		}
+		testcase tc() runs on C system C {
+			var C peer := C.create;
+			connect(self:p, peer:p);
+			p.call(S:{ p_par1 := - }, nowait);
+			peer.start(f());
+			alt {
+				[] p.check(getreply(S:{ p_par1 := (100..200) } value ?)) { setverdict(fail, "check wrongly matched"); }
+				[] p.getreply { setverdict(pass); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (check must honour the param template)", v, reason)
+	}
+}
+
+// TestStrictAlt_BooleanGuardGatesClause covers boolean-guard evaluation
+// (ETSI 20.2): a clause `[expr] op {...}` is eligible only when `expr`
+// holds. Both clauses below fire on the same timer, but the first is
+// gated by a false boolean guard, so the strict snapshot must skip it and
+// take the second (true-guarded) clause. Without guard evaluation the
+// first clause would win by source order and the verdict would be fail.
+func TestStrictAlt_BooleanGuardGatesClause(t *testing.T) {
+	// Deterministic clock: the 0.05s timer is only the event that lets the
+	// alt conclude; the test is about WHICH guarded clause fires, not the
+	// wait. Firing it virtually makes the outcome deterministic instead of
+	// racing a real 50ms deadline on a loaded runner (a Windows CI flake).
+	v, reason := runStrictDet(t, "M.tc", `module M {
+		type component C { }
+		testcase tc() runs on C system C {
+			var integer x := 0;
+			timer t := 0.05;
+			t.start;
+			alt {
+				[x > 0] t.timeout { setverdict(fail, "false-guarded clause fired"); }
+				[x == 0] t.timeout { setverdict(pass); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (false boolean guard must skip its clause)", v, reason)
+	}
+}
+
+// TestStrictProc_TwoPTCBlockingCall covers the concurrent two-PTC
+// blocking-`call` shape (Sem_220301_CallOperation): a non-alive `server`
+// PTC forks and blocks in `getcall` BEFORE any call exists, then a
+// non-alive `client` PTC issues a blocking `call` whose reply the server
+// produces. Both are `create`d (not `create alive`), so the strict
+// forkStrict path must run their blocking bodies on real goroutines; the
+// deterministic clock falls back to the real clock while they are live,
+// so the server's safety timer does not fire before the client's call
+// arrives. The MTC coordinates via component.done.
+func TestStrictProc_TwoPTCBlockingCall(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		signature S() return integer;
+		type port P procedure { inout S }
+		type component C { port P p }
+		function server() runs on C {
+			timer t := 30.0; t.start;
+			alt {
+				[] p.getcall(S:?) { p.reply(S:{} value 42); }
+				[] t.timeout { setverdict(fail, "server timed out"); }
+			}
+		}
+		function client() runs on C {
+			p.call(S:{}, 5.0) {
+				[] p.getreply(S:? value 42) { setverdict(pass); }
+				[] p.getreply { setverdict(fail, "wrong reply"); }
+				[] p.catch(timeout) { setverdict(fail, "call timed out"); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C srv := C.create;
+			var C cli := C.create;
+			connect(srv:p, cli:p);
+			srv.start(server());
+			cli.start(client());
+			all component.done;
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (two-PTC blocking call/reply)", v, reason)
+	}
+}
+
+// TestStrictProc_GetcallPositionalParamRedirect covers two procedure
+// redirect fixes: (1) a `getcall(...) -> param(...)` redirect is applied
+// at all (getcall was missing from the RedirectExpr evaluator), and (2)
+// the POSITIONAL form `param(v1, -, v3)` binds each target to the
+// parameter record's field at that position (in signature order) rather
+// than the whole payload. The server echoes the bound params back as the
+// reply's return value; a wrong binding yields the wrong value and the
+// client's value-qualified getreply would not match. Mirrors
+// Sem_220301_CallOperation_001.
+func TestStrictProc_GetcallPositionalParamRedirect(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		signature S(in integer p1, out integer p2, inout integer p3) return integer;
+		template S s_call := { p1 := 4, p2 := -, p3 := 5 };
+		type port P procedure { inout S }
+		type component C { port P p }
+		function server() runs on C {
+			var integer v1, v3;
+			p.getcall(S:?) -> param(v1, -, v3);
+			p.reply(S:{ p1 := -, p2 := v1 + v3, p3 := - } value v1 + v3);
+		}
+		testcase tc() runs on C system C {
+			var C peer := C.create;
+			connect(self:p, peer:p);
+			p.call(S:s_call, nowait);
+			peer.start(server());
+			peer.done;
+			alt {
+				[] p.getreply(S:? value 8) { setverdict(fail, "wrong return value"); }
+				[] p.getreply(S:{ p1 := -, p2 := 9, p3 := ? } value 9) { setverdict(pass); }
+				[] p.getreply { setverdict(fail, "no positional bind"); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (positional param redirect: v1=4,v3=5 -> value 9)", v, reason)
+	}
+}
+
+// TestStrictProc_MultiClientBroadcast covers the multi-connect broadcast
+// shape (Sem_220303_ReplyOperation): two non-alive client PTCs each issue
+// a blocking `call`, and a server replies `to all component`. Both
+// clients must run and receive the reply. The bug: the global
+// HasPendingCalls flag caused the SECOND client to be skipped once the
+// first had a queued call, so it never finished and `all component.done`
+// hung. A client (blocking call) must always fork regardless of pending
+// calls.
+func TestStrictProc_MultiClientBroadcast(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		signature S() return integer;
+		type port P procedure { inout S }
+		type component C { port P p }
+		function server() runs on C {
+			timer t := 30.0; t.start;
+			alt {
+				[] p.getcall(S:?) { }
+				[] t.timeout { setverdict(fail, "server timeout"); }
+			}
+			p.reply(S:{} value 7) to all component;
+		}
+		function client() runs on C {
+			p.call(S:{}, 5.0) {
+				[] p.getreply(S:? value 7) { setverdict(pass); }
+				[] p.catch(timeout) { setverdict(fail, "client got no reply"); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C srv := C.create;
+			var C a := C.create;
+			var C b := C.create;
+			connect(srv:p, a:p);
+			connect(srv:p, b:p);
+			srv.start(server());
+			a.start(client());
+			b.start(client());
+			all component.done;
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (both clients must run and get the broadcast reply)", v, reason)
+	}
+}
+
+// TestStrictProc_PortArrayConnectedRouting covers strict routing for
+// port ARRAY elements: connect(self:p[i], v:p[i]) records the endpoint
+// under the base name "p" (portRefName drops the index) while comm uses
+// "p[i]", so strict routing must fall back to the base and re-apply the
+// element index. Mirrors Sem_220304_getreply_operation_002.
+func TestStrictProc_PortArrayConnectedRouting(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		signature S();
+		type port P procedure { inout S }
+		type component C { port P p[2] }
+		function f() runs on C {
+			for (var integer i := 0; i < 2; i := i + 1) {
+				p[i].getcall;
+				p[i].reply(S:{});
+			}
+		}
+		testcase tc() runs on C system C {
+			var C v := C.create;
+			for (var integer i := 0; i < 2; i := i + 1) {
+				connect(self:p[i], v:p[i]);
+				p[i].call(S:{}, nowait);
+			}
+			v.start(f());
+			// The responder runs concurrently: wait for its reply, bounded.
+			timer g := 5.0; g.start;
+			alt {
+				[] any from p.getreply { setverdict(pass); }
+				[] g.timeout { setverdict(fail, "port-array reply not routed to caller"); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (port-array connected routing)", v, reason)
+	}
+}
+
+// TestStrictProc_BareGetreplyRespectsSnapshot guards the ETSI 20.2 snapshot
+// boundary on the BARE procedure-guard path. A specific
+// `getreply(S:? value 42)` clause followed by a catch-all `getreply` must
+// never lose the reply to the catch-all: the templated and message receive
+// paths honour the round's frozen boundary, and this path used to peek the
+// LIVE queue instead, so a reply arriving mid-round was invisible to the
+// earlier clause and consumed by the later one. It surfaced as an
+// intermittent "wrong reply" on loaded CI runners and reproduced under
+// -race; run with -count to exercise the window.
+func TestStrictProc_BareGetreplyRespectsSnapshot(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		signature S() return integer;
+		type port P procedure { inout S }
+		type component C { port P p }
+		function server() runs on C {
+			timer t := 30.0; t.start;
+			alt {
+				[] p.getcall(S:?) { p.reply(S:{} value 42); }
+				[] t.timeout { setverdict(fail, "server timed out"); }
+			}
+		}
+		function client() runs on C {
+			p.call(S:{}, 5.0) {
+				[] p.getreply(S:? value 42) { setverdict(pass); }
+				[] p.getreply { setverdict(fail, "catch-all took the reply from the specific clause"); }
+				[] p.catch(timeout) { setverdict(fail, "call timed out"); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C srv := C.create;
+			var C cli := C.create;
+			connect(srv:p, cli:p);
+			srv.start(server());
+			cli.start(client());
+			all component.done;
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass (a bare guard must respect the alt snapshot)", v, reason)
+	}
+}
+
+// TestLiveClock_PTCBodyWithTimerRuns guards the real-clock fork predicate.
+// A started PTC gets a goroutine only when a predicate says its body needs
+// one. Under the cooperative scheduler that predicate is broad; on the real
+// clock it used to be the narrow getcall-only one, on the reasoning that
+// forking half a pair whose counterpart is not forked leaves it waiting for
+// traffic that never comes. That reasoning does not transfer: with no
+// scheduler there is no modelling, so an unforked body does not run at all.
+//
+// The body below sends, waits on a timer, then sends again. Before the fix
+// NEITHER send arrived under the real clock — the testcase died on its own
+// guard timer with no indication the PTC had never started — while the same
+// source passed on the virtual clock. "Wait, then act" is an ordinary shape
+// for pacing a live SUT, so this asserts both sends arrive.
+func TestLiveClock_PTCBodyWithTimerRuns(t *testing.T) {
+	src := `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		function two_phase() runs on C {
+			p.send("before");
+			timer d := 0.05; d.start; d.timeout;
+			p.send("after");
+		}
+		testcase tc() runs on C system C {
+			timer g := 10.0;
+			var C q := C.create;
+			connect(self:p, q:p);
+			q.start(two_phase());
+			g.start;
+			alt {
+				[] p.receive("before") { setverdict(pass); }
+				[] g.timeout { setverdict(fail, "PTC never ran at all"); stop; }
+			}
+			alt {
+				[] p.receive("after") { setverdict(pass); }
+				[] g.timeout { setverdict(fail, "PTC ran but its timer never released it"); }
+			}
+		}
+	}`
+	// Real clock: both options off, which is what --live selects.
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
+		interpreter.TestcaseOptions{})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("real clock: verdict = %s (%s), want pass", v, reason)
+	}
+	// Same source, virtual clock: the verdict must agree. This pair is the
+	// clock-substitution equivalence claim in miniature.
+	v2, reason2, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc",
+		interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith (virtual): %v", err)
+	}
+	if v2 != v {
+		t.Fatalf("clock substitution changed the verdict: real=%s (%s) virtual=%s (%s)",
+			v, reason, v2, reason2)
+	}
+}
+
+// TestLiveClock_DoneBlocksAndPreservesPTCVerdict covers ETSI 21.3.7 on the
+// real clock, and the hollow pass that followed from it not holding.
+//
+// `comp.done` was gated on the cooperative scheduler at its call site, so a
+// live run answered a non-blocking snapshot. The MTC then ran to the end of
+// its body and teardown stopped the PTC — which had not yet reached its
+// setverdict — so the testcase reported a pass nothing had earned. That is
+// the failure class this engine exists not to produce, on the one path the
+// conformance corpus cannot cover, since the corpus runs virtual.
+//
+// The PTC below sends immediately before its setverdict, so the probe
+// distinguishes "ran to completion" from "was cut off" rather than
+// inferring it from elapsed time — teardown's own grace period makes wall
+// time a misleading proxy here.
+func TestLiveClock_DoneBlocksAndPreservesPTCVerdict(t *testing.T) {
+	src := `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		function late_fail() runs on C {
+			p.send("early");
+			timer d := 0.2; d.start; d.timeout;
+			p.send("reached");
+			setverdict(fail, "PTC reached setverdict");
+		}
+		testcase tc() runs on C system C {
+			var C q := C.create;
+			connect(self:p, q:p);
+			q.start(late_fail());
+			q.done;
+			setverdict(pass);
+		}
+	}`
+	for _, k := range []struct {
+		name string
+		opts interpreter.TestcaseOptions
+	}{
+		{"virtual", interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true}},
+		{"live", interpreter.TestcaseOptions{}},
+	} {
+		v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", k.opts)
+		if err != nil {
+			t.Fatalf("%s: RunTestcaseWith: %v", k.name, err)
+		}
+		// The PTC sets fail and the testcase must inherit it: `.done` has
+		// to wait long enough for the PTC to get there.
+		if v != runtime.FailVerdict {
+			t.Fatalf("%s: verdict = %s (%s), want fail — the PTC's verdict must survive `.done`",
+				k.name, v, reason)
+		}
+	}
+}
+
+// TestLiveClock_ToAddressUnicasts pins that `to <component>` addresses one
+// component on BOTH clocks, for every operation that accepts it.
+//
+// The per-component routing was gated on the cooperative scheduler, on the
+// stated grounds that "without the scheduler there are no per-component
+// keys". That was not so — PortKey/PortKeyFor and ConnectedPeers consult
+// only the MTC id, the current component and the connection map — so the
+// gate made `to` silently a no-op under --live and delivered to every
+// connected peer instead. A sibling PTC then received a value, or caught an
+// exception, meant for another component, with nothing reporting it.
+//
+// Each case runs two receivers and addresses only the first; the second
+// reporting a delivery means the address was ignored. Both clocks must
+// agree, which is the property that failed.
+func TestLiveClock_ToAddressUnicasts(t *testing.T) {
+	const prelude = `
+		signature S() return integer exception (charstring);
+		signature N();
+		type port Q procedure { inout S, N }
+		type port P message { inout charstring }
+		type port R message { inout charstring }
+		type component C { port P p; port Q q; port R r }
+		type component W { port P p; port Q q; port R r }
+	`
+	for _, k := range []struct{ name, body string }{
+		{"send", `
+		function rx(charstring tag) runs on W {
+			timer t := 0.3; t.start;
+			alt { [] p.receive(charstring:?) { r.send(tag & ":GOT"); }
+			      [] t.timeout { r.send(tag & ":NONE"); } }
+		}
+		testcase tc() runs on C system C {
+			timer g := 15.0;
+			var W a := W.create("a"); var W b := W.create("b");
+			connect(self:p, a:p); connect(self:p, b:p);
+			connect(self:r, a:r); connect(self:r, b:r);
+			a.start(rx("a")); b.start(rx("b"));
+			p.send("hello") to a;
+			g.start;
+			var integer n := 0; var boolean bad := false;
+			while (n < 2) {
+				alt { [] r.receive("b:GOT") { bad := true; n := n + 1; }
+				      [] r.receive(charstring:?) { n := n + 1; }
+				      [] g.timeout { n := 2; } }
+			}
+			if (bad) { setverdict(fail, "broadcast: b got a message addressed to a"); }
+			else { setverdict(pass); }
+		}`},
+		{"call", `
+		function rx(charstring tag) runs on W {
+			timer t := 0.3; t.start;
+			alt { [] q.getcall(N:?) { r.send(tag & ":GOT"); }
+			      [] t.timeout { r.send(tag & ":NONE"); } }
+		}
+		testcase tc() runs on C system C {
+			timer g := 15.0;
+			var W a := W.create("a"); var W b := W.create("b");
+			connect(self:q, a:q); connect(self:q, b:q);
+			connect(self:r, a:r); connect(self:r, b:r);
+			a.start(rx("a")); b.start(rx("b"));
+			q.call(N:{}, nowait) to a;
+			g.start;
+			var integer n := 0; var boolean bad := false;
+			while (n < 2) {
+				alt { [] r.receive("b:GOT") { bad := true; n := n + 1; }
+				      [] r.receive(charstring:?) { n := n + 1; }
+				      [] g.timeout { n := 2; } }
+			}
+			if (bad) { setverdict(fail, "broadcast: b got a call addressed to a"); }
+			else { setverdict(pass); }
+		}`},
+		{"reply", `
+		function cli(charstring tag) runs on W {
+			q.call(S:{}, 1.0) {
+				[] q.getreply(S:?) { r.send(tag & ":GOT"); }
+				[] q.catch(timeout) { r.send(tag & ":NONE"); }
+			}
+		}
+		function srv() runs on W {
+			timer t := 3.0; t.start; var W vc;
+			alt { [] q.getcall(S:?) -> sender vc { q.reply(S:{} value 7) to vc; }
+			      [] t.timeout { } }
+		}
+		testcase tc() runs on C system C {
+			timer g := 15.0;
+			var W s := W.create("s"); var W a := W.create("a"); var W b := W.create("b");
+			connect(s:q, a:q); connect(s:q, b:q);
+			connect(self:r, a:r); connect(self:r, b:r);
+			s.start(srv()); a.start(cli("a")); b.start(cli("b"));
+			g.start;
+			var integer n := 0; var integer got := 0;
+			while (n < 2) {
+				alt { [] r.receive("a:GOT") { got := got + 1; n := n + 1; }
+				      [] r.receive("b:GOT") { got := got + 1; n := n + 1; }
+				      [] r.receive(charstring:?) { n := n + 1; }
+				      [] g.timeout { n := 2; } }
+			}
+			if (got > 1) { setverdict(fail, "broadcast: both clients got the reply"); }
+			else { setverdict(pass); }
+		}`},
+		{"raise", `
+		function cli(charstring tag) runs on W {
+			q.call(S:{}, 1.0) {
+				[] q.catch(S, charstring:?) { r.send(tag & ":GOT"); }
+				[] q.getreply(S:?) { r.send(tag & ":REPLY"); }
+				[] q.catch(timeout) { r.send(tag & ":NONE"); }
+			}
+		}
+		function srv() runs on W {
+			timer t := 3.0; t.start; var W vc;
+			alt { [] q.getcall(S:?) -> sender vc { q.raise(S, "boom") to vc; }
+			      [] t.timeout { } }
+		}
+		testcase tc() runs on C system C {
+			timer g := 15.0;
+			var W s := W.create("s"); var W a := W.create("a"); var W b := W.create("b");
+			connect(s:q, a:q); connect(s:q, b:q);
+			connect(self:r, a:r); connect(self:r, b:r);
+			s.start(srv()); a.start(cli("a")); b.start(cli("b"));
+			g.start;
+			var integer n := 0; var integer got := 0;
+			while (n < 2) {
+				alt { [] r.receive("a:GOT") { got := got + 1; n := n + 1; }
+				      [] r.receive("b:GOT") { got := got + 1; n := n + 1; }
+				      [] r.receive(charstring:?) { n := n + 1; }
+				      [] g.timeout { n := 2; } }
+			}
+			if (got > 1) { setverdict(fail, "broadcast: both clients caught the exception"); }
+			else { setverdict(pass); }
+		}`},
+	} {
+		t.Run(k.name, func(t *testing.T) {
+			src := "module M {" + prelude + k.body + "}"
+			var first runtime.Verdict
+			for i, opts := range []interpreter.TestcaseOptions{
+				{DeterministicScheduler: true, DeterministicClock: true},
+				{},
+			} {
+				v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", opts)
+				if err != nil {
+					t.Fatalf("RunTestcaseWith: %v", err)
+				}
+				if v != runtime.PassVerdict {
+					t.Fatalf("%s clock: verdict = %s (%s), want pass",
+						map[int]string{0: "virtual", 1: "live"}[i], v, reason)
+				}
+				if i == 0 {
+					first = v
+				} else if v != first {
+					t.Fatalf("clock substitution changed the verdict: virtual=%s live=%s", first, v)
+				}
+			}
+		})
+	}
+}
+
+// TestBothClocks_DefaultReassertingVerdictIsDetected covers ETSI 20.5.1 on
+// the real clock. A fired default branch was detected two ways: directly,
+// via a flag armed around the altstep evaluation, and indirectly, by the
+// testcase verdict changing. Only the indirect test ran on the real clock,
+// and it misses a default whose branch re-asserts a verdict that is
+// already set — so the alt did not learn the default had fired and waited
+// until its own guard timer expired.
+func TestBothClocks_DefaultReassertingVerdictIsDetected(t *testing.T) {
+	src := `module M {
+		type port P message { inout charstring }
+		type component C { port P p; timer tlong }
+		altstep reassert() runs on C {
+			[] p.receive("wake") { setverdict(pass, "default branch took"); }
+		}
+		function waker() runs on C { p.send("wake"); }
+		testcase tc() runs on C system C {
+			setverdict(pass);                     // already pass: no change to detect
+			var default d := activate(reassert());
+			var C q := C.create;
+			connect(self:p, q:p);
+			q.start(waker());
+			tlong.start(3.0);
+			alt {
+				[] p.receive("other") { setverdict(fail, "wrong branch"); }
+				[] tlong.timeout { setverdict(fail, "alt timed out: default branch not detected"); }
+			}
+		}
+	}`
+	assertSameVerdictBothClocks(t, src, runtime.PassVerdict)
+}
+
+// TestBothClocks_DoneIsNotAValue covers `comp.done` / `comp.killed` outside
+// the two positions the grammar allows them — a statement and an alt guard
+// (ETSI ES 201 873-1 BNF 268/507). `if (q.done)` is not TTCN-3, and was
+// answered anyway: first by blocking and reading the result as false, then
+// as a boolean computed after blocking, which a scheduler deadlock release
+// could turn into `true` for a component still waiting on a port. It is now
+// an error on both clocks, naming the forms that do exist.
+func TestBothClocks_DoneIsNotAValue(t *testing.T) {
+	for _, expr := range []string{"q.done", "q.killed", "all component.done", "any component.killed"} {
+		t.Run(expr, func(t *testing.T) {
+			src := `module M {
+				type port P message { inout charstring }
+				type component C { port P p }
+				function waits() runs on C { p.receive; }
+				testcase tc() runs on C system C {
+					var C q := C.create;
+					connect(self:p, q:p);
+					q.start(waits());
+					if (` + expr + `) { setverdict(fail, "answered true"); }
+					else { setverdict(fail, "answered false"); }
+				}
+			}`
+			for _, k := range clocks {
+				v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", k.opts)
+				if err != nil {
+					t.Fatalf("%s: RunTestcaseWith: %v", k.name, err)
+				}
+				if v != runtime.ErrorVerdict || !strings.Contains(reason, "not a value") {
+					t.Fatalf("%s clock: verdict = %s (%s), want error naming the construct", k.name, v, reason)
+				}
+			}
+		})
+	}
+}
+
+// TestBothClocks_DoneSnapshotSeesCompletedPTC is the legal form of a
+// non-blocking `.done` check: an alt guard with an `[else]`. A component
+// that has finished must be seen as done on both clocks.
+func TestBothClocks_DoneSnapshotSeesCompletedPTC(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		type component C { timer tg }
+		type component W { }
+		function naps() runs on W { timer d := 0.4; d.start; d.timeout; }
+		testcase tc() runs on C system C {
+			var W q := W.create;
+			q.start(naps());
+			tg.start(1.2);
+			tg.timeout;
+			alt {
+				[] q.done { setverdict(pass); }
+				[else] { setverdict(fail, "a finished component was not seen as done"); }
+			}
+		}
+	}`, runtime.PassVerdict)
+}
+
+// clocks are the two execution modes every two-clock test runs under.
+var clocks = []struct {
+	name string
+	opts interpreter.TestcaseOptions
+}{
+	{"virtual", interpreter.TestcaseOptions{DeterministicScheduler: true, DeterministicClock: true}},
+	{"live", interpreter.TestcaseOptions{}},
+}
+
+// assertSameVerdictBothClocks runs one source under the virtual and real
+// clocks and requires the same, expected, verdict from each. The pairing is
+// the point: these tests exist because the two clocks disagreed.
+func assertSameVerdictBothClocks(t *testing.T, src string, want runtime.Verdict) {
+	t.Helper()
+	for _, k := range clocks {
+		v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", k.opts)
+		if err != nil {
+			t.Fatalf("%s: RunTestcaseWith: %v", k.name, err)
+		}
+		if v != want {
+			t.Fatalf("%s clock: verdict = %s (%s), want %s", k.name, v, reason, want)
+		}
+	}
+}
+
+// TestBothClocks_AggregateTimeoutBlocksOutsideAlt covers ETSI 23.7 for the
+// aggregate timeout forms used as a statement rather than an alt guard.
+//
+// `any timer.timeout` / `all timer.timeout` were implemented only for the
+// alt-guard case; outside an alt the evaluator returned false and did
+// nothing. A standalone `any timer.timeout` was therefore a silent no-op —
+// it neither waited for the timeout nor consumed it, and the timer it
+// should have fired was left running. The singular `T.timeout` has always
+// blocked in that position, and ETSI draws no distinction between the
+// named and aggregate forms.
+func TestBothClocks_AggregateTimeoutBlocksOutsideAlt(t *testing.T) {
+	// `any`: the earliest deadline fires and that timer is consumed.
+	assertSameVerdictBothClocks(t, `module M {
+		type component C {}
+		testcase tc() runs on C system C {
+			timer t := 0.05;
+			t.start;
+			any timer.timeout;
+			if (t.running) { setverdict(fail, "timer still running after any timer.timeout"); }
+			else { setverdict(pass); }
+		}
+	}`, runtime.PassVerdict)
+
+	// `all`: every running timer is consumed once the last has expired.
+	assertSameVerdictBothClocks(t, `module M {
+		type component C {}
+		testcase tc() runs on C system C {
+			timer a := 0.05;
+			timer b := 0.08;
+			a.start; b.start;
+			all timer.timeout;
+			if (a.running or b.running) { setverdict(fail, "a timer survived all timer.timeout"); }
+			else { setverdict(pass); }
+		}
+	}`, runtime.PassVerdict)
+
+	// With nothing running there is nothing to wait for: it must report
+	// false rather than block forever.
+	assertSameVerdictBothClocks(t, `module M {
+		type component C {}
+		testcase tc() runs on C system C {
+			timer g := 2.0;
+			g.start;
+			g.stop;
+			any timer.timeout;
+			setverdict(pass, "returned with no running timer");
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_TimerOnlyDefaultFires covers ETSI 20.5.1 for the classic
+// safety-net default — "if this hangs longer than N seconds, fail".
+//
+// Such a default never fired, on either clock. The proximate cause was a
+// skip in the default walker, but the real one was that an activated
+// default's timer was invisible to the alt's block step: a default supplies
+// alternatives to every alt, so its timer guard has to influence when the
+// alt wakes. It did not, so the virtual clock never advanced to the
+// default's deadline, the timer was never expired when defaults were
+// consulted, and the default could not fire. Removing the skip alone made
+// the clocks disagree, because only the real clock advances on its own.
+func TestBothClocks_TimerOnlyDefaultFires(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		type port P message { inout charstring }
+		type component C { port P p; timer tsafe; timer tlong }
+		altstep safety() runs on C {
+			[] tsafe.timeout { setverdict(pass, "safety net fired"); }
+		}
+		testcase tc() runs on C system C {
+			var default d := activate(safety());
+			tsafe.start(0.1);
+			tlong.start(3.0);
+			alt {
+				[] p.receive("never") { setverdict(fail, "impossible"); }
+				[] tlong.timeout { setverdict(fail, "long guard won: the default never fired"); }
+			}
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_NoDefaultsInsideCallBlock covers ETSI 22.3.1: the response
+// and exception handling part of a `call` operation "is executed like an
+// alt statement without any active default".
+//
+// The engine never implemented this. It went unnoticed because the only
+// conformance fixture covering it (Sem_220301_CallOperation_008) uses a
+// timer-only default, which the skip above happened to suppress — so
+// removing that skip exposed the missing rule as a regression. The two
+// belong together: making defaults able to fire requires also knowing
+// where they must not.
+func TestBothClocks_NoDefaultsInsideCallBlock(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		signature S();
+		type port P procedure { inout S }
+		type component C { port P p; timer tsafe }
+		altstep safety() runs on C {
+			[] tsafe.timeout { setverdict(fail, "default fired inside a call block"); }
+		}
+		function responder() runs on C {
+			timer d := 0.4;
+			p.getcall(S:?);
+			d.start; d.timeout;
+			p.reply(S:{});
+		}
+		testcase tc() runs on C system C {
+			var C q := C.create;
+			connect(self:p, q:p);
+			q.start(responder());
+			tsafe.start(0.1);                 // expires during the call block
+			var default dflt := activate(safety());
+			p.call(S:{}, 4.0) {
+				[] p.getreply(S:?) { setverdict(pass, "reply received, default stayed inactive"); }
+				[] p.catch(timeout) { setverdict(fail, "call timed out"); }
+			}
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_ExpiredDefaultTimerDoesNotStallTheAlt covers a default
+// whose timer has expired but which does not take it — its guard is false,
+// or the alt is `@nodefault`. The alt must keep waiting on its own guards.
+//
+// Letting default timers bound the alt's wait (ETSI 20.5.1, so a timer-only
+// default can fire) first counted every running default timer, expired or
+// not. The alt then parked until a deadline already in the past, woke at
+// once to the same state, and did it again: the virtual clock never moved,
+// a core spun, and the testcase ended with no verdict after seconds.
+func TestBothClocks_ExpiredDefaultTimerDoesNotStallTheAlt(t *testing.T) {
+	t.Run("guard false", func(t *testing.T) {
+		assertSameVerdictBothClocks(t, `module M {
+			type port P message { inout charstring }
+			type component C { port P m; timer tsafe := 0.1; var boolean armed := false }
+			altstep guarded() runs on C {
+				[armed] tsafe.timeout { setverdict(fail, "a false guard fired"); }
+			}
+			testcase tc() runs on C system C {
+				connect(self:m, self:m);
+				var default d := activate(guarded());
+				tsafe.start;
+				timer tlong := 0.5; tlong.start;
+				alt {
+					[] m.receive("never") {}
+					[] tlong.timeout { setverdict(pass); }
+				}
+			}
+		}`, runtime.PassVerdict)
+	})
+	t.Run("nodefault alt", func(t *testing.T) {
+		assertSameVerdictBothClocks(t, `module M {
+			type port P message { inout charstring }
+			type component C { port P m; timer tsafe := 0.1 }
+			altstep safety() runs on C {
+				[] tsafe.timeout { setverdict(fail, "a default fired in a @nodefault alt"); }
+			}
+			testcase tc() runs on C system C {
+				connect(self:m, self:m);
+				var default d := activate(safety());
+				tsafe.start;
+				timer tlong := 0.5; tlong.start;
+				alt @nodefault {
+					[] m.receive("never") {}
+					[] tlong.timeout { setverdict(pass); }
+				}
+			}
+		}`, runtime.PassVerdict)
+	})
+}
+
+// TestBothClocks_CallBlockKeepsOtherComponentsDefaults covers the reach of
+// ETSI 22.3.1. A call's response block runs without active defaults, and
+// only that block: a PTC started earlier keeps its own defaults while the
+// MTC waits for a reply.
+//
+// The rule was first keyed on the call signature being set in scope. A
+// PTC's scope inherits from the scope that started it, so every PTC saw the
+// MTC's in-flight call and lost its defaults for as long as the call ran.
+func TestBothClocks_CallBlockKeepsOtherComponentsDefaults(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		type port P message { inout charstring }
+		signature S();
+		type port SP procedure { inout S }
+		type component E { port P m; port SP sp }
+		altstep poked() runs on E { [] m.receive("poke") { m.send("fired"); } }
+		function ptc() runs on E {
+			var default d := activate(poked());
+			timer t := 0.5; t.start;
+			alt {
+				[] m.receive("never") {}
+				[] t.timeout { setverdict(fail, "the PTC's default was suppressed"); }
+			}
+		}
+		testcase tc() runs on E system E {
+			var E c := E.create;
+			connect(c:m, self:m);
+			connect(self:sp, self:sp);
+			c.start(ptc());
+			m.send("poke");
+			sp.call(S:{}, 1.0) {
+				[] m.receive("fired") { setverdict(pass); }
+				[] sp.catch(timeout) { setverdict(fail, "no reply from the PTC's default"); }
+			}
+			c.done;
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_NestedAltInCallBlockKeepsDefaults covers the other edge
+// of 22.3.1: an alt statement inside a branch body of the response block is
+// an ordinary alt, and the activated defaults take part in it.
+func TestBothClocks_NestedAltInCallBlockKeepsDefaults(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		signature S();
+		type port P procedure { inout S }
+		type port Q message { inout charstring }
+		type component C { port P p; port Q m }
+		altstep poked() runs on C { [] m.receive("poke") { setverdict(pass); } }
+		function responder() runs on C { p.getcall(S:?); p.reply(S:{}); }
+		testcase tc() runs on C system C {
+			var C q := C.create;
+			connect(self:p, q:p);
+			connect(self:m, self:m);
+			q.start(responder());
+			var default d := activate(poked());
+			p.call(S:{}, 4.0) {
+				[] p.getreply(S:?) {
+					m.send("poke");
+					timer t2 := 0.5; t2.start;
+					alt {
+						[] m.receive("never") {}
+						[] t2.timeout { setverdict(fail, "the default was suppressed in a nested alt"); }
+					}
+				}
+				[] p.catch(timeout) { setverdict(fail, "call timed out"); }
+			}
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_AnyComponentDoneReturnsOnFirst covers `any component.done`
+// over PTCs that finish at different times: it is satisfied by the first to
+// finish (ETSI 21.3.7). The real-clock wait took the first unfinished PTC in
+// creation order and waited out that one alone, so with a slow PTC created
+// first it returned only when the slow one finished.
+func TestBothClocks_AnyComponentDoneReturnsOnFirst(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		type component W { }
+		function naps(float d) runs on W { timer t := d; t.start; t.timeout; }
+		testcase tc() runs on W system W {
+			var W slow := W.create;
+			var W quick := W.create;
+			slow.start(naps(1.5));
+			quick.start(naps(0.1));
+			timer g := 0.8; g.start;
+			any component.done;
+			if (g.running) { setverdict(pass); }
+			else { setverdict(fail, "any component.done waited for the slower PTC"); }
+			all component.done;
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_AggregateTimeoutLetsEarlierEventsHappen covers a
+// standalone `any timer.timeout` while another component has something due
+// sooner. Blocking must let that happen first (ETSI 23.7), as the named
+// `T.timeout` does. Under the scheduler the aggregate form jumped the
+// virtual clock to its own deadline instead of parking, and with a forked
+// PTC live it then also slept the whole duration in real time.
+func TestBothClocks_AggregateTimeoutLetsEarlierEventsHappen(t *testing.T) {
+	src := `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		function early() runs on C { timer d := 0.2; d.start; d.timeout; p.send("early"); }
+		testcase tc() runs on C system C {
+			var C q := C.create;
+			connect(self:p, q:p);
+			q.start(early());
+			timer a := 2.0; a.start;
+			any timer.timeout;
+			alt {
+				[] p.receive("early") { setverdict(pass); }
+				[else] { setverdict(fail, "the PTC's earlier send had not happened"); }
+			}
+			q.done;
+		}
+	}`
+	assertSameVerdictBothClocks(t, src, runtime.PassVerdict)
+	start := time.Now()
+	if v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", clocks[0].opts); err != nil || v != runtime.PassVerdict {
+		t.Fatalf("virtual clock: verdict = %s (%s), err %v", v, reason, err)
+	}
+	if elapsed := time.Since(start); elapsed > time.Second {
+		t.Fatalf("virtual clock took %v for a 2s timer; it must not sleep in real time", elapsed)
+	}
+}
+
+// TestBothClocks_DefaultsBelongToTheirComponent covers ETSI 20.5: a default
+// is activated by, and belongs to, one component. The defaults were one
+// list per testcase, so a component's alt could invoke another component's
+// default. Once timer-only defaults were no longer skipped, the MTC's
+// safety-net timer ended a PTC's alt and consumed the MTC's timer.
+func TestBothClocks_DefaultsBelongToTheirComponent(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		type port P message { inout charstring }
+		type component C { port P m; timer tg := 0.1 }
+		altstep mtcSafety() runs on C { [] tg.timeout { log("MTC safety net"); } }
+		function ptc() runs on C {
+			timer t := 0.5; t.start;
+			alt {
+				[] m.receive("never") {}
+				[] t.timeout { setverdict(pass); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C c := C.create;
+			connect(c:m, self:m);
+			var default d := activate(mtcSafety());
+			tg.start;
+			c.start(ptc());
+			c.done;
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_DeactivateClearsOnlyOwnDefaults covers the bare
+// `deactivate;`, which deactivates all defaults "of the test component"
+// executing it (ETSI 20.5.3). It cleared every component's.
+func TestBothClocks_DeactivateClearsOnlyOwnDefaults(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		type port P message { inout charstring }
+		type component C { port P m }
+		altstep ptcDefault() runs on C { [] m.receive("x") { setverdict(pass); } }
+		function ptc() runs on C {
+			var default d := activate(ptcDefault());
+			timer t := 0.5; t.start;
+			alt {
+				[] m.receive("never") {}
+				[] t.timeout { setverdict(fail, "the MTC's deactivate cleared the PTC's default"); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C c := C.create;
+			connect(c:m, self:m);
+			c.start(ptc());
+			timer w := 0.1; w.start; w.timeout;
+			deactivate;
+			m.send("x");
+			c.done;
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_EchoPTCRuns covers the most ordinary PTC there is, one
+// that answers a request: `alt { [] p.receive("ping") { p.send("pong") } }`.
+// On the real clock a port-communicating body was forked only when it would
+// otherwise have been skipped. This one is not skipped, so it ran inline on
+// the MTC's goroutine, and the MTC sat in the PTC's alt waiting for the
+// "ping" it had not yet sent: no verdict, after the full timeout.
+func TestBothClocks_EchoPTCRuns(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		function echo() runs on C {
+			alt {
+				[] p.receive("ping") { p.send("pong"); }
+			}
+		}
+		testcase tc() runs on C system C {
+			var C e := C.create("echo");
+			connect(self:p, e:p);
+			e.start(echo());
+			p.send("ping");
+			timer t := 2.0; t.start;
+			alt {
+				[] p.receive("pong") { setverdict(pass); }
+				[] t.timeout { setverdict(fail, "no echo"); }
+			}
+			e.done;
+		}
+	}`, runtime.PassVerdict)
+}
+
+// TestBothClocks_FinishedPTCIsKilled covers a non-alive PTC whose body has
+// ended: the component ends with it (ETSI 21.3.2), so it is killed as well
+// as done (21.3.8). A forked body only recorded done, so `.killed` stayed
+// false for good — the statement form blocked until the testcase timed out,
+// the guard form never matched — while an inline body got it right.
+func TestBothClocks_FinishedPTCIsKilled(t *testing.T) {
+	const decls = `
+		type port P message { inout charstring }
+		type component C { port P p }
+		function sends() runs on C { p.send("x"); }`
+	t.Run("statement", func(t *testing.T) {
+		assertSameVerdictBothClocks(t, `module M {`+decls+`
+			testcase tc() runs on C system C {
+				var C c := C.create;
+				connect(c:p, self:p);
+				c.start(sends());
+				c.killed;
+				setverdict(pass);
+			}
+		}`, runtime.PassVerdict)
+	})
+	t.Run("guard after done", func(t *testing.T) {
+		assertSameVerdictBothClocks(t, `module M {`+decls+`
+			testcase tc() runs on C system C {
+				var C c := C.create;
+				connect(c:p, self:p);
+				c.start(sends());
+				c.done;
+				alt {
+					[] c.killed { setverdict(pass); }
+					[else] { setverdict(fail, "a finished non-alive PTC is not killed"); }
+				}
+			}
+		}`, runtime.PassVerdict)
+	})
+}
+
+// TestBothClocks_DoneWaitsForModelledPTC covers `.done` on a component
+// whose body does no port communication. Such a PTC is never forked; its
+// completion is modelled from the body's duration.
+//
+// The cooperative scheduler parks and advances the virtual clock to that
+// modelled deadline. The real clock had no goroutine to wait on, so it
+// returned immediately and reported the component as not done — the last
+// divergence of the family where behaviour the scheduler supplies
+// implicitly has no real-clock counterpart. ETSI 21.3.7 makes `.done`
+// blocking, so the real clock now waits out the remaining real time.
+func TestBothClocks_DoneWaitsForModelledPTC(t *testing.T) {
+	assertSameVerdictBothClocks(t, `module M {
+		type component C { timer el }
+		type component W { }
+		function naps() runs on W { timer d := 0.3; d.start; d.timeout; }
+		testcase tc() runs on C system C {
+			var W q := W.create;
+			el.start(10.0);
+			q.start(naps());
+			q.done;
+			if (el.read >= 0.3) { setverdict(pass, "waited for the modelled duration"); }
+			else { setverdict(fail, "returned before the modelled duration elapsed"); }
+		}
+	}`, runtime.PassVerdict)
+}

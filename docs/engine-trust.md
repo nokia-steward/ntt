@@ -1,0 +1,264 @@
+# How far can this engine be trusted?
+
+This page is for an engineer deciding whether to rely on `ntt`'s TTCN-3
+engine, and it is about the evidence rather than the feature list. For what
+exists at all, see the [feature matrix](ntt-vs-titan.md); for the work queue,
+[remaining work](conformance/remaining-work.md); for per-push numbers, the
+[conformance dashboard](conformance/index.html).
+
+Short answer, as of 2026-09-30: **4794 of 4948 ETSI conformance files match
+their expected outcome, 97.34%.** On 2026-08-10 the number went down 1.34
+points, deliberately, and the reason it went down is the most informative
+thing on this page; how it came back is the second most.
+
+## One engine
+
+There is a single evaluator: a cooperative discrete-event scheduler over a
+virtual clock. Components are real goroutines that hold a token, so exactly
+one runs at a time and the interleaving is deterministic. Time advances only
+at quiescence - when every component is parked - and then jumps to the
+soonest timer deadline. A fixture with a 3-second guard timer costs
+microseconds and produces the same result every run.
+
+The earlier "approximate" evaluator, which preferred whichever alt branch
+produced a verdict, is deleted, along with the profile toggle that selected
+between them. There is no mode in which the engine guesses.
+
+## How correctness is measured
+
+Every file in the ETSI suite carries an `@verdict` annotation. The harness
+runs the file and compares. A positive fixture must reach the verdict it
+declares; a negative fixture (`@verdict pass reject`) must be refused, by
+the parser, the semantic analyzer, or at runtime.
+
+Three rules keep that honest:
+
+- **Zero per-file regressions.** Not "the rate went up" - no individual file
+  may go from matching to not. `diff_runs.py` compares two JSON reports file
+  by file, because a rate can hold steady while ten files break and ten
+  others start working.
+- **CI gates every commit** against the recorded baseline at
+  `--regress 0.5`.
+- **Anything that cannot clear the gate is reverted, not absorbed.** On
+  2026-08-10 a change that was defensible in principle - running timer-only
+  PTC bodies for real, which the virtual clock now makes possible - measured
+  -7 files and +0. It was kept out of the tree, with its diagnosis recorded
+  in a test, until the defects it ran into were fixed (below); it landed on
+  2026-09-30 at +5, 0 lost.
+
+One caveat about a number you will see: the **real-execution rate**
+(currently 50.52%) counts only files whose verdict came from executing a
+testcase, not from a parse or semantic rejection. It cannot approach 100%.
+2200 of the files expect `reject`, and a completed run always yields a TTCN-3
+verdict, never the string `reject` - so the ceiling is about 55%. Reading it
+as "half the suite doesn't run" is wrong.
+
+## The correction
+
+Two mechanisms in the engine existed so that fixtures would pass.
+
+The scheduler, on reaching a state where every component was blocked and no
+timer could fire, released everyone so their blocked alts concluded as
+though nothing had matched. And a testcase that never called `setverdict`
+was given `pass`.
+
+Both look reasonable in isolation. Together they were holding up **74
+files**. Worse, some of those files were not testing their subject at all.
+`Sem_2204_the_check_operation_025` sets `pass` after its alt whether or not
+`check(getcall)` ever matched - so 35 files nominally covering the `check`
+operation were reporting on an operation that never ran.
+
+The same was true of six of our own Go tests, which is the part that should
+worry a reader most, because those tests were the reason to believe the
+engine worked. Four of them exercised a client/server pair over a procedure
+port. The PTC bodies never ran at all - not the server's `getcall`, not its
+safety timer, not the client's `call` - and the tests passed anyway, because
+nothing set a verdict and the engine supplied one.
+
+So both mechanisms were deleted, in two commits, each with its own
+measurement:
+
+| Change | Effect |
+| --- | --- |
+| A deadlock reports `error` instead of releasing blocked alts | -51, +7 |
+| An undeclared verdict stays `none` (ETSI 22.4.1) | -28, +1 |
+
+97.73% became 96.39%. The gains are worth noting too: six of the seven in
+the first row are negative fixtures that expect a rejection and now get one.
+
+The engine is now honest about those 74 files, and three of them have since
+been earned back properly by making procedure responder bodies actually run.
+Every one of the six vacuous Go tests is still in the suite, rewritten to
+assert what the engine really does and naming what must be restored when the
+gap closes. A green test that asserts nothing is worse than a red one.
+
+## What removing the scaffolding found
+
+Defects that had been sitting behind green tests:
+
+- **An injected message never reaches a PTC whose port has an external
+  driver bound.** This is the path a real C or C++ test port uses, so it
+  matters more than any conformance fixture. Diagnosed: the daemon body
+  runs, the message lands in the queue under exactly the key its receive
+  reads, it is still there unconsumed when the testcase ends, and the alt
+  re-polls every 2ms throughout. Not a lost wake-up, not a template
+  mismatch.
+- **A stopped `alive` component cannot be restarted**, which ETSI 21.3.3
+  requires. Two layers: `start` does not clear the component's `done` flag,
+  so a following `comp.done` is satisfied by the previous run; and with that
+  fixed, the re-forked goroutine still never gets scheduled. *Fixed
+  2026-09-30:* the stopped behaviour unwinds without the scheduler's token,
+  which the scheduler took for a deadlock, and finishing, it finished the
+  new behaviour too.
+- **`interleave` does not suspend a blocked branch**, so two mutually
+  dependent branches deadlock instead of completing.
+
+Each has a test carrying its diagnosis, so the next attempt starts from what
+was already learned.
+
+## What waiting found
+
+On 2026-09-30 a receiving operation used as a statement - `p.receive(t);` -
+was found not to wait. With nothing queued it returned at once and ended
+the behaviour, so the plainest exchange, the MTC sending and a PTC
+answering, ended with verdict `none`. Making it wait, as the one-alternative
+alt the standard defines (20.1), first measured -24: the old behaviour had
+been hiding other defects, which waiting exposed one after another. Each
+was fixed before the change went in:
+
+- procedure responders were replayed inline by their caller instead of
+  running as their component;
+- a `call` of a `noblock` signature sent nothing;
+- a bare `check` saw only messages, not calls, replies or exceptions;
+- `any port` meant every component's ports, not the component's own;
+- the `any port` procedure guards never matched;
+- a default whose timer was its altstep's parameter never fired;
+- a stopped `alive` component could not be restarted (above);
+- `mtc.stop` from a PTC did not end a waiting MTC;
+- timer-only PTC bodies were modelled instead of run.
+
+Together: 4754 → 4787 matched, none lost.
+
+## What a review found
+
+The same day, the rest of the recorded defects were worked through, each
+change reviewed independently before it went in. The reviews mattered: the
+first version of "a loop lets the others run" let virtual time pass while a
+component computed, so a guard timer could fire during a finite
+computation - even the component's own - and a message sent at time zero
+could lose to a timer. The version that went in lets the others run and
+counts each million or so iterations without a wait - and each hundred
+thousand turns at one instant, about fifty thousand message round trips -
+as a second of virtual time, so that a computation that goes on for good
+still lets timers fire, while a short one takes none and a long one does
+not use up a watchdog far off. The second review caught a version that
+jumped straight to the next timer; the third, one that could pass a timer
+of a component woken but not yet run, so that two timers expired out of
+order; the fourth, a component starved while two others kept each other
+busy. Each is now a test. The reviews also found values
+shared where TTCN-3 copies them: a sent message the sender changed
+afterwards, a redirect of a message a `check` left queued, a server
+changing the parameter it received, a component variable's initial value
+shared by every component (under `--live`, a crash). Fixed with them:
+
+- `c.call(f())` ran f inline, or modelled it, instead of running it as c;
+  `catch(timeout)` ran whether or not the call timed out;
+- an `execute()` timeout was real time on the virtual clock, and `ntt exec`
+  ignored it; a testcase cut off by a time limit reported the verdict it
+  had reached, not `error`;
+- the elements of a port array were connected under the array's name;
+- an altstep could not be an alternative of an alt;
+- `p.call(...) to c { ... }` was never sent; `action()` did not exist;
+  `from system` never matched; a port index and a `to` clause ran twice.
+
+Together: 4787 → 4794 matched, none lost. The two clocks were compared
+behaviour by behaviour with `ntt log diff` (see [test logging](test-logging.md))
+over a suite of probes written for their differences; what remains there is
+timing - whether a PTC got a turn before it was stopped - not a different
+verdict. The one exception is a testcase that never ends: `--live` reports
+that it did not terminate within its time limit, where the virtual clock
+reports the deadlock.
+
+## An ending is a value, not a silence
+
+"The engine does not guess" has an outward-facing twin that is easy to
+violate while honouring the first: **when nothing happened, say so with a
+value the suite can match on.** A testcase cannot distinguish an absence
+from a slow answer, and a harness that reports absence by simply not
+delivering anything forces every failure through the same channel — the
+guard timer — where they all look alike.
+
+It is the same rule each time it comes up, and it has come up repeatedly:
+
+- A **dial failure** on the TCP port fails the `map` operation, naming the
+  address, rather than leaving a mapped port that receives nothing.
+- A **failed HTTP request** arrives as a `TransportError` with a matchable
+  `reason` (`refused` and `reset` are retryable; `timeout` means wedged),
+  rather than as no response at all. The reason is an enumeration, not the
+  underlying error text, because that text is diagnostic and not API.
+- A **scheduler deadlock** is an `error` verdict, not a shrug.
+- An **undeclared verdict** stays `none` instead of being coerced to `pass`.
+- A **catch-all that also holds the commonest transient failure** is not a
+  catch-all but a hole: after `reset` was split out of `other`, `other`
+  means "unknown" again, and a suite can branch on it.
+
+The test for a new inbound path is therefore: *can a suite tell "it ended",
+"it failed", and "it is still going" apart without waiting for a timer?* If
+not, the missing distinction is a value that has not been given a name yet.
+This is why the HTTP port grew a second inbound type rather than a sentinel
+status, and it is the first question to ask of any streaming or push
+mechanism, where "the stream closed" and "the stream is quiet" are otherwise
+indistinguishable.
+
+**A worked example, including the awkward part.** Auditing ntt's own inbound
+paths against this test found the TCP port failing it: when the system under
+test closed the connection mid-run, the read loop exited and the suite was
+told nothing — it waited out its guard timer, unable to tell a hang-up from
+a slow answer. Only the *dial* was reported honestly.
+
+It now says so, but the fix is shaped by a constraint worth recording. The
+obvious move — inject a `Disconnected` value the way the HTTP port injects
+`TransportError` — changes the contract of every suite that declared its
+port as `inout charstring`: a bare `p.receive` matches any message, so the
+new value would be silently consumed as data. Curing a silence by
+introducing a mis-typed match is a worse trade.
+
+So it is split by cost. The **warning is unconditional** — a human always
+learns a peer hung up while the port was mapped. The **inbound value is
+opt-in** (`WithDisconnectEvent`, or `report_disconnect := "true"` in a
+`.cfg`), for the suite that waits on pushes and needs to branch. Default
+behaviour is byte-identical to before.
+
+That is a compromise, not a clean application of the rule, and it is written
+down as one: a suite that does not opt in still cannot distinguish a hang-up
+from silence. The honest default would be to deliver the value always, and
+the reason we do not is compatibility with suites that already exist.
+
+## What this means in practice
+
+The engine is dependable for single-component testcases: templates and
+matching, the type system, timers, message-based communication with the
+system under test, the control part, and the object-oriented additions. That
+is the bulk of the suite and of the passing files.
+
+Be careful with **multi-component procedure-based communication**. A
+client/server pair over a procedure port does not reliably complete a
+call/reply round trip, and 47 of the honest misses are exactly that. Be
+careful with **external test ports** until the inject defect above is fixed.
+
+The largest remaining block is the 102 files expecting a rejection we do not
+produce: static checks a compiler-based tool performs and an
+interpreter-first one has to be taught. That is a known, bounded gap rather
+than a soundness problem.
+
+## Why the drop is the point
+
+Any project can raise a conformance number. We had, partly, by writing
+engine behaviour that made fixtures pass - and the tests that were supposed
+to catch that had been captured by the same mechanism.
+
+The measurement was corrected before the defects were fixed, deliberately in
+that order, and the drop was published rather than absorbed. What is left is
+a number that means something: 96.39% of the suite matches for reasons that
+survive inspection, and the misses are enumerated in
+[remaining work](conformance/remaining-work.md) with a reason each.

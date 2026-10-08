@@ -26,6 +26,7 @@ import (
 	"github.com/nokia/ntt/internal/log"
 	"github.com/nokia/ntt/internal/results"
 	"github.com/nokia/ntt/internal/yaml"
+	"github.com/nokia/ntt/project/internal/titan"
 )
 
 var (
@@ -122,6 +123,12 @@ type Manifest struct {
 
 	// Diagnostics is a list of diagnostics flags used by compilator
 	Diagnostics []string `json:"diagnostics"`
+
+	// Tools holds per-tool configuration sections so individual
+	// editors (and CI jobs) can override the defaults without
+	// resorting to per-project flags. See the docs on Tools for the
+	// full schema.
+	Tools Tools `yaml:"tools,omitempty" json:"tools,omitempty"`
 
 	// Parameters is an embedded parameters file.
 	Parameters `json:",inline"`
@@ -260,6 +267,14 @@ func Discover(path string) []Suite {
 		// Check source directories
 		if file := fs.JoinPath(path, ManifestFile); fs.IsRegular(file) {
 			log.Debugf("discovered manifest: %q\n", file)
+			list = append(list, Suite{RootDir: path, SourceDir: path})
+		}
+		// Discover Titan project descriptors next to package.yml.
+		// A directory may contain several .tpd files (one per
+		// configuration); we report each of them so the caller can
+		// pick.
+		for _, tpd := range fs.Glob(fs.JoinPath(path, "*.tpd")) {
+			log.Debugf("discovered titan descriptor: %q\n", tpd)
 			list = append(list, Suite{RootDir: path, SourceDir: path})
 		}
 		list = append(list, readIndices(fs.JoinPath(path, IndexFile))...)
@@ -545,10 +560,13 @@ func Open(args ...string) (*Config, error) {
 	}
 
 	// Treat a single file argument as source, unless it is a directory or
-	// manifest file.
+	// a recognised project descriptor.
 	if file := args[0]; fs.IsRegular(file) {
 		if filepath.Base(file) == ManifestFile {
 			return NewConfig(WithManifest(file), defaults)
+		}
+		if strings.EqualFold(filepath.Ext(file), ".tpd") {
+			return NewConfig(WithTPD(file), defaults)
 		}
 		return NewConfig(WithSources(file), defaults)
 	}
@@ -661,6 +679,96 @@ func WithManifest(file string) ConfigOption {
 	}
 }
 
+// WithTPD reads a Titan Project Descriptor (.tpd) and uses it to seed
+// the project configuration. We translate the XML into the same fields
+// WithManifest would have populated, so downstream code (lookup, lint,
+// LSP) doesn't need to know which format the user actually has on disk.
+//
+// Referenced sub-projects are loaded transitively and their sources +
+// import directories are merged into the top-level Config. We dedupe
+// paths so a diamond reference graph still produces a sane Sources
+// list.
+//
+// The descriptor's root (the directory containing the .tpd file)
+// becomes Config.Root, mirroring WithManifest's behaviour.
+func WithTPD(file string) ConfigOption {
+	return func(c *Config) error {
+		root, sources, imports, err := loadTPD(file)
+		if err != nil {
+			return err
+		}
+		c.Root = root
+		c.Sources = append(c.Sources, sources...)
+		c.Imports = append(c.Imports, imports...)
+		log.Debugf("project: loaded titan descriptor %s (%d sources, %d imports)\n",
+			file, len(sources), len(imports))
+		return nil
+	}
+}
+
+// loadTPD parses descriptor (and any descriptors it references) and
+// returns the resolved root + flattened sources + imports.
+func loadTPD(descriptor string) (root string, sources, imports []string, err error) {
+	seen := map[string]bool{}
+	var visit func(path string) error
+	visit = func(path string) error {
+		abs, err := filepath.Abs(path)
+		if err != nil {
+			return err
+		}
+		if seen[abs] {
+			return nil
+		}
+		seen[abs] = true
+
+		proj, err := titan.Load(abs)
+		if err != nil {
+			return err
+		}
+		// The first descriptor visited defines the project root.
+		if root == "" {
+			root = proj.Root
+		}
+		sources = append(sources, proj.Sources...)
+		imports = append(imports, proj.ImportDirs...)
+		for _, ref := range proj.References {
+			// Resolve relative refs against the *current*
+			// descriptor's root, not the top-level project.
+			refPath := ref.Path
+			if !filepath.IsAbs(refPath) {
+				refPath = filepath.Join(proj.Root, refPath)
+			}
+			if err := visit(refPath); err != nil {
+				log.Debugf("project: skipping unresolvable .tpd reference %q: %s\n", refPath, err.Error())
+				continue
+			}
+		}
+		return nil
+	}
+	if err := visit(descriptor); err != nil {
+		return "", nil, nil, err
+	}
+	sources = dedupePaths(sources)
+	imports = dedupePaths(imports)
+	return root, sources, imports, nil
+}
+
+func dedupePaths(in []string) []string {
+	if len(in) < 2 {
+		return in
+	}
+	seen := make(map[string]struct{}, len(in))
+	out := in[:0]
+	for _, p := range in {
+		if _, ok := seen[p]; ok {
+			continue
+		}
+		seen[p] = struct{}{}
+		out = append(out, p)
+	}
+	return out
+}
+
 // WithRoot sets the root directory of the project.
 func WithRoot(root string) ConfigOption {
 	return func(c *Config) error {
@@ -712,6 +820,12 @@ func AutomaticRoot(root string) ConfigOption {
 		log.Debugf("project: root %s\n", root)
 		if manifest := fs.JoinPath(root, ManifestFile); fs.IsRegular(manifest) {
 			return WithManifest(manifest)(c)
+		}
+		// Fall back to Titan project descriptors when there is no
+		// package.yml. We deliberately pick the first .tpd in
+		// alphabetical order so the discovery is deterministic.
+		if tpds := fs.Glob(fs.JoinPath(root, "*.tpd")); len(tpds) > 0 {
+			return WithTPD(tpds[0])(c)
 		}
 
 		if isRoot(c.Root) {

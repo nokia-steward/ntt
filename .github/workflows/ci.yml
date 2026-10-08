@@ -8,16 +8,33 @@ on:
 
 jobs:
   test:
+    # Run the same suite on Linux, macOS, and Windows. Windows uses
+    # backslash as its path separator and is case-insensitive for file
+    # names, both of which used to trip up path-handling tests until
+    # the cleanup tracked in issue #629.
     name: Tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
+      # The TTCN-3 conformance test suite under
+      # testdata/ttcn3-conformance-tests/ has paths > 260 chars,
+      # which trips Windows' MAX_PATH limit during checkout. This
+      # config must run BEFORE actions/checkout so the clone itself
+      # can write the long paths.
+      - name: Enable Git long paths (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: git config --system core.longpaths true
       - uses: actions/checkout@v4
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: stable
       - name: Test
-        run: go test -race -v ./...
+        run: go test -race ./...
 
   lint:
     name: Linting
@@ -31,3 +48,29 @@ jobs:
         uses: golangci/golangci-lint-action@v6
         with:
           version: v1.60
+
+  conformance:
+    # The ntt-Titan roadmap makes the ETSI conformance pass-rate the
+    # always-on regression gate: a commit that drops the rate by more
+    # than --regress fails CI. The "real" gate measures verdicts: each
+    # file in the suite has an @verdict annotation; a file matches when
+    # the interpreter's actual outcome equals the annotation. The
+    # baseline lives in testdata/conformance-baseline.json and is
+    # refreshed whenever a milestone deliberately moves the rate up.
+    name: ETSI conformance pass-rate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: stable
+      - name: Build ntt
+        run: go build -o /tmp/ntt .
+      - name: Run conformance suite
+        run: |
+          /tmp/ntt conformance \
+            --baseline testdata/conformance-baseline.json \
+            --regress 0.5 \
+            --timeout 4s \
+            --jobs 4 \
+            testdata/ttcn3-conformance-tests
