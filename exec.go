@@ -78,8 +78,10 @@ test log, per the TCI-TL logging interface of ETSI ES 201 873-6: messages
 sent, detected, received and mismatched (with the template), procedure
 calls, timers, component and port operations, verdicts, alt steps, function
 calls, assignments and codecs. The log is
-the standard's XML format (Annex B), or with --log-format=jsonl the same
-events one per line. One file covers the whole run.`,
+the standard's XML format (Annex B), with --log-format=jsonl the same
+events as JSON one per line, or with --log-format=lines one event per
+line as text: timestamp|event|component=file:line|fields, the fields
+written as TTCN-3 writes values. One file covers the whole run.`,
 		RunE: runExec,
 	}
 )
@@ -110,8 +112,10 @@ func init() {
 	ExecCommand.Flags().StringVar(&execLog, "log", "",
 		"write a TCI-TL test log (ETSI ES 201 873-6) of every TTCN-3 operation to this file")
 	ExecCommand.Flags().StringVar(&execLogFmt, "log-format", "",
-		"test log format: xml (the standard's Annex B format) or jsonl; "+
-			"default from the --log file extension, xml otherwise")
+		"test log format: xml (the standard's Annex B format), jsonl (the same "+
+			"events, one JSON object per line) or lines (one event per line, its "+
+			"fields separated by |, to read in a pager or split with awk); "+
+			"default from the --log file extension (.jsonl, .lines), xml otherwise")
 }
 
 // openTestLog opens the --log file and starts a TCI-TL log in the
@@ -119,18 +123,27 @@ func init() {
 func openTestLog(path, format string) (tl.Logger, func() error, error) {
 	if format == "" {
 		format = "xml"
-		if ext := strings.ToLower(filepath.Ext(path)); ext == ".jsonl" || ext == ".json" {
+		switch strings.ToLower(filepath.Ext(path)) {
+		case ".jsonl", ".json":
 			format = "jsonl"
+		case ".lines":
+			format = "lines"
 		}
 	}
-	var mk func(io.Writer) *tl.Writer
+	type logWriter interface {
+		tl.Logger
+		Close() error
+	}
+	var mk func(io.Writer) logWriter
 	switch strings.ToLower(format) {
 	case "xml":
-		mk = tl.NewXMLWriter
+		mk = func(w io.Writer) logWriter { return tl.NewXMLWriter(w) }
 	case "jsonl", "json":
-		mk = tl.NewJSONLWriter
+		mk = func(w io.Writer) logWriter { return tl.NewJSONLWriter(w) }
+	case "lines":
+		mk = func(w io.Writer) logWriter { return tl.NewLinesWriter(w) }
 	default:
-		return nil, nil, fmt.Errorf("--log-format %q: want xml or jsonl", format)
+		return nil, nil, fmt.Errorf("--log-format %q: want xml, jsonl or lines", format)
 	}
 	f, err := os.Create(path)
 	if err != nil {

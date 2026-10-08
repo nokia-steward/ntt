@@ -16,6 +16,7 @@ a log `ntt` writes validates against the Annex B schemas.
 ntt exec --log run.xml suite/            # the standard's XML format
 ntt exec --log run.jsonl suite/          # the same events, one per line
 ntt exec --log run.log --log-format=jsonl suite/
+ntt exec --log run.lines suite/          # one event per line, as text
 ```
 
 One file covers the whole run, every testcase in order. Logging is off
@@ -44,6 +45,67 @@ tliTcTerminated mtc   tcId=M.tc  verdict=pass  reason="echoed"
 
 Every event carries a timestamp, the component that produced it, and where
 the test specification performs the operation (file and line).
+
+## Lines
+
+`--log-format=lines` (or a `.lines` file) writes the same events as text,
+one per line, its fields separated by `|` — to read in a pager, and to
+split with `awk` or `cut`:
+
+```
+timestamp|event|component=file:line|field|field...
+20261008T072651.367348|cocr|mtc=T.ttcn3:10|echo|once
+20261008T072651.367348|cost|echo=T.ttcn3:12|T.echo()
+20261008T072651.367348|ptsd|mtc=T.ttcn3:14|mtc:p|echo:p|integer|41
+20261008T072651.367348|ptrx|echo=T.ttcn3:8|echo:p|?|match
+20261008T072651.367348|ulog|mtc=T.ttcn3:15|"got " {n := 1, s := "a\|b"}
+20261008T072651.867348|setv|mtc=T.ttcn3:6|none|pass|done waiting
+20261008T072651.867348|tcfi|ntt|T.tc|pass
+```
+
+The timestamp is UTC to the microsecond; the event a four-letter code, in
+lower case (an upper-case code is an error); the component the one that
+produced the event, with the source file's name and line when there is
+one, `ntt` for the test system itself. The fields are the event's own,
+values and templates written as TTCN-3 writes them, a behaviour with its
+actual parameters as `T.f(x=1,y=2)`; a `|`, a backslash or a line break in
+a field is escaped with a backslash. The codes:
+
+| Code | Event | Fields |
+|------|-------|--------|
+| `cpen` `cplv` | control part enter, leave | control |
+| `tcst` | testcase started | testcase, the duration `execute()` gave it |
+| `tcen` `tclv` | testcase behaviour enter, leave | testcase(parameters) |
+| `tcfi` | testcase finished | testcase, verdict |
+| `fnen` `fnlv` | function enter, leave | function(parameters)[->result] |
+| `asen` `aslv` | altstep enter, leave | altstep(parameters) |
+| `cocr` `cost` | component created, started | component, alive/once; behaviour |
+| `cofi` | component finished | verdict |
+| `cosp` `coki` | component stopped, killed | component |
+| `codo` `cokd` | done, killed evaluated | component, match/mismatch |
+| `coru` `coal` | running, alive evaluated | component, result |
+| `ptcn` `ptdi` `ptmp` `ptun` | connect, disconnect, map, unmap | port, port |
+| `ptst` `ptsp` `ptha` `ptcl` | port start, stop, halt, clear | port |
+| `ptsd` | send, call, reply, raise | port, to, type or call/reply/exception, value |
+| `ptqu` | arrived in a port's queue | port, what arrived |
+| `ptrx` | receive, getcall, getreply, catch evaluated | port, template, match/mismatch |
+| `ptck` | check evaluated | port, template, match/mismatch |
+| `tmst` `tmsp` | timer start, stop | timer, duration |
+| `tmto` `tmrd` `tmru` | timeout, read, running evaluated | timer, outcome/elapsed/result |
+| `alen` `allv` `alrp` `alwt` | alt enter, leave, repeat, wait | |
+| `dtac` `dtde` | default activated, deactivated | altstep(parameters) |
+| `setv` `getv` | setverdict, getverdict | verdict before, verdict, reason |
+| `ulog` `uact` | log, action | text |
+| `matc` | match | value, template, mismatches |
+| `vach` | variable assigned | type, name, value |
+| `mpar` | module parameter | name, value |
+| `enco` `deco` | encvalue, decvalue | type, codec |
+| `TSTP` | testcase.stop | reason |
+
+Events with no line of their own — an alt round that matched nothing, the
+defaults consulted — are left out; the XML and JSON Lines logs have them
+all. `ntt log diff` and `ntt log profile` read the XML and JSON Lines
+logs.
 
 ## What is logged
 

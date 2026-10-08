@@ -900,3 +900,45 @@ func TestExampleHTTPSTestingRuns(t *testing.T) {
 		}
 	}
 }
+
+// TestExecLinesLog: --log to a .lines file writes the log as lines, each
+// `timestamp|event|component...|fields` with a four-letter event, from the
+// testcase's start to its end.
+func TestExecLinesLog(t *testing.T) {
+	path := writeTC(t, `module m {
+		type component C {}
+		testcase tc() runs on C { timer t := 0.1; t.start; t.timeout; setverdict(pass) }
+	}`)
+	logPath := filepath.Join(t.TempDir(), "run.lines")
+	l, closeLog, err := openTestLog(logPath, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := newStaticDriver([]string{path})
+	d.testLogger = l
+	if v, reason, err := d.Run(context.Background(), "m.tc"); err != nil || v != rreport.Pass {
+		t.Fatalf("verdict=%s reason=%q err=%v", v, reason, err)
+	}
+	if err := closeLog(); err != nil {
+		t.Fatal(err)
+	}
+	b, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lines := strings.Split(strings.TrimSpace(string(b)), "\n")
+	var ids []string
+	for _, l := range lines {
+		f := strings.Split(l, "|")
+		if len(f) < 3 || len(f[0]) != len("20060102T150405.000000") || len(f[1]) != 4 {
+			t.Fatalf("not a line of the format: %q", l)
+		}
+		ids = append(ids, f[1])
+	}
+	got := strings.Join(ids, " ")
+	for _, want := range []string{"tcst", "tcen", "tmst", "tmto", "setv", "tclv", "tcfi"} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("events %s: no %s", got, want)
+		}
+	}
+}

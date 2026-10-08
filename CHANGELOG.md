@@ -99,6 +99,12 @@ single functional test doubles as a performance probe. See
   latency, with a copy-pasteable stand-in server. Exercised by CI so it
   cannot rot.
 
+- **A test log of lines** — `ntt exec --log run.lines` (or
+  `--log-format=lines`) writes the run's events as text, one per line:
+  `timestamp|event|component=file:line|fields`, a four-letter event code,
+  the fields as TTCN-3 writes values — to read in a pager and split with
+  awk. The same events as the TCI-TL XML and JSON Lines logs, which stay
+  the standard and complete record.
 - **JSON encoding and decoding** — `encvalue`, `encvalue_o` and
   `encvalue_unichar` of a value whose type has `with { encode "JSON" }` (or
   with "JSON" as the dynamic encoding) give its JSON text, and `decvalue*`
