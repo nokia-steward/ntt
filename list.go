@@ -191,7 +191,7 @@ func list(cmd *cobra.Command, args []string) error {
 						Print(basket, n, module+"."+n.Name.String())
 					}
 				case *syntax.ValueDecl:
-					if n.KindTok == nil && n.KindTok.Kind() == syntax.MODULEPAR {
+					if n.KindTok == nil || n.KindTok.Kind() == syntax.MODULEPAR {
 						return true
 					}
 				case *syntax.NodeList, *syntax.ModuleDef, *syntax.GroupDecl, *syntax.ModuleParameterGroup:

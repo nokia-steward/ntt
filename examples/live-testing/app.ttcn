@@ -1,0 +1,71 @@
+/*
+ * Live testing + performance profiling against a real TCP SUT.
+ *
+ * The port `p` is bound to a real TCP endpoint by app.cfg — no Go code
+ * and no C test port. Each loop iteration is one request/response
+ * transaction, which is also one latency sample when run with --profile.
+ *
+ * See docs/live-testing-and-profiling.md for the full guide.
+ */
+module app {
+
+    // A plain message port. The built-in TCP test port carries charstring
+    // under the default newline framing (one record per line).
+    type port P message { inout charstring }
+
+    type component C { port P p }
+
+    // tc_echo drives a request/response loop against the SUT and fails
+    // honestly if a reply does not arrive within the guard timer.
+    testcase tc_echo() runs on C system C {
+        timer g := 5.0;
+        var integer i := 0;
+
+        map(self:p, system:p);
+
+        while (i < 20) {
+            g.start;
+            p.send("ping");
+            alt {
+                [] p.receive("ping") { }
+                [] p.receive        { setverdict(fail, "unexpected reply"); stop; }
+                [] g.timeout        { setverdict(fail, "SUT stopped responding"); stop; }
+            }
+            i := i + 1;
+        }
+
+        setverdict(pass);
+        unmap(self:p, system:p);
+    }
+
+    // tc_latency_budget shows the other half of live mode: measuring a
+    // single round trip with the real clock and asserting a budget.
+    // `t.read` reports real elapsed wall time under --live / --profile.
+    testcase tc_latency_budget() runs on C system C {
+        timer g := 5.0;
+        // A stopwatch timer still needs a default duration (ETSI 12): the
+        // duration is an upper bound that `read` clamps to, and we only
+        // ever read it, never wait for its timeout.
+        timer rtt := 60.0;
+
+        map(self:p, system:p);
+
+        g.start;
+        rtt.start;
+        p.send("ping");
+        alt {
+            [] p.receive("ping") {
+                if (rtt.read < 1.0) { setverdict(pass); }
+                else { setverdict(fail, "round trip exceeded the 1s budget"); }
+            }
+            [] g.timeout { setverdict(fail, "no reply"); }
+        }
+
+        unmap(self:p, system:p);
+    }
+
+    control {
+        execute(tc_echo());
+        execute(tc_latency_budget());
+    }
+}

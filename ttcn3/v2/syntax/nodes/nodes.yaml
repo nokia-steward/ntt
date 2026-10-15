@@ -1,0 +1,74 @@
+# nodes.yaml is the single source of truth for the AST node hierarchy in
+# the ttcn3/v2/syntax/nodes package. The companion generator
+# (gen/main.go) consumes it to produce nodes_gen.go, which contains:
+#
+#   - One Go struct per node entry.
+#   - A NodeKind enum constant per node entry.
+#   - Kind() / Children() / Accept() methods on every struct.
+#   - A discriminated Visitor interface so consumers can dispatch
+#     without writing `switch n.(type)` boilerplate.
+#
+# Field syntax:
+#   <name>: <type>
+# where <type> can be one of:
+#   token        -> a single Token interface value.
+#   *<NodeName>  -> a pointer to another generated node.
+#   []<NodeName> -> a slice of pointers to other generated nodes.
+#   []token      -> a slice of tokens.
+#
+# Adding a new node here, running `go generate`, and providing a
+# `parse<NodeName>` function in parser.go is enough to teach the rest of
+# the toolchain (visitor, dumper, hover, semantic tokens) about it.
+
+nodes:
+  - name: Module
+    doc: A TTCN-3 module declaration.
+    fields:
+      ModuleTok: token
+      Name: token
+      LBrace: token
+      Defs: "[]ModuleDef"
+      RBrace: token
+
+  - name: ModuleDef
+    doc: A single definition inside a module body.
+    fields:
+      Visibility: token
+      Decl: "*Decl"
+
+  - name: Decl
+    doc: |
+      A generic declaration node. The concrete declaration kind (function,
+      type, template, ...) is carried in KindTok so consumers don't have
+      to switch on Go interfaces.
+    fields:
+      KindTok: token
+      Name: token
+      Params: "*ParamList"
+      Body: "*Block"
+
+  - name: ParamList
+    doc: A parenthesised list of formal parameters.
+    fields:
+      LParen: token
+      Params: "[]Param"
+      RParen: token
+
+  - name: Param
+    doc: A single formal parameter.
+    fields:
+      Direction: token
+      TypeName: token
+      Name: token
+
+  - name: Block
+    doc: A statement block.
+    fields:
+      LBrace: token
+      Stmts: "[]Stmt"
+      RBrace: token
+
+  - name: Stmt
+    doc: A statement placeholder; concrete kinds are TBD.
+    fields:
+      Tok: token

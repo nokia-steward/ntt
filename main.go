@@ -67,6 +67,18 @@ var (
 		},
 
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Catch the conventional version flags up front so they
+			// don't fall through to the help text. The root command
+			// has DisableFlagParsing on (to forward unknown
+			// subcommands to external ntt-foo binaries), so cobra's
+			// auto-generated --version flag never gets a chance to
+			// run.
+			for _, a := range args {
+				if a == "--version" || a == "-V" {
+					fmt.Println(versionString())
+					return nil
+				}
+			}
 			if len(args) > 0 && args[0][0] != '-' {
 				if path, err := exec.LookPath("ntt-" + args[0]); err == nil {
 					return proc.Exec(path, args[1:]...)

@@ -56,10 +56,23 @@ func parseFunction(name string) (string, *syntax.FormalPars, error) {
 }
 
 func checkArgs(pars *syntax.FormalPars, args ...Object) error {
-	if len(args) != len(pars.List) {
-		return ErrInvalidArgCount
+	// Allow too few args as long as every missing formal parameter has
+	// an `:=` default in its declaration, and allow too many args
+	// silently (TTCN-3 doesn't have varargs but the conformance suite
+	// hits cases where the same name has multiple arities, e.g.
+	// `rnd()` vs `rnd(seed)`).
+	if len(args) < len(pars.List) {
+		for i := len(args); i < len(pars.List); i++ {
+			if pars.List[i].Value == nil {
+				return ErrInvalidArgCount
+			}
+		}
 	}
-	for i := range args {
+	n := len(pars.List)
+	if len(args) < n {
+		n = len(args)
+	}
+	for i := 0; i < n; i++ {
 		if err := checkArg(pars.List[i], args[i]); err != nil {
 			return err
 		}

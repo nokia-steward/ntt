@@ -1,6 +1,7 @@
 package syntax
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -396,4 +397,117 @@ func anyParse(input string, f func(p *parser)) error {
 	f(p)
 	// TODO(5nord) temporary hack until we have proper error handling
 	return p.Err()
+}
+
+// TestRedirectValueAndParam: in `-> value v param (x)` the param list is
+// the redirect's, not a map's or unmap's parameters on the value
+// expression, which left the redirect with no param part and its value
+// a ParamExpr.
+func TestRedirectValueAndParam(t *testing.T) {
+	for _, src := range []string{
+		`p.getreply(S:{} value ?) -> value v param (x)`,
+		`p.getreply(S:{} value ?) -> value v param (x) sender s`,
+	} {
+		p := NewParser([]byte(src))
+		r, ok := p.parseExpr().(*RedirectExpr)
+		if err := p.Err(); err != nil || !ok {
+			t.Fatalf("%s: not a redirect (%v)", src, err)
+		}
+		if len(r.Value) != 1 {
+			t.Fatalf("%s: %d value targets, want 1", src, len(r.Value))
+		}
+		if _, ok := r.Value[0].(*Ident); !ok {
+			t.Errorf("%s: value target is %T, want *Ident", src, r.Value[0])
+		}
+		if r.ParamTok == nil || len(r.Param) != 1 {
+			t.Errorf("%s: no param part", src)
+		}
+	}
+	p := NewParser([]byte(`p.getreply(S:{} value ?) -> value v param (x) sender s`))
+	if r, _ := p.parseExpr().(*RedirectExpr); r == nil || r.Sender == nil {
+		t.Errorf("sender part lost after value and param")
+	}
+}
+
+// TestAltstepGuardWithoutBlock: an altstep alternative needs no block
+// (ES 201 873-1 A.1.6.8.2, GuardStatement), so in `[] as1() [g] ...` the
+// "[" opens the next guard. Elsewhere a call's result may still be
+// indexed or selected (OpCall).
+func TestAltstepGuardWithoutBlock(t *testing.T) {
+	src := `alt { [] as1() [g] t.timeout {} [] M.as2(f()[1]) [else] {} [] pa[1].receive(m(2).f) {} [x] as3() { y := 1 } }`
+	p := NewParser([]byte(src))
+	alt, ok := p.parseStmt().(*AltStmt)
+	if err := p.Err(); err != nil || !ok {
+		t.Fatalf("not an alt (%v)", err)
+	}
+	var comms []string
+	for _, s := range alt.Body.Stmts {
+		cc, ok := s.(*CommClause)
+		if !ok {
+			t.Fatalf("%T in alt body", s)
+		}
+		if cc.Else != nil {
+			comms = append(comms, "else")
+			continue
+		}
+		comms = append(comms, fmt.Sprintf("%T", cc.Comm.(*ExprStmt).Expr))
+	}
+	want := "[*syntax.CallExpr *syntax.SelectorExpr *syntax.CallExpr else *syntax.CallExpr *syntax.CallExpr]"
+	if got := fmt.Sprint(comms); got != want {
+		t.Errorf("alternatives %s, want %s", got, want)
+	}
+	arg := alt.Body.Stmts[2].(*CommClause).Comm.(*ExprStmt).Expr.(*CallExpr).Args.List[0]
+	if _, ok := arg.(*IndexExpr); !ok {
+		t.Errorf("f()[1] in an argument is %T, want *IndexExpr", arg)
+	}
+	for src, want := range map[string]string{`f()[1]`: "*syntax.IndexExpr", `m(2).field1`: "*syntax.SelectorExpr"} {
+		p := NewParser([]byte(src))
+		if got := fmt.Sprintf("%T", p.parseExpr()); got != want {
+			t.Errorf("%s is %s, want %s", src, got, want)
+		}
+	}
+}
+
+// TestNestedTypeOfADeclaration: a declaration, a parameter and a return
+// value may have a type definition of their own (ES 201 873-1 A.1.6,
+// TypeOrNestedTypeDef): `var record of integer v`.
+func TestNestedTypeOfADeclaration(t *testing.T) {
+	for src, want := range map[string]string{
+		`var record of integer v := {1, 2}`:              "*syntax.ListSpec",
+		`var set length(2) of charstring v`:              "*syntax.ListSpec",
+		`const record { integer f } c := {f := 1}`:       "*syntax.StructSpec",
+		`var template union { integer i } t := {i := ?}`: "*syntax.StructSpec",
+		`var map from charstring to integer m`:           "*syntax.MapSpec",
+		`var enumerated { e1, e2 } e := e1`:              "*syntax.EnumSpec",
+		`modulepar record of integer mp := {}`:           "*syntax.ListSpec",
+		`var R v`:                                        "*syntax.Ident",
+	} {
+		p := NewParser([]byte(src))
+		var typ Expr
+		if p.tok == MODULEPAR {
+			typ = p.parseModulePar().(*ValueDecl).Type
+		} else {
+			typ = p.parseValueDecl().Type
+		}
+		if err := p.Err(); err != nil {
+			t.Errorf("%s: %v", src, err)
+			continue
+		}
+		if got := fmt.Sprintf("%T", typ); got != want {
+			t.Errorf("%s: type is %s, want %s", src, got, want)
+		}
+	}
+	for _, src := range []string{
+		`function f(record of integer p, in set { integer f } q) return record of integer {}`,
+		`template R t(record of integer p) := {f := p[0]}`,
+		`signature S() exception (record of integer, charstring, M.T)`,
+		`signature S() exception (integer, record of integer,)`,
+		`type component C { var record of integer v }`,
+	} {
+		p := NewParser([]byte(src))
+		p.parseModuleDef()
+		if err := p.Err(); err != nil {
+			t.Errorf("%s: %v", src, err)
+		}
+	}
 }
