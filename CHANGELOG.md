@@ -651,6 +651,27 @@ Independent of the two clocks:
 - **`deactivate` of a default that is not active is an error** (ETSI
   20.5.3): one deactivated already, an uninitialised reference, another
   component's. It was ignored. `deactivate(null)` still has no effect.
+- **`lengthof` follows the declared type of its argument** (ETSI C.2.1).
+  A record of or set of value's length is the index of its last
+  initialized element plus 1, and no less than the minimal length its
+  type, or a field's own `length(...)`, restricts it to:
+  `lengthof({1, 2, -, -})` was 4 and is 2. An array's is the fixed size
+  of its type: `var integer a[4]; a[0] := 1` gave 1 and gives 4. The list
+  type of a synonym is the one where the synonym is declared, not one of
+  the same name where it is used.
+- **`ntt check` reports a declaration named after a predefined function**
+  (ETSI A.1.5): a `function rnd()`, a field `replace`, an enumerated value
+  `substr`, a label `lengthof`. The names of table 15 are reserved words.
+  A module defining its own `rnd()` passed the check, and the predefined
+  one ran in its place.
+- **A variable an `out` argument sets is bound, for `ntt check`.** Passed
+  to a function's `out` parameter, as `decvalue`'s decoded value or as
+  `int2enum`'s result, and then to an `in` parameter, it was reported
+  statically unbound, so `decvalue_unichar(u, j); f(j)` failed the check.
+  A function the module does not declare - imported, named with its
+  module, a method - is taken to set what it is passed. An `inout`
+  parameter, whose actual has to be bound already (5.4.2), and a port or
+  timer operation are not.
 - **An altstep named with its module is an alternative too.** `[] M.a()`
   in an alt was never taken when its timer ran out, nor was a default
   activated as `activate(M.a())`, where `a()` was.

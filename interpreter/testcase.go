@@ -1475,7 +1475,8 @@ func bindDeclNameScoped(env runtime.Scope, n syntax.Node, scopes []*syntax.WithS
 			if lo := arrayDefLowerBound(d.Field.ArrayDef, env); lo != 0 {
 				td.IndexOffset = lo
 			}
-			td.ArrayDims = len(d.Field.ArrayDef)
+			td.ArrayDims, td.ArrayDef = len(d.Field.ArrayDef), d.Field.ArrayDef
+			td.Length = d.Field.LengthConstraint
 			// A `set of` subtype tags its values unordered so
 			// set-of matching is order-independent (ETSI 6.2.3.2).
 			if spec, ok := d.Field.Type.(*syntax.ListSpec); ok && spec.KindTok != nil &&

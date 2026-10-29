@@ -314,6 +314,12 @@ type TypeDesc struct {
 	// ArrayDims is how many dimensions an array type has (`type R
 	// A[2][3]` has 2) — the elements of all but the last are arrays too.
 	ArrayDims int
+	// ArrayDef is an array type's dimensions, outermost first (`[2]`,
+	// `[1..3]`): the first gives the fixed length lengthof reports.
+	ArrayDef []*syntax.ParenExpr
+	// Length is the length restriction a subtype declaration gives a
+	// list type (`type RoI R length(3..5)`), which lengthof is never below.
+	Length *syntax.LengthExpr
 	// Map is a map type's specification, for the type of its values.
 	Map *syntax.MapSpec
 	// Spec is the type specification a subtype declaration gives (`type

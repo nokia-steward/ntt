@@ -119,6 +119,7 @@ func (a *Analyzer) Analyze(tree *ttcn3.Tree) []Diagnostic {
 		out = append(out, a.checkArraySizeCompat(mod)...)
 		out = append(out, a.checkComponentCallRules(mod)...)
 		out = append(out, a.checkIdentifierUniqueness(mod)...)
+		out = append(out, a.checkPredefinedNamesReserved(mod)...)
 		out = append(out, a.checkArrayIndexRules(mod)...)
 		out = append(out, a.checkPredefinedFunctionRules(mod)...)
 		out = append(out, a.checkCallStmtBodyRules(mod)...)

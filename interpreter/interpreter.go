@@ -1743,6 +1743,18 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			return res
 		}
 
+		// `lengthof(v)` and `sizeof(v)` of a list take its declared
+		// type: an array's fixed size, a record of's minimal length.
+		if _, ok := f.(*runtime.Builtin); ok && len(args) == 1 {
+			if id, ok := n.Fun.(*syntax.Ident); ok && (id.String() == "lengthof" || id.String() == "sizeof") {
+				if td := listTypeDesc(lvalueTypeDesc(n.Args.List[0], env), env); td != nil {
+					if res, ok := listLength(args[0], td, env); ok {
+						return res
+					}
+				}
+			}
+		}
+
 		// `match(value, template)` is a builtin; the executor logs it
 		// (tliMatch, tliMatchMismatch) with the operands it evaluated.
 		if _, ok := f.(*runtime.Builtin); ok && len(args) == 2 {
@@ -3388,6 +3400,114 @@ func arrayDefLowerBound(arrayDef []*syntax.ParenExpr, env runtime.Scope) int {
 		}
 	}
 	return 0
+}
+
+// listTypeDesc is td when it is an array, record of or set of type, or
+// the list type a synonym of one (`type RoI R length(4)`) refers to where
+// the synonym is declared, keeping the synonym's own length restriction;
+// nil otherwise.
+func listTypeDesc(td *runtime.TypeDesc, env runtime.Scope) *runtime.TypeDesc {
+	for depth := 0; td != nil && depth < 8; depth++ {
+		if td.IsList {
+			return td
+		}
+		if td.Underlying == "" {
+			return nil
+		}
+		home := td.Home
+		if home == nil {
+			home = env
+		}
+		next := lookupTypeDesc(td.Underlying, home)
+		if next == nil || td.Length == nil {
+			td = next
+			continue
+		}
+		withLength := *next
+		withLength.Length = td.Length
+		td = &withLength
+	}
+	return nil
+}
+
+// listLength is lengthof of a list v of type td (ETSI ES 201 873-1
+// C.2.1): an array's is the fixed size of its type; a record of's or set
+// of's is the index of its last initialized element plus 1, and no less
+// than the minimal length its type restricts it to. ok is false for what
+// is no list value or template of td.
+func listLength(v runtime.Object, td *runtime.TypeDesc, env runtime.Scope) (runtime.Object, bool) {
+	l, ok := v.(*runtime.List)
+	if !ok {
+		return nil, false
+	}
+	home := td.Home
+	if home == nil {
+		home = env
+	}
+	if len(td.ArrayDef) > 0 {
+		if n, ok := arrayDimSize(td.ArrayDef[0], home, env); ok {
+			return runtime.NewInt(n), true
+		}
+		return nil, false
+	}
+	last := len(l.Elements)
+	for last > 0 && l.Elements[last-1] == runtime.Undefined {
+		last--
+	}
+	res := builtins.Lengthof(&runtime.List{ListType: l.ListType, Elements: l.Elements[:last]})
+	n, ok := res.(runtime.Int)
+	if !ok {
+		return res, true
+	}
+	lr := td.Length
+	if spec, ok := td.Spec.(*syntax.ListSpec); ok && lr == nil {
+		lr = spec.Length
+	}
+	if min, ok := lengthMin(lr, home, env); ok && int64(min) > n.Int64() {
+		return runtime.NewInt(min), true
+	}
+	return n, true
+}
+
+// arrayDimSize is the number of elements an array dimension (`[4]`,
+// `[1..4]`) gives, its expression evaluated where the type was declared
+// or, failing that, in env.
+func arrayDimSize(d *syntax.ParenExpr, home, env runtime.Scope) (int, bool) {
+	if d == nil || len(d.List) != 1 {
+		return 0, false
+	}
+	for _, scope := range []runtime.Scope{home, env} {
+		switch v := eval(d.List[0], scope).(type) {
+		case runtime.Int:
+			return int(v.Int64()), true
+		case *runtime.Range:
+			lo, lok := v.Lower.(runtime.Int)
+			hi, hok := v.Upper.(runtime.Int)
+			if lok && hok {
+				return int(hi.Int64()-lo.Int64()) + 1, true
+			}
+		}
+	}
+	return 0, false
+}
+
+// lengthMin is the lower bound of a length restriction (`length(4)`,
+// `length(3..5)`).
+func lengthMin(lr *syntax.LengthExpr, home, env runtime.Scope) (int, bool) {
+	if lr == nil || lr.Size == nil || len(lr.Size.List) != 1 {
+		return 0, false
+	}
+	for _, scope := range []runtime.Scope{home, env} {
+		switch v := eval(lr.Size.List[0], scope).(type) {
+		case runtime.Int:
+			return int(v.Int64()), true
+		case *runtime.Range:
+			if lo, ok := v.Lower.(runtime.Int); ok {
+				return int(lo.Int64()), true
+			}
+		}
+	}
+	return 0, false
 }
 
 // shapeCompared gives the operands x and y of a comparison, written xe
@@ -5772,7 +5892,7 @@ func declTypeDesc(typ syntax.Expr, decl *syntax.Declarator, env runtime.Scope) *
 			if !ok {
 				spec = &syntax.RefSpec{X: typ}
 			}
-			return &runtime.TypeDesc{IsList: true, ArrayDims: len(decl.ArrayDef), Spec: spec, Home: moduleHome(env)}
+			return &runtime.TypeDesc{IsList: true, ArrayDims: len(decl.ArrayDef), ArrayDef: decl.ArrayDef, Spec: spec, Home: moduleHome(env)}
 		})
 	}
 	return typeDescOfSpec(typ, env)
@@ -5993,10 +6113,7 @@ func lvalueTypeDesc(lx syntax.Expr, env runtime.Scope) *runtime.TypeDesc {
 				if td := fieldStructTypeDesc(f, env); td != nil {
 					return td
 				}
-				if td := fieldTypeDesc(f, env); td != nil && td.IsList {
-					return td
-				}
-				return nil
+				return listTypeDesc(fieldTypeDesc(f, env), env)
 			}
 		}
 	case *syntax.IndexExpr:
@@ -6141,7 +6258,7 @@ func formalTypeDesc(p *syntax.FormalPar, env runtime.Scope) *runtime.TypeDesc {
 			if !ok {
 				spec = &syntax.RefSpec{X: p.Type}
 			}
-			return &runtime.TypeDesc{IsList: true, ArrayDims: len(p.ArrayDef), Spec: spec, Home: moduleHome(env)}
+			return &runtime.TypeDesc{IsList: true, ArrayDims: len(p.ArrayDef), ArrayDef: p.ArrayDef, Spec: spec, Home: moduleHome(env)}
 		})
 	}
 	return typeDescOfSpec(p.Type, env)
@@ -6272,11 +6389,33 @@ func fieldTypeDesc(f *syntax.Field, env runtime.Scope) *runtime.TypeDesc {
 	}
 	if len(f.ArrayDef) > 0 {
 		return inlineTypeDesc(f, len(f.ArrayDef), func() *runtime.TypeDesc {
-			return &runtime.TypeDesc{IsList: true, ArrayDims: len(f.ArrayDef), Spec: f.Type, Home: moduleHome(env)}
+			return &runtime.TypeDesc{IsList: true, ArrayDims: len(f.ArrayDef), ArrayDef: f.ArrayDef, Spec: f.Type, Home: moduleHome(env)}
 		})
 	}
-	return typeDescOfSpec(f.Type, env)
+	td := typeDescOfSpec(f.Type, env)
+	if f.LengthConstraint == nil || listTypeDesc(td, env) == nil {
+		return td
+	}
+	// A field's own length restriction (`record of integer f length(3)`)
+	// bounds the length of its values as its type's would.
+	key := fieldLengthKey{f.LengthConstraint, td}
+	if l, ok := fieldLengthTypes.Load(key); ok {
+		return l.(*runtime.TypeDesc)
+	}
+	withLength := *td
+	withLength.Length = f.LengthConstraint
+	l, _ := fieldLengthTypes.LoadOrStore(key, &withLength)
+	return l.(*runtime.TypeDesc)
 }
+
+// fieldLengthKey names a field's type with its length restriction: the
+// restriction and the descriptor of the type it restricts.
+type fieldLengthKey struct {
+	length *syntax.LengthExpr
+	td     *runtime.TypeDesc
+}
+
+var fieldLengthTypes sync.Map
 
 // elemTypeDesc is the descriptor of the elements of a record of, set of
 // or array type: a list type's element type, or an array subtype's
@@ -6291,8 +6430,13 @@ func elemTypeDesc(td *runtime.TypeDesc, env runtime.Scope) *runtime.TypeDesc {
 	}
 	if td.ArrayDims > 1 {
 		// An element of `R a[2][3]` is an `R [3]`.
-		return inlineTypeDesc(td.Spec, td.ArrayDims-1, func() *runtime.TypeDesc {
-			return &runtime.TypeDesc{IsList: true, ArrayDims: td.ArrayDims - 1, Spec: td.Spec, Home: home}
+		var node syntax.Node = td.Spec
+		var inner []*syntax.ParenExpr
+		if len(td.ArrayDef) == td.ArrayDims {
+			node, inner = td.ArrayDef[1], td.ArrayDef[1:]
+		}
+		return inlineTypeDesc(node, td.ArrayDims-1, func() *runtime.TypeDesc {
+			return &runtime.TypeDesc{IsList: true, ArrayDims: td.ArrayDims - 1, ArrayDef: inner, Spec: td.Spec, Home: home}
 		})
 	}
 	if l, ok := td.Spec.(*syntax.ListSpec); ok {

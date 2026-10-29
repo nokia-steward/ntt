@@ -245,7 +245,7 @@ func checkUnboundArgPerFunc(mod *syntax.Module, sigs map[string][]formalSig) []D
 		if !ok || fn == nil || fn.Body == nil {
 			return true
 		}
-		unbound := localUnboundVars(fn.Body)
+		unbound := localUnboundVars(fn.Body, sigs)
 		if len(unbound) == 0 {
 			return false
 		}
@@ -295,9 +295,14 @@ func checkUnboundArgPerFunc(mod *syntax.Module, sigs map[string][]formalSig) []D
 }
 
 // localUnboundVars returns the names of vars declared without an
-// initialiser in body, minus any that are reassigned via `x := y`
-// or passed to any call (conservatively assumed to bind them).
-func localUnboundVars(body syntax.Node) map[string]bool {
+// initialiser in body, minus any that are reassigned via `x := y`,
+// bound by a redirect, or passed to an out parameter: of a function in
+// sigs, the result of int2enum or the decoded value of decvalue (ETSI ES
+// 201 873-1 C.1.4, C.5.2, C.5.4, C.5.6). An inout one is not: its actual
+// has to be initialized (5.4.2). A function not in sigs - imported, named
+// with its module, a method - may have an out parameter, so a variable
+// passed to it is taken as bound.
+func localUnboundVars(body syntax.Node, sigs map[string][]formalSig) map[string]bool {
 	cand := map[string]bool{}
 	syntax.Inspect(body, func(n syntax.Node) bool {
 		vd, ok := n.(*syntax.ValueDecl)
@@ -335,10 +340,50 @@ func localUnboundVars(body syntax.Node) map[string]bool {
 			if name := identName(x.Sender); name != "" {
 				delete(cand, name)
 			}
+		case *syntax.CallExpr:
+			if x.Args == nil {
+				break
+			}
+			callee := identName(x.Fun)
+			_, known := sigs[callee]
+			unresolved := !known && !predefinedFunctionNames[callee] && !predefinedOperations[callee]
+			if sel, ok := x.Fun.(*syntax.SelectorExpr); ok && objectOperations[syntax.Name(sel.Sel)] {
+				unresolved = false
+			}
+			for i, arg := range x.Args.List {
+				binds := unresolved || i == 1 && outResultFuncs[callee]
+				if params := sigs[callee]; i < len(params) && params[i].dir == "out" {
+					binds = true
+				}
+				if name := rootIdentName(arg); binds && name != "" {
+					delete(cand, name)
+				}
+			}
 		}
 		return true
 	})
 	return cand
+}
+
+// outResultFuncs are the predefined functions whose second parameter is
+// the out parameter their result is written to.
+var outResultFuncs = map[string]bool{"int2enum": true, "decvalue": true, "decvalue_unichar": true, "decvalue_o": true}
+
+// predefinedOperations are the operations called like functions that are
+// not in table 15 and write no argument.
+var predefinedOperations = map[string]bool{
+	"isbound": true, "ispresent": true, "ischosen": true, "isvalue": true,
+	"log": true, "match": true, "valueof": true, "setverdict": true,
+	"action": true, "execute": true, "activate": true, "deactivate": true,
+}
+
+// objectOperations are the port, timer and component operations
+// (`p.send(v)`, `t.start(d)`): they write no argument, only a redirect.
+var objectOperations = map[string]bool{
+	"send": true, "receive": true, "trigger": true, "check": true, "call": true,
+	"getcall": true, "reply": true, "getreply": true, "raise": true, "catch": true,
+	"start": true, "stop": true, "kill": true, "done": true, "alive": true,
+	"running": true, "read": true, "timeout": true, "checkstate": true,
 }
 
 // rootIdentName strips Selector / Index / Paren wrappers and
