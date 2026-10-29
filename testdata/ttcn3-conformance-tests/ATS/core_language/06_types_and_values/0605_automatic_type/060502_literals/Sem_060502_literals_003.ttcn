@@ -1,0 +1,25 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for float literals.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060502_literals_003 {
+
+type component GeneralComp {}
+
+// inout parameters require strong typing and can be used to type verification.
+function verifyType(inout float f) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_060502_literals_003() runs on GeneralComp {
+	{ var v := -1.0; verifyType(v) }
+	{ var v := not_a_number; verifyType(v) }
+	{ var v := -infinity; verifyType(v) }
+	{ var v := infinity; verifyType(v) }
+	{ var v := 0.3; verifyType(v) }
+}
+
+control {
+	execute(TC_Sem_060502_literals_003());
+}
+
+}

@@ -16,7 +16,7 @@ module Sem_050402_actual_parameters_188 {
 
     type record R {
         integer field1,
-        integer field2
+        integer field2 optional
     }
 
     template integer mw_int (integer p_upper) := (0..p_upper);

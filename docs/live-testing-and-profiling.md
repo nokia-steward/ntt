@@ -63,9 +63,9 @@ On the virtual clock, time advances only when every component is parked,
 and then jumps straight to the soonest deadline. Two consequences worth
 having:
 
-- **It is fast.** The full 4,948-file ETSI conformance suite — guard timers
-  and all — runs in roughly 20 seconds on a 12-core workstation (measured
-  17–25 s depending on load). A testcase with a 30-second safety timer
+- **It is fast.** The full 5,164-file ETSI conformance suite — guard timers
+  and all — runs in about 5 seconds on a 12-core workstation (measured
+  2.7–4.6 s). A testcase with a 30-second safety timer
   costs microseconds, because the clock jumps to the deadline instead of
   waiting for it.
 - **It is reproducible.** Verdicts were identical across 29,688

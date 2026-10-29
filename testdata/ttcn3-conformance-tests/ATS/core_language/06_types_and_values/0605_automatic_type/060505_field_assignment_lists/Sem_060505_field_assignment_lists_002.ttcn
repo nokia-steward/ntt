@@ -1,0 +1,26 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure record fields become optional as specified (15.8).
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060505_field_assignment_lists_002 {
+
+type component GeneralComp {}
+
+type record Point {
+	integer x,
+	integer y optional
+}
+
+testcase TC_Sem_060505_field_assignment_lists_002() runs on GeneralComp {
+	var v := { x := 1, y := omit }
+	if (match(v, { x := 1, y := omit })) {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+}
+
+control {
+	execute(TC_Sem_060505_field_assignment_lists_002());
+}
+
+}

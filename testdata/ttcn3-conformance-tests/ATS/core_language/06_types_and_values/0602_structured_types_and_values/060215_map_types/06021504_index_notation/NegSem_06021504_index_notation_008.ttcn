@@ -1,0 +1,32 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:6.2.15.4, Using asterisk as an index on RHS (typing issue)
+ ** @verdict  pass reject
+ ***************************************************/
+
+// The following requirement is tested:
+// The index notation, when used on the right-hand side, refers to the value element that the
+// map value or template associates with the key given as the index or with the presence of
+// the AnyElementsOrNone matching symbol if asterisk is used instead of the index.
+// When used at the right-hand side of an assignment, the notation returns a boolean value
+// indicating if the AnyElementsOrNone is present within the map template.
+
+module NegSem_06021504_index_notation_008 {
+	type map from charstring to charstring TMap;
+	type component C {}
+
+	testcase TC_NegSem_06021504_index_notation_008() runs on C {
+		var template TMap v_map := {
+            ["first_name"] := "John",
+            ["surname"] := "Doe"
+        }
+        var charstring v_str := v_map[*]; // type mismatch expected, the RHS resolves to a boolean value
+		log (v_str);
+        setverdict(pass);
+	}
+
+	control {
+		execute(TC_NegSem_06021504_index_notation_008());
+	}
+}

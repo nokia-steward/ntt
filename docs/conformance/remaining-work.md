@@ -1,5 +1,21 @@
 # Remaining Conformance Work
 
+**2026-10-29 — corpus refreshed to upstream `main` `fdc17d2c` (2024-03-28):
+4916 / 5164 matched (95.59%), 21 skipped, 248 misses.** The earlier copy
+(`99ac02bc`, 2022-09-07) gave 4803 / 4948. ntt gives every test the two
+copies share unchanged the outcome it gave; 24 earlier tests that
+matched now miss because upstream changed them: 22 expect another
+outcome (15 `Sem_1508` template-restriction tests, an import test and
+two connect tests now expect a reject; four former `NegSem` tests became
+`Sem` ones expecting a pass), and two were rewritten
+(`NegSem_1400_procedure_signatures_003`,
+`Sem_160102_predefined_functions_110`) — each worth checking against the
+standard before taking upstream's word for it. 91 of the 216 new tests
+miss, by clause: structured types 17 (embedded fields, map index and
+unmapping notation), referencing template fields 15, automatic type 13,
+functions 13, variadic parameters 11, template matching 7, operators 4,
+and a few more. The full list is in [current-misses.md](current-misses.md).
+
 State as of 2026-08-20: **4754 / 4948 matched (96.53%)**, 23 skipped
 (inconclusive / no-verdict), **194 real misses** in the inventory.
 

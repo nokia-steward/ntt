@@ -1,0 +1,21 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for octetstring literals.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060502_literals_006 {
+
+type component GeneralComp {}
+
+// inout parameters require strong typing and can be used to type verification.
+function verifyType(inout octetstring os) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_060502_literals_006() runs on GeneralComp {
+	{ var v := '03'O; verifyType(v) }
+}
+
+control {
+	execute(TC_Sem_060502_literals_006());
+}
+
+}

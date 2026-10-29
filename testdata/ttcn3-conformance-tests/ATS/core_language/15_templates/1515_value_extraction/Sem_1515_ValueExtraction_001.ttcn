@@ -1,0 +1,32 @@
+/***************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.15, Value extraction
+ ** @verdict  pass accept
+ ***************************************************/
+
+module Sem_1515_ValueExtaction_001 {
+
+	type component GeneralComp {}
+
+	testcase TC_Sem_1515_ValueExtaction_001() runs on GeneralComp {
+
+        var template charstring v_pattern := pattern "ab\?#(1,1)";
+        if (v_pattern.value == "ab\?#(1,1)") {
+            setverdict(pass);
+        } else {
+			setverdict(fail);
+		}
+
+        var template charstring v_ifpresent := "abc" ifpresent;
+        if (v_ifpresent.value == "abc") {
+            setverdict(pass);
+        } else {
+			setverdict(fail);
+		}
+	}
+
+	control {
+		execute(TC_Sem_1515_ValueExtaction_001());
+	};
+}

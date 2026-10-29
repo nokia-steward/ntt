@@ -8,10 +8,11 @@ the corpus for `ntt conformance` and the CI regression gate.
 | | |
 | --- | --- |
 | Upstream | <https://forge.etsi.org/rep/mts/ttcn3-conformance-tests> |
-| Revision | `99ac02bc5c3a8a3d3dba53a195fe2f4a7ee413d6` (2022-09-07) |
-| Imported | 2022-09-10, commit `247433a7` |
+| Revision | `fdc17d2c03c4074ceee77c1be4614dcce04421a5` (2024-03-28), branch `main` |
+| Imported | 2026-10-29; before that `99ac02bc` (2022-09-07), imported 2022-09-10 |
+| Vendored | `ATS/` and `LICENSE`; upstream's `docs/`, `standards/`, `build-aux/` and `Makefile` are not |
 | Local delta | two `@purpose` comment lines (below) |
-| `.ttcn` files | 4,948 — the same count as upstream at that revision |
+| `.ttcn` files | 5,164 — the same count as upstream at that revision |
 
 Note the upstream group is **`mts`** (ETSI TC MTS). A `ttcn3` group does not
 exist; that path returns a sign-in redirect, which looks like a permissions
@@ -42,10 +43,11 @@ someone reproducing a pass rate has to be told about.
 
 ## Re-deriving the revision after a refresh
 
-The import recorded no upstream revision, so the one above was recovered
-from content rather than metadata. The same method re-establishes it after
-any future refresh, and is worth knowing because it does not depend on
-anyone having written the provenance down:
+The 2022 import recorded no upstream revision, so its revision was
+recovered from content rather than metadata; the 2026 one was taken from
+upstream `main` directly, and checked the same way. The same method
+re-establishes it after any future refresh, and is worth knowing because
+it does not depend on anyone having written the provenance down:
 
 ```shell
 git clone https://forge.etsi.org/rep/mts/ttcn3-conformance-tests up

@@ -1,0 +1,32 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:6.2.0, duplicated indexes not allowed in assignment notation
+ ** @verdict  pass reject
+ ***************************************************/
+
+// The following requirement is tested:
+// In this notation each index shall not appear more than once and shall conform
+// to the range of indices allowed by the type definition.
+
+module NegSem_0602_TopLevel_011 {
+
+    type map from charstring to charstring TMap;
+    type component GeneralComp {
+    }
+
+    testcase TC_NegSem_0602_TopLevel_011() runs on GeneralComp {
+        var TMap v_map := {
+            ["first_name"] := "John",
+            ["surname"] := "Doe",
+            ["surname"] := "Smith"
+        };
+
+        log (v_map);
+        setverdict(pass);
+    }
+
+    control {
+        execute(TC_NegSem_0602_TopLevel_011());
+    }
+}

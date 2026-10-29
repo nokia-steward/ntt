@@ -1,0 +1,17 @@
+// @author   TTF T023
+// @purpose  1:6.2.1.4, Ensure the unqualified type name acts as the field name.
+// @verdict  pass reject
+module NegSem_06020104_embedding_fields_001 {
+
+type record of integer RoI;
+type union U {
+	record of integer RoI;
+}
+
+// Reject nested or anonymous types.
+type record R {
+	Roi[-]
+	U.Roi
+}
+
+}

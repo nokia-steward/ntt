@@ -1,0 +1,35 @@
+/***************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.12, The present operation
+ ** @verdict  pass reject
+ ***************************************************/
+
+/* The following requirements are tested:
+ * present operation:
+ * A template with the present operationn shall cause an error if the operand not fulfils
+ * conditions of the prenent template restriction.
+ */
+
+module NegSem_1512_ThePresentOperation_003 {
+
+	type component GeneralComp {}
+
+	type record ExampleType {
+		integer a,
+		boolean b optional
+	}
+
+	testcase TC_NegSem_1512_ThePresentOperation_003()	runs on GeneralComp {
+
+		var template ExampleType m_originalAny := *;
+
+		template(present) ExampleType m_targetAny := present(m_originalAny); // causes error
+
+		setverdict(pass);
+	}
+
+	control {
+		execute(TC_NegSem_1512_ThePresentOperation_003());
+	};
+}

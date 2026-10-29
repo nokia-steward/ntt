@@ -1,0 +1,46 @@
+/*****************************************************************
+ ** @author   STF 584
+ ** @version  0.0.1
+ ** @purpose  1:20.4, verify that conditional goto can be used to jump out of interleave
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+// The following requirement is tested:
+// Restriction d)
+// The restricted use of the control transfer statements for, while, do-while, and goto within interleave
+// statements is allowed under the following conditions:
+// b. The goto statement can be used for defining jumps with statements blocks that do not contain reception
+// statements and for specifying jumps out of interleave statements.
+
+module NegSem_2004_InterleaveStatement_013 {
+
+    type port MyPort message {
+        inout charstring
+    }
+
+    type component GeneralComp {
+        port MyPort p;
+    }
+
+    testcase TC_NegSem_2004_InterleaveStatement_013() runs on GeneralComp {
+		var boolean v_cond := true;
+        p.send(charstring:"foo");
+        p.send(charstring:"bar");
+
+        interleave {
+            [] p.receive(charstring:"bar") {
+				if (v_cond) {
+					goto L1;
+				}
+            }
+            [] p.receive(charstring:"foo") {
+            }
+        }
+		label L1;
+        setverdict(pass);
+    }
+
+    control{
+        execute(TC_NegSem_2004_InterleaveStatement_013());
+    }
+}

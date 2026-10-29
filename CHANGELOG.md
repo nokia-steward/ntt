@@ -181,6 +181,14 @@ single functional test doubles as a performance probe. See
 
 ### Changed
 
+- **The ETSI conformance suite is upstream's of 2024-03-28** (`fdc17d2c`;
+  it was `99ac02bc` of 2022-09-07): 5164 files, 216 more. ntt matches
+  4916, 95.59% (4803 of 4948 before, 97.52%). It gives every test the two
+  share unchanged the outcome it gave; upstream changed 24 of those that
+  matched (the expected outcome of 22, the test of 2), and most of the new
+  tests' 91 misses are features not implemented yet: embedded fields,
+  variadic parameters, map index notation, more forms of the automatic
+  type. The baseline CI holds ntt to is the new measurement.
 - **Linting runs golangci-lint v2** (2.14, built with Go 1.27), which can
   type-check this code where v1.60 could not, and **fails the job** on a
   finding. It runs the standard linters (errcheck, govet, ineffassign,

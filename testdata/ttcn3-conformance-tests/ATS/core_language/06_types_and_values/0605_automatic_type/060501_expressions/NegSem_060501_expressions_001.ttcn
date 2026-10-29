@@ -1,0 +1,18 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure qualified enumerated values.
+// @verdict  pass reject
+module NegSem_060501_expressions_001 {
+
+type component GeneralComp {}
+
+type enumerated E { A(1), B(2) }
+
+testcase TC_NegSem_060501_expressions_001() runs on GeneralComp {
+	var e := A;
+}
+
+control {
+	execute(TC_NegSem_060501_expressions_001());
+}
+
+}

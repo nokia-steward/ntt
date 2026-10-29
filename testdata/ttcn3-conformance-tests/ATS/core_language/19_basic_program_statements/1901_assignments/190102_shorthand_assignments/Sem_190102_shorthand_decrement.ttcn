@@ -1,0 +1,31 @@
+/***************************************************
+ ** @author   STF 423
+ ** @version  0.0.1
+ ** @purpose  1:19.1.2, Ensure that the IUT properly evaluates shorthand decrement assignment statements
+ ** @verdict  pass  accept, ttcn3verdict:pass
+ ***************************************************/
+module Sem_190102_shorthand_decrement {
+
+type component GeneralComp {
+}
+
+testcase TC_Sem_190102_shorthand_decrement () runs on GeneralComp system GeneralComp {
+ var integer v_i := 1;
+ v_i--;	//use of shorthand decrement
+
+ if ( v_i==0 ) {
+  setverdict(pass);
+ }
+ else {
+  setverdict(fail);
+ }
+}
+
+
+control{
+
+    execute(TC_Sem_190102_shorthand_decrement());
+
+}
+
+}

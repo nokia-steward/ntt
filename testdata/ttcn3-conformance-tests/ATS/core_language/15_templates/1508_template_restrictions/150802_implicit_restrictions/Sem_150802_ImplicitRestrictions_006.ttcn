@@ -1,0 +1,42 @@
+/*****************************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.8.2, Ensure that referenced item have implicit template restriction.
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+/*
+ * Reference optional field of a record of a template with present restriction.
+ * (see Table 13C: Implicit restrictions)
+ *
+ */
+
+module Sem_150802_ImplicitRestrictions_006 {
+
+type component GeneralComp { }
+
+type record ExampleType {
+	integer a,
+	boolean b optional
+}
+
+template(present) ExampleType examplePresent := {1, ?};
+
+testcase TC_Sem_150802_ImplicitRestrictions_006() runs on GeneralComp {
+
+	var template boolean v_present_b :=  examplePresent.b;
+
+	if (ispresent(v_present_b) ) {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+
+}
+
+control{
+	execute(TC_Sem_150802_ImplicitRestrictions_006());
+}
+
+
+}

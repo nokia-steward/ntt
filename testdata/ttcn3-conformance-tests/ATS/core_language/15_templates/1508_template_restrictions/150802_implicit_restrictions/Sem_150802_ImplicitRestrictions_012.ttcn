@@ -1,0 +1,37 @@
+/*****************************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.8.2, Ensure that referenced item have implicit template restriction.
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+/*
+ * Reference element of a 'record of' template without restriction.
+ * (see Table 13C: Implicit restrictions)
+ *
+ */
+module Sem_150802_ImplicitRestrictions_012 {
+
+type component GeneralComp { }
+
+type record of integer RecordOfInt;
+
+testcase TC_Sem_150802_ImplicitRestrictions_012() runs on GeneralComp {
+
+	template RecordOfInt m_example := {1, 2, 3};
+
+	var template (present) integer  v_secondElem := m_example[2];
+
+	if (isvalue(v_secondElem)) {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+}
+
+control{
+	execute(TC_Sem_150802_ImplicitRestrictions_012());
+}
+
+
+}

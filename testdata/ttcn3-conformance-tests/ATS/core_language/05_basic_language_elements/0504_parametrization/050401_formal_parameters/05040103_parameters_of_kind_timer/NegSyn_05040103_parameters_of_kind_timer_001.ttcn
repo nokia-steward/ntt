@@ -2,7 +2,7 @@
  ** @author   STF 521
  ** @version  0.0.1
  ** @purpose  1:5.4.1.3, Verify that in timer parameters are not allowed
- ** @verdict  pass reject
+ ** @verdict  pass accept, ttcn3verdict:pass
  *****************************************************************/
 
 // The following requirement is tested:

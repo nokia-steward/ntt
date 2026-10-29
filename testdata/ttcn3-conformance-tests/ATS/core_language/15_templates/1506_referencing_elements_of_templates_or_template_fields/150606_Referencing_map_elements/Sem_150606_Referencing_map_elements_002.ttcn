@@ -1,0 +1,48 @@
+/*****************************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:15.6.6, Expanding map containing AnyValue on the RHS
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+// The following requirements are tested:
+// When referencing an element of a map template or field to which AnyValue is assigned,
+// at the right  hand side of an assignment, AnyValueOrNone shall be returned.
+
+module Sem_150606_Referencing_map_elements_002 {
+
+    type record ProductInfo {
+        charstring producer,
+        charstring model,
+        charstring description optional
+    };
+
+    type map from charstring to ProductInfo TMap;
+
+    type record TRec {
+        integer a,
+        TMap b optional
+    }
+
+    type component GeneralComp {
+    }
+
+    testcase TC_Sem_150606_Referencing_map_elements_002() runs on GeneralComp {
+        var template TRec v_template := {
+            a := 1,
+            b := ?
+        };
+        // expanding ? on the RHS
+        var template ProductInfo v_productTemplate := v_template.b["XS125"];
+        log (v_productTemplate); // expecting *
+        if (istemplatekind(v_productTemplate, "*")) {
+            setverdict(pass);
+         } else {
+             setverdict(fail);
+         }
+    }
+
+    control{
+        execute(TC_Sem_150606_Referencing_map_elements_002());
+    }
+}

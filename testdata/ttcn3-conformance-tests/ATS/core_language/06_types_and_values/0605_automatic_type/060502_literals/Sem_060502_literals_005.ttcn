@@ -1,0 +1,21 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for hexstring literals.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060502_literals_005 {
+
+type component GeneralComp {}
+
+// inout parameters require strong typing and can be used to type verification.
+function verifyType(inout hexstring hs) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_060502_literals_005() runs on GeneralComp {
+	{ var v := '5'H; verifyType(v) }
+}
+
+control {
+	execute(TC_Sem_060502_literals_005());
+}
+
+}

@@ -1,0 +1,33 @@
+/***************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.14, Presentness conversion
+ ** @verdict  pass reject
+ ***************************************************/
+
+ /* The following requirements are tested:
+ * presentness conversion:
+ * a. Applying the presentness conversion to a template that only matches the special value omit shall result in an error.
+ */
+
+module NegSem_1514_PresentnessConversion_001 {
+
+	type component GeneralComp {}
+
+	testcase TC_NegSem_1514_PresentnessConversion_001() runs on GeneralComp {
+
+        template boolean t_omit := omit
+
+        var template(present) boolean v_present_omit := t_omit.present; //error
+
+		if (match(v_present_omit, *)) {
+			setverdict(pass);
+		} else {
+			setverdict(fail);
+		}
+	}
+
+	control {
+		execute(TC_NegSem_1514_PresentnessConversion_001());
+	};
+}

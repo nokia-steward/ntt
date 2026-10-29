@@ -1,0 +1,21 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for value ranges.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060501_expressions_003 {
+
+type component GeneralComp {}
+
+testcase TC_Sem_060501_expressions_003() runs on GeneralComp {
+	var v := (0.1..!0.2);
+	if (match(0.11, v)) {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+}
+
+control {
+	execute(TC_Sem_060501_expressions_003());
+}
+
+}

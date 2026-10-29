@@ -1,0 +1,8 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure constants provide automatic type inference.
+// @verdict  pass accept
+module Sem_0605_automatic_type_003 {
+
+const X := 23;
+
+}
