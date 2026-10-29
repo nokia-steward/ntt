@@ -77,6 +77,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return nil
 
 	case *syntax.ModuleDef:
+		if t, ok := n.Def.(*syntax.TemplateDecl); ok && isDynamicTemplate(t, env) {
+			return bindDynamicTemplate(t, env)
+		}
 		return eval(n.Def, env)
 
 	case *syntax.ControlPart:
@@ -106,7 +109,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// merging when both sides are Records.
 		if n.Base != nil && n.Value != nil && n.Params == nil {
 			base := eval(n.Base, env)
-			if !runtime.IsError(base) && base != nil {
+			if !runtime.IsError(base) && base != nil && !isUnionTyped(n.Base, env) {
 				mod := eval(n.Value, env)
 				if !runtime.IsError(mod) {
 					if merged, ok := mergeTemplateMod(base, mod); ok {
@@ -132,10 +135,14 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// actuals. The Body is synthesised on the fly because the
 		// template value is an expression, not a block.
 		if n.Params != nil && n.Value != nil {
+			value := n.Value
+			if n.Base != nil {
+				value = &syntax.ModifiesExpr{X: n.Base, Y: n.Value}
+			}
 			body := &syntax.BlockStmt{
 				Stmts: []syntax.Stmt{
 					&syntax.ReturnStmt{
-						Result: n.Value,
+						Result: value,
 					},
 				},
 			}
@@ -1985,6 +1992,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// `modifies base := mod` used as an expression. Resolve both
 		// sides and merge field-by-field, falling back to the base
 		// when the merge would lose information.
+		if n.Tok == nil {
+			return evalModifiedTemplate(n, env)
+		}
 		base := eval(n.X, env)
 		if runtime.IsError(base) {
 			return base
@@ -3400,6 +3410,106 @@ func arrayDefLowerBound(arrayDef []*syntax.ParenExpr, env runtime.Scope) int {
 		}
 	}
 	return 0
+}
+
+// evalModifiedTemplate evaluates the modification a template declaration
+// with a parameter list, or a dynamic one, makes of its base (ETSI ES
+// 201 873-1 15.5): the base's fields it leaves, merged with its own. A
+// base with parameters is given the template's own of the same names
+// (b.1), its defaults those it has not; a union or record of value the
+// modification does not merge with, it replaces, as a static template's.
+func evalModifiedTemplate(n *syntax.ModifiesExpr, env runtime.Scope) runtime.Object {
+	base, union := modifiedBase(n.X, env)
+	if runtime.IsError(base) {
+		return base
+	}
+	mod := eval(n.Y, env)
+	if runtime.IsError(mod) {
+		return mod
+	}
+	if !union {
+		if merged, ok := mergeTemplateMod(base, mod); ok {
+			return merged
+		}
+	}
+	return mod
+}
+
+// modifiedBase is the value of the base x of a modified template, one
+// with parameters given those of the template's own scope env that have
+// its parameters' names, and whether it is of a union type.
+func modifiedBase(x syntax.Expr, env runtime.Scope) (runtime.Object, bool) {
+	id, ok := x.(*syntax.Ident)
+	if !ok {
+		return eval(x, env), isUnionTyped(x, env)
+	}
+	v, ok := env.Get(id.String())
+	fn, isFn := forceThunk(v).(*runtime.Function)
+	if !ok || !isFn || !fn.IsTemplate || fn.Params == nil {
+		return eval(x, env), isUnionTyped(x, env)
+	}
+	// A base with parameters is of its declared result type.
+	home := fn.Home
+	if home == nil {
+		home = env
+	}
+	st := structDeclOf(typeDescOfSpec(fn.Result, home))
+	union := st != nil && st.KindTok.Kind() == syntax.UNION
+	own, isEnv := env.(*runtime.Env)
+	if !isEnv || runtime.Scope(own) == moduleHome(env) {
+		// A template without parameters has none to give its base.
+		return eval(x, env), union
+	}
+	var args []runtime.Object
+	for _, p := range fn.Params.List {
+		if p == nil || p.Name == nil || own.Owner(syntax.Name(p.Name)) != own {
+			break
+		}
+		a, _ := own.Get(syntax.Name(p.Name))
+		args = append(args, forceThunk(a))
+	}
+	if len(args) < len(fn.Params.List) && !allFormalsHaveDefaults(&syntax.FormalPars{List: fn.Params.List[len(args):]}) {
+		return eval(x, env), union
+	}
+	ret, _ := applyFunction(fn, args)
+	return ret, union
+}
+
+// isDynamicTemplate reports whether a global template without parameters
+// is evaluated at each use rather than once where it is declared: one
+// declared @fuzzy (ETSI ES 201 873-1 15.3), or one of a module whose
+// template attribute is "dynamic" (TTCN-3 V5, ETSI TR 104 081 6.13).
+func isDynamicTemplate(t *syntax.TemplateDecl, env runtime.Scope) bool {
+	if t.Name == nil || t.Params != nil || t.Value == nil {
+		return false
+	}
+	if t.Modif != nil && t.Modif.String() == "@fuzzy" {
+		return true
+	}
+	a, ok := env.Get(activeAttrsKey)
+	if !ok {
+		return false
+	}
+	td, ok := a.(*runtime.TypeDesc)
+	if !ok {
+		return false
+	}
+	vals, _ := td.Lookup("template")
+	return len(vals) > 0 && vals[len(vals)-1] == "dynamic"
+}
+
+// bindDynamicTemplate binds a dynamic template as a fuzzy thunk, which
+// each use evaluates anew, as a @fuzzy parameter; a modified one merges
+// its base and modification each time.
+func bindDynamicTemplate(t *syntax.TemplateDecl, env runtime.Scope) runtime.Object {
+	value := t.Value
+	if t.Base != nil {
+		value = &syntax.ModifiesExpr{X: t.Base, Y: t.Value}
+	}
+	name := syntax.Name(t.Name)
+	env.Set(name, &runtime.LazyThunk{Expr: value, Env: env, Fuzzy: true, Template: t.Type})
+	recordDeclaredType(env, name, t.Type)
+	return nil
 }
 
 // listTypeDesc is td when it is an array, record of or set of type, or
@@ -8069,6 +8179,12 @@ func forceThunk(v runtime.Object) runtime.Object {
 	// The parameter's value, of its own: a change to it in the callee
 	// does not reach the actual it was evaluated from.
 	val := runtime.Share(eval(expr, t.Env))
+	if typ, ok := t.Template.(syntax.Expr); ok {
+		if runtime.IsError(val) || val == nil {
+			return runtime.Undefined
+		}
+		val = coerceToDeclaredStruct(val, typ, expr, t.Env)
+	}
 	if !t.Fuzzy {
 		t.Cached = val
 		t.Once = true
@@ -11649,16 +11765,17 @@ func evalTypeDescAttrCall(td *runtime.TypeDesc, attrName string, n *syntax.CallE
 
 // mergeTemplateMod implements the runtime side of `template T t2
 // modifies t1 := { fieldX := X, ... }`. Field assignments in the
-// modifier overlay the base record's field map; unspecified fields
-// inherit from the base. Returns (merged, true) on success, or
-// (nil, false) if the shapes don't line up with the record-based
-// model we implement here.
+// modifier overlay the base record's field map; unspecified fields, and
+// those the modifier leaves unchanged with `-`, inherit from the base
+// (ETSI ES 201 873-1 15.5). Either side may be written positionally.
+// Returns (merged, true) on success, or (nil, false) if the shapes don't
+// line up with the record-based model we implement here.
 func mergeTemplateMod(base, mod runtime.Object) (runtime.Object, bool) {
-	br, ok := base.(*runtime.Record)
+	br, ok := templateRecord(base, nil)
 	if !ok {
 		return nil, false
 	}
-	mr, ok := mod.(*runtime.Record)
+	mr, ok := templateRecord(mod, br.Names())
 	if !ok {
 		return nil, false
 	}
@@ -11667,9 +11784,34 @@ func mergeTemplateMod(base, mod runtime.Object) (runtime.Object, bool) {
 		out.Set(k, br.Fields[k])
 	}
 	for _, k := range mr.Names() {
-		out.Set(k, mr.Fields[k])
+		if v := mr.Fields[k]; v != runtime.Undefined {
+			out.Set(k, v)
+		}
 	}
 	return out, true
+}
+
+// templateRecord is the record a template of a record type is: itself, or
+// the fields of one held positionally, named by its type or, failing
+// that, by names, the base's field names in order.
+func templateRecord(v runtime.Object, names []string) (*runtime.Record, bool) {
+	switch x := v.(type) {
+	case *runtime.Record:
+		return x, true
+	case *runtime.List:
+		if len(x.FieldNames) > 0 {
+			names = x.FieldNames
+		}
+		if x.ListType != "" || len(names) == 0 || len(names) != len(x.Elements) {
+			return nil, false
+		}
+		r := runtime.NewRecord()
+		for i, name := range names {
+			r.Set(name, x.Elements[i])
+		}
+		return r, true
+	}
+	return nil, false
 }
 
 // evalActivate registers an altstep call as a "default" - a fallback

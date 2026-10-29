@@ -38,10 +38,7 @@ func (a *Analyzer) checkPortTypeRules(mod *syntax.Module) []Diagnostic {
 		if hasDir {
 			continue
 		}
-		kindLabel := "message"
-		if pt.KindTok != nil {
-			kindLabel = pt.KindTok.String()
-		}
+		kindLabel := pt.PortKind().String()
 		diags = append(diags, Diagnostic{
 			Code:     "port-type-no-direction",
 			Severity: SeverityError,

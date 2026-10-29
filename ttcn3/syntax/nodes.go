@@ -918,6 +918,15 @@ func (x *PortAttribute) declNode()        {}
 func (x *PortMapAttribute) declNode()     {}
 func (x *ComponentTypeDecl) declNode()    {}
 
+// PortKind is the kind of the port type: MIXED, MESSAGE or PROCEDURE; one
+// declared without its kind is a message port type.
+func (x *PortTypeDecl) PortKind() Kind {
+	if x.KindTok == nil {
+		return MESSAGE
+	}
+	return x.KindTok.Kind()
+}
+
 // ------------------------------------------------------------------------
 // Modules and Module Definitions
 

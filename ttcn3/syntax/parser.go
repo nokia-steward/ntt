@@ -1557,7 +1557,8 @@ func (p *parser) parseWithStmt() *WithStmt {
 		EXTENSION,
 		OPTIONAL,
 		STEPSIZE,
-		OVERRIDE:
+		OVERRIDE,
+		TEMPLATE: // TTCN-3 V5: how a module's templates are evaluated
 		x.KindTok = p.consume()
 	default:
 		p.errorExpected("with-attribute")
@@ -1719,6 +1720,9 @@ func (p *parser) parsePortTypeDecl() *PortTypeDecl {
 	switch p.tok {
 	case MIXED, MESSAGE, PROCEDURE:
 		x.KindTok = p.consume()
+	case LBRACE, REALTIME:
+		// A port type without its kind is a message port type
+		// (TTCN-3 V5, ETSI TR 104 081 6.5.4).
 	default:
 		p.errorExpected("'message' or 'procedure'")
 	}

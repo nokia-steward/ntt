@@ -48,10 +48,7 @@ func (a *Analyzer) checkPortDeclTypeRules(mod *syntax.Module) []Diagnostic {
 		if !ok || pd == nil {
 			return true
 		}
-		portKind := ""
-		if pd.KindTok != nil {
-			portKind = pd.KindTok.String()
-		}
+		portKind := pd.PortKind().String()
 		for _, attr := range pd.Attrs {
 			switch a := attr.(type) {
 			case *syntax.PortAttribute:

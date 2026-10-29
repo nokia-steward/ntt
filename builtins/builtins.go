@@ -288,6 +288,19 @@ func Oct2Hex(args ...runtime.Object) runtime.Object {
 	return reformatBinarystring(args[0].(*runtime.Binarystring), runtime.Hex)
 }
 
+// universal is conversion f giving a universal charstring: the
+// to and from universal charstring functions TTCN-3 V5 adds beside the
+// charstring ones (ETSI TR 104 081 8.1.11).
+func universal(f func(...runtime.Object) runtime.Object) func(...runtime.Object) runtime.Object {
+	return func(args ...runtime.Object) runtime.Object {
+		r := f(args...)
+		if s, ok := r.(*runtime.String); ok {
+			return runtime.NewUniversalString(s.String())
+		}
+		return r
+	}
+}
+
 // Bit2Str / Hex2Str / Oct2Str produce charstring repr of the value.
 func Bit2Str(args ...runtime.Object) runtime.Object {
 	b := args[0].(*runtime.Binarystring)
@@ -362,10 +375,14 @@ func Str2Bit(args ...runtime.Object) runtime.Object {
 	}
 }
 func Str2Hex(args ...runtime.Object) runtime.Object {
+	return strToHex("str2hex", args...)
+}
+
+func strToHex(name string, args ...runtime.Object) runtime.Object {
 	s := args[0].(*runtime.String).String()
 	v, ok := new(big.Int).SetString(s, 16)
 	if !ok {
-		return runtime.Errorf("str2hex: %q is not a hexstring", s)
+		return runtime.Errorf("%s: %q is not a hexstring", name, s)
 	}
 	return &runtime.Binarystring{
 		String: fmt.Sprintf("'%0*X'H", len(s), v),
@@ -375,13 +392,17 @@ func Str2Hex(args ...runtime.Object) runtime.Object {
 	}
 }
 func Str2Oct(args ...runtime.Object) runtime.Object {
+	return strToOct("str2oct", args...)
+}
+
+func strToOct(name string, args ...runtime.Object) runtime.Object {
 	s := args[0].(*runtime.String).String()
 	if len(s)%2 != 0 {
-		return runtime.Errorf("str2oct: %q must have even length", s)
+		return runtime.Errorf("%s: %q must have even length", name, s)
 	}
 	v, ok := new(big.Int).SetString(s, 16)
 	if !ok {
-		return runtime.Errorf("str2oct: %q is not octets", s)
+		return runtime.Errorf("%s: %q is not octets", name, s)
 	}
 	return &runtime.Binarystring{
 		String: fmt.Sprintf("'%0*X'O", len(s), v),
@@ -1195,6 +1216,23 @@ func init() {
 
 	for name, builtin := range builtins {
 		if err := runtime.AddBuiltin(name, builtin); err != nil {
+			panic(err)
+		}
+	}
+
+	// The conversions TTCN-3 V5 adds for the universal charstring (ETSI
+	// TR 104 081 8.1.11): free names in earlier editions, so a module's
+	// own definition of one is the one it calls.
+	for name, builtin := range map[string]func(...runtime.Object) runtime.Object{
+		"int2unistr(in integer i) return universal charstring":     universal(Int2Str),
+		"bit2unistr(in bitstring b) return universal charstring":   universal(Bit2Str),
+		"hex2unistr(in hexstring h) return universal charstring":   universal(Hex2Str),
+		"unistr2int(in universal charstring s) return integer":     Str2Int,
+		"unistr2hex(in universal charstring s) return hexstring":   func(args ...runtime.Object) runtime.Object { return strToHex("unistr2hex", args...) },
+		"unistr2oct(in universal charstring s) return octetstring": func(args ...runtime.Object) runtime.Object { return strToOct("unistr2oct", args...) },
+		"unistr2float(in universal charstring s) return float":     Str2Float,
+	} {
+		if err := runtime.AddFallbackBuiltin(name, builtin); err != nil {
 			panic(err)
 		}
 	}

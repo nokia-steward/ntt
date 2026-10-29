@@ -619,9 +619,7 @@ func collectPortTypes(mod *syntax.Module) map[string]*portDirs {
 			out:   map[string]bool{},
 			inout: map[string]bool{},
 		}
-		if pt.KindTok != nil {
-			dirs.kind = pt.KindTok.Kind()
-		}
+		dirs.kind = pt.PortKind()
 		for _, attr := range pt.Attrs {
 			pa, ok := attr.(*syntax.PortAttribute)
 			if !ok || pa.KindTok == nil {

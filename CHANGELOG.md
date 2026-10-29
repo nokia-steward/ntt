@@ -164,6 +164,21 @@ single functional test doubles as a performance probe. See
   settings, now shared by both (`runtime/port/tlsconf`). A hang-up is
   reported as on plain TCP, so a long-lived line stream can run over TLS.
 
+- **First features of TTCN-3 V5** (ETSI TR 104 081 V5.1.1, the migration
+  guide to it), those that leave what a module of an earlier edition means
+  as it is:
+  - a port type may be declared without its kind, `type port P { inout
+    integer }`, and is then a message port type;
+  - a module's `with { template "dynamic" }` makes every template of the
+    module evaluated at each use, as one with a parameter list is; with
+    "static", the default, a template without one is evaluated once, where
+    it is declared. `ntt check` reports the attribute on anything but a
+    module, and a value other than these two;
+  - `int2unistr`, `bit2unistr`, `hex2unistr`, `unistr2int`, `unistr2hex`,
+    `unistr2oct` and `unistr2float` convert to and from the universal
+    charstring as the charstring functions do. A module's own definition
+    of one of these names is still the one it calls.
+
 ### Changed
 
 - **Linting runs golangci-lint v2** (2.14, built with Go 1.27), which can
@@ -672,6 +687,17 @@ Independent of the two clocks:
   module, a method - is taken to set what it is passed. An `inout`
   parameter, whose actual has to be bound already (5.4.2), and a port or
   timer operation are not.
+- **A `@fuzzy` template is evaluated at each use** (ETSI 15.3), as a
+  `@fuzzy` parameter is. A global one was evaluated once.
+- **A modified template has its base's fields where it does not change
+  them** (ETSI 15.5). A base written positionally (`{1, 1.0}`) was lost,
+  as was every field of the base of a modified template with parameters
+  (`template R t2(integer p) modifies t1`), which was its modification
+  alone; and `-` in a modification written positionally changed the
+  field. A base with parameters is given the modified template's actuals
+  of the same names, or its defaults. A modification of a union or record
+  of template replaces the base's value; one of a union kept the base's
+  alternative beside its own.
 - **An altstep named with its module is an alternative too.** `[] M.a()`
   in an alt was never taken when its timer ran out, nor was a default
   activated as `activate(M.a())`, where `a()` was.

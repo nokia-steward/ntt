@@ -108,6 +108,10 @@ type LazyThunk struct {
 	Fuzzy  bool
 	Once   bool
 	Cached Object
+	// Template, when set, is the declared type of the template the thunk
+	// evaluates, a dynamic one: its value takes the type's shape, and an
+	// error evaluating it gives Undefined, as a static template's does.
+	Template interface{}
 	// Name is the parameter the thunk stands for, and Module the module
 	// of its function, for the test log's tliEvaluate.
 	Name, Module string

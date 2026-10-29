@@ -9,7 +9,7 @@ import (
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
-var builtins map[string]*Builtin
+var builtins, fallbackBuiltins map[string]*Builtin
 
 // AddBuiltin adds a builtin function to the runtime environment.
 //
@@ -22,6 +22,20 @@ func AddBuiltin(id string, fn func(args ...Object) Object) error {
 	if builtins == nil {
 		builtins = make(map[string]*Builtin)
 	}
+	return addBuiltin(builtins, id, fn)
+}
+
+// AddFallbackBuiltin adds a builtin function a definition of the same name
+// hides, as AddBuiltin's do not: one whose name an earlier edition of
+// TTCN-3 leaves free for a module's own definitions.
+func AddFallbackBuiltin(id string, fn func(args ...Object) Object) error {
+	if fallbackBuiltins == nil {
+		fallbackBuiltins = make(map[string]*Builtin)
+	}
+	return addBuiltin(fallbackBuiltins, id, fn)
+}
+
+func addBuiltin(builtins map[string]*Builtin, id string, fn func(args ...Object) Object) error {
 	if i := strings.Index(id, "("); i >= 0 {
 		name, params, err := parseFunction(id)
 		if err != nil {

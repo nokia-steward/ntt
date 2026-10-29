@@ -76,6 +76,9 @@ func (env *Env) Get(name string) (Object, bool) {
 	if env.outer != nil {
 		return env.outer.Get(name)
 	}
+	if builtin, ok := fallbackBuiltins[name]; ok {
+		return builtin, true
+	}
 	return nil, false
 }
 
