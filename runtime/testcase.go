@@ -53,6 +53,9 @@ type TestcaseExec struct {
 	// tlSites is, per component, where the behaviour it is about to enter
 	// was called or started from (SetTLCallSite).
 	tlSites map[int64]tl.Pos
+	// tlMsgType is a message arriving at a component's port as the log
+	// shows it, of its type (SetTLMessageTyper).
+	tlMsgType func(comp *ComponentRef, port string, o Object) tl.Value
 	// controlLog marks an exec that only logs, a control part's, and
 	// controlComp is the component its events are of (NewControlLog).
 	controlLog  bool

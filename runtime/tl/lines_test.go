@@ -198,3 +198,54 @@ func TestLinesWriterStartsEachTestcaseAfresh(t *testing.T) {
 		`20261008T072418.794614|tmto|MTC|MTC.t|never(inactive)`,
 	)
 }
+
+// TestLinesWriterSystemMessagesAndModuleParameters: what a mapped port
+// hands in is its decoded value, from no sender, logged as from `?`; a
+// receive of `?` names the type of what it took; a module parameter is
+// logged the first time a testcase reads it.
+func TestLinesWriterSystemMessagesAndModuleParameters(t *testing.T) {
+	at := tl.PortID{Comp: mtc, Name: "ctl", Index: -1}.Content()
+	from := tl.PortID{Comp: tl.ComponentID{Name: "system", ID: "system"}, Name: "ctl", Index: -1}.Content()
+	resp := tl.Value{Kind: "record", Type: "Resp", Module: "T", Elems: []tl.Value{{Name: "code", Kind: "integer", Text: "200"}}}
+	mpar := &tl.Event{Op: "tliModulePar", Ts: ts, C: mtc, Args: []tl.Arg{
+		{Name: "name", Val: tl.QualifiedName("T", "mp")}, {Name: "val", Val: tl.Value{Kind: "float", Text: "10"}.AsValue()}}}
+	got := linesOf(t,
+		&tl.Event{Op: "tliTcStart", Ts: ts, C: mtc, Args: []tl.Arg{{Name: "tcId", Val: tl.TestcaseID("T", "tc")}}},
+		mpar, mpar,
+		&tl.Event{Op: "tliMDetected_m", Ts: ts, C: mtc, Args: []tl.Arg{
+			{Name: "at", Val: at}, {Name: "from", Val: from}, {Name: "msgValue", Val: tl.Message("")}},
+			Parts: []tl.Value{resp}},
+		&tl.Event{Op: "tliMReceive_m", Ts: ts, Src: "T.ttcn3", Line: 9, C: mtc, Args: []tl.Arg{
+			{Name: "at", Val: at}, {Name: "msgValue", Val: resp.AsValue()},
+			{Name: "msgTmpl", Val: tl.Value{Match: &tl.Matching{Symbol: "any_value"}}.AsTemplate()}}},
+	)
+	wantLines(t, got[3:],
+		`20261008T072418.794614|mpar|ntt|T.mp|10.0`,
+		`20261008T072418.794614|ptqu|?|MTC.ctl|message(value=T.Resp:{200},sender=:null,timestamp=0.000000)`,
+		`20261008T072418.794614|ptrx|MTC=T.ttcn3:9|MTC.ctl|value=T.Resp:?|ready(match=message(value=T.Resp:{200},sender=:null,timestamp=0.000000))+consume`,
+	)
+}
+
+// TestLinesWriterMismatchAndComponentNamedSystem: a `?` that did not match
+// names its template's type, not the message's; a component named System
+// sends as itself, not as the system does.
+func TestLinesWriterMismatchAndComponentNamedSystem(t *testing.T) {
+	at := tl.PortID{Comp: mtc, Name: "q", Index: -1}.Content()
+	named := tl.ComponentID{Name: "System", ID: "3", Type: "C"}
+	from := tl.PortID{Comp: named, Name: "p", Index: -1}.Content()
+	five := tl.Value{Kind: "integer", Text: "5"}
+	got := linesOf(t,
+		&tl.Event{Op: "tliTcStart", Ts: ts, C: mtc, Args: []tl.Arg{{Name: "tcId", Val: tl.TestcaseID("T", "tc")}}},
+		&tl.Event{Op: "tliMDetected_c", Ts: ts, C: mtc, Args: []tl.Arg{
+			{Name: "at", Val: at}, {Name: "from", Val: from}, {Name: "msgValue", Val: five.AsValue()}}},
+		&tl.Event{Op: "tliMMismatch_c", Ts: ts, Src: "T.ttcn3", Line: 9, C: mtc, Args: []tl.Arg{
+			{Name: "at", Val: at}, {Name: "msgValue", Val: five.AsValue()},
+			{Name: "msgTmpl", Val: tl.Value{Match: &tl.Matching{Symbol: "any_value"}}.AsTemplate()},
+			{Name: "diffs", Val: tl.Diffs(tl.Diff{Val: "5", Tmpl: "?"})}},
+			Parts: []tl.Value{{Type: "Resp", Module: "T"}}},
+	)
+	wantLines(t, got[len(got)-2:],
+		`20261008T072418.794614|ptqu|System|MTC.q|message(value=integer:5,sender=C:System(running),timestamp=0.000000)`,
+		`20261008T072418.794614|ptrx|MTC=T.ttcn3:9|MTC.q|value=T.Resp:?|never(mismatch=value:5~?)`,
+	)
+}

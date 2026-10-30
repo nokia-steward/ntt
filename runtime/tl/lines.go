@@ -50,6 +50,7 @@ type LinesWriter struct {
 	timers   map[string]int64    // per component and timer, when it expires (µs)
 	queues   map[string][]queued // per port, the messages detected in it
 	sent     map[string]string   // per component, where it last sent
+	modpars  map[string]bool     // the module parameters logged
 	guard    string              // the duration execute() gave the testcase starting
 	execAt   string              // where execute() was called
 	tcStart  int64               // when the testcase started (µs)
@@ -73,7 +74,7 @@ func NewLinesWriter(w io.Writer) *LinesWriter {
 		w: bufio.NewWriter(w), loc: time.Local,
 		verdicts: map[string]string{}, names: map[string]string{}, states: map[string]string{},
 		frames: map[string][]frame{}, timers: map[string]int64{}, queues: map[string][]queued{},
-		sent: map[string]string{},
+		sent: map[string]string{}, modpars: map[string]bool{},
 	}
 }
 
@@ -170,6 +171,7 @@ func (lw *LinesWriter) lines(e *Event, n *Node) []string {
 		control := lw.frames["ntt"]
 		lw.verdicts, lw.names, lw.states = map[string]string{}, map[string]string{}, map[string]string{}
 		lw.frames, lw.timers, lw.queues, lw.sent = map[string][]frame{"ntt": control}, map[string]int64{}, map[string][]queued{}, map[string]string{}
+		lw.modpars = map[string]bool{}
 		lw.tcStart = e.Ts
 		lw.verdicts["MTC"] = "none"
 		lw.states["MTC"] = "running"
@@ -195,7 +197,14 @@ func (lw *LinesWriter) lines(e *Event, n *Node) []string {
 		}
 		return one("vach", lineTypeName(arg("val")), lw.valueName(e, who, arg("name")), val("val"))
 	case "tliModulePar":
-		return []string{line("mpar", "ntt", qualified(arg("name")), val("val"))}
+		// A module parameter is logged the first time a testcase reads
+		// it, not at each reading.
+		name := qualified(arg("name"))
+		if lw.modpars[name] {
+			return nil
+		}
+		lw.modpars[name] = true
+		return []string{line("mpar", "ntt", name, val("val"))}
 	case "tliSetVerdict":
 		prev := lw.verdicts[who]
 		if prev == "" {
@@ -329,6 +338,12 @@ func (lw *LinesWriter) lines(e *Event, n *Node) []string {
 		lw.sent[who] = here
 		return one("ptsd", lw.portRef(arg("at")), lw.portRef(arg("to")), "exception", qualified(arg("signature"))+" "+val("excValue"))
 	case "tliMDetected":
+		// A mapped port's message is logged encoded, a connected port's
+		// untyped; its decoded value, of its type, comes along.
+		if len(e.Parts) == 1 {
+			v := e.Parts[0].node()
+			return lw.detected(e, n, "message(value="+lineTypeName(v)+":"+lw.lineValue(v))
+		}
 		return lw.detected(e, n, "message(value="+lineTypeName(arg("msgValue"))+":"+val("msgValue"))
 	case "tliPrGetCallDetected":
 		return lw.detected(e, n, "call("+lw.signature(n, true))
@@ -337,9 +352,9 @@ func (lw *LinesWriter) lines(e *Event, n *Node) []string {
 	case "tliPrCatchDetected":
 		return lw.detected(e, n, "exception(value="+qualified(arg("signature"))+":"+val("excValue"))
 	case "tliMReceive", "tliMMismatch":
-		return one("ptrx", lw.portRef(arg("at")), lw.description(arg("msgTmpl")), lw.outcome(n, base == "tliMReceive", "consume", "msgValue", "msgTmpl"))
+		return one("ptrx", lw.portRef(arg("at")), lw.description(e, arg("msgTmpl"), arg("msgValue"), base == "tliMReceive"), lw.outcome(n, base == "tliMReceive", "consume", "msgValue", "msgTmpl"))
 	case "tliMChecked", "tliCheckedAny", "tliCheckAnyMismatch":
-		return one("ptck", lw.portRef(arg("at")), lw.description(arg("msgTmpl")), lw.outcome(n, base != "tliCheckAnyMismatch", "check", "msgValue", "msgTmpl"))
+		return one("ptck", lw.portRef(arg("at")), lw.description(e, arg("msgTmpl"), arg("msgValue"), base != "tliCheckAnyMismatch"), lw.outcome(n, base != "tliCheckAnyMismatch", "check", "msgValue", "msgTmpl"))
 	case "tliPrGetCall", "tliPrGetCallMismatch":
 		return one("ptrx", lw.portRef(arg("at")), "call="+lw.signatureTmpl(n), lw.outcome(n, base == "tliPrGetCall", "consume", "", ""))
 	case "tliPrGetReply", "tliPrGetReplyMismatch", "tliPrGetReplyChecked":
@@ -476,6 +491,16 @@ func (lw *LinesWriter) detected(e *Event, n *Node, item string) []string {
 			senderType = compType(c)
 		}
 	}
+	if strings.HasSuffix(e.Op, "_m") {
+		// What arrives from the system, a test port hands in: it has no
+		// sender, and is logged as from the port's own thread, `?`.
+		parts := []string{lw.stamp(e.Ts), "ptqu", "?", at, item + ",sender=:null,timestamp=" + lw.since(e.Ts) + ")"}
+		lw.queues[at] = append(lw.queues[at], queued{item: parts[4]})
+		for i := range parts {
+			parts[i] = oneLine(parts[i])
+		}
+		return []string{strings.Join(parts, "|")}
+	}
 	stamp := lw.since(e.Ts)
 	if sender != "" {
 		item += ",sender=" + senderType + ":" + sender + "(" + lw.state(sender) + ")"
@@ -521,13 +546,27 @@ func (lw *LinesWriter) outcome(n *Node, ok bool, how, valueArg, tmplArg string) 
 	return "ready(match=" + item + ")+" + how
 }
 
-// description is the template a receive or check matches its message
+// description is the template t a receive or check matches its message v
 // against, `value=` its type and itself, nothing for a receive of any.
-func (lw *LinesWriter) description(t *Node) string {
+func (lw *LinesWriter) description(e *Event, t, v *Node, matched bool) string {
 	if t == nil {
 		return ""
 	}
-	return "value=" + lineTypeName(t) + ":" + lw.lineValue(t)
+	typ := lineTypeName(t)
+	switch {
+	case typ != "-":
+	case len(e.Parts) == 1 && e.Parts[0].Type != "":
+		// A `?` shows no type; the template's comes along.
+		typ = e.Parts[0].Type
+		if m := e.Parts[0].Module; m != "" {
+			typ = m + "." + typ
+		}
+	case matched && v != nil:
+		// Nor does a `?` of no declared type, which the message it
+		// matched has.
+		typ = lineTypeName(v)
+	}
+	return "value=" + typ + ":" + lw.lineValue(t)
 }
 
 // until is when the alt component who waits in can go on at the latest:
@@ -581,7 +620,8 @@ func (lw *LinesWriter) compName(id, name string) string {
 	switch {
 	case strings.EqualFold(name, "mtc"):
 		name = "MTC"
-	case strings.EqualFold(name, "system"):
+	case id == "system":
+		// The system, not a component named so.
 		name = "SYSTEM"
 	case name == "" || name == id:
 		if known := lw.names[id]; known != "" {

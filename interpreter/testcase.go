@@ -348,6 +348,9 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 	exec.SetDeterministicClock(opts.DeterministicClock)
 	if opts.TestLogger != nil {
 		exec.SetTestLogger(opts.TestLogger)
+		exec.SetTLMessageTyper(func(comp *runtime.ComponentRef, port string, o runtime.Object) tl.Value {
+			return tlTyped(o, portMessageTypeDesc(env, comp, port, o), env)
+		})
 	}
 	// Per-port performance capture (real-clock live runs). Hand the raw
 	// capture back at run end, on every exit path including a recovered
@@ -1408,7 +1411,17 @@ func bindDeclNameScoped(env runtime.Scope, n syntax.Node, scopes []*syntax.WithS
 		}
 	case *syntax.PortTypeDecl:
 		if d.Name != nil {
-			env.Set(syntax.Name(d.Name), typeDescForScoped(syntax.Name(d.Name), d.With, scopes))
+			td := typeDescForScoped(syntax.Name(d.Name), d.With, scopes)
+			for _, a := range d.Attrs {
+				if pa, ok := a.(*syntax.PortAttribute); ok && pa.KindTok != nil &&
+					(pa.KindTok.Kind() == syntax.IN || pa.KindTok.Kind() == syntax.INOUT) {
+					td.PortIn = append(td.PortIn, pa.Types...)
+				}
+			}
+			if len(td.PortIn) > 0 {
+				td.Home = env
+			}
+			env.Set(syntax.Name(d.Name), td)
 		}
 	case *syntax.EnumTypeDecl:
 		if d.Name != nil {
@@ -4083,7 +4096,7 @@ func evalPortReceiveBare(n syntax.Node, port string, env runtime.Scope, consume 
 					if !consume {
 						ev = "check"
 					}
-					tlReceive(exec, n, name, head, runtime.Any, nil, ev, false, false)
+					tlReceive(exec, env, n, name, head, runtime.Any, nil, ev, false, false)
 				}
 				return true
 			}
@@ -4109,7 +4122,7 @@ func evalPortReceiveBare(n syntax.Node, port string, env runtime.Scope, consume 
 		if !consume {
 			ev = "check"
 		}
-		tlReceive(exec, n, port, head, runtime.Any, nil, ev, false, false)
+		tlReceive(exec, env, n, port, head, runtime.Any, nil, ev, false, false)
 	}
 	return true
 }
@@ -4270,6 +4283,53 @@ func bindComponentType(env runtime.Scope, moduleName, compTypeName string) {
 		bindComponentMembers(members, body)
 	}
 	bind(moduleName, compTypeName, map[*syntax.BlockStmt]bool{})
+}
+
+// componentPortType is the type of the port named port of a component of
+// type compTypeName, as moduleName sees it: of its own ports or those it
+// inherits, resolved where the component type declaring it is.
+func componentPortType(root runtime.Scope, moduleName, compTypeName, port string) *runtime.TypeDesc {
+	var find func(module, name string, seen map[*syntax.BlockStmt]bool) *runtime.TypeDesc
+	find = func(module, name string, seen map[*syntax.BlockStmt]bool) *runtime.TypeDesc {
+		var body *syntax.BlockStmt
+		var parents typeParents
+		declaring := module
+		if c, ok := lookupComponentType(root, module, name); ok {
+			body, parents = c.body, typeParents{module: c.module, names: c.extends}
+			declaring = c.module
+		} else {
+			body = componentTypeBody(module, name)
+			componentTypeBodiesMu.RLock()
+			parents = componentTypeParents[body]
+			componentTypeBodiesMu.RUnlock()
+		}
+		if body == nil || seen[body] {
+			return nil
+		}
+		seen[body] = true
+		for _, stmt := range body.Stmts {
+			ds, ok := stmt.(*syntax.DeclStmt)
+			if !ok {
+				continue
+			}
+			vd, ok := ds.Decl.(*syntax.ValueDecl)
+			if !ok || vd.KindTok == nil || vd.KindTok.Kind() != syntax.PORT {
+				continue
+			}
+			for _, d := range vd.Decls {
+				if d != nil && d.Name != nil && d.Name.String() == port {
+					return lookupTypeDesc(syntax.Name(vd.Type), moduleScopeOf(root, declaring))
+				}
+			}
+		}
+		for _, p := range parents.names {
+			if td := find(parents.module, p, seen); td != nil {
+				return td
+			}
+		}
+		return nil
+	}
+	return find(moduleName, compTypeName, map[*syntax.BlockStmt]bool{})
 }
 
 func componentTypeBody(moduleName, compTypeName string) *syntax.BlockStmt {

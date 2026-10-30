@@ -326,6 +326,9 @@ type TypeDesc struct {
 	Length *syntax.LengthExpr
 	// Map is a map type's specification, for the type of its values.
 	Map *syntax.MapSpec
+	// PortIn is the types a port type's `in` and `inout` lists name, the
+	// types of the messages its ports receive.
+	PortIn []syntax.Expr
 	// Spec is the type specification a subtype declaration gives (`type
 	// record of T L`'s list of T, `type T S`'s reference to T), for a codec
 	// that walks a value by its type; nil for a record, set or union type

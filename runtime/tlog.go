@@ -205,6 +205,31 @@ func NewControlLog(l tl.Logger, c tl.ComponentID) *TestcaseExec {
 	return t
 }
 
+// SetTLMessageTyper sets how a message arriving at a component's port is
+// logged: the runtime does not know the types of the values it queues, the
+// interpreter does.
+func (t *TestcaseExec) SetTLMessageTyper(f func(comp *ComponentRef, port string, o Object) tl.Value) {
+	t.tlMu.Lock()
+	defer t.tlMu.Unlock()
+	t.tlMsgType = f
+}
+
+// tlMessage is o, arriving at the port named port of component comp, as
+// the log shows it.
+func (t *TestcaseExec) tlMessage(comp int64, port string, o Object) tl.Value {
+	t.tlMu.Lock()
+	f := t.tlMsgType
+	t.tlMu.Unlock()
+	if f != nil {
+		for _, r := range t.AllComponents() {
+			if r != nil && r.ID == comp {
+				return f(r, port, o)
+			}
+		}
+	}
+	return TLValue(o)
+}
+
 // SetTLCallSite records where component comp calls or starts the behaviour
 // it enters next, for the event of its entry (TakeTLCallSite).
 func (t *TestcaseExec) SetTLCallSite(comp int64, at tl.Pos) {
@@ -418,10 +443,13 @@ func (t *TestcaseExec) tlDetected(key string, msg PortMessage) {
 		if b, ok := msg.Payload.(*Binarystring); ok && b.Unit == Octet {
 			octets = TLValue(b).Text
 		}
-		t.TLogFrom(l, recv, "tliMDetected_m", "", 0,
-			tl.Arg{Name: "at", Val: at.Content()},
-			tl.Arg{Name: "from", Val: from.Content()},
-			tl.Arg{Name: "msgValue", Val: tl.Message(octets)})
+		// The decoded value goes along for a writer that shows it.
+		t.tlogEvent(l, &tl.Event{Op: "tliMDetected_m", Ts: t.TLTime(), C: recv,
+			Args: []tl.Arg{
+				{Name: "at", Val: at.Content()},
+				{Name: "from", Val: from.Content()},
+				{Name: "msgValue", Val: tl.Message(octets)}},
+			Parts: []tl.Value{t.tlMessage(owner, at.Name, msg.Payload)}})
 		return
 	}
 	from := at
@@ -434,10 +462,14 @@ func (t *TestcaseExec) tlDetected(key string, msg PortMessage) {
 			}
 		}
 	}
-	t.TLogFrom(l, recv, "tliMDetected_c", "", 0,
-		tl.Arg{Name: "at", Val: at.Content()},
-		tl.Arg{Name: "from", Val: from.Content()},
-		tl.Arg{Name: "msgValue", Val: TLValue(msg.Payload).AsValue()})
+	// Of its type, as the port's type lists it, for a writer that shows
+	// it.
+	t.tlogEvent(l, &tl.Event{Op: "tliMDetected_c", Ts: t.TLTime(), C: recv,
+		Args: []tl.Arg{
+			{Name: "at", Val: at.Content()},
+			{Name: "from", Val: from.Content()},
+			{Name: "msgValue", Val: TLValue(msg.Payload).AsValue()}},
+		Parts: []tl.Value{t.tlMessage(owner, at.Name, msg.Payload)}})
 }
 
 // connID is the id the connection graph records for a component: the MTC

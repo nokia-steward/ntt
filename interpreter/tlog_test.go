@@ -978,3 +978,83 @@ func TestLoggingAnElementAssignedEvaluatesNothing(t *testing.T) {
 		t.Errorf("element paths %v", paths)
 	}
 }
+
+// TestLoggedMessagesAreOfTheTypesTheirPortsReceive: the runtime does not
+// know the types of the values it queues; a message arriving at a port, and
+// a `?` receiving it, are logged as of the one type the port's `in` list
+// gives a value of its structure, and of none when two would fit.
+func TestLoggedMessagesAreOfTheTypesTheirPortsReceive(t *testing.T) {
+	rec, _ := runLogged(t, `module M {
+	type record Resp { integer code }
+	type record Same { integer code }
+	type record Other { charstring text }
+	type port P message { inout Resp, Other, integer }
+	type port Q message { inout Resp, Same }
+	type component C { port P p; port Q q; }
+	testcase tc() runs on C system C {
+		map(mtc:p, system:p);
+		map(mtc:q, system:q);
+		p.send(Resp:{code := 200});
+		p.receive(?);
+		q.send(Resp:{code := 404});
+		q.receive(?);
+		setverdict(pass);
+	}
+}`, clocks[0].opts)
+	var got []string
+	for _, e := range rec.Events {
+		switch e.Op {
+		case "tliMDetected_m", "tliMReceive_m":
+			if len(e.Parts) != 1 {
+				got = append(got, e.Op+" -")
+				continue
+			}
+			got = append(got, e.Op+" "+e.Parts[0].Module+"."+e.Parts[0].Type)
+		}
+	}
+	want := []string{
+		"tliMDetected_m M.Resp", "tliMReceive_m M.Resp",
+		"tliMDetected_m .", "tliMReceive_m -",
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}
+
+// TestLoggedMessagesAreOfTheirOwnPortsTypes: what arrives at a port is of a
+// type its own port type receives, not that of a port of the same name of
+// a component created before it arrives; a port a component type inherits
+// included.
+func TestLoggedMessagesAreOfTheirOwnPortsTypes(t *testing.T) {
+	rec, _ := runLogged(t, `module M {
+	type record Resp { integer code }
+	type record Req { integer code }
+	type port P message { inout Resp }
+	type port Q message { inout Req }
+	type component Base { port P p; }
+	type component C extends Base { }
+	type component W { port Q p; }
+	testcase tc() runs on C system C {
+		var W c := W.create;
+		map(mtc:p, system:p);
+		p.send(Resp:{code := 200});
+		p.receive(?);
+		setverdict(pass);
+	}
+}`, clocks[0].opts)
+	var got []string
+	for _, e := range rec.Events {
+		switch e.Op {
+		case "tliMDetected_m", "tliMReceive_m":
+			if len(e.Parts) != 1 {
+				got = append(got, e.Op+" -")
+				continue
+			}
+			got = append(got, e.Op+" "+e.Parts[0].Module+"."+e.Parts[0].Type)
+		}
+	}
+	want := []string{"tliMDetected_m M.Resp", "tliMReceive_m M.Resp"}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Fatalf("got\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	}
+}

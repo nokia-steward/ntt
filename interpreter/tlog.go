@@ -420,11 +420,13 @@ func tlDoneKilled(env runtime.Scope, n syntax.Node, op, kind string, ref *runtim
 // every connected peer when there is none. dest is the value the engine
 // already evaluated the `to` clause to — never evaluated again here, since a
 // log must not change what the test does.
-func tlSend(exec *runtime.TestcaseExec, n syntax.Node, port string, dest, payload runtime.Object) {
+//
+// td is the payload's declared type, which the value is logged with.
+func tlSend(exec *runtime.TestcaseExec, n syntax.Node, port string, dest, payload runtime.Object, td *runtime.TypeDesc, env runtime.Scope) {
 	defer tlRecover(exec)
 	self := currentCompID(exec)
 	at := tlArg("at", exec.TLPort(self, port).Content())
-	msg := tlArg("msgValue", runtime.TLValue(payload).AsValue())
+	msg := tlArg("msgValue", tlTyped(payload, td, env).AsValue())
 	if exec.TLMapped(self, port) {
 		args := []tl.Arg{at, tlArg("to", exec.TLPort(-2, port).Content()), msg}
 		if l, ok := dest.(*runtime.List); ok && l.ListType == runtime.VALUE_LIST {
@@ -542,7 +544,7 @@ func targetComponentIDs(dest runtime.Object) map[int64]bool {
 // receiving operation when dedupe is set: an alt re-checking its guards
 // against an unchanged queue head is not a new event, but each head a
 // trigger discards is.
-func tlReceive(exec *runtime.TestcaseExec, call syntax.Node, port string, head runtime.PortMessage, tmpl, fromTmpl runtime.Object, ev string, payloadOk, dedupe bool) {
+func tlReceive(exec *runtime.TestcaseExec, env runtime.Scope, call syntax.Node, port string, head runtime.PortMessage, tmpl, fromTmpl runtime.Object, ev string, payloadOk, dedupe bool) {
 	defer tlRecover(exec)
 	self := currentCompID(exec)
 	if ev == "mismatch" && dedupe {
@@ -550,6 +552,16 @@ func tlReceive(exec *runtime.TestcaseExec, call syntax.Node, port string, head r
 		if !exec.TLMismatchIsNew(key, head.Seq) {
 			return
 		}
+	}
+	// The template, and the message it matched, of the type the
+	// template is declared with; a template of no declared type, `?`,
+	// matches the message as of its type.
+	var td *runtime.TypeDesc
+	if ce, ok := call.(*syntax.CallExpr); ok && ce.Args != nil && len(ce.Args.List) > 0 {
+		td = lvalueTypeDesc(ce.Args.List[0], env)
+	}
+	if td == nil && ev != "mismatch" {
+		td = portMessageTypeDesc(env, exec.CurrentComponent(), exec.TLPort(self, port).Name, head.Payload)
 	}
 	suffix := "_c"
 	if exec.TLMapped(self, port) {
@@ -561,9 +573,13 @@ func tlReceive(exec *runtime.TestcaseExec, call syntax.Node, port string, head r
 	checkAny := ev != "receive" && tlIsCheckAny(call, ev)
 	args := []tl.Arg{tlArg("at", exec.TLPort(self, port).Content())}
 	if !checkAny {
+		val := runtime.TLValue(head.Payload)
+		if ev != "mismatch" {
+			val = tlTyped(head.Payload, td, env)
+		}
 		args = append(args,
-			tlArg("msgValue", runtime.TLValue(head.Payload).AsValue()),
-			tlArg("msgTmpl", runtime.TLValue(tmpl).AsTemplate()))
+			tlArg("msgValue", val.AsValue()),
+			tlArg("msgTmpl", tlTyped(tmpl, td, env).AsTemplate()))
 	}
 	if ev == "mismatch" && !checkAny {
 		ds := tlDiffs(head.Payload, tmpl)
@@ -598,7 +614,87 @@ func tlReceive(exec *runtime.TestcaseExec, call syntax.Node, port string, head r
 		// Locate the check itself, not the call standing in for it.
 		call = orig.(syntax.Node)
 	}
-	tlEmit(exec, call, op, args...)
+	if td == nil || checkAny {
+		tlEmit(exec, call, op, args...)
+		return
+	}
+	// The template's type, which a `?` of it does not show.
+	typed := tl.Value{Type: td.Name, Module: moduleNameFromEnv(env)}
+	if td.Home != nil {
+		typed.Module = moduleNameFromEnv(td.Home)
+	}
+	tlEmitWith(exec, call, op, func(e *tl.Event) { e.Parts = []tl.Value{typed} }, args...)
+}
+
+// portMessageTypeDesc is the type of message o arriving at the port named
+// port of component comp: the one of the types its port type's `in` list
+// o's structure matches, or nil when there is none or more than one.
+func portMessageTypeDesc(env runtime.Scope, comp *runtime.ComponentRef, port string, o runtime.Object) *runtime.TypeDesc {
+	if comp == nil {
+		return nil
+	}
+	pt := componentPortType(runtime.RootScope(env), comp.Module, comp.TypeName, port)
+	if pt == nil || len(pt.PortIn) == 0 {
+		return nil
+	}
+	home := pt.Home
+	if home == nil {
+		home = env
+	}
+	v := runtime.TLValue(o)
+	var found *runtime.TypeDesc
+	for _, e := range pt.PortIn {
+		td := lookupTypeDesc(syntax.Name(e), home)
+		if td == nil || !tlOfType(v, td, home) {
+			continue
+		}
+		if found != nil && found != td {
+			return nil
+		}
+		found = td
+	}
+	return found
+}
+
+// tlOfType reports whether v, a value of no known type, is structured as
+// one of type td is: a record, set or union of its fields, a list of a
+// list type.
+func tlOfType(v tl.Value, td *runtime.TypeDesc, env runtime.Scope) bool {
+	for i := 0; td.Struct == nil && !td.IsList && td.Underlying != "" && i < 8; i++ {
+		next := lookupTypeDesc(td.Underlying, env)
+		if next == nil {
+			return false
+		}
+		if next.Home != nil {
+			env = next.Home
+		}
+		td = next
+	}
+	switch {
+	case td.Struct != nil:
+		if v.Kind != "record" || len(v.Elems) == 0 || len(v.Elems) > len(td.Struct.Fields) {
+			return false
+		}
+		if k := td.Struct.KindTok; k != nil && k.Kind() == syntax.UNION && len(v.Elems) != 1 {
+			return false
+		}
+		for _, e := range v.Elems {
+			declared := false
+			for _, f := range td.Struct.Fields {
+				if f != nil && f.Name != nil && f.Name.String() == e.Name {
+					declared = true
+					break
+				}
+			}
+			if !declared {
+				return false
+			}
+		}
+		return true
+	case td.IsList:
+		return v.Kind == "record_of" || v.Kind == "set_of"
+	}
+	return false
 }
 
 // checkAnyCalls maps each check with no receiving operation to the

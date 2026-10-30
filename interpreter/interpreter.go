@@ -7768,7 +7768,7 @@ func evalAnyAllFromMsg(n *syntax.FromExpr, sel *syntax.SelectorExpr, call *synta
 				var matched bool
 				if matched, tmpl = portReceiveMatch(head.Payload, systemLoopback(head), call, env); !matched {
 					if exec.TestLogger() != nil {
-						tlReceive(exec, call, pn, head, tmpl, nil, "mismatch", false, !isTrigger)
+						tlReceive(exec, env, call, pn, head, tmpl, nil, "mismatch", false, !isTrigger)
 					}
 					if isTrigger {
 						exec.DequeueKind(key, runtime.MsgMessage)
@@ -7779,7 +7779,7 @@ func evalAnyAllFromMsg(n *syntax.FromExpr, sel *syntax.SelectorExpr, call *synta
 			}
 			exec.DequeueKind(key, runtime.MsgMessage)
 			if exec.TestLogger() != nil {
-				tlReceive(exec, call, pn, head, tmpl, nil, "receive", false, false)
+				tlReceive(exec, env, call, pn, head, tmpl, nil, "receive", false, false)
 			}
 			if redirect != nil {
 				applyRedirect(redirect, head, env)
@@ -14798,7 +14798,7 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 		if dest != nil {
 			destVal = sender
 		}
-		tlSend(exec, n, bareName, destVal, payload)
+		tlSend(exec, n, bareName, destVal, payload, lvalueTypeDesc(n.Args.List[0], env), env)
 	}
 	// External port-driver path: when the testcase has a driver
 	// bound to this port instance (typically a C/C++ test port
@@ -15179,7 +15179,7 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 			if exec.TestLogger() != nil {
 				// A trigger drops this head: every drop is an event.
 				if !isProc {
-					tlReceive(exec, info.call, port, head, tmpl, fromTmpl, "mismatch", payloadOk, !isTrigger)
+					tlReceive(exec, env, info.call, port, head, tmpl, fromTmpl, "mismatch", payloadOk, !isTrigger)
 				} else {
 					if payloadOk && mismatchDesc == "" {
 						mismatchDesc = "sender does not match the from clause"
@@ -15226,7 +15226,7 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 				ev = "check"
 			}
 			if !isProc {
-				tlReceive(exec, info.call, port, head, tmpl, fromTmpl, ev, false, false)
+				tlReceive(exec, env, info.call, port, head, tmpl, fromTmpl, ev, false, false)
 			} else {
 				tlProcReceive(exec, info.call, port, head, parsTmpl, valTmpl, fromTmpl, ev, "", false)
 			}
@@ -15499,7 +15499,7 @@ func evalPortTrigger(port string, n *syntax.CallExpr, env runtime.Scope) runtime
 		if !matches {
 			ev = "mismatch"
 		}
-		tlReceive(exec, n, port, head, tmpl, nil, ev, false, false)
+		tlReceive(exec, env, n, port, head, tmpl, nil, ev, false, false)
 	}
 	if !matches {
 		return runtime.Undefined

@@ -109,8 +109,11 @@ single functional test doubles as a performance probe. See
   test system; behaviours entered at their call site with their in
   parameters and left with their out parameters and result; ports,
   variables and timers named after their component or behaviour; a
-  message's arrival logged as its sender, with its value, sender and time;
-  a receive's outcome with the message it took; a backtrace before a
+  message's arrival logged as its sender (`?` for what a test port hands
+  in), with its value, sender and time; messages sent and received of their
+  declared types, or of the one type the port's `in` list gives a value of
+  their structure; a receive's outcome with the message it took; a module
+  parameter the first time a testcase reads it; a backtrace before a
   setverdict to inconc or fail. Against the expected logs of such a
   runtime's own regression suite, a third of the runs give identical logs;
   the rest differ in its classified runtime errors, which ntt does not

@@ -124,7 +124,7 @@ value cannot hold a line break, which `char(...)` writes, but can hold a
 | `ptcn` `ptdi` `ptmp` `ptun` | connect, disconnect, map, unmap | port, port (map: and its parameters) |
 | `ptst` `ptsp` `ptha` `ptcl` | port start, stop, halt, clear | port |
 | `ptsd` | send, call, reply, raise | port, to, type or call/reply/exception, value |
-| `ptqu` | arrived in a port's queue, logged as its sender | port, `message(value=T:v,sender=T:C(state),timestamp=s)` |
+| `ptqu` | arrived in a port's queue, logged as its sender (`?` for what a test port hands in) | port, `message(value=T:v,sender=T:C(state),timestamp=s)`, the sender `:null` from a test port |
 | `ptrx` `ptck` | receive (getcall, getreply, catch), check evaluated | port, `value=T:template`, `ready(match=...)+consume` / `+check` or `never(mismatch=value:v~t)` |
 | `tmst` `tmsp` | timer start, stop | timer, duration in seconds (`1.0s`) |
 | `tmto` `tmrd` `tmru` | timeout, read, running evaluated | timer, `ready`/`wait(expiry)`/`never(inactive)`, elapsed, true/false |
@@ -149,13 +149,15 @@ What differs from a runtime that writes these logs natively: ntt's own
 runtime errors are not classified into error codes (a testcase that ends in
 error says so in `tcfi`); a value whose type ntt does not know where it is
 logged is written by its kind, `record` for a record of unknown type,
-positionally even when it is a set or a union; a component's state in a
-message's sender is the one ntt last logged for it, and its type is
-named without its module; a module parameter is logged where it is read,
-not each one before every testcase; an altstep invoked as a default is
-logged as an altstep (`asen`, `aslv`); and ntt computes floats in double
-precision, so a computed float can differ in its last digits from one
-computed in more precision.
+positionally even when it is a set or a union (a message sent or received
+is of its declared type, or of the one type its port's `in` list gives a
+value of its structure); a component's state in a message's sender is the
+one ntt last logged for it, and its type is named without its module; a
+module parameter is logged the first time a testcase reads it, not each one
+before every testcase; an altstep invoked as a default is logged as an
+altstep (`asen`, `aslv`); and ntt computes floats in double precision, so a
+computed float can differ in its last digits from one computed in more
+precision.
 
 ## What is logged
 
