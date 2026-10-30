@@ -33,7 +33,7 @@ func removeDuplicateNodes(nodes []*ttcn3.Node) []*ttcn3.Node {
 func (md *MarkdownHover) Print(sign string, comment string, posRef string) protocol.MarkupContent {
 	// make line breaks conform to markdown spec
 	comment = strings.ReplaceAll(comment, "\n", "  \n")
-	res := "```ttcn3\n" + string(sign) + "\n```\n"
+	res := "```ttcn3\n" + sign + "\n```\n"
 	if len(comment) > 0 {
 		res += " - - -\n" + comment
 	}

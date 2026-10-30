@@ -1,0 +1,23 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure common type of value lists is inferred.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060507_value_lists_001 {
+
+type component GeneralComp {}
+
+testcase TC_Sem_060507_value_lists_001() runs on GeneralComp {
+	var a := 1;
+	var b := {a, 2};
+	var c := {{}, b, {3}};
+	if (match(c, {{}, {1, 2}, {3}})) {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+}
+
+control {
+	execute(TC_Sem_060507_value_lists_001());
+}
+
+}

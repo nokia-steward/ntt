@@ -1,7 +1,6 @@
 package ttcn3
 
 import (
-	"fmt"
 
 	"github.com/nokia/ntt/internal/log"
 	"github.com/nokia/ntt/ttcn3/syntax"
@@ -204,9 +203,9 @@ func (scp *Scope) addField(n *syntax.Field) {
 }
 
 // add adds definitions to the scope;
-func (scp *Scope) add(n syntax.Node) error {
+func (scp *Scope) add(n syntax.Node) {
 	if syntax.IsNil(n) {
-		return nil
+		return
 	}
 	switch n := n.(type) {
 
@@ -294,6 +293,4 @@ func (scp *Scope) add(n syntax.Node) error {
 	case *syntax.FormalPar:
 		scp.Insert(n, n.Name)
 	}
-
-	return fmt.Errorf("%T is not a declaration", n)
 }

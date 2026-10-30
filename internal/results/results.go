@@ -353,12 +353,6 @@ func Deviation(slice []time.Duration) time.Duration {
 	return time.Duration(math.Sqrt(v))
 }
 
-type floatSlice []Run
-
-func (a floatSlice) Len() int           { return len(a) }
-func (a floatSlice) Less(i, j int) bool { return a[i].Load < a[j].Load }
-func (a floatSlice) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-
 type durationSlice []time.Duration
 
 func (a durationSlice) Len() int           { return len(a) }

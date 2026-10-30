@@ -226,7 +226,7 @@ func (n Node) Inspect(f func(n Node) bool) {
 // no position was available.
 func (n Node) Pos() int {
 	if tok := n.FirstToken(); tok != Nil {
-		return int(tok.event().offset())
+		return tok.event().offset()
 	}
 	return -1
 }
@@ -235,7 +235,7 @@ func (n Node) Pos() int {
 // was available.
 func (n Node) End() int {
 	if tok := n.LastToken(); tok != Nil {
-		return int(tok.event().offset() + tok.event().length())
+		return tok.event().offset() + tok.event().length()
 	}
 	return -1
 }
@@ -306,7 +306,7 @@ func (t *tree) searchLines(pos int) int {
 			j = h
 		}
 	}
-	return int(i) - 1
+	return i - 1
 }
 
 // Err returns the error of the subtree.
@@ -355,7 +355,7 @@ type tree struct {
 //
 // event is an opaque union and not an interface for performance reasons.
 // Only two properties are exported (Type and Kind). The other properties are
-// context-dependent and are accessable via the Node wrappers.
+// context-dependent and are accessible via the Node wrappers.
 type event struct {
 	kind  uint16
 	flags uint16
@@ -428,7 +428,7 @@ func (ev event) MarshalJSON() ([]byte, error) {
 	case OpenNode:
 		s = fmt.Sprintf(`{"event":"open","kind":"%s"}`, ev.Kind().String())
 	case CloseNode:
-		s = fmt.Sprintf(`{"event":"close"}`)
+		s = `{"event":"close"}`
 	default:
 		s = fmt.Sprintf(`{"event":"unknown", "d1":%d, "d2":%d, "d3":%d, "d4":%d}`,
 			ev.kind, ev.flags, ev.data[0], ev.data[1])
@@ -454,8 +454,7 @@ func (ev event) length() int { assertToken(ev); return int(ev.data[1]) }
 func (ev event) parent() int { assertNode(&ev); return int(ev.data[0]) }
 func (ev event) skip() int   { assertNode(&ev); return int(ev.data[1]) }
 
-func (ev *event) setParent(idx int) { assertNode(ev); ev.data[0] = int32(idx) }
-func (ev *event) setSkip(idx int)   { assertNode(ev); ev.data[1] = int32(idx) }
+func (ev *event) setSkip(idx int) { assertNode(ev); ev.data[1] = int32(idx) }
 
 func assertToken(ev event) {
 	if ev.Type() != AddToken {

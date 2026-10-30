@@ -27,11 +27,17 @@ module Sem_160102_predefined_functions_116 {
         v_res := replace(v_Rec1,0,1,{23});
         v_expected := {23,0,-,2};
 
-        if(match(v_res, v_expected)) {
-            setverdict(pass,v_res);
-        } else {
+        for (var integer i := 0; i < lengthof(v_res); i := i + 1) {
+            if (isbound(v_res[i]))
+            {
+                if (v_res[i] == v_expected[i]) { continue; }
+            } else {
+                if (not isbound(v_expected[i])) { continue; }
+            }
             setverdict(fail,"The value of v_res:",v_res);
+            stop;
         }
+        setverdict(pass,v_res);
     }
 
     control{

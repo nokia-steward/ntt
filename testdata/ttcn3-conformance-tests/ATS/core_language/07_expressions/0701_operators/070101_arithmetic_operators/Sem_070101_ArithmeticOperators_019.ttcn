@@ -15,11 +15,11 @@ type component GeneralComp {
  * @return true if abs(f1 - f2) < 1.E-6
  */
 function f_isFloatNear(in float f1, in float f2) return boolean {
-  var float delta := f1-f2;
-  if (delta < 0.0) {
-    delta := 0.0 - delta;
+  var float diff := f1-f2;
+  if (diff < 0.0) {
+    diff := 0.0 - diff;
   }
-  return delta < 1E-6;
+  return diff < 1E-6;
 }
 
 testcase TC_Sem_070101_ArithmeticOperators_019() runs on GeneralComp {

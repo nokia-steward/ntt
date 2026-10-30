@@ -1,0 +1,52 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:20.5.0, suspended default not invoked
+ ** @verdict  pass accept, ttcn3verdict:pass
+ ***************************************************/
+
+// The following requirement is tested:
+// In the case of an unsuccessful termination, the default mechanism invokes the next
+// default in the list that is not in the suspended state.
+
+module Sem_200501_the_default_mechanism_009 {
+
+	type port P message {
+		inout integer;
+	}
+
+	type component GeneralComp {
+		port P p;
+	}
+
+	altstep a() runs on GeneralComp {
+		[] p.receive(integer:?) {
+			log ("in altstep a");
+            setverdict(pass);
+		}
+	}
+
+    altstep b() runs on GeneralComp {
+		[] p.receive(integer:?) {
+            log ("in altstep b");
+			setverdict(fail);
+		}
+	}
+
+	testcase TC_Sem_200501_the_default_mechanism_009() runs on GeneralComp system GeneralComp {
+		connect(self:p, self:p);
+        var default v_default := activate(b());
+        activate(a());
+		p.send(integer:5);
+        deactivate(v_default);
+		alt {
+			[] p.receive(integer:0) { // not expected: leads to default invocation
+				setverdict(fail);
+			}
+		}
+	}
+
+	control{
+		execute(TC_Sem_200501_the_default_mechanism_009());
+	}
+}

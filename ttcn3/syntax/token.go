@@ -460,7 +460,20 @@ func Unquote(s string) (string, error) {
 	if len(s) < 2 {
 		return s, strconv.ErrSyntax
 	}
-	return strconv.Unquote(`"` + strings.ReplaceAll(s[1:len(s)-1], `""`, `\"`) + `"`)
+	inner := s[1 : len(s)-1]
+	// TTCN-3 escapes an embedded double quote by doubling it. Try the
+	// Go unquoter first so the common C-style escapes (\n, \t, \uXXXX,
+	// ...) that TTCN-3 tooling accepts keep working.
+	if out, err := strconv.Unquote(`"` + strings.ReplaceAll(inner, `""`, `\"`) + `"`); err == nil {
+		return out, nil
+	}
+	// The literal is not a valid Go-escaped string: a backslash
+	// appears before whitespace or before a TTCN-3-only sequence such
+	// as a USI quadruple `\q{...}` or a pattern reference `\N{...}`. In
+	// a plain (universal) charstring value those backslashes are
+	// ordinary characters (ETSI 6.1.1), so fall back to treating every
+	// backslash literally; only the doubled-quote escape applies.
+	return strings.ReplaceAll(inner, `""`, `"`), nil
 }
 
 // Predicates

@@ -14,7 +14,7 @@ type component GeneralComp {
 
 
 testcase TC_Sem_07010802_ischosen_operator_003 () runs on GeneralComp {
-	template U m_u4 := ({ f1 := 2 }, {f2 := 'AB'O });
+	template(present) U m_u4 := ({ f1 := 2 }, {f2 := 'AB'O });
     template anytype mw_anytype := { U := m_u4 }
 	var boolean v_i;
 

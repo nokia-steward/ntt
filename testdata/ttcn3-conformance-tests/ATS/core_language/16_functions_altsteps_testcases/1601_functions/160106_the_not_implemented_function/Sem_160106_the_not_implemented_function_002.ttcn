@@ -1,0 +1,19 @@
+// @author   TTF T023
+// @purpose  1:16.1.6, Ensure ??? can be used as stand-alone statement (direct use)
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_160106_the_not_implemented_function_002 {
+
+type component GeneralComp {}
+
+testcase TC_Sem_160106_the_not_implemented_function_002() runs on GeneralComp {
+	if (false) {
+		???
+	}
+	setverdict(pass);
+}
+
+control {
+	execute(TC_Sem_160106_the_not_implemented_function_002());
+}
+
+}

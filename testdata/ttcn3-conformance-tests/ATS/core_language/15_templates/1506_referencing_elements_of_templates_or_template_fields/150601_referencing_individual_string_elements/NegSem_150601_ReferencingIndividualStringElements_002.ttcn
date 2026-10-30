@@ -1,0 +1,28 @@
+/*****************************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.6.1, Ensure that the referencing of individual string elements inside templates or template fields is allowed on the left hand side.
+ ** @verdict  pass reject
+ *****************************************************************/
+
+module NegSem_150601_ReferencingIndividualStringElements_002 {
+
+type component GeneralComp { }
+
+testcase TC_NegSem_150601_ReferencingIndividualStringElements_002() runs on GeneralComp {
+	var template charstring v_char1 := "abc";
+
+    v_char1[2] := "test"; // will produce an error as the character string contains more than one character
+
+    if (v_char1.value == "abtest") {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+}
+
+control{
+    execute(TC_NegSem_150601_ReferencingIndividualStringElements_002());
+}
+
+}

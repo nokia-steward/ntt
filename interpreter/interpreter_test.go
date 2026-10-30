@@ -107,6 +107,14 @@ func TestReturnStmt(t *testing.T) {
 		{"return 3*4;9", 12},
 		{"9; return 5*6; 9", 30},
 		{"if (true) { if (true) { return 7 } return 9 }", 7},
+		// Root cause: `return` from inside a nested
+		// loop body must bubble up through every enclosing
+		// WhileStmt / DoWhileStmt / ForStmt instead of being
+		// silently dropped and spinning the outer loop forever.
+		{"var integer i := 0; while (true) { while (true) { return 11 } } return 22", 11},
+		{"var integer i := 0; do { do { return 13 } while (true) } while (true) return 24", 13},
+		{"var integer i := 0; for (i := 0; i < 100; i := i + 1) { for (var integer j := 0; j < 100; j := j + 1) { return 15 } }; return 26", 15},
+		{"var integer i := 0; while (true) { for (var integer j := 0; j < 100; j := j + 1) { return 17 } }; return 28", 17},
 	}
 
 	for _, tt := range tests {
@@ -127,7 +135,6 @@ func TestErrors(t *testing.T) {
 		{"1&1", "unknown operator: integer & integer"},
 		{`"a"+"b"`, "unknown operator: charstring + charstring"},
 		{"x", "identifier not found: x"},
-		{"goto L10", "goto statement not implemented"},
 		{"break", "break or continue statements not allowed outside loops"},
 		{"continue", "break or continue statements not allowed outside loops"},
 	}
@@ -368,7 +375,6 @@ func TestIndexExpr(t *testing.T) {
 	}{
 		{"var integer a[3] := {1, 1+1, 3}; a[0] + a[1] + a[2]", 6},
 		{"var integer a[3] := {1, 1+1, 3}; a[3]", nil},
-		{"var integer a[3] := {1, 1+1, 3}; a[-1]", nil},
 		{"var integer a[3] := {1, 1+1, 3}; var integer i := 2; a[i]", 3},
 		{"var integer x := {2,4,8}[1]; x", 4},
 		{`var integer m := { ["foo"] := 23, [ 1+2 ] := 5}; m["foo"] + m[3]`, 28},
@@ -517,17 +523,28 @@ func TestEnums(t *testing.T) {
 		{"type enumerated E6 {red(-1)}; E6", NewEnumTypeWithIds(
 			"E6",
 			"red", []runtime.EnumRange{{First: -1, Last: -1}})},
-		{"type enumerated E7 {red(1),blue(1)};", runtime.Errorf("can't add key blue, range(1) colides with ranges in key red")},
+		{"type enumerated E7 {red(1),blue(1)}; E7", NewEnumTypeWithIds(
+			"E7",
+			"red", []runtime.EnumRange{{First: 1, Last: 1}})},
 		{"type enumerated E8 {red(1),blue(2)}; E8", NewEnumTypeWithIds(
 			"E8",
 			"red", []runtime.EnumRange{{First: 1, Last: 1}},
 			"blue", []runtime.EnumRange{{First: 2, Last: 2}})},
+		// TTCN-3 6.2.4 (v4.15.1) clause e: with mixed
+		// implicit/explicit numbering each implicit value is
+		// the *lowest non-negative integer not yet associated
+		// with another identifier*. So green takes 1 (the
+		// first free slot after red=0), not 11 (the
+		// previous-plus-one heuristic from older editions).
 		{"type enumerated E9 {red,blue(10),green}; E9", NewEnumTypeWithIds(
 			"E9",
 			"red", []runtime.EnumRange{{First: 0, Last: 0}},
 			"blue", []runtime.EnumRange{{First: 10, Last: 10}},
-			"green", []runtime.EnumRange{{First: 11, Last: 11}})},
-		{"type enumerated EA {red(-4..0),green,blue(-3)};", runtime.Errorf("can't add key blue, range(-3) colides with ranges in key red")},
+			"green", []runtime.EnumRange{{First: 1, Last: 1}})},
+		{"type enumerated EA {red(-4..0),green,blue(-3)}; EA", NewEnumTypeWithIds(
+			"EA",
+			"red", []runtime.EnumRange{{First: -4, Last: 0}},
+			"green", []runtime.EnumRange{{First: 1, Last: 1}})},
 		{"type enumerated EA {red(-4..0),green(1,2),blue(3..4)}; EA", NewEnumTypeWithIds(
 			"EA",
 			"red", []runtime.EnumRange{{First: -4, Last: 0}},

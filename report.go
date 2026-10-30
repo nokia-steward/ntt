@@ -240,32 +240,32 @@ var funcMap = template.FuncMap{
 		if env := os.Getenv("NTT_COLORS"); env == "never" {
 			return ""
 		}
-		return "[32;1m"
+		return "\x1b[32;1m"
 	},
 	"red": func() string {
 		if env := os.Getenv("NTT_COLORS"); env == "never" {
 			return ""
 		}
 
-		return "[31;1m"
+		return "\x1b[31;1m"
 	},
 	"orange": func() string {
 		if env := os.Getenv("NTT_COLORS"); env == "never" {
 			return ""
 		}
-		return "[38;5;208;1m"
+		return "\x1b[38;5;208;1m"
 	},
 	"bold": func() string {
 		if env := os.Getenv("NTT_COLORS"); env == "never" {
 			return ""
 		}
-		return "[1m"
+		return "\x1b[1m"
 	},
 	"off": func() string {
 		if env := os.Getenv("NTT_COLORS"); env == "never" {
 			return ""
 		}
-		return "[0m"
+		return "\x1b[0m"
 	},
 
 	"colorize": func(s string) string {
@@ -282,15 +282,15 @@ var funcMap = template.FuncMap{
 		return re.ReplaceAllStringFunc(s, func(s string) string {
 			switch {
 			case s == "NORUN":
-				return "[38;5;208;1m" + s + "[0m"
+				return "\x1b[38;5;208;1m" + s + "\x1b[0m"
 			case pass.MatchString(s):
-				return "[32;1m" + s + "[0m"
+				return "\x1b[32;1m" + s + "\x1b[0m"
 			case fail.MatchString(s):
-				return "[31;1m" + s + "[0m"
+				return "\x1b[31;1m" + s + "\x1b[0m"
 			case unstable.MatchString(s):
-				return "[38;5;208;1m" + s + "[0m"
+				return "\x1b[38;5;208;1m" + s + "\x1b[0m"
 			case inconc.MatchString(s) || none.MatchString(s):
-				return "[38;5;201;1m" + s + "[0m"
+				return "\x1b[38;5;201;1m" + s + "\x1b[0m"
 			default:
 				return s
 			}

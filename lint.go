@@ -278,7 +278,7 @@ func lint(cmd *cobra.Command, args []string) error {
 
 					case *syntax.FuncDecl:
 						ccID = n
-						cc[ccID] = 1 // Intial McCabe value
+						cc[ccID] = 1 // Initial McCabe value
 
 						switch n.KindTok.Kind() {
 						case syntax.TESTCASE:
@@ -474,9 +474,9 @@ func lint(cmd *cobra.Command, args []string) error {
 	case 0:
 		return nil
 	case 1:
-		return fmt.Errorf("1 issue found.")
+		return fmt.Errorf("1 issue found")
 	default:
-		return fmt.Errorf("%d issues found.", issues)
+		return fmt.Errorf("%d issues found", issues)
 	}
 
 }
@@ -864,9 +864,7 @@ func buildRegexCache() error {
 }
 
 func cacheRegex(p string) error {
-	if strings.HasPrefix(p, "!") {
-		p = p[1:]
-	}
+	p = strings.TrimPrefix(p, "!")
 
 	if _, ok := regexes[p]; !ok {
 		r, err := regexp.Compile(p)

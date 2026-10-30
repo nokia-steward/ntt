@@ -1,0 +1,23 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for extension.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060506_return_values_009 {
+
+type component GeneralComp {}
+
+type integer int with { extension "ext" }
+type record of universal charstring RoS;
+
+testcase TC_Sem_060506_return_values_009() runs on GeneralComp {
+	var v := int.extension;
+	var Ros expected := { "ext" };
+	if (v == expected) {
+		setverdict(pass);
+	}
+}
+
+control {
+	execute(TC_Sem_060506_return_values_009());
+}
+
+}

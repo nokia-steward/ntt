@@ -1,0 +1,39 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:6.2.15.4, Using asterisk as an index on LHS
+ ** @verdict  pass accept, ttcn3verdict:pass
+ ***************************************************/
+
+// The following requirement is tested:
+// When the asterisk symbol is used at the left hand side of an assignment, only the presence
+// of the AnyElementsOrNone within the template is changed, values and keys remain unchanged.
+// The right-hand side of the assignment shall resolve into a boolean value in this case.
+
+module Sem_06021504_index_notation_007 {
+	type map from charstring to charstring TMap;
+	type component C {}
+
+	testcase TC_Sem_06021504_index_notation_007() runs on C {
+		var template TMap v_map := {
+            ["first_name"] := "John",
+            ["surname"] := "Doe"
+        }
+        var TMap v_val := {
+            ["first_name"] := "John",
+            ["surname"] := "Doe",
+            ["city"] := "New York"
+        }
+        v_map[*] := true; // adding the AnyElementsOrNone field
+
+        if (match(v_val, v_map)) { // shall match as AnyElementsOrNone is active and matches the city field
+		    setverdict(pass);
+        } else {
+            setverdict(fail);
+        }
+	}
+
+	control {
+		execute(TC_Sem_06021504_index_notation_007());
+	}
+}

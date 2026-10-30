@@ -9,7 +9,7 @@ import (
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
-var builtins map[string]*Builtin
+var builtins, fallbackBuiltins map[string]*Builtin
 
 // AddBuiltin adds a builtin function to the runtime environment.
 //
@@ -22,6 +22,20 @@ func AddBuiltin(id string, fn func(args ...Object) Object) error {
 	if builtins == nil {
 		builtins = make(map[string]*Builtin)
 	}
+	return addBuiltin(builtins, id, fn)
+}
+
+// AddFallbackBuiltin adds a builtin function a definition of the same name
+// hides, as AddBuiltin's do not: one whose name an earlier edition of
+// TTCN-3 leaves free for a module's own definitions.
+func AddFallbackBuiltin(id string, fn func(args ...Object) Object) error {
+	if fallbackBuiltins == nil {
+		fallbackBuiltins = make(map[string]*Builtin)
+	}
+	return addBuiltin(fallbackBuiltins, id, fn)
+}
+
+func addBuiltin(builtins map[string]*Builtin, id string, fn func(args ...Object) Object) error {
 	if i := strings.Index(id, "("); i >= 0 {
 		name, params, err := parseFunction(id)
 		if err != nil {
@@ -56,10 +70,23 @@ func parseFunction(name string) (string, *syntax.FormalPars, error) {
 }
 
 func checkArgs(pars *syntax.FormalPars, args ...Object) error {
-	if len(args) != len(pars.List) {
-		return ErrInvalidArgCount
+	// Allow too few args as long as every missing formal parameter has
+	// an `:=` default in its declaration, and allow too many args
+	// silently (TTCN-3 doesn't have varargs but the conformance suite
+	// hits cases where the same name has multiple arities, e.g.
+	// `rnd()` vs `rnd(seed)`).
+	if len(args) < len(pars.List) {
+		for i := len(args); i < len(pars.List); i++ {
+			if pars.List[i].Value == nil {
+				return ErrInvalidArgCount
+			}
+		}
 	}
-	for i := range args {
+	n := len(pars.List)
+	if len(args) < n {
+		n = len(args)
+	}
+	for i := 0; i < n; i++ {
 		if err := checkArg(pars.List[i], args[i]); err != nil {
 			return err
 		}

@@ -1,0 +1,23 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for integer literals.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060502_literals_001 {
+
+type component GeneralComp {}
+
+// inout parameters require strong typing and can be used to type verification.
+function verifyType(inout integer i) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_060502_literals_001() runs on GeneralComp {
+	{ var v := -1; verifyType(i) }
+	{ var v := 0; verifyType(i) }
+	{ var v := 2; verifyType(i) }
+}
+
+control {
+	execute(TC_Sem_060502_literals_001());
+}
+
+}

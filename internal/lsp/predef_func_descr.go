@@ -31,7 +31,7 @@ var PredefinedFunctions = []PredefFunctionDetails{
 	{
 		Label:      "int2bit(...)",
 		InsertText: "int2bit(${1:invalue}, ${2:length})$0",
-		Signature: `function function int2bit(
+		Signature: `function int2bit(
 	in integer invalue,
 	in integer length
 ) return bitstring`,
@@ -915,7 +915,7 @@ empty string.`,
 		Signature: `function hostid(
 	in charstring idkind := "Ipv4orIPv6"
 ) return charstring`,
-		Documentation: "## (TTCN-3)\nThe __hostid__ function shall return the host id of the test component or module control executing the hostid function	in form of a character string. The in parameter idkind allows to specify the expected id format to be returned.	Predefined _idkind_ values are:\n* \"Ipv4orIPv6\": The contents of the returned character string is an Ipv4 address. If no Ipv4 address, but an	Ipv6 address is available, a character string representation of the Ipv6 address is returned.\n* \"Ipv4\": The contents of the returned character string shall be an Ipv4 address.\n* \"Ipv6\": The contents of the returned characterstring shall be an Ipv6 address.",
+		Documentation:  "## (TTCN-3)\nThe __hostid__ function shall return the host id of the test component or module control executing the hostid function	in form of a character string. The in parameter idkind allows to specify the expected id format to be returned.	Predefined _idkind_ values are:\n* \"Ipv4orIPv6\": The contents of the returned character string is an Ipv4 address. If no Ipv4 address, but an	Ipv6 address is available, a character string representation of the Ipv6 address is returned.\n* \"Ipv4\": The contents of the returned character string shall be an Ipv4 address.\n* \"Ipv6\": The contents of the returned characterstring shall be an Ipv6 address.",
 		NrOfParameters: 1,
 		TextFormat:     protocol.SnippetTextFormat},
 	{

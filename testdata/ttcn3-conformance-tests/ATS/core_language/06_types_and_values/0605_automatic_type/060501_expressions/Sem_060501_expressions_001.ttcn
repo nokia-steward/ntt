@@ -1,0 +1,21 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for expressions.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060501_expressions_001 {
+
+type component GeneralComp {}
+
+testcase TC_Sem_060501_expressions_001() runs on GeneralComp {
+	var cond := 1 + 2 <= 3;
+	if (cond == true) {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+}
+
+control {
+	execute(TC_Sem_060501_expressions_001());
+}
+
+}

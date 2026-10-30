@@ -24,7 +24,7 @@ func DataHome() string {
 //
 // XDG_DATA_DIRS defines the preference-ordered set of base directories to
 // search for data files in addition to the XDG_DATA_HOME base directory. The
-// directories in XDG_DATA_DIRS should be seperated with a colon ':'.
+// directories in XDG_DATA_DIRS should be separated with a colon ':'.
 //
 // If XDG_DATA_DIRS is either not set or empty, a value equal to
 // /usr/local/share/:/usr/share/ should be used.
@@ -51,7 +51,7 @@ func ConfigHome() string {
 //
 // XDG_CONFIG_DIRS defines the preference-ordered set of base directories to
 // search for configuration files in addition to the XDG_CONFIG_HOME base
-// directory. The directories in XDG_CONFIG_DIRS should be seperated with a
+// directory. The directories in XDG_CONFIG_DIRS should be separated with a
 // colon ':'.
 //
 // If XDG_CONFIG_DIRS is either not set or empty, a value equal to /etc/xdg

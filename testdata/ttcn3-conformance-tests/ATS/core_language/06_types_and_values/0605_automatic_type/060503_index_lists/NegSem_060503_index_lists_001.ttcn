@@ -1,0 +1,16 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure index list with common key type keys is a map.
+// @verdict  pass reject
+module NegSem_060503_index_lists_001 {
+
+type component GeneralComp {}
+
+testcase TC_NegSem_060503_index_lists_001() runs on GeneralComp {
+	var v := { ["Hello"] := 1, [1] := 2 };
+}
+
+control {
+	execute(TC_NegSem_060503_index_lists_001());
+}
+
+}

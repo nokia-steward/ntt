@@ -1,131 +1,90 @@
 package main
 
 import (
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
-	"os/exec"
 	"strings"
 
-	"github.com/nokia/ntt/internal/fs"
+	"github.com/nokia/ntt/backend/cpp"
+	"github.com/nokia/ntt/backend/golang"
+	"github.com/nokia/ntt/ir"
+	"github.com/nokia/ntt/ir/lower"
 	"github.com/nokia/ntt/ttcn3"
-	"github.com/nokia/ntt/ttcn3/syntax"
 	"github.com/spf13/cobra"
 )
 
 var (
+	compileTarget string
+	compileOut    string
+
+	// CompileCommand runs the AST -> IR -> source pipeline. It is the
+	// command-line surface of `ir/lower` + `backend/{golang,cpp}`. The
+	// output is source code (Go or C++) that links against runtime/*
+	// and can be compiled into a standalone test binary with the
+	// usual toolchain (`go build`, `g++ -std=c++17`).
 	CompileCommand = &cobra.Command{
-		Use:   "compile",
-		Short: "Compile TTCN-3 sources and generate output for other tools",
-		Long:  `Compile TTCN-3 sources and generate output for other tools.`,
+		Use:   "compile [file.ttcn3]",
+		Short: "Compile a TTCN-3 module to Go or C++ source",
+		Long: `compile lowers a single TTCN-3 file through the IR (ir/lower) and
+emits source code for the target backend. The generated code links
+against the ntt runtime packages and can be compiled into a standalone
+test binary with the usual toolchain.
 
-		RunE: compile,
+The current pipeline supports the subset of TTCN-3 the interpreter
+also handles: integer / boolean / string scalars, top-level functions
+and testcases, if / while control flow, setverdict, log. Anything
+outside that subset produces a "skip" diagnostic on stderr; the rest
+of the module still lowers successfully.`,
+		Args: cobra.ExactArgs(1),
+		RunE: runCompile,
 	}
-
-	format string
 )
 
 func init() {
-	CompileCommand.Flags().StringVarP(&format, "generator", "G", "stdout", "generator to use (default stdout)")
+	RootCommand.AddCommand(CompileCommand)
+	CompileCommand.Flags().StringVar(&compileTarget, "target", "go",
+		"output target: 'go' or 'cpp'")
+	CompileCommand.Flags().StringVar(&compileOut, "out", "",
+		"output file (default: stdout)")
 }
 
-func compile(cmd *cobra.Command, args []string) error {
-	srcs, err := fs.TTCN3Files(Project.Sources...)
-	if err != nil {
-		return err
+func runCompile(cmd *cobra.Command, args []string) error {
+	path := args[0]
+	tree := ttcn3.ParseFile(path)
+	if tree == nil {
+		return fmt.Errorf("compile: parse failed for %s", path)
+	}
+	if tree.Err != nil {
+		return fmt.Errorf("compile: %s: %w", path, tree.Err)
 	}
 
-	imports, err := fs.TTCN3Files(Project.Imports...)
-	if err != nil {
-		return err
+	m, diags := lower.Module(tree)
+	if m == nil {
+		return fmt.Errorf("compile: no module found in %s", path)
+	}
+	for _, d := range diags {
+		fmt.Fprintf(os.Stderr, "lower: %s\n", d.Message)
 	}
 
-	files := append(srcs, imports...)
-
-	if format == "stdout" {
-		writeSource(os.Stdout, files...)
-		return nil
-	}
-
-	generator, err := exec.LookPath(fmt.Sprintf("ntt-gen-%s", format))
-	if err != nil {
-		return fmt.Errorf("could not find generator %q", format)
-	}
-	proc := exec.Command(generator)
-	proc.Stdout = os.Stdout
-	proc.Stderr = os.Stderr
-	stdin, err := proc.StdinPipe()
-	if err != nil {
-		return err
-	}
-
-	go func() {
-		defer stdin.Close()
-		writeSource(stdin, files...)
-	}()
-
-	if err := proc.Run(); err != nil {
-		return err
-	}
-	return nil
-}
-
-func writeSource(w io.Writer, files ...string) {
-	for _, file := range files {
-		src := buildSource(file)
-		b, err := json.MarshalIndent(src, "", "  ")
+	out := io.Writer(os.Stdout)
+	if compileOut != "" {
+		f, err := os.Create(compileOut)
 		if err != nil {
-			fatal(err)
+			return err
 		}
-		w.Write(b)
+		defer f.Close()
+		out = f
 	}
-}
 
-func buildSource(file string) ttcn3.Source {
-	src := ttcn3.Source{
-		Filename: file,
+	switch strings.ToLower(compileTarget) {
+	case "go", "golang":
+		return golang.Generate(out, m)
+	case "cpp", "c++":
+		return cpp.Generate(out, m)
+	case "ir":
+		_, err := io.WriteString(out, ir.Dump(m))
+		return err
 	}
-	var visit func(n syntax.Node)
-	visit = func(n syntax.Node) {
-		if n == nil {
-			return
-		}
-
-		k := strings.TrimPrefix(strings.TrimPrefix(fmt.Sprintf("%T", n), "*"), "syntax.")
-		begin := int(n.Pos())
-		end := int(n.End())
-
-		switch n := n.(type) {
-		case syntax.Token:
-			if n == nil {
-				break
-			}
-			src.Events = append(src.Events, ttcn3.NodeEvent{
-				Kind: "AddToken",
-				Text: n.String(),
-				Offs: begin,
-				Len:  end - begin,
-			})
-		default:
-			src.Events = append(src.Events, ttcn3.NodeEvent{
-				Kind: "Open" + k,
-				Offs: begin,
-				Len:  end - begin,
-			})
-			idx := len(src.Events) - 1
-			for _, c := range n.Children() {
-				visit(c)
-			}
-			src.Events = append(src.Events, ttcn3.NodeEvent{
-				Kind:  "Close" + k,
-				Offs:  begin,
-				Len:   end - begin,
-				Other: idx,
-			})
-			src.Events[idx].Other = len(src.Events) - 1
-		}
-	}
-	visit(ttcn3.ParseFile(file).Root)
-	return src
+	return fmt.Errorf("compile: unknown target %q (want go|cpp|ir)", compileTarget)
 }

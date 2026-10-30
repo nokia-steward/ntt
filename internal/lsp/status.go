@@ -76,7 +76,7 @@ func (s *Server) status(ctx context.Context) (interface{}, error) {
 	}
 	var buf bytes.Buffer
 	if err := t.Execute(&buf, NewStatus(suites)); err != nil {
-		s.Log(context.TODO(), "An error occured during collecting status information. This is probably a ntt bug:")
+		s.Log(context.TODO(), "An error occurred during collecting status information. This is probably a ntt bug:")
 		s.Log(context.TODO(), err.Error())
 	}
 	s.Log(ctx, buf.String())

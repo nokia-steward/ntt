@@ -36,43 +36,6 @@ func Parse(src []byte) Node {
 	return root
 }
 
-var (
-	literals = map[Kind]bool{
-		Any:           true,
-		Bitstring:     true,
-		ErrorLiteral:  true,
-		FailLiteral:   true,
-		FalseLiteral:  true,
-		Float:         true,
-		InconcLiteral: true,
-		Integer:       true,
-		Mul:           true,
-		NotANumber:    true,
-		NoneLiteral:   true,
-		NullKeyword:   true,
-		OmitKeyword:   true,
-		PassLiteral:   true,
-		String:        true,
-		Sub:           true,
-		TrueLiteral:   true,
-	}
-
-	// refs is a list of keywords that are allowed to be used as references.
-	refs = map[Kind]bool{
-		AddressKeyword:    true,
-		AllKeyword:        true,
-		AnyKeyword:        true,
-		CharstringKeyword: true,
-		MapKeyword:        true,
-		MtcKeyword:        true,
-		SystemKeyword:     true,
-		TestcaseKeyword:   true,
-		TimerKeyword:      true,
-		UniversalKeyword:  true,
-		UnmapKeyword:      true,
-	}
-)
-
 type parser struct {
 	Builder
 	*Scanner
@@ -408,8 +371,6 @@ func (p *parser) parseExpr() bool {
 	return p.expect(Identifier)
 }
 
-func (p *parser) parseBinaryExpr() bool { panic("binaryExpr: not implemented") }
-func (p *parser) parseUnaryExpr() bool  { panic("binaryExpr: not implemented") }
-func (p *parser) parseCallExpr() bool   { panic("binaryExpr: not implemented") }
-func (p *parser) parseIndexExpr() bool  { panic("binaryExpr: not implemented") }
-func (p *parser) parseDotExpr() bool    { panic("binaryExpr: not implemented") }
+func (p *parser) parseCallExpr() bool  { panic("binaryExpr: not implemented") }
+func (p *parser) parseIndexExpr() bool { panic("binaryExpr: not implemented") }
+func (p *parser) parseDotExpr() bool   { panic("binaryExpr: not implemented") }

@@ -17,8 +17,8 @@ module Sem_05040102_parameters_of_kind_template_014 {
 
     type record R
     {
-        integer field1,
-        integer field2
+        integer field1 optional,
+        integer field2 optional
     }
 
     template R mw_t(template integer p_int1 := ?, in template integer p_int2 := (0..5)) := {

@@ -1,9 +1,12 @@
 package ttcn3
 
 import (
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 
+	"github.com/nokia/ntt/internal/asn1"
 	"github.com/nokia/ntt/internal/log"
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
@@ -43,6 +46,24 @@ func (db *DB) Index(files ...string) {
 	for _, path := range files {
 		go func(path string) {
 			defer wg.Done()
+			if isASN1File(path) {
+				// ASN.1 files don't go through the TTCN-3
+				// parser. We index them as plain modules so
+				// "import from XYZ all" from a TTCN-3 file can
+				// resolve to the ASN.1 source.
+				mod, err := asn1.ParseFile(path)
+				if err != nil || mod == nil || mod.Name == "" {
+					return
+				}
+				db.mu.Lock()
+				db.addModule(path, mod.Name)
+				for _, a := range mod.Assignments {
+					syms++
+					db.addDefinition(path, a.Name)
+				}
+				db.mu.Unlock()
+				return
+			}
 			tree := ParseFile(path)
 			if tree.Root != nil {
 				db.mu.Lock()
@@ -141,4 +162,43 @@ func (db *DB) addRef(file string, name string) {
 		db.Uses[name] = make(map[string]bool)
 	}
 	db.Uses[name][file] = true
+}
+
+// isASN1File reports whether path looks like an ASN.1 source file based
+// on its extension. We deliberately keep this lookup case-insensitive
+// because ASN.1 specs (and the editor extensions that ship them) are
+// inconsistent about casing.
+func isASN1File(path string) bool {
+	ext := strings.ToLower(filepath.Ext(path))
+	return ext == ".asn" || ext == ".asn1"
+}
+
+// ASN1Location locates an ASN.1 assignment definition by name and
+// returns its byte offset within the source file. The result is
+// suitable for editor "go to definition" jumps from TTCN-3 callers
+// that imported the ASN.1 module.
+//
+// We return (file, offset, ok). The caller is responsible for any
+// LSP-specific line/column conversion via fs.Open(file) - this keeps
+// db.go free of LSP imports.
+func (db *DB) ASN1Location(symbol string) (file string, offset int, ok bool) {
+	for path := range db.Names[symbol] {
+		if !isASN1File(path) {
+			continue
+		}
+		// Reparse the file using the full frontend so we get the
+		// byte-precise position of the named assignment. The
+		// underlying parser is cheap enough that re-parsing on every
+		// jump is fine for editor workloads.
+		mod, err := asn1.ParseFileFull(path)
+		if err != nil || mod == nil {
+			continue
+		}
+		for _, a := range mod.Assignments {
+			if asn1.AssignmentName(a) == symbol {
+				return path, a.Pos(), true
+			}
+		}
+	}
+	return "", 0, false
 }

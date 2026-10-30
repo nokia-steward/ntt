@@ -21,6 +21,22 @@ type Tree struct {
 	parentsMu sync.Mutex
 	scopes    map[syntax.Node]*Scope
 	scopesMu  sync.Mutex
+
+	memo sync.Map // key -> *memoEntry
+}
+
+type memoEntry struct {
+	once sync.Once
+	val  interface{}
+}
+
+// Memo returns what f gives for key, f called once for the tree: what a
+// tool derives from the tree, kept as long as the tree is.
+func (t *Tree) Memo(key string, f func() interface{}) interface{} {
+	e, _ := t.memo.LoadOrStore(key, &memoEntry{})
+	m := e.(*memoEntry)
+	m.once.Do(func() { m.val = f() })
+	return m.val
 }
 
 // Filename returns the filename of the file that was parsed.
@@ -212,7 +228,7 @@ func (t *Tree) ModulePars() []*Node {
 	return defs
 }
 
-// IdentifierAt returns the primary expression enclosing the identifer at the
+// IdentifierAt returns the primary expression enclosing the identifier at the
 // given position.
 func (t *Tree) IdentifierAt(line, col int) syntax.Expr {
 	pos := t.PosFor(line, col)
@@ -348,7 +364,7 @@ func (f *finder) ident(id *syntax.Ident, tree *Tree) []*Node {
 				var results []*Node
 				for _, c := range f.lookup(ppp.Fun, tree) {
 					results = append(results, Definitions(id.String(), c.Node, c.Tree)...)
-					// Bellow switch is required to handle behvaiour types references.
+					// Bellow switch is required to handle behaviour types references.
 					// See tests TestLookup/parameters#01 and TestLookup/parameters#02.
 					//
 					// This brute force solution is not ideal, but it works for now.
@@ -540,12 +556,6 @@ func (f *finder) typeOf(def *Node) []*Node {
 				q = append(q, &Node{Node: n.Return.Type, Tree: def.Tree})
 			}
 
-		case *syntax.IndexExpr:
-			q = append(q, f.lookup(n, def.Tree)...)
-
-		case syntax.Expr:
-			q = append(q, f.lookup(n, def.Tree)...)
-
 		case *syntax.RefSpec:
 			r := f.lookup(n.X, def.Tree)
 			for _, v := range r {
@@ -568,6 +578,13 @@ func (f *finder) typeOf(def *Node) []*Node {
 			*syntax.MapTypeDecl,
 			*syntax.ClassTypeDecl:
 			result = append(result, &Node{Node: n, Tree: def.Tree})
+
+		// After the nested type definitions, which are expressions too.
+		case *syntax.IndexExpr:
+			q = append(q, f.lookup(n, def.Tree)...)
+
+		case syntax.Expr:
+			q = append(q, f.lookup(n, def.Tree)...)
 		}
 
 		prev = def.Node

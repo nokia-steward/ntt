@@ -1,0 +1,10 @@
+// @author   TTF T023
+// @purpose  1:6.2.2.4, Ensure set defintion allow embedded fields
+// @verdict  pass accept
+module Sem_06020204_embedding_fields_001 {
+
+type set S {
+	integer
+}
+
+}

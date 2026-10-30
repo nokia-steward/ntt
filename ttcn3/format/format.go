@@ -41,11 +41,10 @@ type CanonicalPrinter struct {
 	// Indent is the level of indentation at which to start.
 	Indent int
 
-	w                io.Writer
-	lastPos, currPos syntax.Position
-	whiteBuf         string
-	firstToken       bool
-	stack            []syntax.Node
+	w          io.Writer
+	lastPos    syntax.Position
+	whiteBuf   string
+	firstToken bool
 }
 
 // NewCanonicalPrinter returns a new printer that formats source code.

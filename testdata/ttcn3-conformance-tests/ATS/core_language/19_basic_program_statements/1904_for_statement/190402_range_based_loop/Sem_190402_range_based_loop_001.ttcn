@@ -1,0 +1,34 @@
+/***************************************************
+ ** @author   STF 423
+ ** @version  0.0.1
+ ** @purpose  1:19.4.2, Ensure that the IUT properly evaluates range-based loop
+ ** @verdict  pass  accept, ttcn3verdict:pass
+ ***************************************************/
+module Sem_190402_range_based_loop_001 {
+
+type component GeneralComp {
+}
+
+testcase TC_Sem_190402_range_based_loop_001 () runs on GeneralComp system GeneralComp {
+ var integer v_i, v_e := 0;
+
+ for (v_i in {1, 2, 3}) {
+ 	v_e := v_e + v_i;
+ }
+
+ if ( v_e==6 ) {
+  setverdict(pass);
+ }
+ else {
+  setverdict(fail);
+ }
+}
+
+
+control{
+
+    execute(TC_Sem_190402_range_based_loop_001());
+
+}
+
+}

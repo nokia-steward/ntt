@@ -20,7 +20,7 @@ module NegSem_1505_ModifiedTemplates_009 {
         boolean field3
     }
 
-	template(value) MyRecordType m_myValueRecTemplate :=
+	template(present) MyRecordType m_myValueRecTemplate :=
 	{
 		field1 := 123,
 		field2 := "A string",

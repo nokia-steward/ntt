@@ -19,7 +19,7 @@ module Sem_160102_predefined_functions_016 {
     }
 
     testcase TC_Sem_160102_predefined_functions_016 () runs on GeneralComp {
-        var template I v_test := 0;
+        var template(value) I v_test := 0;
 		var bitstring v_res := encvalue(v_test);
 		if (lengthof(v_res) == 32) {
 			setverdict(pass);

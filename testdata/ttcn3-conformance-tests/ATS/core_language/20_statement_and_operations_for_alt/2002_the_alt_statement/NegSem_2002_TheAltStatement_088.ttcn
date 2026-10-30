@@ -1,7 +1,7 @@
 /***************************************************
  ** @author   STF 548
  ** @version  0.0.1
- ** @purpose  1:20.2, verify that a external function used in a parameter of an altstep invoked from an alt branch cannot contain fuzzy parameters
+ ** @purpose  1:20.2, verify that an external function used in a parameter of an altstep invoked from an alt branch cannot contain fuzzy parameters
  ** @verdict  pass reject
  ***************************************************/
 

@@ -1,0 +1,18 @@
+// @author   TTF T023
+// @purpose  1:8.2.1, Ensure module parameters accept nested types.
+// @verdict  pass accept
+module Sem_080201_ModulParameters_004 {
+
+modulepar record of charstring IDs := {1, 2, 3};
+
+type component GeneralComp {}
+
+testcase TC_Sem_080201_ModulParameters_004() runs on GeneralComp {
+	setverdict(pass);
+}
+
+control {
+	execute(TC_Sem_080201_ModulParameters_004());
+}
+
+}

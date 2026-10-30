@@ -19,17 +19,13 @@ module Sem_1512_TheOmitOperation_002 {
 		boolean b optional
 	}
 
-	template ExampleType m_originalValue := {1, true};
-	template(omit) ExampleType m_targetValue := omit(m_originalValue);
-
 	testcase TC_Sem_1512_TheOmitOperation_002() runs on GeneralComp {
-		var template(omit) ExampleType v_omit;
 
-		v_omit := m_targetValue;
+		template ExampleType m_originalValue := {1, true};
 
-		if (match(valueof(v_omit.a), 1) and
-			match(ispresent(v_omit.b), true )
-		   ) {
+		template(omit) ExampleType m_targetValue := omit(m_originalValue);
+
+		if (match(valueof(m_targetValue), m_originalValue)) {
 			setverdict(pass);
 		} else {
 			setverdict(fail);
@@ -40,3 +36,4 @@ module Sem_1512_TheOmitOperation_002 {
 		execute(TC_Sem_1512_TheOmitOperation_002());
 	};
 }
+

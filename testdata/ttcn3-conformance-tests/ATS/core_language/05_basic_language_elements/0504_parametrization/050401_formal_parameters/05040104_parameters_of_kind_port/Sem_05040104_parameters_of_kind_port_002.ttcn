@@ -24,7 +24,8 @@ module Sem_05040104_parameters_of_kind_port_002 {
     }
 
     testcase TC_Sem_05040104_parameters_of_kind_port_002() runs on C {
-        f_test(p);
+        var P v_port := p;
+		f_test(v_port);
     }
 
     control {

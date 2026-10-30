@@ -1,0 +1,56 @@
+/*****************************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:15.6.6, Expanding map containing a complemented list on the RHS
+ ** @verdict  pass reject
+ *****************************************************************/
+
+// The following requirements are tested:
+// Template lists and complemented lists: referencing an element within a map field to which
+// a list or complemented list is assigned, shall cause an error.
+
+module NegSem_150606_Referencing_map_elements_004 {
+
+    type record ProductInfo {
+        charstring producer,
+        charstring model,
+        charstring description optional
+    };
+
+    type map from charstring to ProductInfo TMap;
+
+    type record TRec {
+        integer a,
+        TMap b optional
+    }
+
+    type component GeneralComp {
+    }
+
+    testcase TC_NegSem_150606_Referencing_map_elements_004() runs on GeneralComp {
+        var template TRec v_template := {
+            a := 1,
+            b := complement ({
+                ["XS125"] := {
+                    producer := "Yoomstick Tec",
+                    model := ?,
+                    description := *
+                }
+            }, {
+                ["DZ506"] := {
+                    producer := "XanDonHua Mechanics",
+                    model := ?,
+                    description := *
+                }
+            })
+        };
+        // expanding complemented list on the RHS
+        var template ProductInfo v_productTemplate := v_template.b["XS125"]; // shall cause an error
+        log (v_productTemplate);
+        setverdict(pass);
+    }
+
+    control{
+        execute(TC_NegSem_150606_Referencing_map_elements_004());
+    }
+}

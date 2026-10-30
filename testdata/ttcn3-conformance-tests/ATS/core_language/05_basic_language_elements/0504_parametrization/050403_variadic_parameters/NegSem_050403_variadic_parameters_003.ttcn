@@ -1,0 +1,9 @@
+// @author   TTF T023
+// @purpose  1:5.4.3, Ensure variadic parameters are in parameters.
+// @verdict  pass reject
+module NegSem_050403_variadic_parameters_003 {
+
+function f1(inout integer x...) {}
+function f2(out integer x...) {}
+
+}

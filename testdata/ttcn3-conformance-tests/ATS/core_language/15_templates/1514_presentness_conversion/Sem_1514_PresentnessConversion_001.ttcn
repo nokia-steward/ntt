@@ -1,0 +1,33 @@
+/***************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.14, Presentness conversion
+ ** @verdict  pass accept
+ ***************************************************/
+
+module Sem_1514_PresentnessConversion_001 {
+
+	type component GeneralComp {}
+
+	type record ExampleType {
+		integer a,
+        boolean b optional
+	}
+
+	testcase TC_Sem_1514_PresentnessConversion_001() runs on GeneralComp {
+
+        template ExampleType m_example := { 1, *}; // unrestricted
+
+        var template(present) boolean v_field := m_example.b.present; // m_field is converted to ? from *
+
+		if (istemplatekind(v_field, "?")) {
+			setverdict(pass);
+		} else {
+			setverdict(fail);
+		}
+	}
+
+	control {
+		execute(TC_Sem_1514_PresentnessConversion_001());
+	};
+}

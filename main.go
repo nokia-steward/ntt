@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -67,6 +68,18 @@ var (
 		},
 
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Catch the conventional version flags up front so they
+			// don't fall through to the help text. The root command
+			// has DisableFlagParsing on (to forward unknown
+			// subcommands to external ntt-foo binaries), so cobra's
+			// auto-generated --version flag never gets a chance to
+			// run.
+			for _, a := range args {
+				if a == "--version" || a == "-V" {
+					fmt.Println(versionString())
+					return nil
+				}
+			}
 			if len(args) > 0 && args[0][0] != '-' {
 				if path, err := exec.LookPath("ntt-" + args[0]); err == nil {
 					return proc.Exec(path, args[1:]...)
@@ -97,7 +110,6 @@ var (
 	outputPlain    bool
 	outputProgress bool
 	outputTAP      bool
-	testsFiles     []string
 	chdir          string
 
 	version = "devel"
@@ -193,16 +205,14 @@ func PrintError(w io.Writer, err error) {
 }
 
 func fatal(err error) {
-	switch err := err.(type) {
-	case *exec.ExitError:
-		waitStatus := err.Sys().(syscall.WaitStatus)
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		waitStatus := exitErr.Sys().(syscall.WaitStatus)
 		if waitStatus.ExitStatus() == -1 {
 			PrintError(os.Stderr, err)
 		}
 		os.Exit(waitStatus.ExitStatus())
-	default:
-		fmt.Fprintln(os.Stderr, err.Error())
 	}
-
+	fmt.Fprintln(os.Stderr, err.Error())
 	os.Exit(1)
 }

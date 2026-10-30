@@ -140,7 +140,9 @@ func processFile(path string) error {
 				return err
 			}
 			if err := os.WriteFile(path, res, perm); err != nil {
-				os.Rename(backup, path)
+				if rerr := os.Rename(backup, path); rerr != nil {
+					return fmt.Errorf("%w; restoring %s from %s: %s", err, path, backup, rerr.Error())
+				}
 				return err
 			}
 			if err := os.Remove(backup); err != nil {

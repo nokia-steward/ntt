@@ -210,19 +210,19 @@ func (t *ListType) descriptionString() string {
 	}
 	switch t.Kind {
 	case RecordOf, Any:
-		var lengthConstraint string = ""
+		var lengthConstraint = ""
 		if t.LengthConstraint.Expr != nil {
 			lengthConstraint = "length(" + t.LengthConstraint.String() + ") "
 		}
 		return "record " + lengthConstraint + "of " + elem
 	case SetOf:
-		var lengthConstraint string = ""
+		var lengthConstraint = ""
 		if t.LengthConstraint.Expr != nil {
 			lengthConstraint = "length(" + t.LengthConstraint.String() + ") "
 		}
 		return "set " + lengthConstraint + "of " + elem
 	case Charstring, Octetstring, Hexstring, Bitstring, UniversalCharstring:
-		var lengthConstraint string = ""
+		var lengthConstraint = ""
 		if t.LengthConstraint.Expr != nil {
 			lengthConstraint = " length(" + t.LengthConstraint.String() + ")"
 		}

@@ -1,0 +1,20 @@
+// @author   TTF T023
+// @purpose  1:5.4.1.2, Ensure formal parameters accept nested types.
+// @verdict  pass accept
+module Sem_05040102_nested_types_001 {
+
+type component GeneralComp {}
+
+function f(template record of integer n) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_05040102_nested_types_001() runs on GeneralComp {
+	f({1, ?, 3});
+}
+
+control {
+	execute(TC_Sem_05040102_nested_types_001());
+}
+
+}

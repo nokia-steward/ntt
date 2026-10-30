@@ -15,7 +15,7 @@ func dot(n syntax.Node) {
 	w := bufio.NewWriter(os.Stdout)
 	defer w.Flush()
 
-	w.WriteString(`digraph {
+	_, _ = w.WriteString(`digraph {
 	rankdir=LR
 `)
 	q := []syntax.Node{n}
@@ -40,12 +40,12 @@ func dot(n syntax.Node) {
 		}
 	}
 
-	w.WriteString("	{ \n")
+	_, _ = w.WriteString("	{ \n")
 	for _, tok := range toks {
 		fmt.Fprintf(w, "\t%s %s;\n", nodeID(tok), nodeProps(tok))
 	}
-	w.WriteString("	}")
-	w.WriteString("}")
+	_, _ = w.WriteString("	}")
+	_, _ = w.WriteString("}")
 }
 
 func nodeID(n syntax.Node) string {

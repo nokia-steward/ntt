@@ -2,7 +2,6 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
 	"os"
 	"reflect"
@@ -18,8 +17,6 @@ import (
 )
 
 var (
-	indent = 0
-
 	DumpCommand = &cobra.Command{
 		Use:   "dump",
 		Short: "Dump TTCN-3 syntax trees",
@@ -68,7 +65,7 @@ var (
 						if n.Kind().IsKeyword() {
 							fmt.Fprintf(w, "KEYWORD")
 						} else {
-							fmt.Fprintf(w, strings.ToUpper(n.Kind().String()))
+							fmt.Fprint(w, strings.ToUpper(n.Kind().String()))
 						}
 
 						if withValue {
@@ -110,14 +107,6 @@ func init() {
 	DumpCommand.PersistentFlags().BoolVarP(&withTrivia, "with-trivia", "", false, "dump tokens with trivia")
 	DumpCommand.PersistentFlags().BoolVarP(&withPosition, "with-position", "", false, "dump tokens with position")
 	DumpCommand.PersistentFlags().BoolVarP(&withValue, "with-value", "", false, "dump token with value")
-}
-
-func dumpJSON(tree *ttcn3.Tree) {
-	b, err := json.MarshalIndent(tree.Root, "", "  ")
-	if err != nil {
-		fatal(err)
-	}
-	fmt.Println(string(b))
 }
 
 func dumpAST(indent int, name string, v reflect.Value) {

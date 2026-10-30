@@ -1,0 +1,29 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:6.2.15.2, map template with a wildcard
+ ** @verdict  pass accept, ttcn3verdict:pass
+ ***************************************************/
+
+// The following requirement is tested:
+// Templates of the map type can use a specific form of the mixed notation, where the first
+// item is and asterisk representing the AnyElementsOrNone matching symbol, followed by one
+// or more indexed assignments.
+
+module Sem_06021502_indexed_assignment_notation_004 {
+	type map from charstring to charstring TMap;
+	type component C {}
+
+	testcase TC_Sem_06021502_indexed_assignment_notation_004() runs on C {
+		var template TMap v_map := { *,
+            ["first_name"] := "John",
+            ["surname"] := "Doe"
+        }
+        log(v_map);
+		setverdict(pass);
+	}
+
+	control {
+		execute(TC_Sem_06021502_indexed_assignment_notation_004());
+	}
+}

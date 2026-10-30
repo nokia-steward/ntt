@@ -2,7 +2,7 @@
  ** @author   STF 451 (updated by STF 521)
  ** @version  0.0.2
  ** @purpose  1:21.1.1, Ensure that the the IUT allows connecting ports with empty outlists
- ** @verdict  pass accept, ttcn3verdict:pass
+ ** @verdict  pass reject
  ***************************************************/
 // NOTE: the test shall pass as empty set (in this case a list of allowed out types) is always a subset
 // of another set (in this case a list of allowed in types). For that reason, the test was changed

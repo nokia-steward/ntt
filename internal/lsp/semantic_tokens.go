@@ -261,7 +261,7 @@ func appendToken(tokens []uint32, tok syntax.Token, tree *ttcn3.Tree, typ Semant
 	col = pos.Column
 
 	// token width
-	width := int(tok.End() - tok.Pos())
+	width := tok.End() - tok.Pos()
 	tokens = append(tokens, uint32(relLine), uint32(relCol), uint32(width), uint32(typ), uint32(mod))
 	return tokens, line, col
 }

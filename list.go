@@ -117,11 +117,10 @@ If a basket is not defined by an environment variable, it's equivalent to a
 
 	w = bufio.NewWriter(os.Stdout)
 
-	showFiles   = false
-	showTags    = false
-	formatJSON  = false
-	formatPlain = true
-	first       = true
+	showFiles  = false
+	showTags   = false
+	formatJSON = false
+	first      = true
 )
 
 func init() {
@@ -129,7 +128,7 @@ func init() {
 	flags.BoolVar(&showFiles, "with-filename", false, "Print the filename for each match.")
 	flags.BoolVar(&showTags, "with-tags", false, "Print documentation tags for each match.")
 	flags.BoolVarP(&showTags, "tags", "t", false, "Print documentation tags for each match.")
-	flags.MarkDeprecated("tags", "please use --with-tags instead")
+	_ = flags.MarkDeprecated("tags", "please use --with-tags instead")
 	flags.AddFlagSet(BasketFlags())
 	ListCommand.AddCommand(
 		&cobra.Command{Use: `tests`, RunE: list},
@@ -144,13 +143,14 @@ func init() {
 func list(cmd *cobra.Command, args []string) error {
 
 	basket, err := NewBasketWithFlags("list", cmd.Flags())
-	basket.LoadFromEnvOrConfig(Project, "NTT_LIST_BASKETS")
 	if err != nil {
+		return err
+	}
+	if err := basket.LoadFromEnvOrConfig(Project, "NTT_LIST_BASKETS"); err != nil {
 		return err
 	}
 
 	formatJSON, _ = cmd.Flags().GetBool("json")
-	formatPlain, _ = cmd.Flags().GetBool("plain")
 
 	if formatJSON {
 		fmt.Fprintln(w, "[")
@@ -191,7 +191,7 @@ func list(cmd *cobra.Command, args []string) error {
 						Print(basket, n, module+"."+n.Name.String())
 					}
 				case *syntax.ValueDecl:
-					if n.KindTok == nil && n.KindTok.Kind() == syntax.MODULEPAR {
+					if n.KindTok == nil || n.KindTok.Kind() == syntax.MODULEPAR {
 						return true
 					}
 				case *syntax.NodeList, *syntax.ModuleDef, *syntax.GroupDecl, *syntax.ModuleParameterGroup:
@@ -253,7 +253,7 @@ func Print(basket Basket, n syntax.Node, id string) {
 	switch {
 	case formatJSON:
 		if !first {
-			w.Write([]byte(",\n"))
+			_, _ = w.Write([]byte(",\n"))
 		}
 		first = false
 		b, err := json.Marshal(Match{
@@ -267,7 +267,7 @@ func Print(basket Basket, n syntax.Node, id string) {
 			fmt.Fprintln(os.Stderr, err)
 			return
 		}
-		w.Write(b)
+		_, _ = w.Write(b)
 	default:
 		if showTags && len(tags) != 0 {
 			for _, tag := range prettyTags {
@@ -284,7 +284,7 @@ func PrintMatch(filename string, pos syntax.Position, id string, tags ...string)
 	if showFiles {
 		fmt.Fprintf(w, "%s:%d\t", filename, pos.Line)
 	}
-	fmt.Fprintf(w, id)
+	fmt.Fprint(w, id)
 	for _, t := range tags {
 		fmt.Fprintf(w, "\t%s", t)
 	}

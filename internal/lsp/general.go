@@ -19,6 +19,12 @@ type MarkdownHover struct {
 	mapOrConnectLinks string
 }
 
+// VersionKey is the context key of the ntt version the server reports
+// to its client.
+var VersionKey = versionKey{}
+
+type versionKey struct{}
+
 func (s *Server) registerSemanticTokensIfNoDynReg() *protocol.SemanticTokensRegistrationOptions {
 	if s.clientCapability.HasDynRegForSemTok {
 		// NOTE:
@@ -99,29 +105,52 @@ func (s *Server) initialize(ctx context.Context, params *protocol.ParamInitializ
 	setTrace(params.Trace)
 
 	version := "devel"
-	if v, ok := ctx.Value("version").(string); ok {
+	if v, ok := ctx.Value(VersionKey).(string); ok {
 		version = v
 	}
 
 	return &protocol.InitializeResult{
 		Capabilities: protocol.ServerCapabilities{
-			InlayHintProvider:               s.registerInlayHintIfNoDynReg(),
-			CodeActionProvider:              false,
-			CompletionProvider:              protocol.CompletionOptions{TriggerCharacters: []string{"."}},
+			InlayHintProvider: s.registerInlayHintIfNoDynReg(),
+			// Advertise the kinds we actually emit so clients can
+			// surface them in their menus (e.g. "Source Action"
+			// in VS Code) and pre-filter via the `Only` field.
+			CodeActionProvider: protocol.CodeActionOptions{
+				CodeActionKinds: []protocol.CodeActionKind{
+					protocol.QuickFix,
+					protocol.SourceOrganizeImports,
+				},
+			},
+			CompletionProvider: protocol.CompletionOptions{
+				TriggerCharacters: []string{"."},
+				ResolveProvider:   true,
+			},
+			CallHierarchyProvider:           true,
 			DefinitionProvider:              true,
-			TypeDefinitionProvider:          false,
+			TypeDefinitionProvider:          true,
 			ImplementationProvider:          false,
 			DocumentFormattingProvider:      s.registerFormatterIfNoDynReg(),
 			DocumentRangeFormattingProvider: false,
 			DocumentSymbolProvider:          true,
-			WorkspaceSymbolProvider:         false,
-			FoldingRangeProvider:            false,
+			WorkspaceSymbolProvider:         true,
+			FoldingRangeProvider:            true,
 			HoverProvider:                   true,
-			DocumentHighlightProvider:       false,
+			DocumentHighlightProvider:       true,
 			DocumentLinkProvider:            protocol.DocumentLinkOptions{},
 			ReferencesProvider:              true,
+			RenameProvider: protocol.RenameOptions{
+				PrepareProvider: true,
+			},
+			SignatureHelpProvider: protocol.SignatureHelpOptions{
+				TriggerCharacters:   []string{"(", ","},
+				RetriggerCharacters: []string{","},
+			},
 			TextDocumentSync: &protocol.TextDocumentSyncOptions{
-				Change:    protocol.Full,
+				// Incremental sync sends only the edited range
+				// per keystroke. We splice it into our cached
+				// content (see didChange) instead of having the
+				// client retransmit the whole file every time.
+				Change:    protocol.Incremental,
 				OpenClose: true,
 				Save: protocol.SaveOptions{
 					IncludeText: false,
@@ -163,7 +192,9 @@ func (s *Server) initialized(ctx context.Context, params *protocol.InitializedPa
 	s.state = serverInitialized
 	s.stateMu.Unlock()
 
-	s.didChangeConfiguration(ctx, &protocol.DidChangeConfigurationParams{})
+	if err := s.didChangeConfiguration(ctx, &protocol.DidChangeConfigurationParams{}); err != nil {
+		log.Debugf("lsp: configuration: %v\n", err)
+	}
 	for _, folder := range s.pendingFolders {
 		log.Printf("Scanning %q for possible TTCN-3 suites\n", folder.URI)
 		for _, root := range project.Discover(folder.URI) {

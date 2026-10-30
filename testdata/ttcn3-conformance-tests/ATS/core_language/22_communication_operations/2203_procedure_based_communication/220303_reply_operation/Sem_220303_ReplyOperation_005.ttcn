@@ -27,7 +27,7 @@ module Sem_220303_ReplyOperation_005 {
     }
 
     function f_server() runs on GeneralComp {
-		var template R v_rec := { field1 := 0, field2 := ? }
+		var template(present) R v_rec := { field1 := 0, field2 := ? }
         p.getcall(S:?);
         p.reply(S:{par1 := v_rec});
     }

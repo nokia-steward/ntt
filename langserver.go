@@ -21,6 +21,6 @@ var (
 
 func langserver(cmd *cobra.Command, args []string) error {
 	stream := jsonrpc2.NewHeaderStream(fakenet.NewConn("stdio", os.Stdin, os.Stdout))
-	ctx := context.WithValue(context.Background(), "version", version)
+	ctx := context.WithValue(context.Background(), lsp.VersionKey, version)
 	return lsp.NewServer(stream).Serve(ctx)
 }
