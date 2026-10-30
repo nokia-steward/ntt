@@ -852,6 +852,7 @@ type (
 		TypePars   *FormalPars
 		Params     *FormalPars // Formal parameter list
 		RunsOn     *RunsOnSpec // Optional runs-on spec
+		Mtc        *MtcSpec    // Optional mtc spec
 		System     *SystemSpec // Optional system spec
 		Return     *ReturnSpec // Optional return spec
 		With       *WithSpec

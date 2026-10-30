@@ -195,9 +195,11 @@ single functional test doubles as a performance probe. See
   V4.17.1** (ES 201 873-1 15.8): what may be assigned or passed to a
   restricted template, template variable or formal template parameter
   (table 13; a value always may, a template only with a restriction as
-  strict), the fields of a `template(value)` or `template(omit)` (13c), the
-  restriction a modified template may have given its base's (13b: none if
-  the base has none, 15.5 f) and that of its formal parameters (13a). A
+  strict), the fields, alternatives and elements of a restricted template
+  (13c: of a `template(value)` value, or omit where optional; of a
+  `template(present)` present where mandatory), the restriction a modified
+  template may have given its base's, global or local (13b: none if the
+  base has none, 15.5 f) and that of its formal parameters (13a). A
   restriction is judged where it is known: a reference to a template, a
   template variable or parameter, a call of a template or of a function
   returning one, `t.present`. Also reported now, as V4.17.1 has them: the
@@ -285,6 +287,13 @@ single functional test doubles as a performance probe. See
   `modifies ?` has its base expanded into the type's fields (`?` where
   mandatory, `*` where optional, 15.5 c) before the modification, and an
   element of a map template holding `?` is `*` (15.6.6 c).
+- **A template list with `omit` matches an omitted field**: `{ a := 1, b
+  := (1, omit) }` did not match `{ a := 1, b := omit }` (B.1.2.1); nor did
+  `* length(1)`, a length restricting a present value only (B.1.4.1).
+- **Behaviour types**: `type function F() runs on C mtc C` parses, as a
+  function may have an `mtc` clause, and `refers(f)` and `v.apply(...)`
+  evaluate, an altstep's in `activate` and as an `alt` branch too;
+  `refers` was an unknown identifier at run time.
 - **`t.value` and `t.present`** (15.15, 15.14): the value extraction of a
   pattern or a template holding a value, and the presentness conversion;
   `.present` did not parse and `.value` was undefined.

@@ -243,6 +243,9 @@ func (n *BehaviourTypeDecl) FirstTok() Token {
 	case n.RunsOn != nil:
 		return n.RunsOn.FirstTok()
 
+	case n.Mtc != nil:
+		return n.Mtc.FirstTok()
+
 	case n.System != nil:
 		return n.System.FirstTok()
 
@@ -268,6 +271,9 @@ func (n *BehaviourTypeDecl) LastTok() Token {
 
 	case n.System != nil:
 		return n.System.LastTok()
+
+	case n.Mtc != nil:
+		return n.Mtc.LastTok()
 
 	case n.RunsOn != nil:
 		return n.RunsOn.LastTok()
@@ -296,7 +302,7 @@ func (n *BehaviourTypeDecl) LastTok() Token {
 }
 
 func (n *BehaviourTypeDecl) Children() []Node {
-	ret := make([]Node, 0, 10)
+	ret := make([]Node, 0, 11)
 
 	if n.TypeTok != nil {
 		ret = append(ret, n.TypeTok)
@@ -324,6 +330,10 @@ func (n *BehaviourTypeDecl) Children() []Node {
 
 	if n.RunsOn != nil {
 		ret = append(ret, n.RunsOn)
+	}
+
+	if n.Mtc != nil {
+		ret = append(ret, n.Mtc)
 	}
 
 	if n.System != nil {
@@ -365,6 +375,13 @@ func (n *BehaviourTypeDecl) Inspect(f func(Node) bool) {
 	}
 
 	if c := n.RunsOn; c != nil {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+	if c := n.Mtc; c != nil {
 		if f(c) {
 			c.Inspect(f)
 		}

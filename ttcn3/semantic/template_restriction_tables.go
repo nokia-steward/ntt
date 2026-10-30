@@ -42,6 +42,8 @@ func (a *Analyzer) checkTemplateRestrictionTables(mod *syntax.Module) []Diagnost
 		module:    map[string]string{},
 		templates: map[string]*syntax.TemplateDecl{},
 		funcs:     map[string]*syntax.FuncDecl{},
+		local:     map[string]*syntax.TemplateDecl{},
+		types:     map[string]syntax.Node{},
 		members:   map[string]map[string]string{},
 		parents:   collectComponentParents(mod),
 	}
@@ -50,11 +52,13 @@ func (a *Analyzer) checkTemplateRestrictionTables(mod *syntax.Module) []Diagnost
 		switch x := n.(type) {
 		case *syntax.FuncDecl:
 			if x.Body != nil {
+				c.local = map[string]*syntax.TemplateDecl{}
 				c.checkBody(x.Body, c.params(x.Params, c.runsOnScope(x)))
 			}
 			return false
 		case *syntax.ControlPart:
 			if x.Body != nil {
+				c.local = map[string]*syntax.TemplateDecl{}
 				c.checkBody(x.Body, map[string]string{})
 			}
 			return false
@@ -72,7 +76,12 @@ func (a *Analyzer) checkTemplateRestrictionTables(mod *syntax.Module) []Diagnost
 type restrChecker struct {
 	module    map[string]string
 	templates map[string]*syntax.TemplateDecl
-	funcs     map[string]*syntax.FuncDecl
+	// local are the templates declared in the body being checked.
+	local map[string]*syntax.TemplateDecl
+	// types are the module's type declarations, by name: the
+	// *syntax.StructTypeDecl or *syntax.SubTypeDecl.
+	types map[string]syntax.Node
+	funcs map[string]*syntax.FuncDecl
 	// members are the variables and constants each component type
 	// declares, parents the types each extends.
 	members map[string]map[string]string
@@ -98,6 +107,14 @@ func (c *restrChecker) collect(mod *syntax.Module) {
 			case *syntax.FuncDecl:
 				if x.Name != nil {
 					c.funcs[x.Name.String()] = x
+				}
+			case *syntax.StructTypeDecl:
+				if x.Name != nil {
+					c.types[x.Name.String()] = x
+				}
+			case *syntax.SubTypeDecl:
+				if x.Field != nil && x.Field.Name != nil {
+					c.types[x.Field.Name.String()] = x
 				}
 			case *syntax.ValueDecl:
 				for _, dec := range x.Decls {
@@ -309,10 +326,10 @@ func (c *restrChecker) reportf(code string, n syntax.Node, format string, args .
 	})
 }
 
-// checkInit checks e, assigned to or passed for a template of restriction
-// lhs, against table 13, and the fields, alternatives and elements of a
-// template(value) or template(omit) against table 13c.
-func (c *restrChecker) checkInit(lhs string, e syntax.Expr, what string, scope map[string]string) {
+// checkInit checks e, assigned to or passed for a template of type typ
+// (nil when not known) and restriction lhs, against table 13, and its
+// fields, alternatives and elements against table 13c.
+func (c *restrChecker) checkInit(lhs string, e syntax.Expr, typ syntax.Node, what string, scope map[string]string) {
 	if lhs == "" || lhs == restrValue || e == nil {
 		return
 	}
@@ -324,42 +341,131 @@ func (c *restrChecker) checkInit(lhs string, e syntax.Expr, what string, scope m
 		}
 		return
 	}
-	if lhs == "value" || lhs == "omit" {
-		c.checkFields(lhs, e, what, scope)
-	}
+	c.checkFields(lhs, e, typ, what, scope)
 }
 
-// checkFields walks the fields, alternatives and elements of a
-// template(value) or template(omit) body. Each is implicitly restricted
-// to value, or omit when it is an optional field (table 13c); neither
-// accepts an unrestricted or present template. Whether a field is
-// optional is not needed for that, and an omit template in a field,
-// which only an optional one accepts, is not judged here.
-func (c *restrChecker) checkFields(parent string, e syntax.Expr, what string, scope map[string]string) {
+// restrValueOrOmit is the implicit restriction of a field of a
+// template(value) or template(omit) whose optionality is not known: value
+// or omit, which accept the same but an omit template.
+const restrValueOrOmit = "value or omit"
+
+// implicitRestriction is table 13c: the restriction of a field,
+// alternative or element of a template with restriction parent, optional
+// telling whether it is an optional field of a record or set, known
+// whether that is known.
+func implicitRestriction(parent string, optional, known bool) string {
+	switch parent {
+	case "value", "omit", restrValueOrOmit:
+		if !known {
+			return restrValueOrOmit
+		}
+		if optional {
+			return "omit"
+		}
+		return "value"
+	case "present":
+		if known && !optional {
+			return "present"
+		}
+	}
+	return ""
+}
+
+// checkFields walks the fields, alternatives and elements of a template
+// of restriction parent and type typ, each restricted as table 13c says,
+// and checks what they refer to against table 13.
+func (c *restrChecker) checkFields(parent string, e syntax.Expr, typ syntax.Node, what string, scope map[string]string) {
 	cl, ok := e.(*syntax.CompositeLiteral)
-	if !ok {
+	if !ok || parent == "" {
 		return
 	}
-	for _, el := range cl.List {
+	fields, union, elem := c.shapeOf(typ, 0)
+	for i, el := range cl.List {
+		var f *syntax.Field
 		if be, ok := el.(*syntax.BinaryExpr); ok && be.Op != nil && be.Op.Kind() == syntax.ASSIGN {
+			if id, ok := be.X.(*syntax.Ident); ok {
+				f = fieldNamed(fields, id.String())
+			}
 			el = be.Y
+		} else if fields != nil && i < len(fields) {
+			f = fields[i]
 		}
-		if r, ok := c.restrictionOf(el, scope); ok {
-			if r == "" || r == "present" {
+		var r string
+		var sub syntax.Node
+		switch {
+		case f != nil:
+			r = implicitRestriction(parent, f.Optional != nil && !union, true)
+			sub = f.Type
+		case elem != nil:
+			r = implicitRestriction(parent, false, true)
+			sub = elem
+		default:
+			r = implicitRestriction(parent, false, false)
+		}
+		if r == "" {
+			continue
+		}
+		if got, ok := c.restrictionOf(el, scope); ok {
+			bad := !fits(r, got)
+			if r == restrValueOrOmit {
+				bad = got == "" || got == "present"
+			}
+			if bad {
 				c.reportf("template-restriction-field", el,
-					"a field of %s, a template(%s), refers to %s; the field is restricted to value or omit (ETSI 15.8 tables 13, 13c)",
-					what, parent, restrName(r))
+					"a field of %s, a template(%s), refers to %s, which its field, restricted to %s, does not accept (ETSI 15.8 tables 13, 13c)",
+					what, parent, restrName(got), r)
 			}
 			continue
 		}
-		c.checkFields(parent, el, what, scope)
+		c.checkFields(r, el, sub, what, scope)
 	}
+}
+
+func fieldNamed(fields []*syntax.Field, name string) *syntax.Field {
+	for _, f := range fields {
+		if f != nil && syntax.Name(f.Name) == name {
+			return f
+		}
+	}
+	return nil
+}
+
+// shapeOf is what a value of type typ is made of, as far as the module
+// declares it: the fields of a record or set, or the alternatives of a
+// union (union true), or the element type of a record of, set of or
+// array.
+func (c *restrChecker) shapeOf(typ syntax.Node, depth int) (fields []*syntax.Field, union bool, elem syntax.Node) {
+	if typ == nil || depth > 8 {
+		return nil, false, nil
+	}
+	switch x := typ.(type) {
+	case *syntax.RefSpec:
+		return c.shapeOf(x.X, depth+1)
+	case *syntax.StructSpec:
+		return x.Fields, x.KindTok != nil && x.KindTok.Kind() == syntax.UNION, nil
+	case *syntax.ListSpec:
+		return nil, false, x.ElemType
+	case *syntax.Ident:
+		switch d := c.types[x.String()].(type) {
+		case *syntax.StructTypeDecl:
+			return d.Fields, d.KindTok != nil && d.KindTok.Kind() == syntax.UNION, nil
+		case *syntax.SubTypeDecl:
+			if d.Field == nil {
+				return nil, false, nil
+			}
+			if len(d.Field.ArrayDef) > 0 {
+				return nil, false, d.Field.Type
+			}
+			return c.shapeOf(d.Field.Type, depth+1)
+		}
+	}
+	return nil, false, nil
 }
 
 func (c *restrChecker) checkTemplateDecl(td *syntax.TemplateDecl, scope map[string]string) {
 	name := syntax.Name(td.Name)
 	inner := c.params(td.Params, scope)
-	c.checkInit(restrictionTag(td.RestrictionSpec), td.Value, fmt.Sprintf("template %q", name), inner)
+	c.checkInit(restrictionTag(td.RestrictionSpec), td.Value, td.Type, fmt.Sprintf("template %q", name), inner)
 	c.checkModified(td, scope)
 	c.checkCalls(td.Value, inner)
 }
@@ -373,10 +479,11 @@ func (c *restrChecker) checkModified(td *syntax.TemplateDecl, scope map[string]s
 	if !ok {
 		return
 	}
-	if _, local := scope[id.String()]; local {
-		return
-	}
 	base := c.templates[id.String()]
+	if _, local := scope[id.String()]; local {
+		// A local template, or else a variable or parameter.
+		base = c.local[id.String()]
+	}
 	if base == nil {
 		return
 	}
@@ -444,7 +551,11 @@ func (c *restrChecker) checkBody(body *syntax.BlockStmt, scope map[string]string
 				if dec == nil || dec.Name == nil {
 					continue
 				}
-				c.checkInit(r, dec.Value, fmt.Sprintf("%q", dec.Name.String()), scope)
+				var typ syntax.Node
+				if len(dec.ArrayDef) == 0 {
+					typ = x.Type
+				}
+				c.checkInit(r, dec.Value, typ, fmt.Sprintf("%q", dec.Name.String()), scope)
 				scope[dec.Name.String()] = r
 			}
 			return true
@@ -452,13 +563,14 @@ func (c *restrChecker) checkBody(body *syntax.BlockStmt, scope map[string]string
 			if x.Name != nil {
 				c.checkTemplateDecl(x, scope)
 				scope[x.Name.String()] = restrictionTag(x.RestrictionSpec)
+				c.local[x.Name.String()] = x
 			}
 			return false
 		case *syntax.ExprStmt:
 			if be, ok := x.Expr.(*syntax.BinaryExpr); ok && be.Op != nil && be.Op.Kind() == syntax.ASSIGN {
 				if id, ok := be.X.(*syntax.Ident); ok {
 					if r, ok := scope[id.String()]; ok {
-						c.checkInit(r, be.Y, fmt.Sprintf("%q", id.String()), scope)
+						c.checkInit(r, be.Y, nil, fmt.Sprintf("%q", id.String()), scope)
 					}
 				}
 			}
@@ -524,7 +636,11 @@ func (c *restrChecker) checkCall(ce *syntax.CallExpr, scope map[string]string) {
 		if fp.Direction != nil && fp.Direction.Kind() != syntax.IN {
 			continue
 		}
-		c.checkInit(restrictionTag(fp.TemplateRestriction), arg,
+		var typ syntax.Node
+		if len(fp.ArrayDef) == 0 {
+			typ = fp.Type
+		}
+		c.checkInit(restrictionTag(fp.TemplateRestriction), arg, typ,
 			fmt.Sprintf("parameter %q of %q", syntax.Name(fp.Name), id.String()), scope)
 	}
 }

@@ -1987,6 +1987,12 @@ func (p *parser) parseBehaviourTypeDecl() *BehaviourTypeDecl {
 		x.RunsOn = p.parseRunsOn()
 	}
 
+	// A behaviour type (ETSI ES 202 785) has the mtc clause a
+	// behaviour of its kind may have (ES 201 873-1 16.1).
+	if p.tok == MTC {
+		x.Mtc = p.parseMtc()
+	}
+
 	if p.tok == SYSTEM {
 		x.System = p.parseSystem()
 	}

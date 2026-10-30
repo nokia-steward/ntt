@@ -61,12 +61,18 @@ func TestTemplateRestrictionTables(t *testing.T) {
 		tc(`var template(omit) R v := t_omit; f_present(v.present);`): false,
 	})
 	expectCodes(t, "template-restriction-field", map[string]bool{
-		"module M {\n" + decls + "template(value) R t(template integer p := 1) := { a := p, b := true }\n}":            true,
-		"module M {\n" + decls + "template(value) R t(template(value) integer p := 1) := { a := p, b := true }\n}":     false,
-		"module M {\n" + decls + "template(omit) R t(template(present) integer p := 1) := { a := p, b := omit }\n}":    true,
-		"module M {\n" + decls + "template(present) R t(template integer p := 1) := { a := p, b := true }\n}":          false,
-		"module M {\n" + decls + "template(value) R t(integer p := 1) := { a := p, b := true }\n}":                     false,
-		"module M {\n" + decls + "type record of R L; template(value) L t(template R p := t_any) := { t_value, p }\n}": true,
+		"module M {\n" + decls + "template(value) R t(template integer p := 1) := { a := p, b := true }\n}":                       true,
+		"module M {\n" + decls + "template(value) R t(template(value) integer p := 1) := { a := p, b := true }\n}":                false,
+		"module M {\n" + decls + "template(omit) R t(template(present) integer p := 1) := { a := p, b := omit }\n}":               true,
+		"module M {\n" + decls + "template(present) R t(template integer p := 1) := { a := p, b := true }\n}":                     true,
+		"module M {\n" + decls + "template(present) R t(template boolean p := true) := { a := 1, b := p }\n}":                     false,
+		"module M {\n" + decls + "template(present) R t(template(present) integer p := ?) := { a := p, b := * }\n}":               false,
+		"module M {\n" + decls + "template(value) R t(template(omit) boolean p := omit) := { a := 1, b := p }\n}":                 false,
+		"module M {\n" + decls + "template(value) R t(template(omit) integer p := 1) := { a := p, b := omit }\n}":                 true,
+		"module M {\n" + decls + "template(value) R t(template(omit) integer p := 1) := { p, omit }\n}":                           true,
+		"module M {\n" + decls + "type union U { integer i } template(value) U t(template(omit) integer p := 1) := { i := p }\n}": true,
+		"module M {\n" + decls + "template(value) R t(integer p := 1) := { a := p, b := true }\n}":                                false,
+		"module M {\n" + decls + "type record of R L; template(value) L t(template R p := t_any) := { t_value, p }\n}":            true,
 	})
 }
 
@@ -111,6 +117,26 @@ func TestModifiedTemplateRestrictions(t *testing.T) {
 		cases[par(k[0], k[1])] = !ok
 	}
 	expectCodes(t, "modified-template-param-restriction", cases)
+}
+
+// TestModifiedLocalTemplateRestrictions: tables 13a and 13b apply to a
+// base declared locally too.
+func TestModifiedLocalTemplateRestrictions(t *testing.T) {
+	src := func(base, modified string) string {
+		return `module M {
+			type record R { integer a, boolean b optional }
+			type component C {}
+			testcase tc() runs on C {
+				template` + base + ` R t1 := { 1, true };
+				template` + modified + ` R t2 modifies t1 := { a := 2 };
+			}
+		}`
+	}
+	expectCodes(t, "modified-template-restriction", map[string]bool{
+		src("", "(present)"):        true,
+		src("(value)", "(present)"): false,
+		src("(present)", ""):        false,
+	})
 }
 
 // TestModulePrefixOnlyForModuleDefinitions: a module's own name may prefix
@@ -321,5 +347,26 @@ func TestQualifiedCallHasItsParentheses(t *testing.T) {
 			testcase tc() runs on C { var integer x := f; } }`: true,
 		`module M { type function FT() return integer; function f() return integer { return 1 } type component C {}
 			testcase tc() runs on C { var FT g := refers(f); } }`: false,
+	})
+}
+
+// TestControlCallsFollowGroupsQualifiedCallsAndCycles: the functions the
+// control part reaches are found in groups, through calls qualified by
+// the module's name, and through calls that form a cycle.
+func TestControlCallsFollowGroupsQualifiedCallsAndCycles(t *testing.T) {
+	src := func(control string) string {
+		return `module M {
+			type component C {}
+			group g { function f_mtc() mtc C {} }
+			function f_a() { f_b() }
+			function f_b() { f_a(); f_mtc() }
+			control { ` + control + ` }
+		}`
+	}
+	expectCodes(t, "control-calls-function-with-mtc-or-system", map[string]bool{
+		src(`f_mtc();`):   true,
+		src(`M.f_mtc();`): true,
+		src(`f_a();`):     true,
+		src(``):           false,
 	})
 }

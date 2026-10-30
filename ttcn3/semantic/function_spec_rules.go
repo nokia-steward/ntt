@@ -124,76 +124,7 @@ func (a *Analyzer) checkFunctionSpecRules(mod *syntax.Module) []Diagnostic {
 	// the control part or a control function has no mtc or system
 	// clause (ETSI 16.1 restriction c). A function may otherwise
 	// have both.
-	calls := map[string][]string{}
-	for _, d := range mod.Defs {
-		if fn, ok := d.Def.(*syntax.FuncDecl); ok && fn.Name != nil && fn.Body != nil {
-			calls[fn.Name.String()] = calledFunctionNames(fn.Body)
-		}
-	}
-	// clause names a function with an mtc or system clause that
-	// calling name reaches, name itself included, or "".
-	memo := map[string]string{}
-	var clause func(name string) string
-	clause = func(name string) string {
-		if r, ok := memo[name]; ok {
-			return r
-		}
-		memo[name] = ""
-		info, ok := infos[name]
-		if !ok || info.isTC {
-			return ""
-		}
-		if info.hasMtc || info.hasSys {
-			memo[name] = name
-			return name
-		}
-		for _, callee := range calls[name] {
-			if r := clause(callee); r != "" {
-				memo[name] = r
-				return r
-			}
-		}
-		return ""
-	}
-	checkControl := func(body *syntax.BlockStmt) {
-		syntax.Inspect(body, func(n syntax.Node) bool {
-			ce, ok := n.(*syntax.CallExpr)
-			if !ok {
-				return true
-			}
-			id, ok := ce.Fun.(*syntax.Ident)
-			if !ok {
-				return true
-			}
-			if r := clause(id.String()); r != "" {
-				via := ""
-				if r != id.String() {
-					via = fmt.Sprintf(", through %q", id.String())
-				}
-				diags = append(diags, Diagnostic{
-					Code:     "control-calls-function-with-mtc-or-system",
-					Severity: SeverityError,
-					Message: fmt.Sprintf(
-						"the control part calls %q%s, which has an mtc or system clause (ETSI 16.1 restriction c)", r, via),
-					Node: ce,
-					Span: syntax.SpanOf(ce),
-				})
-			}
-			return true
-		})
-	}
-	for _, d := range mod.Defs {
-		switch x := d.Def.(type) {
-		case *syntax.ControlPart:
-			if x.Body != nil {
-				checkControl(x.Body)
-			}
-		case *syntax.FuncDecl:
-			if x.IsControl() && x.Body != nil {
-				checkControl(x.Body)
-			}
-		}
-	}
+	diags = append(diags, controlCallsWithMtcOrSystem(mod)...)
 
 	// Rule 2b: in a runs-on-less function / altstep, any
 	// port operation whose receiver is a bare identifier we
@@ -366,17 +297,109 @@ func activatedBehaviourCalls(body *syntax.BlockStmt) map[*syntax.CallExpr]bool {
 	return out
 }
 
-// calledFunctionNames lists the names of the functions body calls by a
-// plain identifier.
-func calledFunctionNames(body *syntax.BlockStmt) []string {
-	var out []string
-	syntax.Inspect(body, func(n syntax.Node) bool {
-		if ce, ok := n.(*syntax.CallExpr); ok {
-			if id, ok := ce.Fun.(*syntax.Ident); ok {
-				out = append(out, id.String())
+// controlCallsWithMtcOrSystem reports the calls of the control part and
+// of control functions that reach, directly or through other functions,
+// one with an mtc or system clause (ETSI 16.1 restriction c). Testcases,
+// which the control part executes, are not followed.
+func controlCallsWithMtcOrSystem(mod *syntax.Module) []Diagnostic {
+	self := syntax.Name(mod.Name)
+	funcs := map[string]*syntax.FuncDecl{}
+	var roots []*syntax.BlockStmt
+	var defs func(list []*syntax.ModuleDef)
+	defs = func(list []*syntax.ModuleDef) {
+		for _, d := range list {
+			if d == nil {
+				continue
+			}
+			switch x := d.Def.(type) {
+			case *syntax.GroupDecl:
+				defs(x.Defs)
+			case *syntax.ControlPart:
+				if x.Body != nil {
+					roots = append(roots, x.Body)
+				}
+			case *syntax.FuncDecl:
+				if x.Name != nil {
+					funcs[x.Name.String()] = x
+				}
+				if x.IsControl() && x.Body != nil {
+					roots = append(roots, x.Body)
+				}
 			}
 		}
-		return true
-	})
-	return out
+	}
+	defs(mod.Defs)
+
+	// callee names the function of this module a call calls, or "".
+	callee := func(ce *syntax.CallExpr) string {
+		switch f := ce.Fun.(type) {
+		case *syntax.Ident:
+			return f.String()
+		case *syntax.SelectorExpr:
+			if syntax.Name(f.X) == self {
+				return syntax.Name(f.Sel)
+			}
+		}
+		return ""
+	}
+	// reaches is the first function with an mtc or system clause a
+	// call of name reaches, name itself included, or "".
+	reaches := func(name string) string {
+		seen := map[string]bool{}
+		queue := []string{name}
+		for len(queue) > 0 {
+			n := queue[0]
+			queue = queue[1:]
+			fd := funcs[n]
+			if seen[n] || fd == nil || fd.KindTok == nil || fd.KindTok.Kind() == syntax.TESTCASE {
+				continue
+			}
+			seen[n] = true
+			if fd.Mtc != nil || fd.System != nil {
+				return n
+			}
+			if fd.Body != nil {
+				syntax.Inspect(fd.Body, func(m syntax.Node) bool {
+					if ce, ok := m.(*syntax.CallExpr); ok {
+						if c := callee(ce); c != "" {
+							queue = append(queue, c)
+						}
+					}
+					return true
+				})
+			}
+		}
+		return ""
+	}
+	var diags []Diagnostic
+	for _, root := range roots {
+		syntax.Inspect(root, func(n syntax.Node) bool {
+			ce, ok := n.(*syntax.CallExpr)
+			if !ok {
+				return true
+			}
+			name := callee(ce)
+			r := ""
+			if name != "" {
+				r = reaches(name)
+			}
+			if r == "" {
+				return true
+			}
+			via := ""
+			if r != name {
+				via = fmt.Sprintf(", through %q", name)
+			}
+			diags = append(diags, Diagnostic{
+				Code:     "control-calls-function-with-mtc-or-system",
+				Severity: SeverityError,
+				Message: fmt.Sprintf(
+					"the control part calls %q%s, which has an mtc or system clause (ETSI 16.1 restriction c)", r, via),
+				Node: ce,
+				Span: syntax.SpanOf(ce),
+			})
+			return true
+		})
+	}
+	return diags
 }

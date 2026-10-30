@@ -2984,7 +2984,7 @@ func clausesNeedPoll(stmts []syntax.Stmt, where, depth int, scope, own runtime.S
 			continue
 		}
 		if ce, ok := es.Expr.(*syntax.CallExpr); ok {
-			if altstepCallName(ce, scope) != "" && altstepNeedsPoll(ce, pollCalled, depth-1, scope) {
+			if (altstepCallName(ce, scope) != "" || altstepOfCall(ce, scope) != nil) && altstepNeedsPoll(ce, pollCalled, depth-1, scope) {
 				return true
 			}
 		}
@@ -3015,7 +3015,7 @@ func waitsOnlyForOthers(n *syntax.AltStmt, env runtime.Scope) bool {
 			return false
 		}
 		if es, ok := cc.Comm.(*syntax.ExprStmt); ok {
-			if ce, ok := es.Expr.(*syntax.CallExpr); ok && altstepCallName(ce, env) != "" {
+			if ce, ok := es.Expr.(*syntax.CallExpr); ok && (altstepCallName(ce, env) != "" || altstepOfCall(ce, env) != nil) {
 				return false
 			}
 		}
@@ -3057,7 +3057,7 @@ func altstepNeedsPoll(call *syntax.CallExpr, where, depth int, scope runtime.Sco
 	if call == nil || depth <= 0 {
 		return true
 	}
-	fn := lookupAltstep(altstepCallName(call, scope), scope)
+	fn := altstepOfCall(call, scope)
 	if fn == nil || fn.Body == nil {
 		return true
 	}
@@ -3325,7 +3325,7 @@ func nextAltTimerVirtualDeadline(n *syntax.AltStmt, env runtime.Scope) (float64,
 			if depth <= 0 {
 				return
 			}
-			fn := lookupAltstep(altstepCallName(x, scope), scope)
+			fn := altstepOfCall(x, scope)
 			if fn == nil || fn.Body == nil {
 				return
 			}
@@ -3671,7 +3671,7 @@ func nextAltTimerDeadlineLenient(n *syntax.AltStmt, env runtime.Scope) (time.Dur
 // deadline to be exact — only to exist, so the alt sleeps rather than
 // spins.
 func defaultTimerHandles(dc defaultCall) []*runtime.TimerHandle {
-	fn := lookupAltstep(altstepCallName(dc.call, dc.scope), dc.scope)
+	fn := altstepOfCall(dc.call, dc.scope)
 	if fn == nil || fn.Body == nil {
 		return nil
 	}
@@ -3766,6 +3766,28 @@ func altstepCallName(ce *syntax.CallExpr, scope runtime.Scope) string {
 		}
 	}
 	return ""
+}
+
+// altstepOfCall is the altstep a call — a guard, a default's — calls:
+// one it names (altstepCallName), or the one a behaviour-type value
+// refers to, `v.apply(...)` (ETSI ES 202 785); nil for anything else.
+func altstepOfCall(ce *syntax.CallExpr, scope runtime.Scope) *runtime.Function {
+	if fn := lookupAltstep(altstepCallName(ce, scope), scope); fn != nil {
+		return fn
+	}
+	if ce == nil {
+		return nil
+	}
+	if sel, ok := ce.Fun.(*syntax.SelectorExpr); ok && syntax.Name(sel.Sel) == "apply" {
+		if id, ok := sel.X.(*syntax.Ident); ok {
+			if v, ok := scope.Get(id.String()); ok {
+				if fn, ok := forceThunk(v).(*runtime.Function); ok && fn.IsAltstep {
+					return fn
+				}
+			}
+		}
+	}
+	return nil
 }
 
 // lookupAltstep resolves an altstep's name, `a` or module-qualified
@@ -3914,7 +3936,7 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 	// care of.
 	if es, ok := g.(*syntax.ExprStmt); ok {
 		if ce, ok := es.Expr.(*syntax.CallExpr); ok {
-			if fn := lookupAltstep(altstepCallName(ce, env), env); fn != nil && fn.Body != nil {
+			if fn := altstepOfCall(ce, env); fn != nil && fn.Body != nil {
 				return altstepAlternativeMatches(fn, ce, env)
 			}
 		}

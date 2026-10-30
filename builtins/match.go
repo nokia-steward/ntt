@@ -128,6 +128,21 @@ func match(a, b runtime.Object) (bool, error) {
 		if a == runtime.Omit {
 			other = b
 		}
+		// A length restricts a present value only (B.1.4.1): `*
+		// length(1)` matches an omitted field.
+		if lr, ok := other.(*runtime.LengthRestricted); ok {
+			return match(runtime.Omit, lr.Inner)
+		}
+		// A template list matches omit if one of its alternatives
+		// does: `(1, omit)` matches an omitted field (B.1.2.1).
+		if l, ok := other.(*runtime.List); ok && l.ListType == runtime.VALUE_LIST {
+			for _, e := range l.Elements {
+				if ok, err := match(runtime.Omit, e); err == nil && ok {
+					return true, nil
+				}
+			}
+			return false, nil
+		}
 		return other == runtime.Omit || other == runtime.Undefined, nil
 	}
 	if a == runtime.Any || b == runtime.Any {

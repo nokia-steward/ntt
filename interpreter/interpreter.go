@@ -680,6 +680,20 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			}
 		}
 
+		// `v.apply(...)` invokes the behaviour a behaviour-type value
+		// refers to (ETSI ES 202 785); the call applies it to the
+		// arguments.
+		if syntax.Name(n.Sel) == "apply" {
+			if fn, ok := left.(*runtime.Function); ok {
+				return fn
+			}
+			if left == runtime.Undefined {
+				if _, isIdent := n.X.(*syntax.Ident); isIdent {
+					return runtime.Errorf("%s.apply: %s refers to no behaviour", syntax.Name(n.X), syntax.Name(n.X))
+				}
+			}
+		}
+
 		// The value extraction `t.value` (ETSI 15.15) and the presentness
 		// conversion `t.present` (15.14) of a template. Both names are
 		// keywords, so no field is named after them.
@@ -1419,6 +1433,19 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				return evalDecValue(name.String(), n, env)
 			case "encvalue", "encvalue_o", "encvalue_unichar":
 				return evalEncValue(name.String(), n, env)
+			case "refers":
+				// A reference to a function, altstep or testcase, a
+				// value of a behaviour type (ETSI ES 202 785).
+				if n.Args != nil && len(n.Args.List) == 1 {
+					if id, ok := n.Args.List[0].(*syntax.Ident); ok {
+						if v, ok := env.Get(id.String()); ok {
+							if fn, ok := forceThunk(v).(*runtime.Function); ok {
+								return fn
+							}
+						}
+						return runtime.Errorf("refers: %q is not a function, altstep or testcase", id.String())
+					}
+				}
 			case "matchFile":
 				return evalMatchFile(n, env)
 			case "execute":
@@ -11575,8 +11602,6 @@ func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 			}
 		}
 		if bs == nil {
-			// No bitstring a test builds is empty-and-encoded, so
-			// the placeholder cannot be mistaken for one by decvalue.
 			bs = &runtime.Binarystring{
 				Unit:   runtime.Bit,
 				Value:  big.NewInt(0),

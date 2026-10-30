@@ -171,3 +171,80 @@ func TestValueAndPresentnessEdgeCases(t *testing.T) {
 			if (not istemplatekind(t.present, "AnyValue")) { setverdict(fail, t.present) }`,
 	})
 }
+
+// TestTemplateListWithOmitAndBehaviourTypes: a template list holding omit
+// matches an omitted field (ETSI ES 201 873-1 B.1.2.1); refers(f) is a
+// value of a behaviour type and v.apply(...) calls it (ES 202 785).
+func TestTemplateListWithOmitAndBehaviourTypes(t *testing.T) {
+	src := `module M {
+		type component C { var integer c_n := 10 }
+		type record R { integer a, integer b optional }
+		type function FT(integer p) runs on C mtc C return integer;
+		function f(integer p) runs on C mtc C return integer { return p + c_n }
+		testcase tc() runs on C {
+			var R v := { a := 1, b := omit };
+			if (not match(v, R:{ a := 1, b := (1, omit) })) { setverdict(fail, "omit alternative") }
+			if (match(v, R:{ a := 1, b := (1, 2) })) { setverdict(fail, "no omit alternative") }
+			if (not match(R:{ a := 1, b := 2 }, R:{ a := 1, b := (2, omit) })) { setverdict(fail, "value alternative") }
+			var FT g := refers(f);
+			if (g.apply(5) != 15) { setverdict(fail, "apply") }
+			setverdict(pass);
+		}
+	}`
+	for _, k := range clocks {
+		v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", k.opts)
+		if err != nil || v != runtime.PassVerdict {
+			t.Errorf("%s clock: %s (%s) %v", k.name, v, reason, err)
+		}
+	}
+}
+
+// TestAltstepThroughABehaviourReference: an altstep a behaviour-type value
+// refers to is activated, and is an alt branch, as the altstep named
+// would be (ETSI ES 202 785); apply of an unbound one is an error.
+func TestAltstepThroughABehaviourReference(t *testing.T) {
+	src := `module M {
+		type port P message { inout integer }
+		type component C { port P p; timer t; var integer cnt := 0; }
+		type altstep AS() runs on C;
+		type function FT() return integer;
+		altstep as_t() runs on C { [] t.timeout { cnt := cnt + 10; } }
+		testcase tc_activate() runs on C {
+			var AS a := refers(as_t);
+			t.start(0.01);
+			var default d := activate(a.apply());
+			alt { [] p.receive { } }
+			if (cnt == 10) { setverdict(pass) } else { setverdict(fail, cnt) }
+		}
+		testcase tc_branch() runs on C {
+			var AS a := refers(as_t);
+			t.start(0.01);
+			alt { [] a.apply() { } }
+			if (cnt == 10) { setverdict(pass) } else { setverdict(fail, cnt) }
+		}
+		testcase tc_unbound() runs on C {
+			var FT f;
+			var integer i := f.apply();
+			setverdict(pass);
+		}
+	}`
+	for tc, want := range map[string]runtime.Verdict{"M.tc_activate": runtime.PassVerdict, "M.tc_branch": runtime.PassVerdict, "M.tc_unbound": runtime.ErrorVerdict} {
+		for _, k := range clocks {
+			v, reason, _ := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, tc, k.opts)
+			if v != want {
+				t.Errorf("%s, %s clock: %s (%s), want %s", tc, k.name, v, reason, want)
+			}
+		}
+	}
+}
+
+// TestLengthRestrictsOnlyAPresentValue: `* length(1)` matches an omitted
+// field, and a length-restricted template list matches it if one of its
+// alternatives does (ETSI ES 201 873-1 B.1.4.1, B.1.2.1).
+func TestLengthRestrictsOnlyAPresentValue(t *testing.T) {
+	runBodiesPass(t, map[string]string{
+		"length": `var R v := { a := 1, b := omit };
+			if (not match(v, R:{ a := 1, b := * length(1) })) { setverdict(fail, "* length") }
+			if (match(v, R:{ a := 1, b := ? length(1) })) { setverdict(fail, "? length") }`,
+	})
+}
