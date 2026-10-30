@@ -50,55 +50,93 @@ the test specification performs the operation (file and line).
 
 `--log-format=lines` (or a `.lines` file) writes the same events as text,
 one per line, its fields separated by `|` — to read in a pager, and to
-split with `awk` or `cut`:
+split with `awk` or `cut`. The layout and the event codes are those of a
+structured line log long used by TTCN-3 runtimes, so the scripts and
+viewers that read such logs read these too:
 
 ```
-timestamp|event|component=file:line|field|field...
-20261008T072651.367348|cocr|mtc=T.ttcn3:10|echo|once
-20261008T072651.367348|cost|echo=T.ttcn3:12|T.echo()
-20261008T072651.367348|ptsd|mtc=T.ttcn3:14|mtc:p|echo:p|integer|41
-20261008T072651.367348|ptrx|echo=T.ttcn3:8|echo:p|?|match
-20261008T072651.367348|ulog|mtc=T.ttcn3:15|"got " {n := 1, s := "a\|b"}
-20261008T072651.867348|setv|mtc=T.ttcn3:6|none|pass|done waiting
-20261008T072651.867348|tcfi|ntt|T.tc|pass
+timestamp|event|identity=file:line|field|field...
+20261008T092651.367348|tcst|ntt|T.tc|5.0
+20261008T092651.367348|cocr|ntt|MTC|once
+20261008T092651.367348|cost|MTC=T.ttcn3:10|T.tc
+20261008T092651.367348|tcen|MTC|T.tc()
+20261008T092651.367348|cocr|MTC=T.ttcn3:11|echo|once
+20261008T092651.367348|cost|echo=T.ttcn3:6|T.echo
+20261008T092651.367348|ptsd|MTC=T.ttcn3:14|MTC.p|echo.p|integer|41
+20261008T092651.367348|ptqu|MTC=T.ttcn3:14|echo.p|message(value=integer:41,sender=C:MTC(running),timestamp=0.000012)
+20261008T092651.367348|ptrx|echo=T.ttcn3:8|echo.p|value=integer:?|ready(match=message(value=integer:41,sender=C:MTC(running),timestamp=0.000012))+consume
+20261008T092651.367348|ulog|MTC=T.ttcn3:15|"got "{1,"a|b"}
+20261008T092651.867348|setv|MTC=T.ttcn3:16|none|pass|"done"
+20261008T092651.867348|tclv|MTC|T.tc()
+20261008T092651.867348|cofi|MTC|pass
+20261008T092651.867348|tcfi|ntt|T.tc|pass
 ```
 
-The timestamp is UTC to the microsecond; the event a four-letter code, in
-lower case (an upper-case code is an error); the component the one that
-produced the event, with the source file's name and line when there is
-one, `ntt` for the test system itself. The fields are the event's own,
-values and templates written as TTCN-3 writes them, a behaviour with its
-actual parameters as `T.f(x=1,y=2)`; a `|`, a backslash or a line break in
-a field is escaped with a backslash. The codes:
+The timestamp is local time, to the microsecond. The event is a
+four-letter code, in lower case; an upper-case code is an error, followed
+by `->` and what it means (`TSTP->Test stopped by the testcase.stop
+operation`). The identity is the component that produced the event — `MTC`,
+`SYSTEM`, a PTC by its name, `$` and its number for one created without a
+name, `ntt` for the test system, which runs the control part and starts and
+ends the testcases — with the source file and line when there is one. A
+function, altstep or testcase is entered and left at the line it is called
+from, a PTC's behaviour starts at the line it is declared.
+
+The fields are the event's own. Values and templates are written compactly,
+without spaces:
+
+| | |
+|--|--|
+| record, record of | `{1,"a",omit}`, `{1,2,3}`, fields in order, not named |
+| set, union | `{a:=1,b:=2}`, `{alt:=1}` |
+| charstring | `"a ""b"""`, a quote doubled; a character other than a printable ASCII one as `char(0,0,0,10)`, the pieces joined with `&` |
+| float | `1.0`, `12.6999999999999992895`: the value in fixed notation, to 21 significant digits |
+| bit, hex, octet string | `'0101'B`, `'0AFF'O`; a template matching inside it as its text, `"01?1*"` |
+| unbound, omit | `#`, `omit` |
+| templates | `?`, `*`, `(1,2)`, `complement(1)`, `(1..9)`, a pattern as its text, then ` length(n)` and ` ifpresent` |
+| component | its name and state: `echo(running)` |
+| map | `{["k"]:=1}` |
+
+A behaviour is written with its actual parameters, `T.f(x=1,y=-)`: on entry
+those it is given, `-` for an out parameter; on leaving those it gives back,
+`-` for an in parameter, and `->` its result. A port is named after its
+component, `MTC.p`; a variable or timer after its component, `MTC.t`, or the
+behaviour it is local to, `T.tc.x`. A log statement or a verdict's reason is
+its values one after the other, strings quoted. Fields are not escaped: a
+value cannot hold a line break, which `char(...)` writes, but can hold a
+`|`. The codes:
 
 | Code | Event | Fields |
 |------|-------|--------|
-| `cpen` `cplv` | control part enter, leave | control |
-| `tcst` | testcase started | testcase, the duration `execute()` gave it |
+| `cpen` `cplv` | control part enter, leave | M.control() |
+| `mpar` | module parameter | name, value |
+| `tcst` | testcase started | testcase, the duration `execute()` gave it or `unlimited` |
 | `tcen` `tclv` | testcase behaviour enter, leave | testcase(parameters) |
 | `tcfi` | testcase finished | testcase, verdict |
 | `fnen` `fnlv` | function enter, leave | function(parameters)[->result] |
+| `fxen` `fxlv` | external function enter, leave | function(parameters)[->result] |
 | `asen` `aslv` | altstep enter, leave | altstep(parameters) |
 | `cocr` `cost` | component created, started | component, alive/once; behaviour |
 | `cofi` | component finished | verdict |
 | `cosp` `coki` | component stopped, killed | component |
-| `codo` `cokd` | done, killed evaluated | component, match/mismatch |
-| `coru` `coal` | running, alive evaluated | component, result |
-| `ptcn` `ptdi` `ptmp` `ptun` | connect, disconnect, map, unmap | port, port |
+| `codo` `cokd` | done, killed evaluated | component, ready/wait/never |
+| `coru` `coal` | running, alive evaluated | component, running/stopped, alive/killed |
+| `ptcn` `ptdi` `ptmp` `ptun` | connect, disconnect, map, unmap | port, port (map: and its parameters) |
 | `ptst` `ptsp` `ptha` `ptcl` | port start, stop, halt, clear | port |
 | `ptsd` | send, call, reply, raise | port, to, type or call/reply/exception, value |
-| `ptqu` | arrived in a port's queue | port, what arrived |
-| `ptrx` | receive, getcall, getreply, catch evaluated | port, template, match/mismatch |
-| `ptck` | check evaluated | port, template, match/mismatch |
-| `tmst` `tmsp` | timer start, stop | timer, duration |
-| `tmto` `tmrd` `tmru` | timeout, read, running evaluated | timer, outcome/elapsed/result |
-| `alen` `allv` `alrp` `alwt` | alt enter, leave, repeat, wait | |
+| `ptqu` | arrived in a port's queue, logged as its sender | port, `message(value=T:v,sender=T:C(state),timestamp=s)` |
+| `ptrx` `ptck` | receive (getcall, getreply, catch), check evaluated | port, `value=T:template`, `ready(match=...)+consume` / `+check` or `never(mismatch=value:v~t)` |
+| `tmst` `tmsp` | timer start, stop | timer, duration in seconds (`1.0s`) |
+| `tmto` `tmrd` `tmru` | timeout, read, running evaluated | timer, `ready`/`wait(expiry)`/`never(inactive)`, elapsed, true/false |
+| `alen` `allv` `alrp` | alt enter, leave, repeat | |
+| `alwt` | alt waits | until when: the soonest timer, or `maximum` |
 | `dtac` `dtde` | default activated, deactivated | altstep(parameters) |
-| `setv` `getv` | setverdict, getverdict | verdict before, verdict, reason |
-| `ulog` `uact` | log, action | text |
-| `matc` | match | value, template, mismatches |
-| `vach` | variable assigned | type, name, value |
-| `mpar` | module parameter | name, value |
+| `setv` | setverdict | verdict before, verdict set, reason if any |
+| `bctr` | backtrace, before a setverdict to inconc or fail | each behaviour on the way, innermost first: file:line:name(parameters) |
+| `getv` | getverdict | verdict |
+| `ulog` `uact` | log, action | its values |
+| `matc` | match | value, template, mismatch if any |
+| `vach` | variable assigned or declared with a value | type, name, value: of the field or element assigned |
 | `enco` `deco` | encvalue, decvalue | type, codec |
 | `TSTP` | testcase.stop | reason |
 
@@ -106,6 +144,18 @@ Events with no line of their own — an alt round that matched nothing, the
 defaults consulted — are left out; the XML and JSON Lines logs have them
 all. `ntt log diff` and `ntt log profile` read the XML and JSON Lines
 logs.
+
+What differs from a runtime that writes these logs natively: ntt's own
+runtime errors are not classified into error codes (a testcase that ends in
+error says so in `tcfi`); a value whose type ntt does not know where it is
+logged is written by its kind, `record` for a record of unknown type,
+positionally even when it is a set or a union; a component's state in a
+message's sender is the one ntt last logged for it, and its type is
+named without its module; a module parameter is logged where it is read,
+not each one before every testcase; an altstep invoked as a default is
+logged as an altstep (`asen`, `aslv`); and ntt computes floats in double
+precision, so a computed float can differ in its last digits from one
+computed in more precision.
 
 ## What is logged
 

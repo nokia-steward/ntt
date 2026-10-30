@@ -1229,11 +1229,11 @@ func evalSetverdict(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	}
 	exec.SetVerdict(verdict, strings.Join(reasonParts, " "))
 	if lexec := tlExec(env); lexec != nil {
-		args := []tl.Arg{tlArg("verdict", tl.Verdict(string(verdict)))}
+		targs := []tl.Arg{tlArg("verdict", tl.Verdict(string(verdict)))}
 		if r := strings.Join(reasonParts, " "); r != "" {
-			args = append(args, tlArg("reason", tl.String(r)))
+			targs = append(targs, tlArg("reason", tl.String(r)))
 		}
-		tlEmit(lexec, n, "tliSetVerdict", args...)
+		tlEmitWith(lexec, n, "tliSetVerdict", func(e *tl.Event) { e.Parts = tlPartsOf(args[1:], n.Args.List[1:], env) }, targs...)
 	}
 	// Also accumulate the verdict on the running component so
 	// `comp.done -> value v` can retrieve that PTC's local verdict
@@ -1272,11 +1272,12 @@ func evalGetverdict(env runtime.Scope) runtime.Object {
 // goes on.
 func evalAction(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	var parts []string
+	var vals []runtime.Object
+	var texts []syntax.Expr
 	if n.Args != nil {
 		// Its text is free text and template instances joined by `&`
 		// (ETSI ES 201 873-1 22.6): each is written out on its own, so
 		// an `&` between text and a value is no concatenation.
-		var texts []syntax.Expr
 		var split func(e syntax.Expr)
 		split = func(e syntax.Expr) {
 			if b, ok := e.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.CONCAT {
@@ -1294,6 +1295,7 @@ func evalAction(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 			if runtime.IsError(v) {
 				return v
 			}
+			vals = append(vals, v)
 			if s, ok := v.(*runtime.String); ok {
 				parts = append(parts, string(s.Value))
 				continue
@@ -1304,9 +1306,9 @@ func evalAction(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	text := strings.Join(parts, "")
 	if exec := runtime.FindTestcaseExec(env); exec != nil {
 		exec.Log("action: " + text)
-		if exec.TestLogger() != nil {
-			tlEmit(exec, n, "tliAction", tlArg("action", tl.String(text)))
-		}
+	}
+	if lexec := tlExec(env); lexec != nil {
+		tlEmitWith(lexec, n, "tliAction", func(e *tl.Event) { e.Parts = tlPartsOf(vals, texts, env) }, tlArg("action", tl.String(text)))
 	}
 	return nil
 }
@@ -1328,9 +1330,12 @@ func evalLog(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	if exec := runtime.FindTestcaseExec(env); exec != nil {
 		exec.Log(line)
 		if exec.TestLogger() != nil {
-			tlEmit(exec, n, "tliLog", tlArg("log", tl.String(line)))
+			tlEmitWith(exec, n, "tliLog", func(e *tl.Event) { e.Parts = tlPartsOf(args, n.Args.List, env) }, tlArg("log", tl.String(line)))
 		}
 		return nil
+	}
+	if lexec := tlExec(env); lexec != nil {
+		tlEmitWith(lexec, n, "tliLog", func(e *tl.Event) { e.Parts = tlPartsOf(args, n.Args.List, env) }, tlArg("log", tl.String(line)))
 	}
 	// A control part run for a testcase's actuals writes nothing.
 	if _, quiet := env.Get(controlQuietKey); quiet {

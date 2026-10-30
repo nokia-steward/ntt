@@ -192,7 +192,53 @@ func (t *TestcaseExec) TLog(op, src string, line int, args ...tl.Arg) {
 // tliInfo naming the operation, the component and the testcase it belongs
 // to.
 func (t *TestcaseExec) TLogFrom(l tl.Logger, c tl.ComponentID, op, src string, line int, args ...tl.Arg) {
-	e := &tl.Event{Op: op, Ts: t.TLTime(), Src: src, Line: line, C: c, Args: args}
+	t.tlogEvent(l, &tl.Event{Op: op, Ts: t.TLTime(), Src: src, Line: line, C: c, Args: args})
+}
+
+// NewControlLog is a TestcaseExec that only logs, for what a control part
+// does outside the testcases it executes: its events are those of the
+// control component c, at the time of day.
+func NewControlLog(l tl.Logger, c tl.ComponentID) *TestcaseExec {
+	t := NewTestcaseExec("control")
+	t.SetTestLogger(l)
+	t.controlLog, t.controlComp = true, c
+	return t
+}
+
+// SetTLCallSite records where component comp calls or starts the behaviour
+// it enters next, for the event of its entry (TakeTLCallSite).
+func (t *TestcaseExec) SetTLCallSite(comp int64, at tl.Pos) {
+	t.tlMu.Lock()
+	defer t.tlMu.Unlock()
+	if t.tlSites == nil {
+		t.tlSites = map[int64]tl.Pos{}
+	}
+	t.tlSites[comp] = at
+}
+
+// TakeTLCallSite returns and forgets the call site SetTLCallSite recorded
+// for component comp.
+func (t *TestcaseExec) TakeTLCallSite(comp int64) tl.Pos {
+	t.tlMu.Lock()
+	defer t.tlMu.Unlock()
+	at := t.tlSites[comp]
+	delete(t.tlSites, comp)
+	return at
+}
+
+// TLogEvent logs e, with its Parts or Site, from the component running on
+// the calling goroutine, at the current time.
+func (t *TestcaseExec) TLogEvent(e *tl.Event) {
+	l := t.TestLogger()
+	if l == nil {
+		return
+	}
+	e.Ts, e.C = t.TLTime(), t.TLCurrent()
+	t.tlogEvent(l, e)
+}
+
+func (t *TestcaseExec) tlogEvent(l tl.Logger, e *tl.Event) {
+	op, src, line, c := e.Op, e.Src, e.Line, e.C
 	// Held across the check and the logging, so no event checked before
 	// the end is logged after it (see TLEnd).
 	t.tlEndMu.RLock()
@@ -218,6 +264,9 @@ func (t *TestcaseExec) TLEnd() {
 
 // TLCurrent identifies the component running on the calling goroutine.
 func (t *TestcaseExec) TLCurrent() tl.ComponentID {
+	if t.controlLog {
+		return t.controlComp
+	}
 	if cur := t.CurrentComponent(); cur != nil {
 		return t.TLComponent(cur)
 	}
@@ -435,7 +484,7 @@ func TLValue(o Object) tl.Value {
 	case *Binarystring:
 		return tlBinary(v)
 	case *EnumValue:
-		return tl.Value{Kind: "enumerated", Text: v.Key()}
+		return tl.Value{Kind: "enumerated", Text: v.Key(), Type: v.TypeName()}
 	case *Record:
 		out := tl.Value{Kind: "record"}
 		for _, n := range v.Names() {
@@ -453,6 +502,17 @@ func TLValue(o Object) tl.Value {
 				out.Elems = append(out.Elems, f)
 			}
 			return out
+		}
+		// A template list, complement, subset, superset or permutation is
+		// a matching symbol, not a list value.
+		switch v.ListType {
+		case VALUE_LIST, COMPLEMENT, SUBSET, SUPERSET, PERMUTATION:
+			m := &tl.Matching{Symbol: map[ListType]string{VALUE_LIST: "list", COMPLEMENT: "complement",
+				SUBSET: "subset", SUPERSET: "superset", PERMUTATION: "permutation"}[v.ListType]}
+			for _, e := range v.Elements {
+				m.List = append(m.List, TLValue(e))
+			}
+			return tl.Value{Match: m}
 		}
 		out := tl.Value{Kind: "record_of"}
 		if !v.IsOrdered() {
@@ -578,10 +638,11 @@ func tlBinary(b *Binarystring) tl.Value {
 		return tl.Value{Kind: kind, Text: strings.ToUpper(s)}
 	}
 	var s string
-	switch b.Unit {
-	case Bit:
+	switch {
+	case b.Length == 0:
+	case b.Unit == Bit:
 		s = padLeft(b.Value.Text(2), b.Length)
-	case Octet:
+	case b.Unit == Octet:
 		s = padLeft(strings.ToUpper(b.Value.Text(16)), b.Length*2)
 	default:
 		s = padLeft(strings.ToUpper(b.Value.Text(16)), b.Length)

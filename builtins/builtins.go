@@ -530,6 +530,11 @@ func Substr(args ...runtime.Object) runtime.Object {
 		if i < 0 || n < 0 || i+n > total {
 			return runtime.Errorf("substr: out of range")
 		}
+		if n == 0 {
+			// The empty string, as its literal is.
+			empty, _ := runtime.NewBinarystring("''" + map[runtime.Unit]string{runtime.Bit: "B", runtime.Hex: "H", runtime.Octet: "O"}[v.Unit])
+			return empty
+		}
 		unitBits := uint(v.Unit)
 		val := new(big.Int).Set(v.Value)
 		val.Rsh(val, uint(total-(i+n))*unitBits)
@@ -650,7 +655,11 @@ func Replace(args ...runtime.Object) runtime.Object {
 		right.And(right, rmask)
 		out := new(big.Int).Set(left)
 		out.Lsh(out, uint(rep.Length)*unitBits)
-		out.Or(out, rep.Value)
+		// An empty string's Value is -1, as a template's is; it adds
+		// nothing.
+		if rep.Length > 0 {
+			out.Or(out, rep.Value)
+		}
 		out.Lsh(out, uint(v.Length-(i+n))*unitBits)
 		out.Or(out, right)
 		newLen := v.Length - n + rep.Length

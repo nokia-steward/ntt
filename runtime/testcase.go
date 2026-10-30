@@ -50,9 +50,16 @@ type TestcaseExec struct {
 	tlSeen  map[string]uint64
 	tlAlt   map[int64]uint64 // per component, its alt rounds (see TLAltEpoch)
 	tlScans map[int64]*tlScan
-	msgSeq  uint64
-	tlEnded atomic.Bool  // tliTcTerminated has been logged
-	tlEndMu sync.RWMutex // orders events against tlEnded (see TLEnd)
+	// tlSites is, per component, where the behaviour it is about to enter
+	// was called or started from (SetTLCallSite).
+	tlSites map[int64]tl.Pos
+	// controlLog marks an exec that only logs, a control part's, and
+	// controlComp is the component its events are of (NewControlLog).
+	controlLog  bool
+	controlComp tl.ComponentID
+	msgSeq      uint64
+	tlEnded     atomic.Bool  // tliTcTerminated has been logged
+	tlEndMu     sync.RWMutex // orders events against tlEnded (see TLEnd)
 
 	// mtcID is the component ID of the MTC, used by PortKey to keep the
 	// MTC's ports on bare (unqualified) names so the single-MTC path is

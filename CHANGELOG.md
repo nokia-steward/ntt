@@ -101,10 +101,22 @@ single functional test doubles as a performance probe. See
 
 - **A test log of lines** — `ntt exec --log run.lines` (or
   `--log-format=lines`) writes the run's events as text, one per line:
-  `timestamp|event|component=file:line|fields`, a four-letter event code,
-  the fields as TTCN-3 writes values — to read in a pager and split with
-  awk. The same events as the TCI-TL XML and JSON Lines logs, which stay
-  the standard and complete record.
+  `timestamp|event|identity=file:line|fields`, in the layout, with the
+  four-letter event codes (`tcst`, `ptsd`, `ptrx`, `setv`, `tcfi`, …), the
+  fields and the compact notation of values of a structured line log long
+  used by TTCN-3 runtimes, so that scripts and viewers made for that log
+  read this one: identities `MTC`, `SYSTEM`, a PTC's name, `ntt` for the
+  test system; behaviours entered at their call site with their in
+  parameters and left with their out parameters and result; ports,
+  variables and timers named after their component or behaviour; a
+  message's arrival logged as its sender, with its value, sender and time;
+  a receive's outcome with the message it took; a backtrace before a
+  setverdict to inconc or fail. Against the expected logs of such a
+  runtime's own regression suite, a third of the runs give identical logs;
+  the rest differ in its classified runtime errors, which ntt does not
+  have, and in what the two engines do. To read in a pager and split with
+  awk; the TCI-TL XML and JSON Lines logs stay the standard and complete
+  record. See [`docs/test-logging.md`](docs/test-logging.md).
 - **JSON encoding and decoding** — `encvalue`, `encvalue_o` and
   `encvalue_unichar` of a value whose type has `with { encode "JSON" }` (or
   with "JSON" as the dynamic encoding) give its JSON text, and `decvalue*`
@@ -278,6 +290,19 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **A control part's own statements are in the test log**: its `log`,
+  `action`, assignments, timers and the functions it calls were not
+  logged, only the testcases it executed.
+- **Template lists, complements, subsets, supersets and permutations are
+  logged as matching symbols**, not as list values; a value is logged with
+  its type where it is declared — a variable's, a parameter's, a log
+  statement's argument's — a union and a set as such; an enumerated value
+  names its type; a variable declared with a value logs the assignment.
+- **`u.alt.f := x` chooses a union's alternative** and drops the one it
+  held, as `u.alt := x` does (6.2.5); the union held both.
+- **`replace(s, i, n, ''H)` and `''H & s`** keep `s`: the empty string,
+  whose representation a template's shares, made them negative. And
+  `substr(s, i, 0)` is the empty string, equal to `''H`; it was `'0'H`.
 - **`istemplatekind` tells the kind of a template** (ES 201 873-1 C.3.5):
   it answered `true` for every kind, so the 22 suite tests that use it
   checked nothing. It now answers for each kind of table C.1 — of the

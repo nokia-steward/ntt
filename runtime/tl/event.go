@@ -22,6 +22,26 @@ type Event struct {
 	Line int
 	C    ComponentID
 	Args []Arg
+
+	// Parts, Site and Member are for a writer that renders an event
+	// otherwise than the TCI-TL log, which records none of them: Parts
+	// holds the values a log, an action or a verdict's reason was made
+	// of, one by one; Site is where a behaviour entered was called or
+	// started from (tliSEnter), or where a behaviour started is declared
+	// (tliCStart); Member tells that the variable or timer an event names
+	// is a member of the component it runs on, not local to a behaviour.
+	// Path, for a tliVar, is what in the variable was assigned, `.f[1]`,
+	// with its value in Parts.
+	Parts  []Value
+	Site   Pos
+	Member bool
+	Path   string
+}
+
+// Pos is a position in a source file; the zero Pos is none.
+type Pos struct {
+	Src  string
+	Line int
 }
 
 // Arg is one operation-specific parameter, named as in the XML schema.

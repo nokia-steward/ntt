@@ -424,6 +424,9 @@ func RunControlWith(trees []*ttcn3.Tree, module string, opts TestcaseOptions) (v
 	defer budget.pause()
 	env.Set(controlBudgetKey, budget)
 	env.Set(controlDefaultsKey, &controlDefaults{})
+	if opts.TestLogger != nil {
+		env.Set(controlLogKey, &controlLog{exec: runtime.NewControlLog(opts.TestLogger, tlControlComponent)})
+	}
 	var clock *controlClock
 	if opts.DeterministicClock {
 		clock = &controlClock{}

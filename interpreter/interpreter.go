@@ -89,7 +89,18 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return eval(n.Decl, env)
 
 	case *syntax.ValueDecl:
-		return evalValueDecl(n, env)
+		res := evalValueDecl(n, env)
+		// A variable given a value where it is declared is assigned it.
+		if runtime.TLActive() && !runtime.IsError(res) && n.KindTok != nil && n.KindTok.Kind() == syntax.VAR {
+			if lexec := tlExec(env); lexec != nil {
+				for _, d := range n.Decls {
+					if d != nil && d.Name != nil && d.Value != nil {
+						tlVar(lexec, d.Name, env)
+					}
+				}
+			}
+		}
+		return res
 
 	case *syntax.TemplateDecl:
 		// Templates without parameters and with a concrete value
@@ -1745,6 +1756,11 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// expressions to evaluate to later (TTCN-3 5.4.2).
 		if fn, ok := f.(*runtime.Function); ok {
 			indexSnapshot := snapshotLHSIndices(fn, n.Args.List, env)
+			if runtime.TLActive() {
+				if lexec := tlExec(env); lexec != nil {
+					tlCallSite(lexec, currentCompID(lexec), n)
+				}
+			}
 			ret, fenv, stopped := applyFunctionWithCallSite(fn, args, n.Args.List)
 			if !stopped {
 				writebackInoutParamsWithSnapshot(fn, n.Args.List, indexSnapshot, fenv, env)
@@ -4053,6 +4069,14 @@ func evalBinarystringBinary(x *runtime.Binarystring, y *runtime.Binarystring, op
 		// stays a valid template literal. Otherwise bit-shift the
 		// LHS by the RHS's bit width and OR them together - that's
 		// the cheaper path and preserves Value for arithmetic.
+		// An empty string, whose Value is -1 as a template's is, adds
+		// nothing.
+		if x.Length == 0 {
+			return y
+		}
+		if y.Length == 0 {
+			return x
+		}
 		xWild := x.Value != nil && x.Value.Sign() < 0
 		yWild := y.Value != nil && y.Value.Sign() < 0
 		if xWild || yWild {
@@ -4469,6 +4493,17 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 				}
 			}
 			rec.Set(fid.String(), val)
+			// Choosing a union's alternative by a field of it,
+			// `u.alt.f := x`, drops the alternative it held.
+			if sx, ok := l.X.(*syntax.SelectorExpr); ok && isUnionTyped(sx.X, env) {
+				if parent, ok := owned(sx.X, env).(*runtime.Record); ok {
+					for k := range parent.Fields {
+						if k != syntax.Name(sx.Sel) {
+							delete(parent.Fields, k)
+						}
+					}
+				}
+			}
 			return storeReceiver(l.X, rec, env)
 		}
 		// A union carries one alternative: choosing another drops it.
@@ -9947,10 +9982,22 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 			if op == "call" {
 				tlOp = "tliCCall"
 			}
-			tlEmitLazy(lexec, n, tlOp, func() []tl.Arg {
-				mod, fn := tlQualified(body, env)
-				return []tl.Arg{tlArg("comp", lexec.TLComponent(ref).Content()), tlArg("name", tl.BehaviourID(mod, fn))}
-			})
+			// The behaviour, where it is declared; it enters on the
+			// component as called from here.
+			var decl tl.Pos
+			if ce, ok := body.(*syntax.CallExpr); ok {
+				if id, ok := ce.Fun.(*syntax.Ident); ok {
+					if v, ok := env.Get(id.String()); ok {
+						if f, ok := v.(*runtime.Function); ok && f.Body != nil {
+							decl.Src, decl.Line = tlPos(f.Body)
+						}
+					}
+				}
+			}
+			tlCallSite(lexec, ref.ID, n)
+			mod, fn := tlQualified(body, env)
+			tlEmitWith(lexec, n, tlOp, func(e *tl.Event) { e.Site = decl },
+				tlArg("comp", lexec.TLComponent(ref).Content()), tlArg("name", tl.BehaviourID(mod, fn)))
 		}
 		// Record that behaviour was started on this component (even
 		// when the body is skipped below), by start or by call, which

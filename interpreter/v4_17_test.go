@@ -435,3 +435,29 @@ func TestElementsUnderAttributes(t *testing.T) {
 		}
 	}
 }
+
+// TestUnionAlternativeChosenThroughAField: assigning a field of a union's
+// alternative chooses it, and drops the alternative the union held (ETSI
+// ES 201 873-1 6.2.5).
+func TestUnionAlternativeChosenThroughAField(t *testing.T) {
+	src := `module M {
+		type component C {}
+		type union SubU { integer s1, charstring s2 }
+		type union U { integer o1, SubU o2 }
+		testcase tc() runs on C {
+			var U u;
+			u.o1 := 1;
+			u.o2.s2 := "t";
+			if (ischosen(u.o1) or not ischosen(u.o2) or u.o2.s2 != "t") { setverdict(fail, u) }
+			u.o1 := 5;
+			if (ischosen(u.o2) or u.o1 != 5) { setverdict(fail, u) }
+			setverdict(pass);
+		}
+	}`
+	for _, k := range clocks {
+		v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, src)}, "M.tc", k.opts)
+		if err != nil || v != runtime.PassVerdict {
+			t.Errorf("%s clock: %s (%s) %v", k.name, v, reason, err)
+		}
+	}
+}

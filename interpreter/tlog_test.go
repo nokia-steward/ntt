@@ -76,7 +76,8 @@ func TestTestLog_EventsAreValidAndInOrder(t *testing.T) {
 	got := perComponent(rec)
 	want := map[string][]string{
 		"mtc": {
-			"tliTcStart", "tliTcStarted", "tliSEnter", "tliCCreate", "tliPConnect", "tliCStart",
+			// The tliVar is e declared with its initial value.
+			"tliTcStart", "tliTcStarted", "tliSEnter", "tliCCreate", "tliVar", "tliPConnect", "tliCStart",
 			"tliMSend_c", "tliTStart", "tliAEnter", "tliTTimeoutMismatch", "tliANomatch", "tliAWait",
 			"tliMDetected_c", "tliMMismatch_c", "tliMReceive_c", "tliSetVerdict",
 			"tliALeave", "tliCDone", "tliSLeave", "tliTcTerminated",
@@ -931,4 +932,49 @@ func filterOps(rec *tl.Recorder, comp, op string) []*tl.Event {
 		}
 	}
 	return out
+}
+
+// TestLoggingAnElementAssignedEvaluatesNothing: logging `a[i] := x`
+// names the element without evaluating its index again, which for a
+// @fuzzy parameter would run its expression once more; the element and
+// its path are given to a writer that names them.
+func TestLoggingAnElementAssignedEvaluatesNothing(t *testing.T) {
+	src := `module M {
+		type component C { var integer cnt := 0 }
+		type record of integer RoI;
+		function g() runs on C return integer { cnt := cnt + 1; return 1 }
+		function f(@fuzzy integer i) runs on C {
+			var RoI a := { 0, 0 };
+			a[i] := 5;
+		}
+		testcase tc() runs on C {
+			f(g());
+			if (cnt == 1) { setverdict(pass) } else { setverdict(fail, cnt) }
+		}
+	}`
+	// runLogged wants pass: g ran once.
+	for _, k := range clocks {
+		runLogged(t, src, k.opts)
+	}
+	lit := `module M {
+		type component C {}
+		type record R { integer a, charstring s }
+		testcase tc() runs on C {
+			var R r := { 1, "x" };
+			r.s := "yz";
+			var charstring c := "abc";
+			c[1] := "q";
+			setverdict(pass);
+		}
+	}`
+	rec, _ := runLogged(t, lit, clocks[0].opts)
+	var paths []string
+	for _, e := range rec.Events {
+		if e.Op == "tliVar" && e.Path != "" && len(e.Parts) == 1 {
+			paths = append(paths, e.Path+"="+e.Parts[0].Text)
+		}
+	}
+	if strings.Join(paths, " ") != `.s=yz [1]=q` {
+		t.Errorf("element paths %v", paths)
+	}
 }

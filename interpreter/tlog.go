@@ -22,10 +22,34 @@ import (
 // tlExec returns the running testcase when test logging is on, else nil.
 func tlExec(env runtime.Scope) *runtime.TestcaseExec {
 	exec := runtime.FindTestcaseExec(env)
-	if exec == nil || exec.TestLogger() == nil {
+	if exec == nil {
+		// Outside a testcase, a control part logs what it does itself.
+		if v, ok := env.Get(controlLogKey); ok {
+			if c, ok := v.(*controlLog); ok {
+				return c.exec
+			}
+		}
+		return nil
+	}
+	if exec.TestLogger() == nil {
 		return nil
 	}
 	return exec
+}
+
+// controlLogKey binds, in the module scope of a control part run with a
+// test log, the controlLog that logs its statements.
+const controlLogKey = "\x00ttcn3:control-log"
+
+// controlLog is the exec a control part logs through (runtime.NewControlLog);
+// it is found by tlExec only, so the control part is in no testcase.
+type controlLog struct{ exec *runtime.TestcaseExec }
+
+func (*controlLog) Type() runtime.ObjectType { return runtime.ObjectType("CONTROL_LOG") }
+func (*controlLog) Inspect() string          { return "control log" }
+func (c *controlLog) Equal(o runtime.Object) bool {
+	other, ok := o.(*controlLog)
+	return ok && other == c
 }
 
 // tlPos locates n in the test specification for an event's src and line.
@@ -54,6 +78,111 @@ func tlEmit(exec *runtime.TestcaseExec, n syntax.Node, op string, args ...tl.Arg
 		return
 	}
 	exec.TLog(op, src, line, args...)
+}
+
+// tlEmitWith is tlEmit for an event a writer renders with more than its
+// parameters: with sets its Parts or Site.
+func tlEmitWith(exec *runtime.TestcaseExec, n syntax.Node, op string, with func(*tl.Event), args ...tl.Arg) {
+	defer tlRecover(exec)
+	src, line := tlPos(n)
+	e := &tl.Event{Op: op, Src: src, Line: line, Args: args}
+	if !tl.ArrivalTiming(op) && exec.TLScanRepeats(currentCompID(exec), e) {
+		return
+	}
+	with(e)
+	exec.TLogEvent(e)
+}
+
+// tlTyped is o as a TCI-TL value of type td: a record, set or union as its
+// type declares it, and the type named, its fields and elements typed as
+// well. A nil td leaves the value as TLValue makes it.
+func tlTyped(o runtime.Object, td *runtime.TypeDesc, env runtime.Scope) tl.Value {
+	v := tlAnnotate(runtime.TLValue(o), td, env, 0)
+	if v.Kind == "enumerated" && v.Type != "" && v.Module == "" {
+		// An enumerated value knows its type, not the type's module.
+		v.Module = moduleNameFromEnv(env)
+	}
+	return v
+}
+
+func tlAnnotate(v tl.Value, td *runtime.TypeDesc, env runtime.Scope, depth int) tl.Value {
+	if td == nil || depth > 16 {
+		return v
+	}
+	home := td.Home
+	if home == nil {
+		home = env
+	}
+	if v.Type == "" && td.Name != "" {
+		v.Type, v.Module = td.Name, moduleNameFromEnv(home)
+	}
+	// A synonym's values are of the type it refers to.
+	for i := 0; td.Struct == nil && !td.IsList && td.Underlying != "" && i < 8; i++ {
+		next := lookupTypeDesc(td.Underlying, home)
+		if next == nil {
+			break
+		}
+		td = next
+		if td.Home != nil {
+			home = td.Home
+		}
+	}
+	switch {
+	case td.Struct != nil && v.Kind == "record":
+		if k := td.Struct.KindTok; k != nil {
+			switch k.Kind() {
+			case syntax.UNION:
+				// A union has one alternative; a value holding more is
+				// left a record.
+				if len(v.Elems) == 1 {
+					v.Kind = "union"
+				}
+			case syntax.SET:
+				v.Kind = "set"
+			}
+		}
+		elems := make([]tl.Value, len(v.Elems))
+		for i, e := range v.Elems {
+			elems[i] = e
+			for _, f := range td.Struct.Fields {
+				if f != nil && f.Name != nil && f.Name.String() == e.Name {
+					elems[i] = tlAnnotate(e, fieldTypeDesc(f, home), home, depth+1)
+					break
+				}
+			}
+		}
+		v.Elems = elems
+	case td.IsList && (v.Kind == "record_of" || v.Kind == "set_of"):
+		if et := elemTypeDesc(td, home); et != nil {
+			elems := make([]tl.Value, len(v.Elems))
+			for i, e := range v.Elems {
+				elems[i] = tlAnnotate(e, et, home, depth+1)
+			}
+			v.Elems = elems
+		}
+	}
+	return v
+}
+
+// tlPartsOf is the values of exprs, objs, as the Parts of an event, each
+// typed as its expression is declared.
+func tlPartsOf(objs []runtime.Object, exprs []syntax.Expr, env runtime.Scope) []tl.Value {
+	parts := make([]tl.Value, len(objs))
+	for i, o := range objs {
+		var td *runtime.TypeDesc
+		if i < len(exprs) && len(exprs) == len(objs) {
+			td = lvalueTypeDesc(exprs[i], env)
+		}
+		parts[i] = tlTyped(o, td, env)
+	}
+	return parts
+}
+
+// tlCallSite records n as where the current component calls the behaviour
+// it enters next (see tlScope).
+func tlCallSite(exec *runtime.TestcaseExec, comp int64, n syntax.Node) {
+	src, line := tlPos(n)
+	exec.SetTLCallSite(comp, tl.Pos{Src: src, Line: line})
 }
 
 // tlEmitLazy is tlEmit for an event whose parameters are built by args,
@@ -184,6 +313,10 @@ func tlPortConfig(exec *runtime.TestcaseExec, n syntax.Node, op string, a, b run
 func tlTimerEvent(exec *runtime.TestcaseExec, n syntax.Node, th *runtime.TimerHandle, op string, res runtime.Object) {
 	defer tlRecover(exec)
 	timer := tlArg("timer", tlTimer(th))
+	member := tlMember(exec, th)
+	tlEmit := func(exec *runtime.TestcaseExec, n syntax.Node, op string, args ...tl.Arg) {
+		tlEmitWith(exec, n, op, func(e *tl.Event) { e.Member = member }, args...)
+	}
 	switch op {
 	case "start":
 		tlEmit(exec, n, "tliTStart", timer, tlArg("dur", tl.Duration(th.Duration)))
@@ -848,7 +981,7 @@ func tlScope(exec *runtime.TestcaseExec, n syntax.Node, op, module, name, kind s
 					v = t.Cached
 				}
 			}
-			ps = append(ps, tl.Param{Name: fp.Name.String(), Mode: mode, Val: runtime.TLValue(v)})
+			ps = append(ps, tl.Param{Name: fp.Name.String(), Mode: mode, Val: tlTyped(v, typeDescOfSpec(fp.Type, env), env)})
 		}
 		args = append(args, tlArg("tciPars", tl.Params(ps...)))
 	}
@@ -858,7 +991,12 @@ func tlScope(exec *runtime.TestcaseExec, n syntax.Node, op, module, name, kind s
 		}
 	}
 	args = append(args, tlArg("kind", tl.String(kind)))
-	tlEmit(exec, n, op, args...)
+	if op != "tliSEnter" {
+		tlEmit(exec, n, op, args...)
+		return
+	}
+	site := exec.TakeTLCallSite(currentCompID(exec))
+	tlEmitWith(exec, n, op, func(e *tl.Event) { e.Site = site }, args...)
 }
 
 // tlCompStatus is a component's state as TCI-TL's ComponentStatusType
@@ -1027,7 +1165,137 @@ func tlVar(exec *runtime.TestcaseExec, lhs syntax.Expr, env runtime.Scope) {
 			module = moduleNameFromEnv(owner)
 		}
 	}
-	tlEmit(exec, lhs, "tliVar", tlArg("name", tl.QualifiedName(module, name)), tlArg("val", runtime.TLValue(v).AsValue()))
+	// A component's variable: the one its variables bind to the name,
+	// as the scope the assignment reaches it in does.
+	member := false
+	if cur := exec.CurrentComponent(); cur != nil && cur.Vars != nil {
+		if vars, ok := cur.Vars.(*runtime.Env); ok && vars.Binds(name) {
+			if e, ok := env.(*runtime.Env); ok {
+				if owner := e.Owner(name); owner != nil {
+					mine, _ := vars.Get(name)
+					seen, _ := owner.Get(name)
+					member = runtime.Scope(owner) == cur.Vars || mine == seen
+				}
+			}
+		}
+	}
+	rootTd := lvalueTypeDesc(id, env)
+	val := tlTyped(v, rootTd, env)
+	// The element or field assigned, for a writer that names it.
+	path, elem, ok := tlElement(lhs, v, env)
+	tlEmitWith(exec, lhs, "tliVar", func(e *tl.Event) {
+		e.Member = member
+		if ok && path != "" {
+			ev := tlTyped(elem, lvalueTypeDesc(lhs, env), env)
+			if mod, name := tlElemTypeName(lhs, env); name != "" {
+				ev.Type, ev.Module = name, mod
+			}
+			e.Path, e.Parts = path, []tl.Value{ev}
+		}
+	}, tlArg("name", tl.QualifiedName(module, name)), tlArg("val", val.AsValue()))
+}
+
+// tlElement is the path from a variable to what lhs assigns in it, `.f[1]`,
+// and its value, from the variable's value v. ok is false when an index is
+// more than a literal or a name, which reading again could change.
+func tlElement(lhs syntax.Expr, v runtime.Object, env runtime.Scope) (string, runtime.Object, bool) {
+	switch x := lhs.(type) {
+	case *syntax.Ident:
+		return "", v, true
+	case *syntax.SelectorExpr:
+		path, parent, ok := tlElement(x.X, v, env)
+		if !ok {
+			return "", nil, false
+		}
+		name := syntax.Name(x.Sel)
+		var f runtime.Object = runtime.Undefined
+		switch p := parent.(type) {
+		case *runtime.Record:
+			if got, ok := p.Get(name); ok {
+				f = got
+			}
+		case *runtime.List:
+			if i := p.FieldIndex(name); i >= 0 && i < len(p.Elements) {
+				f = p.Elements[i]
+			}
+		}
+		return path + "." + name, f, true
+	case *syntax.IndexExpr:
+		// The index as it is, without evaluating it again: a literal, or
+		// a name bound to an integer (not a @lazy or @fuzzy parameter,
+		// nor a module parameter, whose reading is an event).
+		var idx runtime.Object
+		switch ix := x.Index.(type) {
+		case *syntax.ValueLiteral:
+			idx = eval(ix, env)
+		case *syntax.Ident:
+			if v, ok := env.Get(ix.String()); ok {
+				idx = v
+			}
+		}
+		i, isInt := idx.(runtime.Int)
+		if !isInt || !i.IsInt64() {
+			return "", nil, false
+		}
+		path, parent, ok := tlElement(x.X, v, env)
+		if !ok {
+			return "", nil, false
+		}
+		var el runtime.Object = runtime.Undefined
+		k := int(i.Int64())
+		switch p := parent.(type) {
+		case *runtime.List:
+			if k -= p.IndexOffset; k >= 0 && k < len(p.Elements) {
+				el = p.Elements[k]
+			}
+		case *runtime.String:
+			if k >= 0 && k < p.Len() {
+				el = runtime.NewCharstringFromRunes([]rune{p.Value[k]})
+			}
+		case *runtime.Binarystring:
+			if k >= 0 && k < p.Length {
+				el = p.Get(k)
+			}
+		}
+		return path + "[" + i.String() + "]", el, true
+	}
+	return "", nil, false
+}
+
+// tlElemTypeName names the type of what lhs denotes: its type's name when
+// it has one, else its record's or list's type's name and the field, or
+// [-] for an element: M.T.f, M.T[-]. name is "" when nothing on the way
+// has a named type.
+func tlElemTypeName(lhs syntax.Expr, env runtime.Scope) (module, name string) {
+	if td := lvalueTypeDesc(lhs, env); td != nil && td.Name != "" {
+		home := td.Home
+		if home == nil {
+			home = env
+		}
+		return moduleNameFromEnv(home), td.Name
+	}
+	switch x := lhs.(type) {
+	case *syntax.SelectorExpr:
+		if m, n := tlElemTypeName(x.X, env); n != "" {
+			return m, n + "." + syntax.Name(x.Sel)
+		}
+	case *syntax.IndexExpr:
+		if m, n := tlElemTypeName(x.X, env); n != "" {
+			return m, n + "[-]"
+		}
+	}
+	return "", ""
+}
+
+// tlMember reports whether timer th is a member of the component running:
+// the one its variables bind to th's name.
+func tlMember(exec *runtime.TestcaseExec, th *runtime.TimerHandle) bool {
+	cur := exec.CurrentComponent()
+	if th == nil || cur == nil || cur.Vars == nil {
+		return false
+	}
+	v, ok := cur.Vars.Get(th.Name)
+	return ok && v == runtime.Object(th)
 }
 
 // tlModulePar logs a read of a module parameter (tliModulePar) with its
