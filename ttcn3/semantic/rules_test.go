@@ -24,6 +24,15 @@ func containsCode(diags []Diagnostic, code string) bool {
 	return false
 }
 
+func hasErrors(diags []Diagnostic) bool {
+	for _, d := range diags {
+		if d.Severity == SeverityError {
+			return true
+		}
+	}
+	return false
+}
+
 func TestAnalyze_UnknownComponent(t *testing.T) {
 	tree := parse(t, `module M {
 		function f() runs on MissingComp { }

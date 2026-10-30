@@ -27,16 +27,9 @@ import (
 func (a *Analyzer) checkTemplateRestrictions(mod *syntax.Module) []Diagnostic {
 	var diags []Diagnostic
 
-	// Restriction d on modified-template restrictions is
-	// disabled: the Sem and NegSem suites contradict each
-	// other (Sem_1508_TemplateRestrictions_017 allows
-	// `base=unrestricted → mod=omit` while
-	// NegSem_1508_TemplateRestrictions_059 rejects the same
-	// transition). The Sem tests follow V4.5.1, the NegSems
-	// follow a later revision. Enabling the rule scores
-	// fewer NegSems than it loses Sems.
-	// diags = append(diags, modifiedTemplateRestrictionViolations(mod)...)
-	_ = modifiedTemplateRestrictionViolations
+	// Restrictions c and d, on the restrictions of a modified
+	// template and its parameters, are checked by
+	// checkTemplateRestrictionTables.
 	diags = append(diags, modifiedTemplateListBaseViolations(mod)...)
 
 	for _, d := range mod.Defs {
@@ -282,10 +275,8 @@ func (a *Analyzer) checkTemplateRestrictions(mod *syntax.Module) []Diagnostic {
 // paramRestrictionViolations flags formal-parameter defaults whose
 // shape cannot coexist with the enclosing template's restriction:
 // `(omit)` forbids both `?` and `*` anywhere, `(value)` forbids
-// `*`. Restriction 15.8.c on laxer parameter restrictions was
-// removed in TTCN-3:2013 (see Sem_1508_TemplateRestrictions_033),
-// so we no longer flag a `template` parameter inside a
-// `template(value|present)` body solely on its restriction tag.
+// `*`. A parameter whose own restriction is laxer is judged where
+// it is used, by checkTemplateRestrictionTables (table 13c).
 func paramRestrictionViolations(params *syntax.FormalPars, enclosing string) []Diagnostic {
 	var diags []Diagnostic
 	for _, p := range params.List {
@@ -294,55 +285,6 @@ func paramRestrictionViolations(params *syntax.FormalPars, enclosing string) []D
 		}
 		diags = append(diags, restrictionViolationsIn(p.Value, enclosing, p)...)
 	}
-	return diags
-}
-
-// modifiedTemplateRestrictionViolations flags `modifies` templates
-// whose restriction differs from the base template's restriction.
-// ETSI 15.8 requires the modified template's restriction to MATCH
-// the base's; any change (stricter or laxer) is rejected. We collect
-// every named TemplateDecl in the module up-front so the modifies
-// lookup stays O(1).
-func modifiedTemplateRestrictionViolations(mod *syntax.Module) []Diagnostic {
-	var diags []Diagnostic
-	byName := map[string]*syntax.TemplateDecl{}
-	syntax.Inspect(mod, func(n syntax.Node) bool {
-		td, ok := n.(*syntax.TemplateDecl)
-		if !ok || td == nil || td.Name == nil {
-			return true
-		}
-		byName[td.Name.String()] = td
-		return true
-	})
-	syntax.Inspect(mod, func(n syntax.Node) bool {
-		td, ok := n.(*syntax.TemplateDecl)
-		if !ok || td == nil || td.ModifiesTok == nil || td.Base == nil {
-			return true
-		}
-		baseName := identName(td.Base)
-		if baseName == "" {
-			return true
-		}
-		base, ok := byName[baseName]
-		if !ok {
-			return true
-		}
-		baseRestr := restrictionTag(base.RestrictionSpec)
-		modRestr := restrictionTag(td.RestrictionSpec)
-		if baseRestr == modRestr {
-			return true
-		}
-		diags = append(diags, Diagnostic{
-			Code:     "modified-template-restriction-mismatch",
-			Severity: SeverityError,
-			Message: fmt.Sprintf(
-				"modified template restriction `template(%s)` differs from base `template(%s)` (ETSI 15.8 restriction d)",
-				modRestr, baseRestr),
-			Node: td,
-			Span: syntax.SpanOf(td),
-		})
-		return true
-	})
 	return diags
 }
 

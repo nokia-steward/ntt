@@ -6,8 +6,8 @@ import (
 	"github.com/nokia/ntt/ttcn3"
 )
 
-func TestSizeofOnRecordOfRejected(t *testing.T) {
-	// NegSem_160102_predefined_functions_062
+func TestSizeofOnRecordOfDeprecated(t *testing.T) {
+	// Sem_160102_predefined_functions_121 (formerly NegSem_..._062): deprecated, not an error
 	tree := parse(t, `module M {
 		type record of integer MyROItype;
 		type component C {}
@@ -18,13 +18,13 @@ func TestSizeofOnRecordOfRejected(t *testing.T) {
 		}
 	}`)
 	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree)
-	if !containsCode(diags, "sizeof-on-variable-shape") {
-		t.Fatalf("expected sizeof-on-variable-shape, got %v", codes(diags))
+	if !containsCode(diags, "sizeof-on-list-deprecated") || hasErrors(diags) {
+		t.Fatalf("expected only the sizeof-on-list-deprecated warning, got %v", codes(diags))
 	}
 }
 
-func TestSizeofOnSetOfRejected(t *testing.T) {
-	// NegSem_160102_predefined_functions_063
+func TestSizeofOnSetOfDeprecated(t *testing.T) {
+	// Sem_160102_predefined_functions_122 (formerly NegSem_..._063): deprecated, not an error
 	tree := parse(t, `module M {
 		type set of integer MySOItype;
 		type component C {}
@@ -35,8 +35,8 @@ func TestSizeofOnSetOfRejected(t *testing.T) {
 		}
 	}`)
 	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree)
-	if !containsCode(diags, "sizeof-on-variable-shape") {
-		t.Fatalf("expected sizeof-on-variable-shape, got %v", codes(diags))
+	if !containsCode(diags, "sizeof-on-list-deprecated") || hasErrors(diags) {
+		t.Fatalf("expected only the sizeof-on-list-deprecated warning, got %v", codes(diags))
 	}
 }
 

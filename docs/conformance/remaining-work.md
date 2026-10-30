@@ -1,5 +1,25 @@
 # Remaining Conformance Work
 
+**2026-10-30 — the 24 tests upstream changed, checked against V4.17.1:
+4953 / 5164 matched (96.31%), 21 skipped, 211 misses.** Each of the 24
+follows the standard, ntt did not: the 15.8 restriction tables (13, 13a,
+13b, 13c) that `ntt check` now enforces, the current-module prefix only
+for module-level definitions (8.2.3.1), signature types being data types
+(14 b), `connect` and `map` that carry nothing (21.1.1 b.3, c.3), a
+conditional `goto` out of an `interleave` (20.4 d), `sizeof` on a list
+being deprecated rather than an error (G.4), `substr` of a binary string
+template (15.6.1, C.4.2), and `encvalue` agreeing with `encvalue_o`
+(C.5.5). Thirteen more tests match with them: seven NegSem tests of
+table 13b, two of `connect`/`map`, two of `substr`, `.value` (15.15) and
+`.present` (15.14). `istemplatekind`
+answered `true` for every kind, so the 22 tests using it checked
+nothing; with it implemented, three of them failed until `modifies ?`
+expanded its base (15.5 c) and a map element of `?` became `*` (15.6.6
+c). The `mtc` clause rule is now 16.1 c, a call from the control part,
+not the declaration. Over some 1,600 TTCN-3 files outside the suite the
+new checks reported one case, in a test that expects the error.
+Remaining by clause, see [current-misses.md](current-misses.md).
+
 **2026-10-29 — corpus refreshed to upstream `main` `fdc17d2c` (2024-03-28):
 4916 / 5164 matched (95.59%), 21 skipped, 248 misses.** The earlier copy
 (`99ac02bc`, 2022-09-07) gave 4803 / 4948. ntt gives every test the two

@@ -66,8 +66,23 @@ func (a *Analyzer) checkMissingCallParens(mod *syntax.Module) []Diagnostic {
 			return true
 		}
 		if ce, ok := n.(*syntax.CallExpr); ok && ce.Fun != nil {
-			if id, ok := ce.Fun.(*syntax.Ident); ok {
-				calleeSet[id] = true
+			switch f := ce.Fun.(type) {
+			case *syntax.Ident:
+				calleeSet[f] = true
+				// `refers(f)` names a function to refer to, not
+				// one to call (ETSI 16.1.4 / 6.2.13).
+				if f.String() == "refers" && ce.Args != nil {
+					for _, a := range ce.Args.List {
+						if id, ok := a.(*syntax.Ident); ok {
+							calleeSet[id] = true
+						}
+					}
+				}
+			case *syntax.SelectorExpr:
+				// `M.f()`: a call qualified by its module's name.
+				if id, ok := f.Sel.(*syntax.Ident); ok {
+					calleeSet[id] = true
+				}
 			}
 		}
 		if cc, ok := n.(*syntax.CommClause); ok && cc.Comm != nil {

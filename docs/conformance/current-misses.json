@@ -1,16 +1,16 @@
 {
- "summary": "ran 5164 files: 4916 matched, 21 skipped (95.59% match rate)",
- "source": "vendored-new.json",
- "miss_count": 248,
+ "summary": "ran 5164 files: 4953 matched, 21 skipped (96.31% match rate)",
+ "source": "off.json",
+ "miss_count": 211,
  "outcomes": {
-  "reject->pass": 95,
-  "pass->parse-error": 36,
+  "reject->pass": 67,
+  "pass->parse-error": 35,
   "reject->none": 27,
   "pass->error": 25,
-  "pass->fail": 22,
   "->": 21,
-  "pass->semantic-error": 11,
+  "pass->fail": 18,
   "error->parse-error": 8,
+  "pass->semantic-error": 7,
   "pass->none": 3
  },
  "chapters": [
@@ -26,18 +26,6 @@
     "pass->fail": 2,
     "pass->semantic-error": 2,
     "pass->none": 1
-   }
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "misses": 48,
-   "outcomes": {
-    "->": 2,
-    "pass->fail": 10,
-    "reject->pass": 30,
-    "reject->none": 3,
-    "pass->error": 2,
-    "pass->parse-error": 1
    }
   },
   {
@@ -61,17 +49,27 @@
    }
   },
   {
+   "chapter": "core_language/15_templates",
+   "misses": 22,
+   "outcomes": {
+    "->": 2,
+    "pass->fail": 7,
+    "reject->pass": 8,
+    "reject->none": 3,
+    "pass->error": 2
+   }
+  },
+  {
    "chapter": "core_language/16_functions_altsteps_testcases",
-   "misses": 24,
+   "misses": 20,
    "outcomes": {
     "reject->none": 1,
     "reject->pass": 3,
-    "pass->fail": 1,
-    "pass->semantic-error": 4,
     "error->parse-error": 8,
     "pass->parse-error": 5,
     "->": 1,
-    "pass->none": 1
+    "pass->none": 1,
+    "pass->semantic-error": 1
    }
   },
   {
@@ -110,21 +108,6 @@
    }
   },
   {
-   "chapter": "core_language/21_configuration_operations",
-   "misses": 4,
-   "outcomes": {
-    "reject->pass": 4
-   }
-  },
-  {
-   "chapter": "core_language/08_modules",
-   "misses": 3,
-   "outcomes": {
-    "->": 2,
-    "reject->pass": 1
-   }
-  },
-  {
    "chapter": "core_language/26_module_control",
    "misses": 3,
    "outcomes": {
@@ -137,6 +120,13 @@
    "outcomes": {
     "pass->parse-error": 2,
     "reject->pass": 1
+   }
+  },
+  {
+   "chapter": "core_language/08_modules",
+   "misses": 2,
+   "outcomes": {
+    "->": 2
    }
   },
   {
@@ -159,20 +149,6 @@
    "misses": 1,
    "outcomes": {
     "pass->parse-error": 1
-   }
-  },
-  {
-   "chapter": "core_language/14_procedure_signatures",
-   "misses": 1,
-   "outcomes": {
-    "reject->pass": 1
-   }
-  },
-  {
-   "chapter": "core_language/20_statement_and_operations_for_alt",
-   "misses": 1,
-   "outcomes": {
-    "pass->semantic-error": 1
    }
   },
   {
@@ -960,14 +936,6 @@
    "message": ""
   },
   {
-   "chapter": "core_language/08_modules",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/08_modules/0802_module_definitions_part/080203_importing_from_modules/08020301_general_format_of_import/Sem_08020301_GeneralFormatOfImport_006.ttcn",
-   "message": ""
-  },
-  {
    "chapter": "core_language/09_test_configurations",
    "expected": "reject",
    "actual": "none",
@@ -1056,14 +1024,6 @@
    "message": ""
   },
   {
-   "chapter": "core_language/14_procedure_signatures",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/14_procedure_signatures/NegSem_1400_procedure_signatures_003.ttcn",
-   "message": ""
-  },
-  {
    "chapter": "core_language/15_templates",
    "expected": "",
    "actual": "",
@@ -1100,23 +1060,7 @@
    "expected": "pass",
    "actual": "fail",
    "outcome": "pass->fail",
-   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150601_referencing_individual_string_elements/Sem_150601_ReferencingIndividualStringElements_004.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
    "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150601_referencing_individual_string_elements/Sem_150601_ReferencingIndividualStringElements_005.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150601_referencing_individual_string_elements/Sem_150601_ReferencingIndividualStringElements_006.ttcn",
    "message": ""
   },
   {
@@ -1236,182 +1180,6 @@
    "expected": "reject",
    "actual": "pass",
    "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/NegSem_1508_TemplateRestrictions_055.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/NegSem_1508_TemplateRestrictions_056.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/NegSem_1508_TemplateRestrictions_057.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/NegSem_1508_TemplateRestrictions_058.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/NegSem_1508_TemplateRestrictions_059.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/NegSem_1508_TemplateRestrictions_060.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/NegSem_1508_TemplateRestrictions_061.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/Sem_1508_TemplateRestrictions_007.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/Sem_1508_TemplateRestrictions_016.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/Sem_1508_TemplateRestrictions_017.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/Sem_1508_TemplateRestrictions_018.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/Sem_1508_TemplateRestrictions_020.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/Sem_1508_TemplateRestrictions_022.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/Sem_1508_TemplateRestrictions_024.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/Sem_1508_TemplateRestrictions_025.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/Sem_1508_TemplateRestrictions_031.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/Sem_1508_TemplateRestrictions_032.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/Sem_1508_TemplateRestrictions_033.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/Sem_1508_TemplateRestrictions_034.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/Sem_1508_TemplateRestrictions_035.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/Sem_1508_TemplateRestrictions_036.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1508_template_restrictions/150801_explicit_restrictions/Sem_1508_TemplateRestrictions_045.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
    "relpath": "core_language/15_templates/1511_concatenating_templates_of_string_and_list_types/NegSem_1511_ConcatenatingTemplatesOfStringAndListTypes_004.ttcn",
    "message": ""
   },
@@ -1421,22 +1189,6 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/15_templates/1513_the_present_operation/NegSem_1512_ThePresentOperation_003.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "pass",
-   "actual": "parse-error",
-   "outcome": "pass->parse-error",
-   "relpath": "core_language/15_templates/1514_presentness_conversion/Sem_1514_PresentnessConversion_001.ttcn",
-   "message": "1 error occurred:\n\t* {testdata/ttcn3-conformance-tests/ATS/core_language/15_templates/1514_presentness_conversion/Sem_1514_PresentnessConversion_001.ttcn 21:62 21:69}: expected 'IDENT', found present\n..."
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/15_templates/1515_value_extraction/Sem_1515_ValueExtraction_001.ttcn",
    "message": ""
   },
   {
@@ -1462,38 +1214,6 @@
    "outcome": "reject->pass",
    "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/NegSem_160102_predefined_functions_039.ttcn",
    "message": ""
-  },
-  {
-   "chapter": "core_language/16_functions_altsteps_testcases",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/Sem_160102_predefined_functions_110.ttcn",
-   "message": "'0300000060'O"
-  },
-  {
-   "chapter": "core_language/16_functions_altsteps_testcases",
-   "expected": "pass",
-   "actual": "semantic-error",
-   "outcome": "pass->semantic-error",
-   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/Sem_160102_predefined_functions_120.ttcn",
-   "message": "substr(Mytemp, ...): template contains AnyElementsOrNone (`*`) inside a string literal, which is forbidden (only AnyElement is allowed inside substr's inpar)"
-  },
-  {
-   "chapter": "core_language/16_functions_altsteps_testcases",
-   "expected": "pass",
-   "actual": "semantic-error",
-   "outcome": "pass->semantic-error",
-   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/Sem_160102_predefined_functions_121.ttcn",
-   "message": "sizeof(MyROI): argument has type \"MyROItype\" which is record of (use lengthof for variable-length lists)"
-  },
-  {
-   "chapter": "core_language/16_functions_altsteps_testcases",
-   "expected": "pass",
-   "actual": "semantic-error",
-   "outcome": "pass->semantic-error",
-   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/Sem_160102_predefined_functions_122.ttcn",
-   "message": "sizeof(MySOI): argument has type \"MySOItype\" which is set of (use lengthof for variable-length lists)"
   },
   {
    "chapter": "core_language/16_functions_altsteps_testcases",
@@ -1686,46 +1406,6 @@
    "outcome": "pass->parse-error",
    "relpath": "core_language/19_basic_program_statements/1905_while_statement/Sem_1905_while_statement_004.ttcn",
    "message": "4 errors occurred:\n\t* {testdata/ttcn3-conformance-tests/ATS/core_language/19_basic_program_statements/1905_while_statement/Sem_1905_while_statement_004.ttcn 15:8 15:11}: expected operand, found var\n\t*..."
-  },
-  {
-   "chapter": "core_language/20_statement_and_operations_for_alt",
-   "expected": "pass",
-   "actual": "semantic-error",
-   "outcome": "pass->semantic-error",
-   "relpath": "core_language/20_statement_and_operations_for_alt/2004_the_interleave_statement/Sem_2004_InterleaveStatement_014.ttcn",
-   "message": "conditional `goto` (inside an `if`, loop, or select) is not allowed in `interleave` branches; only unconditional jumps are permitted (ETSI 20.4 restriction d b)"
-  },
-  {
-   "chapter": "core_language/21_configuration_operations",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/NegSem_210101_connect_and_map_operations_017.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/21_configuration_operations",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/NegSem_210101_connect_and_map_operations_018.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/21_configuration_operations",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/Sem_210101_connect_and_map_operations_011.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/21_configuration_operations",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/21_configuration_operations/2101_connection_operations/210101_connect_and_map_operations/Sem_210101_connect_and_map_operations_012.ttcn",
-   "message": ""
   },
   {
    "chapter": "core_language/22_communication_operations",

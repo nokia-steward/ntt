@@ -108,7 +108,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// templates" (15.5); we approximate it by record-field
 		// merging when both sides are Records.
 		if n.Base != nil && n.Value != nil && n.Params == nil {
-			base := eval(n.Base, env)
+			base := expandAnyValueBase(eval(n.Base, env), n.Type, env)
 			if !runtime.IsError(base) && base != nil && !isUnionTyped(n.Base, env) {
 				mod := eval(n.Value, env)
 				if !runtime.IsError(mod) {
@@ -680,6 +680,18 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			}
 		}
 
+		// The value extraction `t.value` (ETSI 15.15) and the presentness
+		// conversion `t.present` (15.14) of a template. Both names are
+		// keywords, so no field is named after them.
+		if sel, ok := n.Sel.(*syntax.Ident); ok && sel.Tok != nil && sel.Tok2 == nil {
+			switch sel.Tok.Kind() {
+			case syntax.VALUE:
+				return extractTemplateValue(left)
+			case syntax.PRESENT:
+				return presentnessConversion(left)
+			}
+		}
+
 		// Accessing a member through a null object reference is a
 		// dynamic error (ETSI 5.1.2.2): the reference points at no
 		// object, so there is no field, method or nested class to
@@ -1082,8 +1094,13 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			return runtime.Undefined
 		}
 		// Templated `?` / `*` placeholders accept any index and yield
-		// themselves: `(? : record_of) [n]` matches any element.
+		// themselves: `(? : record_of) [n]` matches any element. An
+		// element of a map need not be there, so a map's is `*`
+		// (ETSI 15.6.6 c).
 		if left == runtime.Any || left == runtime.AnyOrNone {
+			if isMapType(lvalueTypeDesc(n.X, env), env) {
+				return runtime.AnyOrNone
+			}
 			return left
 		}
 
@@ -3423,6 +3440,18 @@ func evalModifiedTemplate(n *syntax.ModifiesExpr, env runtime.Scope) runtime.Obj
 	if runtime.IsError(base) {
 		return base
 	}
+	// A template with parameters is a function of its result type.
+	if e, ok := env.(*runtime.Env); ok && e.Binds(currentFunctionKey) {
+		if v, _ := e.Get(currentFunctionKey); v != nil {
+			if fn, ok := v.(*runtime.Function); ok && fn.IsTemplate {
+				home := fn.Home
+				if home == nil {
+					home = env
+				}
+				base = expandAnyValueBase(base, fn.Result, home)
+			}
+		}
+	}
 	mod := eval(n.Y, env)
 	if runtime.IsError(mod) {
 		return mod
@@ -3516,6 +3545,29 @@ func bindDynamicTemplate(t *syntax.TemplateDecl, env runtime.Scope) runtime.Obje
 // the list type a synonym of one (`type RoI R length(4)`) refers to where
 // the synonym is declared, keeping the synonym's own length restriction;
 // nil otherwise.
+// isMapType reports whether td is a map type, or a synonym of one.
+func isMapType(td *runtime.TypeDesc, env runtime.Scope) bool {
+	return mapTypeDesc(td, env) != nil
+}
+
+// mapTypeDesc is the map type td is, or is a synonym of, or nil.
+func mapTypeDesc(td *runtime.TypeDesc, env runtime.Scope) *runtime.TypeDesc {
+	for depth := 0; td != nil && depth < 8; depth++ {
+		if td.Map != nil {
+			return td
+		}
+		if td.Underlying == "" {
+			return nil
+		}
+		home := td.Home
+		if home == nil {
+			home = env
+		}
+		td = lookupTypeDesc(td.Underlying, home)
+	}
+	return nil
+}
+
 func listTypeDesc(td *runtime.TypeDesc, env runtime.Scope) *runtime.TypeDesc {
 	for depth := 0; td != nil && depth < 8; depth++ {
 		if td.IsList {
@@ -6223,7 +6275,11 @@ func lvalueTypeDesc(lx syntax.Expr, env runtime.Scope) *runtime.TypeDesc {
 				if td := fieldStructTypeDesc(f, env); td != nil {
 					return td
 				}
-				return listTypeDesc(fieldTypeDesc(f, env), env)
+				ftd := fieldTypeDesc(f, env)
+				if td := listTypeDesc(ftd, env); td != nil {
+					return td
+				}
+				return mapTypeDesc(ftd, env)
 			}
 		}
 	case *syntax.IndexExpr:
@@ -11508,14 +11564,43 @@ func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 		rememberEncoded(env, bs, v)
 		return bs
 	default:
-		bs := &runtime.Binarystring{
-			Unit:   runtime.Bit,
-			Value:  big.NewInt(0),
-			Length: 0,
+		// The bits encvalue_o packs into octets (ETSI Annex C.5.5): a
+		// bitstring's count and bits as they are, a record's octets.
+		var bs *runtime.Binarystring
+		if bits, ok := v.(*runtime.Binarystring); ok && bits.Unit == runtime.Bit {
+			bs, _ = encodeBitstringToBits(bits)
+		} else if rec, ok := v.(*runtime.List); ok && len(rec.FieldNames) > 0 {
+			if o, ok := encodeRecordToOctetstring(rec); ok {
+				bs = &runtime.Binarystring{Unit: runtime.Bit, Value: o.Value, Length: 8 * o.Length}
+			}
+		}
+		if bs == nil {
+			// No bitstring a test builds is empty-and-encoded, so
+			// the placeholder cannot be mistaken for one by decvalue.
+			bs = &runtime.Binarystring{
+				Unit:   runtime.Bit,
+				Value:  big.NewInt(0),
+				Length: 0,
+			}
 		}
 		rememberEncoded(env, bs, v)
 		return bs
 	}
+}
+
+// encodeBitstringToBits is the bitstring encvalue returns for a bitstring:
+// the 32 bits of the count encodeBitstringToOctetstring leads with, then
+// the bits themselves, so that encvalue_o is this, left-aligned into
+// octets (ETSI Annex C.5.5).
+func encodeBitstringToBits(bits *runtime.Binarystring) (*runtime.Binarystring, bool) {
+	if bits == nil || bits.Length <= 0 || bits.Value == nil || bits.Value.Sign() < 0 {
+		return nil, false
+	}
+	n := uint32(bits.Length)
+	count := new(big.Int).SetBytes([]byte{byte(n), byte(n >> 8), byte(n >> 16), byte(n >> 24)})
+	val := new(big.Int).Lsh(count, uint(bits.Length))
+	val.Or(val, bits.Value)
+	return &runtime.Binarystring{Unit: runtime.Bit, Value: val, Length: 32 + bits.Length}, true
 }
 
 // encodeBitstringToOctetstring renders a bitstring as the octetstring
@@ -11789,6 +11874,33 @@ func mergeTemplateMod(base, mod runtime.Object) (runtime.Object, bool) {
 		}
 	}
 	return out, true
+}
+
+// expandAnyValueBase is the base of a modified template of type typ: when
+// it is AnyValue and typ a record or set type, the fields it implicitly
+// expands to - AnyValue for a mandatory field, AnyValueOrNone for an
+// optional one - so a modification changes some and keeps the others
+// (ETSI ES 201 873-1 15.5 restriction c, 15.6.2).
+func expandAnyValueBase(base runtime.Object, typ syntax.Expr, env runtime.Scope) runtime.Object {
+	if base != runtime.Any || typ == nil {
+		return base
+	}
+	st := structDeclOf(typeDescOfSpec(typ, env))
+	if st == nil || st.KindTok == nil || st.KindTok.Kind() == syntax.UNION {
+		return base
+	}
+	rec := runtime.NewRecord()
+	for _, f := range st.Fields {
+		if f == nil || f.Name == nil {
+			return base
+		}
+		if f.Optional != nil {
+			rec.Set(f.Name.String(), runtime.AnyOrNone)
+		} else {
+			rec.Set(f.Name.String(), runtime.Any)
+		}
+	}
+	return rec
 }
 
 // templateRecord is the record a template of a record type is: itself, or
@@ -13698,6 +13810,83 @@ func unionAlternativeChosen(sel *syntax.SelectorExpr, env runtime.Scope) (bool, 
 		}
 	}
 	return false, false
+}
+
+// extractTemplateValue is `t.value` (ETSI 15.15): the string of a pattern
+// and the value of a template holding one, with any matching attribute -
+// ifpresent, length - removed. Any other template is an error.
+func extractTemplateValue(o runtime.Object) runtime.Object {
+	switch v := o.(type) {
+	case *runtime.IfPresent:
+		return extractTemplateValue(v.Inner)
+	case *runtime.LengthRestricted:
+		return extractTemplateValue(v.Inner)
+	case *runtime.String:
+		if v.IsPattern {
+			return runtime.NewCharstringFromRunes(append([]rune(nil), v.Value...))
+		}
+	case *runtime.Binarystring:
+		// An empty string shares the negative Value of a template
+		// with matching symbols; the symbols tell them apart.
+		if v.Value == nil || (v.Value.Sign() < 0 && strings.ContainsAny(v.String, "?*")) {
+			return runtime.Errorf("value extraction: %s is not a value (ETSI 15.15)", v.Inspect())
+		}
+		return v
+	}
+	if !isConcreteValue(o) {
+		what := "an unbound template"
+		if o != nil && o != runtime.Undefined {
+			what = o.Inspect()
+		}
+		return runtime.Errorf("value extraction: %s holds neither a value nor a pattern (ETSI 15.15)", what)
+	}
+	return o
+}
+
+// presentnessConversion is `t.present` (ETSI 15.14): AnyValueOrNone
+// becomes AnyValue, an ifpresent attribute is dropped, a template list
+// loses its omit alternatives and has the others converted, and a
+// template that matches omit alone is an error. Others are unchanged.
+func presentnessConversion(o runtime.Object) runtime.Object {
+	switch v := o.(type) {
+	case *runtime.IfPresent:
+		return presentnessConversion(v.Inner)
+	case *runtime.LengthRestricted:
+		inner := presentnessConversion(v.Inner)
+		if runtime.IsError(inner) {
+			return inner
+		}
+		return &runtime.LengthRestricted{Inner: inner, Min: v.Min, Max: v.Max}
+	case *runtime.List:
+		if v.ListType != runtime.VALUE_LIST {
+			return o
+		}
+		out := &runtime.List{ListType: runtime.VALUE_LIST}
+		for _, e := range v.Elements {
+			if e == runtime.Omit {
+				continue
+			}
+			c := presentnessConversion(e)
+			if runtime.IsError(c) {
+				return c
+			}
+			out.Elements = append(out.Elements, c)
+		}
+		if len(out.Elements) == 0 {
+			return runtime.Errorf("presentness conversion of a template that matches only omit (ETSI 15.14)")
+		}
+		if len(out.Elements) == 1 {
+			return out.Elements[0]
+		}
+		return out
+	}
+	switch o {
+	case runtime.AnyOrNone:
+		return runtime.Any
+	case runtime.Omit:
+		return runtime.Errorf("presentness conversion of a template that matches only omit (ETSI 15.14)")
+	}
+	return o
 }
 
 // isConcreteValue reports whether o is a fully-initialised concrete

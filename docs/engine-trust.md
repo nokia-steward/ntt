@@ -6,12 +6,16 @@ exists at all, see the [feature matrix](ntt-vs-titan.md); for the work queue,
 [remaining work](conformance/remaining-work.md); for per-push numbers, the
 [conformance dashboard](conformance/index.html).
 
-Short answer, as of 2026-10-29: **4916 of 5164 ETSI conformance files match
-their expected outcome, 95.59%,** in the suite as upstream had it on
+Short answer, as of 2026-10-30: **4953 of 5164 ETSI conformance files match
+their expected outcome, 96.31%,** in the suite as upstream had it on
 2024-03-28. Of the 4948 files of the earlier copy (2022-09-07), 4803
 matched, 97.52%; the newer suite adds 216 tests, mostly of features not
 implemented yet, expects another outcome of 22 of the earlier ones and
-rewrites 2. ntt gives every unchanged test the outcome it gave. On
+rewrites 2. ntt gives every unchanged test the outcome it gave, and each
+of the 24 changed ones, checked against V4.17.1, the one the standard
+gives. Until then `istemplatekind` answered `true` whatever was asked,
+so the 22 tests that use it checked nothing; it is implemented now, and
+the three that then failed are fixed. On
 2026-08-10 the number went down 1.34 points, deliberately, and the reason
 it went down is the most informative thing on this page; how it came back
 is the second most.

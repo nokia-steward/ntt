@@ -927,10 +927,11 @@ func (p *parser) parseSelectorExpr(x Expr) *SelectorExpr {
 	// selectors, e.g. `R.encode` returns the encoding rule that
 	// was attached to type R via `with { encode "..." }`. We
 	// recognise the keywords that the with-statement supports so
-	// the predefined `<type>.<attr>` notation parses.
+	// the predefined `<type>.<attr>` notation parses, and `present`
+	// for the presentness conversion `t.present` (ETSI 15.14).
 	dot := p.consume()
 	switch p.tok {
-	case ENCODE, EXTENSION, VARIANT, DISPLAY, OPTIONAL:
+	case ENCODE, EXTENSION, VARIANT, DISPLAY, OPTIONAL, PRESENT:
 		ident := p.make_use(p.consume())
 		return &SelectorExpr{X: x, Dot: dot, Sel: ident}
 	}

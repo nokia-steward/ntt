@@ -21,28 +21,8 @@ import (
 )
 
 func (a *Analyzer) checkPortDeclTypeRules(mod *syntax.Module) []Diagnostic {
-	components := collectComponentTypeNames(mod)
-	ports := collectPortTypeNames(mod)
-	aliases := collectTypeAliasKinds(mod)
+	classify := nonDataTypeKinds(mod)
 	var diags []Diagnostic
-	classify := func(ty string) string {
-		switch ty {
-		case "":
-			return ""
-		case "timer", "default":
-			return ty
-		}
-		if components[ty] {
-			return "component"
-		}
-		if ports[ty] {
-			return "port"
-		}
-		if kind, ok := aliases[ty]; ok {
-			return kind
-		}
-		return ""
-	}
 	syntax.Inspect(mod, func(n syntax.Node) bool {
 		pd, ok := n.(*syntax.PortTypeDecl)
 		if !ok || pd == nil {
@@ -111,6 +91,30 @@ func (a *Analyzer) checkPortDeclTypeRules(mod *syntax.Module) []Diagnostic {
 		return true
 	})
 	return diags
+}
+
+// nonDataTypeKinds returns a classifier naming the kind of a type that is
+// not a data type - "timer", "default", "component" or "port", directly
+// or through an alias - and "" for any other type name.
+func nonDataTypeKinds(mod *syntax.Module) func(ty string) string {
+	components := collectComponentTypeNames(mod)
+	ports := collectPortTypeNames(mod)
+	aliases := collectTypeAliasKinds(mod)
+	return func(ty string) string {
+		switch ty {
+		case "":
+			return ""
+		case "timer", "default":
+			return ty
+		}
+		if components[ty] {
+			return "component"
+		}
+		if ports[ty] {
+			return "port"
+		}
+		return aliases[ty]
+	}
 }
 
 func portTypeName(pd *syntax.PortTypeDecl) string {

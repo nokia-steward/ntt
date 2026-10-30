@@ -82,6 +82,7 @@ func checkSizeofCall(
 		return nil
 	}
 	var reason string
+	code, severity := "sizeof-on-variable-shape", SeverityError
 	if typeName == "anytype" {
 		reason = "anytype (sizeof is only defined for record / set / array)"
 	} else {
@@ -89,11 +90,15 @@ func checkSizeofCall(
 		if !ok {
 			return nil
 		}
+		// sizeof on a list is deprecated (ETSI ES 201 873-1 G.4), not
+		// removed: it still counts the elements, as lengthof does.
 		switch cat {
 		case typeCategoryRecordOf:
-			reason = "record of (use lengthof for variable-length lists)"
+			reason = "record of, for which sizeof is deprecated (use lengthof)"
+			code, severity = "sizeof-on-list-deprecated", SeverityWarn
 		case typeCategorySetOf:
-			reason = "set of (use lengthof for variable-length lists)"
+			reason = "set of, for which sizeof is deprecated (use lengthof)"
+			code, severity = "sizeof-on-list-deprecated", SeverityWarn
 		case typeCategoryUnion:
 			reason = "union (sizeof is only defined for fixed-size structures)"
 		}
@@ -102,8 +107,8 @@ func checkSizeofCall(
 		return nil
 	}
 	return []Diagnostic{{
-		Code:     "sizeof-on-variable-shape",
-		Severity: SeverityError,
+		Code:     code,
+		Severity: severity,
 		Message: fmt.Sprintf(
 			"sizeof(%s): argument has type %q which is %s",
 			name, typeName, reason),
@@ -346,11 +351,11 @@ func nonFiniteFloatName(e syntax.Expr) (string, bool) {
 }
 
 // checkSubstrCall rejects substr(inpar, ...) when the inpar
-// template is statically known to contain a non-AnyElement
-// matching mechanism (e.g. `*` in a bit/hex/octet literal or
-// `*` inside a record-of composite literal).
+// template is statically known to contain a matching mechanism
+// substr does not accept (`*` inside a record-of composite
+// literal).
 //
-// ETSI ES 201 873-1 Annex C.3.1 lists this restriction as one
+// ETSI ES 201 873-1 Annex C.4.2 lists this restriction as one
 // of the extra error conditions specific to substr beyond the
 // general clause 16.1.2 rules.
 func checkSubstrCall(
@@ -379,7 +384,7 @@ func checkSubstrCall(
 			Severity: SeverityError,
 			Message: fmt.Sprintf(
 				"substr(%s, ...): template contains %s, which is forbidden "+
-					"(only AnyElement is allowed inside substr's inpar)",
+					"(only specific values, AnyElement and combined templates are allowed in a sequence inpar)",
 				name, reason),
 			Node: ce,
 			Span: syntax.SpanOf(ce),
@@ -425,29 +430,14 @@ func templateInitOf(mod *syntax.Module, name string) syntax.Expr {
 	return found
 }
 
-// containsForbiddenSubstrMatch detects matching mechanisms in
-// the static initializer of a substr inpar template. Currently
-// recognised:
-//   - `*` inside a bit/hex/octet/character string literal
-//   - bare `*` inside a composite literal (record-of / array)
+// containsForbiddenSubstrMatch detects a bare `*` element in the static
+// initializer of a substr inpar of sequence type: only specific values,
+// AnyElement and combined templates are allowed there (ETSI ES 201 873-1
+// C.4.2). A string template is not checked: a matching mechanism inside a
+// binary string value counts as one item (15.6.1), and a character string
+// literal holds no matching mechanism at all.
 func containsForbiddenSubstrMatch(e syntax.Expr) (string, bool) {
-	switch x := e.(type) {
-	case *syntax.ValueLiteral:
-		if x == nil || x.Tok == nil {
-			return "", false
-		}
-		s := x.Tok.String()
-		if !looksLikeQuotedBinaryLiteral(s) && !looksLikeQuotedCharLiteral(s) {
-			return "", false
-		}
-		body := stripLiteralQuotes(s)
-		if containsUnescapedStar(body) {
-			return "AnyElementsOrNone (`*`) inside a string literal", true
-		}
-	case *syntax.CompositeLiteral:
-		if x == nil {
-			return "", false
-		}
+	if x, ok := e.(*syntax.CompositeLiteral); ok && x != nil {
 		for _, el := range x.List {
 			if isBareAnyElementsOrNone(el) {
 				return "AnyElementsOrNone (`*`) as a list element", true
@@ -455,53 +445,6 @@ func containsForbiddenSubstrMatch(e syntax.Expr) (string, bool) {
 		}
 	}
 	return "", false
-}
-
-func looksLikeQuotedBinaryLiteral(s string) bool {
-	if len(s) < 3 {
-		return false
-	}
-	last := s[len(s)-1]
-	if last != 'B' && last != 'H' && last != 'O' {
-		return false
-	}
-	return s[0] == '\''
-}
-
-func looksLikeQuotedCharLiteral(s string) bool {
-	if len(s) < 2 {
-		return false
-	}
-	return s[0] == '"' && s[len(s)-1] == '"'
-}
-
-func stripLiteralQuotes(s string) string {
-	if len(s) >= 2 && s[0] == '"' && s[len(s)-1] == '"' {
-		return s[1 : len(s)-1]
-	}
-	if len(s) >= 3 && s[0] == '\'' {
-		end := len(s) - 1
-		for end > 0 && s[end] != '\'' {
-			end--
-		}
-		if end > 0 {
-			return s[1:end]
-		}
-	}
-	return s
-}
-
-func containsUnescapedStar(body string) bool {
-	for i := 0; i < len(body); i++ {
-		if body[i] == '\\' {
-			i++
-			continue
-		}
-		if body[i] == '*' {
-			return true
-		}
-	}
-	return false
 }
 
 func isBareAnyElementsOrNone(e syntax.Expr) bool {

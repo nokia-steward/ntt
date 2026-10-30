@@ -6,10 +6,13 @@
 //     contains a reception statement are illegal;
 //   - nested `alt` and `interleave` statements are illegal
 //     because they would block on a competing event-set;
-//   - `goto` is illegal whenever the surrounding branch
-//     contains a reception (either in its guard or in its
-//     body), since the branch then transfers control across
-//     a blocking-event boundary.
+//   - `goto` to a label inside the interleave is illegal
+//     whenever the surrounding branch body contains a
+//     reception, since the branch then transfers control
+//     across a blocking-event boundary, unless the goto and
+//     its label lie in a statement block that contains no
+//     reception. A jump out of the interleave is allowed,
+//     conditional or not.
 //
 // We only inspect the immediate branch body; deeper nested
 // scopes (e.g. inner functions) are intentionally skipped
@@ -31,6 +34,7 @@ func (a *Analyzer) checkInterleaveGotoRules(mod *syntax.Module) []Diagnostic {
 			alt.Tok.Kind() != syntax.INTERLEAVE || alt.Body == nil {
 			return true
 		}
+		inside := collectLabelNames(alt.Body)
 		for _, stmt := range alt.Body.Stmts {
 			cc, ok := stmt.(*syntax.CommClause)
 			if !ok || cc == nil || cc.Body == nil {
@@ -48,100 +52,22 @@ func (a *Analyzer) checkInterleaveGotoRules(mod *syntax.Module) []Diagnostic {
 					})
 				}
 				for _, g := range collectGotoStmts(cc.Body) {
+					if !inside[syntax.Name(g.Label)] || jumpsWithinReceptionFreeBlock(cc.Body, g) {
+						continue
+					}
 					diags = append(diags, Diagnostic{
 						Code:     "interleave-goto-in-reception-branch",
 						Severity: SeverityError,
-						Message:  "`goto` inside an `interleave` branch is only allowed in reception-free branches or as an unconditional jump out (ETSI 20.4 restriction d b)",
+						Message:  "`goto` inside an `interleave` branch is only allowed in reception-free branches or as a jump out of the interleave (ETSI 20.4 restriction d)",
 						Node:     g,
 						Span:     syntax.SpanOf(g),
 					})
 				}
 			}
-			for _, g := range collectConditionalGotos(cc.Body) {
-				diags = append(diags, Diagnostic{
-					Code:     "interleave-conditional-goto",
-					Severity: SeverityError,
-					Message:  "conditional `goto` (inside an `if`, loop, or select) is not allowed in `interleave` branches; only unconditional jumps are permitted (ETSI 20.4 restriction d b)",
-					Node:     g,
-					Span:     syntax.SpanOf(g),
-				})
-			}
 		}
 		return true
 	})
 	return diags
-}
-
-// collectConditionalGotos returns every goto BranchStmt whose
-// AST path contains at least one IfStmt / loop / SelectStmt
-// between the goto and the branch body root. Such a goto is
-// "conditional" in the ETSI 20.4 sense and not permitted inside
-// interleave branches.
-func collectConditionalGotos(body *syntax.BlockStmt) []*syntax.BranchStmt {
-	var out []*syntax.BranchStmt
-	var walk func(n syntax.Node, depth int)
-	walk = func(n syntax.Node, depth int) {
-		if n == nil {
-			return
-		}
-		switch v := n.(type) {
-		case *syntax.BranchStmt:
-			if v != nil && v.Tok != nil && v.Tok.Kind() == syntax.GOTO && depth > 0 {
-				out = append(out, v)
-			}
-			return
-		case *syntax.IfStmt:
-			if v == nil {
-				return
-			}
-			walk(v.Then, depth+1)
-			walk(v.Else, depth+1)
-			return
-		case *syntax.ForStmt:
-			if v != nil {
-				walk(v.Body, depth+1)
-			}
-			return
-		case *syntax.ForRangeStmt:
-			if v != nil {
-				walk(v.Body, depth+1)
-			}
-			return
-		case *syntax.WhileStmt:
-			if v != nil {
-				walk(v.Body, depth+1)
-			}
-			return
-		case *syntax.DoWhileStmt:
-			if v != nil {
-				walk(v.Body, depth+1)
-			}
-			return
-		case *syntax.SelectStmt:
-			if v == nil {
-				return
-			}
-			for _, cc := range v.Body {
-				walk(cc, depth+1)
-			}
-			return
-		case *syntax.AltStmt:
-			if v == nil {
-				return
-			}
-			walk(v.Body, depth+1)
-			return
-		}
-		n.Inspect(func(child syntax.Node) bool {
-			if child == n {
-				return true
-			}
-			walk(child, depth)
-			return false
-		})
-	}
-	walk(body, 0)
-	return out
 }
 
 // containsReceptionStmt reports whether the node transitively
@@ -199,6 +125,51 @@ func collectLoopStmts(n syntax.Node) []syntax.Stmt {
 			if v != nil {
 				out = append(out, v)
 			}
+		}
+		return true
+	})
+	return out
+}
+
+// jumpsWithinReceptionFreeBlock reports whether goto g and its label lie
+// in one statement block within body that contains no reception: the
+// jumps 20.4 d allows inside an interleave.
+func jumpsWithinReceptionFreeBlock(body *syntax.BlockStmt, g *syntax.BranchStmt) bool {
+	label := syntax.Name(g.Label)
+	found := false
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		if found {
+			return false
+		}
+		b, ok := n.(*syntax.BlockStmt)
+		if !ok || b == nil {
+			return true
+		}
+		hasGoto, hasLabel := false, false
+		syntax.Inspect(b, func(m syntax.Node) bool {
+			if bs, ok := m.(*syntax.BranchStmt); ok && bs != nil && bs.Tok != nil {
+				hasGoto = hasGoto || bs == g
+				hasLabel = hasLabel || (bs.Tok.Kind() == syntax.LABEL && syntax.Name(bs.Label) == label)
+			}
+			return true
+		})
+		if !hasGoto || !hasLabel {
+			return false
+		}
+		if !containsReceptionStmt(b) {
+			found = true
+		}
+		return true
+	})
+	return found
+}
+
+// collectLabelNames returns the name of every label declared within n.
+func collectLabelNames(n syntax.Node) map[string]bool {
+	out := map[string]bool{}
+	syntax.Inspect(n, func(node syntax.Node) bool {
+		if bs, ok := node.(*syntax.BranchStmt); ok && bs != nil && bs.Tok != nil && bs.Tok.Kind() == syntax.LABEL {
+			out[syntax.Name(bs.Label)] = true
 		}
 		return true
 	})

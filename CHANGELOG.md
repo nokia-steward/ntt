@@ -188,7 +188,43 @@ single functional test doubles as a performance probe. See
   matched (the expected outcome of 22, the test of 2), and most of the new
   tests' 91 misses are features not implemented yet: embedded fields,
   variadic parameters, map index notation, more forms of the automatic
-  type. The baseline CI holds ntt to is the new measurement.
+  type. The baseline CI holds ntt to is the new measurement. With the
+  V4.17.1 rules above ntt matches 4953 (96.31%), every one of the 24
+  upstream changed among them.
+- **`ntt check` holds a module to the template restriction tables of
+  V4.17.1** (ES 201 873-1 15.8): what may be assigned or passed to a
+  restricted template, template variable or formal template parameter
+  (table 13; a value always may, a template only with a restriction as
+  strict), the fields of a `template(value)` or `template(omit)` (13c), the
+  restriction a modified template may have given its base's (13b: none if
+  the base has none, 15.5 f) and that of its formal parameters (13a). A
+  restriction is judged where it is known: a reference to a template, a
+  template variable or parameter, a call of a template or of a function
+  returning one, `t.present`. Also reported now, as V4.17.1 has them: the
+  current module's name prefixing what is not one of its module-level
+  definitions (8.2.3.1), a signature parameter or return type that is not a
+  data type — a default, timer, port or component (14 b), a `connect`
+  neither of whose ports can send and a `map` that can carry nothing
+  (21.1.1 b.3, c.3). Upstream changed 24 of its tests to these rules;
+  each was checked against the standard and found right. **Upgrade
+  note:** passing an unrestricted template where a restricted one is
+  declared is an error; convert it with `.present`, or declare it with the
+  restriction. Run over the local suites at hand (some 1,600 files
+  besides the ETSI suite), the new checks reported one case, in a test
+  that expects it to fail.
+- **No longer reported, as V4.17.1 allows them:** `sizeof` on a record of
+  or set of (deprecated, G.4: now a warning); a `goto` out of an
+  `interleave`, under a condition or not, and one within a block of a
+  branch that does not receive (20.4 d); `substr` of a binary string
+  template with a matching mechanism inside its value (15.6.1); an `mtc`
+  clause on a function (16.1) — what is an error is the control part
+  calling, directly or through others, a function with an `mtc` or
+  `system` clause (restriction c), and that is now reported; and a call
+  qualified by its module's name, `M.f()`, which was taken for a
+  function named without its parentheses. The port of `mtc` is no longer
+  judged by the type a function runs on unless it is a testcase's or the
+  function has an `mtc` clause, and `refers(f)` is not taken for `f`
+  named without its parentheses.
 - **Linting runs golangci-lint v2** (2.14, built with Go 1.27), which can
   type-check this code where v1.60 could not, and **fails the job** on a
   finding. It runs the standard linters (errcheck, govet, ineffassign,
@@ -239,6 +275,26 @@ single functional test doubles as a performance probe. See
   mark; the `--regress` gate is the ratchet.
 
 ### Fixed
+
+- **`istemplatekind` tells the kind of a template** (ES 201 873-1 C.3.5):
+  it answered `true` for every kind, so the 22 suite tests that use it
+  checked nothing. It now answers for each kind of table C.1 — of the
+  template itself, inside its value on the first level, or as an attribute
+  attached to it — and an unknown kind is an error. Three of those tests
+  then failed for what the answer had hidden, now fixed: a template that
+  `modifies ?` has its base expanded into the type's fields (`?` where
+  mandatory, `*` where optional, 15.5 c) before the modification, and an
+  element of a map template holding `?` is `*` (15.6.6 c).
+- **`t.value` and `t.present`** (15.15, 15.14): the value extraction of a
+  pattern or a template holding a value, and the presentness conversion;
+  `.present` did not parse and `.value` was undefined.
+- **`substr` of a binary string template with matching inside its value**
+  counts each `?` and `*` as one item: `substr('00101*'B, 1, 2)` is
+  `'01'B`, it was `'11'B`.
+- **`encvalue` and `encvalue_o` agree** (C.5.5) on a bitstring, and on a
+  record of the field types `encvalue_o` encodes: the octetstring is the
+  bitstring left-aligned into octets. `encvalue` of these gave an empty
+  bitstring.
 
 Most of what follows is one family: the real clock (`--live`, and anything
 that implies it) reached code paths written with only the cooperative

@@ -66,9 +66,18 @@ func (a *Analyzer) checkConnectMapCompat(mod *syntax.Module) []Diagnostic {
 		if fn.System != nil && fn.System.Comp != nil {
 			systemComp = syntax.Name(fn.System.Comp)
 		}
+		// The MTC's type is a testcase's runs-on component, or the
+		// one an mtc clause names; elsewhere it is not known.
+		mtcComp := ""
+		switch {
+		case fn.Mtc != nil && fn.Mtc.Comp != nil:
+			mtcComp = syntax.Name(fn.Mtc.Comp)
+		case fn.KindTok != nil && fn.KindTok.Kind() == syntax.TESTCASE:
+			mtcComp = runsOn
+		}
 		varTypes := collectVarComponentTypes(fn.Body, compPorts)
 		diags = append(diags, checkConnectMapInBody(
-			fn.Body, runsOn, systemComp, varTypes, compPorts, portTypes,
+			fn.Body, runsOn, mtcComp, systemComp, varTypes, compPorts, portTypes,
 		)...)
 	}
 	return diags
@@ -77,6 +86,7 @@ func (a *Analyzer) checkConnectMapCompat(mod *syntax.Module) []Diagnostic {
 func checkConnectMapInBody(
 	body *syntax.BlockStmt,
 	runsOn string,
+	mtcComp string,
 	systemComp string,
 	varTypes map[string]string,
 	compPorts map[string]map[string]string,
@@ -109,10 +119,10 @@ func checkConnectMapInBody(
 			return true
 		}
 		left, leftStatus := resolvePortRefStatus(
-			ce.Args.List[0], runsOn, systemComp, varTypes, compPorts,
+			ce.Args.List[0], runsOn, mtcComp, systemComp, varTypes, compPorts,
 		)
 		right, rightStatus := resolvePortRefStatus(
-			ce.Args.List[1], runsOn, systemComp, varTypes, compPorts,
+			ce.Args.List[1], runsOn, mtcComp, systemComp, varTypes, compPorts,
 		)
 		// Emit "port not in component" diagnostics whenever we
 		// fully resolved the component type but the port name
@@ -174,13 +184,22 @@ func checkConnectMapInBody(
 					Span: syntax.SpanOf(ce),
 				})
 			}
-			// The ETSI 21.1.1 b.3 "at least one outlist
-			// non-empty" rule is contradicted by the
-			// suite's own positive Sem_011 test (the spec
-			// authors removed the restriction; the
-			// corresponding NegSem_017 is V4-only). We
-			// therefore skip the empty-outlist check on
-			// connect rather than break the positive test.
+			// ETSI 21.1.1 b.3: a connection over which
+			// neither port can send carries nothing, and is
+			// not allowed.
+			if opName == "connect" && !hasOutDir(ld) && !hasOutDir(rd) {
+				diags = append(diags, Diagnostic{
+					Code:     "connect-nothing-to-send",
+					Severity: SeverityError,
+					Message: fmt.Sprintf(
+						"connect(%s:%s, %s:%s): neither port type %s nor %s has an out direction (ETSI 21.1.1 b.3)",
+						left.compVar, left.portName,
+						right.compVar, right.portName,
+						left.portType, right.portType),
+					Node: ce,
+					Span: syntax.SpanOf(ce),
+				})
+			}
 		}
 		if isMap {
 			// ETSI 21.1.1 c.1 / 21.1.2: map and unmap
@@ -252,10 +271,23 @@ func checkConnectMapInBody(
 					Span: syntax.SpanOf(ce),
 				})
 			}
-			// As with connect, the suite's positive Sem_012
-			// flips the V4 "at least one non-empty"
-			// restriction; we skip the symmetric map check
-			// to avoid flagging it.
+			// ETSI 21.1.1 c.3: the component port shall
+			// send something or the system port deliver
+			// something.
+			if opName == "map" && (left.compVar == "system") != (right.compVar == "system") &&
+				!hasOutDir(lod) && !hasInDir(sysd) {
+				diags = append(diags, Diagnostic{
+					Code:     "map-nothing-to-carry",
+					Severity: SeverityError,
+					Message: fmt.Sprintf(
+						"map(%s:%s, %s:%s): port type %s has no out direction and system port type %s no in direction (ETSI 21.1.1 c.3)",
+						lo.compVar, lo.portName,
+						sys.compVar, sys.portName,
+						lo.portType, sys.portType),
+					Node: ce,
+					Span: syntax.SpanOf(ce),
+				})
+			}
 		}
 		return true
 	})
@@ -287,7 +319,7 @@ const (
 
 func resolvePortRefStatus(
 	expr syntax.Expr,
-	runsOn, systemComp string,
+	runsOn, mtcComp, systemComp string,
 	varTypes map[string]string,
 	compPorts map[string]map[string]string,
 ) (portRef, portRefStatus) {
@@ -307,10 +339,12 @@ func resolvePortRefStatus(
 	ref.compVar = lhs.String()
 	ref.portName = rhs.String()
 
-	compType := ""
+	var compType string
 	switch ref.compVar {
-	case "self", "mtc":
+	case "self":
 		compType = runsOn
+	case "mtc":
+		compType = mtcComp
 	case "system":
 		compType = systemComp
 	default:
@@ -420,6 +454,16 @@ func mapCompatViolation(local, system *portDirs) string {
 		}
 	}
 	return ""
+}
+
+// hasOutDir reports whether a port type lists anything it can send.
+func hasOutDir(p *portDirs) bool {
+	return len(p.out) > 0 || len(p.inout) > 0 || p.allOutDir || p.allInoutDir
+}
+
+// hasInDir reports whether a port type lists anything it can receive.
+func hasInDir(p *portDirs) bool {
+	return len(p.in) > 0 || len(p.inout) > 0 || p.allInDir || p.allInoutDir
 }
 
 func out(p *portDirs) map[string]bool {

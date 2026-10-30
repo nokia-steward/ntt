@@ -520,6 +520,9 @@ func Substr(args ...runtime.Object) runtime.Object {
 		}
 		return &runtime.List{ListType: v.ListType, Elements: append([]runtime.Object(nil), v.Elements[i:i+n]...)}
 	case *runtime.Binarystring:
+		if v.Value != nil && v.Value.Sign() < 0 {
+			return substrOfBinaryTemplate(v, i, n)
+		}
 		// Slice out a contiguous run of `n` units starting at `i`.
 		// Length is in "units" (bits / hex digits / octets), so the
 		// shift count is `i*unit` to skip and `n*unit` to keep.
@@ -558,6 +561,36 @@ func Substr(args ...runtime.Object) runtime.Object {
 		return runtime.Undefined
 	}
 	return runtime.Errorf("substr: unsupported type %s", args[0].Type())
+}
+
+// substrOfBinaryTemplate is substr on a binary string template holding
+// matching mechanisms inside its value, such as '00101*'B: each `?` and
+// `*` counts as one item, as a bit, hex digit or octet does (ETSI ES 201
+// 873-1 15.6.1, C.4.2), so substr('00101*'B, 1, 2) is '01'B.
+func substrOfBinaryTemplate(v *runtime.Binarystring, i, n int) runtime.Object {
+	lit := v.String
+	if len(lit) < 3 {
+		return runtime.Errorf("substr: malformed template %s", lit)
+	}
+	var items []string
+	body := strings.Join(strings.Fields(lit[1:len(lit)-2]), "")
+	for k := 0; k < len(body); k++ {
+		switch {
+		case v.Unit == runtime.Octet && body[k] != '?' && body[k] != '*' && k+1 < len(body):
+			items = append(items, body[k:k+2])
+			k++
+		default:
+			items = append(items, body[k:k+1])
+		}
+	}
+	if i < 0 || n < 0 || i+n > len(items) {
+		return runtime.Errorf("substr: out of range")
+	}
+	res, err := runtime.NewBinarystring("'" + strings.Join(items[i:i+n], "") + lit[len(lit)-2:])
+	if err != nil {
+		return runtime.Errorf("substr: %s", err)
+	}
+	return res
 }
 
 // Replace returns the value with `count` elements starting at `idx`
@@ -659,10 +692,112 @@ func RegExp(args ...runtime.Object) runtime.Object {
 	return runtime.NewCharstring("")
 }
 
-// IsTemplateKind is a stub that always returns true; tracking template
-// kinds requires a full template runtime which we don't have yet.
+// IsTemplateKind is istemplatekind (ETSI ES 201 873-1 C.3.5): whether
+// a template is of the kind of matching mechanism its second parameter
+// names, or holds it inside its value on the first level of nesting, or
+// has it as a matching attribute attached directly.
 func IsTemplateKind(args ...runtime.Object) runtime.Object {
-	return runtime.NewBool(true)
+	if len(args) != 2 {
+		return runtime.Errorf("istemplatekind: expected 2 arguments")
+	}
+	kind, ok := args[1].(*runtime.String)
+	if !ok {
+		return runtime.Errorf("istemplatekind: kind is not a charstring")
+	}
+	t := args[0]
+	// The matching attributes ifpresent and length are attached
+	// directly, around the mechanism they qualify.
+	ifpresent, length := false, false
+	for {
+		if ip, ok := t.(*runtime.IfPresent); ok {
+			ifpresent, t = true, ip.Inner
+			continue
+		}
+		if lr, ok := t.(*runtime.LengthRestricted); ok {
+			length, t = true, lr.Inner
+			continue
+		}
+		break
+	}
+	list := func(lt runtime.ListType) bool {
+		l, ok := t.(*runtime.List)
+		return ok && l.ListType == lt
+	}
+	// inside reports whether a list or binary string value holds the
+	// element at its first level.
+	inside := func(elem func(runtime.Object) bool, symbol byte) bool {
+		switch v := t.(type) {
+		case *runtime.List:
+			if v.ListType == runtime.VALUE_LIST || v.ListType == runtime.COMPLEMENT || len(v.FieldNames) > 0 {
+				return false
+			}
+			for _, e := range v.Elements {
+				if elem(e) {
+					return true
+				}
+			}
+		case *runtime.Binarystring:
+			return symbol != 0 && v.Value != nil && v.Value.Sign() < 0 && strings.IndexByte(v.String, symbol) >= 0
+		}
+		return false
+	}
+	var res bool
+	switch kind.String() {
+	case "value":
+		switch v := t.(type) {
+		case *runtime.Range:
+		case *runtime.String:
+			res = !v.IsPattern
+		case *runtime.List:
+			res = v.ListType != runtime.VALUE_LIST && v.ListType != runtime.COMPLEMENT &&
+				v.ListType != runtime.SUBSET && v.ListType != runtime.SUPERSET
+		default:
+			res = t != runtime.Any && t != runtime.AnyOrNone && t != runtime.Omit && t != runtime.Undefined
+		}
+	case "list":
+		res = list(runtime.VALUE_LIST)
+	case "complement":
+		res = list(runtime.COMPLEMENT)
+	case "AnyValue", "?":
+		res = t == runtime.Any
+	case "AnyValueOrNone", "*":
+		res = t == runtime.AnyOrNone
+	case "range":
+		switch t.(type) {
+		case *runtime.Range:
+			res = true
+		}
+	case "superset":
+		res = list(runtime.SUPERSET)
+	case "subset":
+		res = list(runtime.SUBSET)
+	case "omit":
+		res = t == runtime.Omit
+	case "decmatch":
+		// A decmatch template is held as the Undefined placeholder
+		// the matcher takes for any value; an unbound template is no
+		// argument of istemplatekind.
+		res = t == runtime.Undefined
+	case "AnyElement":
+		res = inside(func(e runtime.Object) bool { return e == runtime.Any }, '?')
+	case "AnyElementsOrNone":
+		res = inside(func(e runtime.Object) bool { return e == runtime.AnyOrNone }, '*')
+	case "permutation":
+		res = inside(func(e runtime.Object) bool {
+			l, ok := e.(*runtime.List)
+			return ok && l.ListType == runtime.PERMUTATION
+		}, 0)
+	case "length":
+		res = length
+	case "ifpresent":
+		res = ifpresent
+	case "pattern":
+		s, ok := t.(*runtime.String)
+		res = ok && s.IsPattern
+	default:
+		return runtime.Errorf("istemplatekind: %q is not a kind of matching mechanism (ETSI ES 201 873-1 table C.1)", kind.String())
+	}
+	return runtime.NewBool(res)
 }
 
 // Char builds a single universal charstring codepoint from its (group,

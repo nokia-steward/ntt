@@ -3,11 +3,12 @@
 // accompany a function / altstep / testcase declaration (ETSI ES
 // 201 873-1 clause 16.1).
 //
-// Two narrow rules are implemented:
+// Narrow rules are implemented:
 //
-//   - `function` and `altstep` declarations may NOT carry an `mtc`
-//     or `system` clause - those clauses are testcase-only
-//     (NegSem_1601_toplevel_007 / _008).
+//   - a function called, directly or through others, from the
+//     control part or a control function shall have no `mtc` or
+//     `system` clause (restriction c; NegSem_1601_toplevel_007 /
+//     _008). Declaring one is allowed.
 //
 //   - A function or altstep without a `runs on` clause shall not
 //     invoke a function or altstep that *does* carry one
@@ -75,18 +76,6 @@ func (a *Analyzer) checkFunctionSpecRules(mod *syntax.Module) []Diagnostic {
 			continue
 		}
 		info := infos[syntax.Name(fn.Name)]
-		// Rule 1: `mtc` clauses are testcase-only. The
-		// equivalent `system` check is intentionally NOT
-		// implemented because Sem_060210_ReuseofComponentTypes_002
-		// puts a `system` clause on a regular function (the
-		// suite considers that legal even though the V4 spec
-		// said otherwise); flagging it costs more than it
-		// catches.
-		if !info.isTC && info.hasMtc {
-			diags = append(diags, fnSpecDiag(fn,
-				"function-mtc-on-non-testcase",
-				"only `testcase` declarations may carry an `mtc` clause (ETSI 16.1)"))
-		}
 		// Rule 2: a runs-on-less function calling a runs-on
 		// function. Skip externals (no body) and testcases.
 		if info.isTC || info.external || info.runsOn != "" || fn.Body == nil {
@@ -129,6 +118,81 @@ func (a *Analyzer) checkFunctionSpecRules(mod *syntax.Module) []Diagnostic {
 			})
 			return true
 		})
+	}
+
+	// Rule 1: a function called, directly or through others, from
+	// the control part or a control function has no mtc or system
+	// clause (ETSI 16.1 restriction c). A function may otherwise
+	// have both.
+	calls := map[string][]string{}
+	for _, d := range mod.Defs {
+		if fn, ok := d.Def.(*syntax.FuncDecl); ok && fn.Name != nil && fn.Body != nil {
+			calls[fn.Name.String()] = calledFunctionNames(fn.Body)
+		}
+	}
+	// clause names a function with an mtc or system clause that
+	// calling name reaches, name itself included, or "".
+	memo := map[string]string{}
+	var clause func(name string) string
+	clause = func(name string) string {
+		if r, ok := memo[name]; ok {
+			return r
+		}
+		memo[name] = ""
+		info, ok := infos[name]
+		if !ok || info.isTC {
+			return ""
+		}
+		if info.hasMtc || info.hasSys {
+			memo[name] = name
+			return name
+		}
+		for _, callee := range calls[name] {
+			if r := clause(callee); r != "" {
+				memo[name] = r
+				return r
+			}
+		}
+		return ""
+	}
+	checkControl := func(body *syntax.BlockStmt) {
+		syntax.Inspect(body, func(n syntax.Node) bool {
+			ce, ok := n.(*syntax.CallExpr)
+			if !ok {
+				return true
+			}
+			id, ok := ce.Fun.(*syntax.Ident)
+			if !ok {
+				return true
+			}
+			if r := clause(id.String()); r != "" {
+				via := ""
+				if r != id.String() {
+					via = fmt.Sprintf(", through %q", id.String())
+				}
+				diags = append(diags, Diagnostic{
+					Code:     "control-calls-function-with-mtc-or-system",
+					Severity: SeverityError,
+					Message: fmt.Sprintf(
+						"the control part calls %q%s, which has an mtc or system clause (ETSI 16.1 restriction c)", r, via),
+					Node: ce,
+					Span: syntax.SpanOf(ce),
+				})
+			}
+			return true
+		})
+	}
+	for _, d := range mod.Defs {
+		switch x := d.Def.(type) {
+		case *syntax.ControlPart:
+			if x.Body != nil {
+				checkControl(x.Body)
+			}
+		case *syntax.FuncDecl:
+			if x.IsControl() && x.Body != nil {
+				checkControl(x.Body)
+			}
+		}
 	}
 
 	// Rule 2b: in a runs-on-less function / altstep, any
@@ -243,16 +307,6 @@ func (a *Analyzer) checkFunctionSpecRules(mod *syntax.Module) []Diagnostic {
 	return diags
 }
 
-func fnSpecDiag(fn *syntax.FuncDecl, code, msg string) Diagnostic {
-	return Diagnostic{
-		Code:     code,
-		Severity: SeverityError,
-		Message:  msg,
-		Node:     fn,
-		Span:     syntax.SpanOf(fn),
-	}
-}
-
 // startedBehaviourCalls returns the set of CallExprs that appear
 // as the function-instance argument of a `<comp>.start(<call>)`
 // or `<comp>.call(<sig>:<tmpl>, <call>)` invocation. Behaviours
@@ -305,6 +359,21 @@ func activatedBehaviourCalls(body *syntax.BlockStmt) map[*syntax.CallExpr]bool {
 		for _, arg := range ce.Args.List {
 			if inner, ok := arg.(*syntax.CallExpr); ok {
 				out[inner] = true
+			}
+		}
+		return true
+	})
+	return out
+}
+
+// calledFunctionNames lists the names of the functions body calls by a
+// plain identifier.
+func calledFunctionNames(body *syntax.BlockStmt) []string {
+	var out []string
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		if ce, ok := n.(*syntax.CallExpr); ok {
+			if id, ok := ce.Fun.(*syntax.Ident); ok {
+				out = append(out, id.String())
 			}
 		}
 		return true
