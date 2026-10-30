@@ -1107,117 +1107,34 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		if left == runtime.Undefined || left == runtime.Omit {
 			return runtime.Undefined
 		}
-		// Templated `?` / `*` placeholders accept any index and yield
-		// themselves: `(? : record_of) [n]` matches any element. An
-		// element of a map need not be there, so a map's is `*`
-		// (ETSI 15.6.6 c).
-		if left == runtime.Any || left == runtime.AnyOrNone {
-			if isMapType(lvalueTypeDesc(n.X, env), env) {
-				return runtime.AnyOrNone
-			}
-			return left
-		}
-
-		index := eval(n.Index, env)
-		if runtime.IsError(index) {
-			return index
-		}
-		if index == runtime.Undefined {
-			return runtime.Undefined
-		}
-		// TTCN-3 6.2.7: `v[idx]` where `idx` is a record-of
-		// integer of length N is shorthand for the chained
-		// `v[idx[0]][idx[1]]...[idx[N-1]]`. We unfold the list
-		// here so the per-element fallthrough below handles the
-		// final read uniformly.
-		if il, ok := index.(*runtime.List); ok && il != nil && allInts(il) {
-			cur := left
-			for _, e := range il.Elements {
-				if cur == nil || cur == runtime.Undefined {
-					return runtime.Undefined
+		// An element of a template with a length attribute: the index is
+		// below its upper bound, and the element has none (ETSI 15.6.1 g,
+		// 15.6.3 c). One with ifpresent keeps it for a string, and is an
+		// error for a record of (15.6.1 h, 15.6.3 f).
+		switch x := left.(type) {
+		case *runtime.LengthRestricted:
+			if x.Max >= 0 {
+				index := eval(n.Index, env)
+				if runtime.IsError(index) {
+					return index
 				}
-				if list, ok := cur.(*runtime.List); ok {
-					i := e.(runtime.Int).Int64()
-					if i < 0 || i >= int64(len(list.Elements)) {
-						return runtime.Undefined
-					}
-					cur = list.Elements[i]
-					continue
+				if i, ok := index.(runtime.Int); ok && i.IsInt64() && i.Int64() >= int64(x.Max) {
+					return runtime.Errorf("index %d is not below the length of the template, %d at most", i.Int64(), x.Max)
 				}
-				return runtime.Undefined
 			}
-			return cur
+			return evalIndexRead(n, x.Inner, env)
+		case *runtime.IfPresent:
+			switch x.Inner.(type) {
+			case *runtime.String, *runtime.Binarystring:
+				el := evalIndexRead(n, x.Inner, env)
+				if runtime.IsError(el) || el == runtime.Undefined {
+					return el
+				}
+				return &runtime.IfPresent{Inner: el}
+			}
+			return runtime.Errorf("referencing an element of a template with ifpresent (ETSI 15.6.3 f)")
 		}
-		switch {
-		case left.Type() == runtime.LIST && index.Type() == runtime.INTEGER:
-			list := left.(*runtime.List)
-			raw := index.(runtime.Int).Int64()
-			i := raw - int64(list.IndexOffset)
-			if i < 0 {
-				return runtime.Errorf("negative index %d for record-of read", raw)
-			}
-			if i >= int64(len(list.Elements)) {
-				return runtime.Undefined
-			}
-			return list.Elements[i]
-		case left.Type() == runtime.CHARSTRING && index.Type() == runtime.INTEGER:
-			s := left.(*runtime.String)
-			i := index.(runtime.Int).Int64()
-			if i < 0 {
-				return runtime.Errorf("negative index %d for charstring read", i)
-			}
-			if i >= int64(s.Len()) {
-				return runtime.Undefined
-			}
-			// Single-rune ASCII case is served straight from the
-			// interned pool (a typical body[i] == "X"
-			// hot path is the motivation). Non-ASCII / non-single
-			// allocates a fresh one-rune String.
-			r := s.Value[i]
-			if cached := runtime.AsciiSingleRuneString(r); cached != nil {
-				return cached
-			}
-			return &runtime.String{Value: []rune{r}}
-		case (left.Type() == runtime.BITSTRING || left.Type() == runtime.HEXSTRING || left.Type() == runtime.OCTETSTRING) && index.Type() == runtime.INTEGER:
-			b := left.(*runtime.Binarystring)
-			i := index.(runtime.Int).Int64()
-			if i < 0 {
-				return runtime.Errorf("negative index %d for bitstring/hexstring/octetstring read", i)
-			}
-			if i >= int64(b.Length) {
-				return runtime.Undefined
-			}
-			return b.Get(int(i))
-		case left.Type() == runtime.LIST && index.Type() == runtime.LIST:
-			// TTCN-3 6.2.3 shorthand: `rec[[i,j,k]]` drills into a
-			// nested record-of/array. Walk the index list left-to-
-			// right, narrowing the receiver one dimension at a time.
-			cur := left
-			for _, idx := range index.(*runtime.List).Elements {
-				list, ok := cur.(*runtime.List)
-				if !ok {
-					return runtime.Undefined
-				}
-				i, ok := idx.(runtime.Int)
-				if !ok {
-					return runtime.Undefined
-				}
-				ii := i.Int64()
-				if ii < 0 || ii >= int64(len(list.Elements)) {
-					return runtime.Undefined
-				}
-				cur = list.Elements[ii]
-			}
-			return cur
-		case left.Type() == runtime.MAP:
-			m := left.(*runtime.Map)
-			val, ok := m.Get(index)
-			if !ok || val == nil {
-				return runtime.Undefined
-			}
-			return val
-		}
-		return runtime.Errorf("index operator not supported: %s", left.Type())
+		return evalIndexRead(n, left, env)
 
 	case *syntax.ParenExpr:
 		// can be template `x := (1,2,3)`, but also arithmetic expression: `1*(2+3)`.
@@ -4403,17 +4320,23 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 				return nil
 			}
 		}
-		// If the receiver is the wildcard template `?` / `*`, promote
-		// it to a list pre-filled with the wildcard so that
-		// subsequent index assignments behave like positional record-
-		// of updates.
+		// An element assigned in a record of template holding `?` or
+		// `*`, or ending with `*`, follows `?` for each element before
+		// it, and `*` ends the list (ETSI 15.6.3 c, d).
+		if expanded, ok := expandedWildcardList(container, idx, val, l.X, env); ok {
+			if store != nil {
+				store(expanded)
+				return nil
+			}
+			return storeReceiver(l.X, expanded, env)
+		}
+		// A wildcard the type does not tell apart is promoted to a
+		// list, so index assignments update it positionally.
 		if container == runtime.Any || container == runtime.AnyOrNone {
-			seed := container
 			container = &runtime.List{ListType: runtime.RECORD_OF}
 			if name, ok := l.X.(*syntax.Ident); ok {
 				assignOrSet(env, name.String(), container)
 			}
-			_ = seed
 		}
 		// Uninitialised array declarations (`var T v[N]` with no
 		// initializer) bind v to Undefined. A subsequent indexed
@@ -4437,8 +4360,36 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 				}
 			}
 		}
+		// An element of a template with a length or ifpresent attribute:
+		// the template's, the attribute kept (15.6.1 k, l; 15.6.3 c); an
+		// element of a record of with ifpresent is an error (15.6.3 f).
+		if idx.Type() == runtime.INTEGER {
+			if out, ok := withElementUnderAttribute(container, idx.(runtime.Int).Int64(), val); ok {
+				if runtime.IsError(out) {
+					return out
+				}
+				if store != nil {
+					store(out)
+					return nil
+				}
+				return storeReceiver(l.X, out, env)
+			}
+		}
 		if list, ok := container.(*runtime.List); ok && idx.Type() == runtime.INTEGER {
 			raw := idx.(runtime.Int).Int64()
+			// A record of template holding AnyElementsOrNone (15.6.3 g).
+			if raw >= 0 && list.IndexOffset == 0 {
+				if out, ok := assignedRecordOfTemplate(list, int(raw), val); ok {
+					if runtime.IsError(out) {
+						return out
+					}
+					if store != nil {
+						store(out)
+						return nil
+					}
+					return storeReceiver(l.X, out, env)
+				}
+			}
 			// An index-range array (`v[2..5]`) stores its first
 			// element at IndexOffset, so `v[2] := X` writes slot 0
 			// (ETSI 6.2.7). Plain record-of has offset 0.
@@ -4461,24 +4412,15 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 			list.Elements[i] = val
 		}
 		if s, ok := container.(*runtime.String); ok && idx.Type() == runtime.INTEGER {
-			i := idx.(runtime.Int).Int64()
-			if i >= 0 {
-				// A new string, stored back: charstrings are shared
-				// by the variables holding them (runtime.Share),
-				// so none is changed in place.
-				r, ok := val.(*runtime.String)
-				set := ok && r.Len() > 0
-				if set || int(i) >= s.Len() {
-					var c rune
-					if set {
-						c = r.Value[0]
-					}
-					if store != nil {
-						store(s.WithRuneAt(int(i), c, set))
-						return nil
-					}
-					return storeReceiver(l.X, s.WithRuneAt(int(i), c, set), env)
+			if ns := stringWithElement(s, idx.(runtime.Int).Int64(), val); ns != nil {
+				if runtime.IsError(ns) {
+					return ns
 				}
+				if store != nil {
+					store(ns)
+					return nil
+				}
+				return storeReceiver(l.X, ns, env)
 			}
 		}
 		// Bit/hex/octet strings expose individual digits via the
@@ -13835,6 +13777,653 @@ func unionAlternativeChosen(sel *syntax.SelectorExpr, env runtime.Scope) (bool, 
 		}
 	}
 	return false, false
+}
+
+// evalIndexRead is element n.Index of left, the value of n.X.
+func evalIndexRead(n *syntax.IndexExpr, left runtime.Object, env runtime.Scope) runtime.Object {
+	// Templated `?` / `*` placeholders accept any index and yield
+	// themselves: `(? : record_of) [n]` matches any element. An
+	// element of a map need not be there, so a map's is `*`
+	// (ETSI 15.6.6 c).
+	if left == runtime.Any || left == runtime.AnyOrNone {
+		td := lvalueTypeDesc(n.X, env)
+		if isMapType(td, env) {
+			return runtime.AnyOrNone
+		}
+		// No element of a record of, set of or array holding `*`
+		// may be referenced on the right hand side (15.6.3 d).
+		if left == runtime.AnyOrNone && listTypeDesc(td, env) != nil {
+			return runtime.Errorf("referencing an element of a template holding AnyValueOrNone (ETSI 15.6.3 d)")
+		}
+		return left
+	}
+
+	index := eval(n.Index, env)
+	if runtime.IsError(index) {
+		return index
+	}
+	if index == runtime.Undefined {
+		return runtime.Undefined
+	}
+	// TTCN-3 6.2.7: `v[idx]` where `idx` is a record-of
+	// integer of length N is shorthand for the chained
+	// `v[idx[0]][idx[1]]...[idx[N-1]]`. We unfold the list
+	// here so the per-element fallthrough below handles the
+	// final read uniformly.
+	if il, ok := index.(*runtime.List); ok && il != nil && allInts(il) {
+		cur := left
+		for _, e := range il.Elements {
+			if cur == nil || cur == runtime.Undefined {
+				return runtime.Undefined
+			}
+			if list, ok := cur.(*runtime.List); ok {
+				i := e.(runtime.Int).Int64()
+				if i < 0 || i >= int64(len(list.Elements)) {
+					return runtime.Undefined
+				}
+				cur = list.Elements[i]
+				continue
+			}
+			return runtime.Undefined
+		}
+		return cur
+	}
+	switch {
+	case left.Type() == runtime.LIST && index.Type() == runtime.INTEGER:
+		list := left.(*runtime.List)
+		raw := index.(runtime.Int).Int64()
+		i := raw - int64(list.IndexOffset)
+		if i < 0 {
+			return runtime.Errorf("negative index %d for record-of read", raw)
+		}
+		switch list.ListType {
+		case runtime.VALUE_LIST, runtime.COMPLEMENT, runtime.SUBSET, runtime.SUPERSET:
+			// ETSI 15.6.3 b: such a template has no elements.
+			return runtime.Errorf("referencing element %d of a %s template", raw, list.ListType)
+		}
+		if el, ok := elementOfRecordOfTemplate(list, int(i)); ok {
+			return el
+		}
+		if i >= int64(len(list.Elements)) {
+			return runtime.Undefined
+		}
+		return list.Elements[i]
+	case left.Type() == runtime.CHARSTRING && index.Type() == runtime.INTEGER:
+		s := left.(*runtime.String)
+		i := index.(runtime.Int).Int64()
+		if i < 0 {
+			return runtime.Errorf("negative index %d for charstring read", i)
+		}
+		// An element of a pattern is one of its items, a character or
+		// a metacharacter (ETSI 15.6.1 b, table B.1).
+		if s.IsPattern {
+			items := patternItems(s.Value)
+			if i >= int64(len(items)) {
+				return runtime.Undefined
+			}
+			return &runtime.String{Value: items[i], IsPattern: true, NoCase: s.NoCase, PatternComplex: s.PatternComplex}
+		}
+		if i >= int64(s.Len()) {
+			return runtime.Errorf("element %d of a string of length %d (ETSI 6.1.1.1)", i, s.Len())
+		}
+		// Single-rune ASCII case is served straight from the
+		// interned pool (a typical body[i] == "X"
+		// hot path is the motivation). Non-ASCII / non-single
+		// allocates a fresh one-rune String.
+		r := s.Value[i]
+		if cached := runtime.AsciiSingleRuneString(r); cached != nil {
+			return cached
+		}
+		return &runtime.String{Value: []rune{r}}
+	case (left.Type() == runtime.BITSTRING || left.Type() == runtime.HEXSTRING || left.Type() == runtime.OCTETSTRING) && index.Type() == runtime.INTEGER:
+		b := left.(*runtime.Binarystring)
+		i := index.(runtime.Int).Int64()
+		if i < 0 {
+			return runtime.Errorf("negative index %d for bitstring/hexstring/octetstring read", i)
+		}
+		// A matching symbol inside the value is one item (15.6.1).
+		if b.Value != nil && b.Value.Sign() < 0 && strings.ContainsAny(b.String, "?*") {
+			return builtins.Substr(b, runtime.NewInt(int(i)), runtime.NewInt(1))
+		}
+		if i >= int64(b.Length) {
+			return runtime.Errorf("element %d of a string of length %d (ETSI 6.1.1.1)", i, b.Length)
+		}
+		return b.Get(int(i))
+	case left.Type() == runtime.LIST && index.Type() == runtime.LIST:
+		// TTCN-3 6.2.3 shorthand: `rec[[i,j,k]]` drills into a
+		// nested record-of/array. Walk the index list left-to-
+		// right, narrowing the receiver one dimension at a time.
+		cur := left
+		for _, idx := range index.(*runtime.List).Elements {
+			list, ok := cur.(*runtime.List)
+			if !ok {
+				return runtime.Undefined
+			}
+			i, ok := idx.(runtime.Int)
+			if !ok {
+				return runtime.Undefined
+			}
+			ii := i.Int64()
+			if ii < 0 || ii >= int64(len(list.Elements)) {
+				return runtime.Undefined
+			}
+			cur = list.Elements[ii]
+		}
+		return cur
+	case left.Type() == runtime.MAP:
+		m := left.(*runtime.Map)
+		val, ok := m.Get(index)
+		if !ok || val == nil {
+			return runtime.Undefined
+		}
+		return val
+	}
+	return runtime.Errorf("index operator not supported: %s", left.Type())
+}
+
+// expandedWildcardList is the record of template container, of the type
+// lx is declared with, after val is assigned to element idx, when
+// container is AnyValue or AnyValueOrNone, with or without a length
+// attribute: AnyElement for every element before idx, val, and
+// AnyElementsOrNone at the end, the length attribute kept (ETSI ES 201
+// 873-1 15.6.3 c, d). ok is false for anything else.
+func expandedWildcardList(container, idx, val runtime.Object, lx syntax.Expr, env runtime.Scope) (runtime.Object, bool) {
+	n, isInt := idx.(runtime.Int)
+	if !isInt || !n.IsInt64() || n.Int64() < 0 {
+		return nil, false
+	}
+	i := int(n.Int64())
+	td := lvalueTypeDesc(lx, env)
+	ltd := listTypeDesc(td, env)
+	if ltd == nil {
+		return nil, false
+	}
+	inner := container
+	lr, _ := container.(*runtime.LengthRestricted)
+	if lr != nil {
+		inner = lr.Inner
+	}
+	if inner != runtime.Any && inner != runtime.AnyOrNone {
+		return nil, false
+	}
+	var elems []runtime.Object
+	for len(elems) < i {
+		elems = append(elems, runtime.Any)
+	}
+	elems = append(elems, val, runtime.AnyOrNone)
+	var out runtime.Object = &runtime.List{ListType: ltd.ListKind, Elements: elems}
+	if lr != nil {
+		out = &runtime.LengthRestricted{Inner: out, Min: lr.Min, Max: lr.Max}
+	}
+	return out, true
+}
+
+// maxTemplateScan bounds the lists searched for the matching symbols
+// that change how an element is referenced: a record of template with a
+// permutation or AnyElementsOrNone is written out by hand, and a value
+// never holds one, so a longer list is taken to be a value rather than
+// every element of it being searched at every reference.
+const maxTemplateScan = 256
+
+// roItem is one position of the transformed form of a record of template
+// (ETSI ES 201 873-1 15.6.3 g): obj at it, the element of the template it
+// comes from, and whether it was made by the transformation, is an
+// AnyElementsOrNone, or is sheltered by a permutation, one holding
+// AnyElementsOrNone if permStar.
+type roItem struct {
+	obj            runtime.Object
+	orig           int
+	made, star     bool
+	perm, permStar bool
+}
+
+// isAnyElementsOrNone reports whether e is `*`, with a length or not.
+func isAnyElementsOrNone(e runtime.Object) (*runtime.LengthRestricted, bool) {
+	if e == runtime.AnyOrNone {
+		return nil, true
+	}
+	if lr, ok := e.(*runtime.LengthRestricted); ok && lr.Inner == runtime.AnyOrNone {
+		return lr, true
+	}
+	return nil, false
+}
+
+// transformedRecordOf is the transformed form of a record of template
+// holding a permutation or AnyElementsOrNone: every `* length(n..m)`
+// replaced by n AnyElements followed, if m is greater than n, by `*
+// length(0..m-n)`. ok is false for any other list.
+func transformedRecordOf(list *runtime.List) ([]roItem, bool) {
+	if len(list.FieldNames) > 0 || len(list.Elements) > maxTemplateScan {
+		return nil, false
+	}
+	wild := false
+	for _, e := range list.Elements {
+		_, star := isAnyElementsOrNone(e)
+		if p, ok := e.(*runtime.List); star || ok && p.ListType == runtime.PERMUTATION {
+			wild = true
+			break
+		}
+	}
+	if !wild {
+		return nil, false
+	}
+	var items []roItem
+	for k, e := range list.Elements {
+		if p, ok := e.(*runtime.List); ok && p.ListType == runtime.PERMUTATION {
+			permStar := false
+			for _, pe := range p.Elements {
+				_, st := isAnyElementsOrNone(pe)
+				permStar = permStar || st
+			}
+			for _, pe := range p.Elements {
+				items = append(items, roItem{obj: pe, orig: k, perm: true, permStar: permStar})
+			}
+			continue
+		}
+		lr, star := isAnyElementsOrNone(e)
+		switch {
+		case star && lr != nil:
+			for j := 0; j < lr.Min; j++ {
+				items = append(items, roItem{obj: runtime.Any, orig: k, made: true})
+			}
+			if lr.Max < 0 || lr.Max > lr.Min {
+				rest := runtime.Object(runtime.AnyOrNone)
+				if lr.Max >= 0 {
+					rest = &runtime.LengthRestricted{Inner: runtime.AnyOrNone, Min: 0, Max: lr.Max - lr.Min}
+				}
+				items = append(items, roItem{obj: rest, orig: k, made: true, star: true})
+			}
+		case star:
+			items = append(items, roItem{obj: e, orig: k, star: true})
+		default:
+			items = append(items, roItem{obj: e, orig: k})
+		}
+	}
+	return items, true
+}
+
+// elementOfRecordOfTemplate is element i of a record of template holding a
+// permutation or AnyElementsOrNone, on the right hand side (ETSI ES 201
+// 873-1 15.6.3 e, g): an element a permutation shelters, or one at or past
+// an AnyElementsOrNone of the transformed form, is an error. ok is false
+// for any other list, whose element i is its own.
+func elementOfRecordOfTemplate(list *runtime.List, i int) (runtime.Object, bool) {
+	items, ok := transformedRecordOf(list)
+	if !ok {
+		return nil, false
+	}
+	for pos, it := range items {
+		switch {
+		case it.permStar:
+			return runtime.Errorf("referencing element %d, which a permutation holding * shelters (ETSI 15.6.3 e)", i), true
+		case it.star && pos <= i:
+			return runtime.Errorf("referencing element %d, at or past * (ETSI 15.6.3 g)", i), true
+		case pos == i && it.perm:
+			return runtime.Errorf("referencing element %d, which a permutation shelters (ETSI 15.6.3 e)", i), true
+		case pos == i:
+			return it.obj, true
+		}
+	}
+	return runtime.Undefined, true
+}
+
+// assignedRecordOfTemplate is the record of template list holding a
+// permutation or AnyElementsOrNone after val is assigned to element i
+// (ETSI ES 201 873-1 15.6.3 e, g). An element a permutation shelters is
+// an error. Before the first AnyElementsOrNone of the transformed form the
+// element is replaced, one the transformation made once the elements up
+// to it are written out as the transformed form has them. Past that of the
+// last element, the elements between are AnyElement, as many as its
+// length allows and unbound beyond, and an AnyElementsOrNone with what its
+// length leaves follows. Past one of another element is an error. ok is
+// false for any other list.
+func assignedRecordOfTemplate(list *runtime.List, i int, val runtime.Object) (runtime.Object, bool) {
+	items, ok := transformedRecordOf(list)
+	if !ok {
+		return nil, false
+	}
+	sp := -1
+	for pos, it := range items {
+		if it.permStar && pos <= i {
+			return runtime.Errorf("assigning element %d, which a permutation holding * shelters (ETSI 15.6.3 e)", i), true
+		}
+		if it.perm && pos == i {
+			return runtime.Errorf("assigning element %d, which a permutation shelters (ETSI 15.6.3 e)", i), true
+		}
+		if it.star && sp < 0 {
+			sp = pos
+		}
+	}
+	// writtenOut is the elements before element k of the template, as
+	// they are but element expand, written out as the transformed form
+	// has it, and where each position of that is in it.
+	writtenOut := func(k, expand int) ([]runtime.Object, map[int]int) {
+		var out []runtime.Object
+		at := map[int]int{}
+		for pos, it := range items {
+			if it.orig >= k {
+				break
+			}
+			if it.perm || it.made && it.orig != expand {
+				if pos == 0 || items[pos-1].orig != it.orig {
+					out = append(out, list.Elements[it.orig])
+				}
+				continue
+			}
+			at[pos] = len(out)
+			out = append(out, it.obj)
+		}
+		return out, at
+	}
+	result := func(out []runtime.Object) (runtime.Object, bool) {
+		return &runtime.List{ListType: list.ListType, Elements: out}, true
+	}
+	last := len(list.Elements) - 1
+	if sp < 0 || i < sp {
+		if i >= len(items) {
+			out, _ := writtenOut(last+1, -1)
+			for gap := i - len(items); gap > 0; gap-- {
+				out = append(out, runtime.Undefined)
+			}
+			return result(append(out, val))
+		}
+		target := items[i].orig
+		var out []runtime.Object
+		var at map[int]int
+		if items[i].made {
+			out, at = writtenOut(target+1, target)
+		} else {
+			out, at = writtenOut(target, -1)
+			at[i] = len(out)
+			out = append(out, list.Elements[target])
+		}
+		out = append(out, list.Elements[target+1:]...)
+		out[at[i]] = val
+		return result(out)
+	}
+	if items[sp].orig != last {
+		return runtime.Errorf("assigning element %d, past * that is not the last element (ETSI 15.6.3 g)", i), true
+	}
+	out, _ := writtenOut(last, -1)
+	start := 0
+	for start < len(items) && items[start].orig < last {
+		start++
+	}
+	lo, hi := 0, -1
+	if lr, _ := isAnyElementsOrNone(list.Elements[last]); lr != nil {
+		lo, hi = lr.Min, lr.Max
+	}
+	for p := start; p < i; p++ {
+		if hi < 0 || p-start < hi {
+			out = append(out, runtime.Any)
+		} else {
+			out = append(out, runtime.Undefined)
+		}
+	}
+	out = append(out, val)
+	used := i - start + 1
+	if lo -= used; lo < 0 {
+		lo = 0
+	}
+	switch {
+	case hi < 0 && lo == 0:
+		out = append(out, runtime.AnyOrNone)
+	case hi < 0:
+		out = append(out, &runtime.LengthRestricted{Inner: runtime.AnyOrNone, Min: lo, Max: -1})
+	case hi > used:
+		out = append(out, &runtime.LengthRestricted{Inner: runtime.AnyOrNone, Min: lo, Max: hi - used})
+	}
+	return result(out)
+}
+
+// stringWithElement is charstring s with element i set to val, or nil
+// when val is no charstring. An item of a pattern, or a pattern assigned to
+// an item, makes a template, whose items are characters and
+// metacharacters (ETSI ES 201 873-1 15.6.1 e-h). Otherwise one character
+// is assigned, at most just past the end (6.1.1.1). s is not changed:
+// charstrings are shared by the variables holding them (runtime.Share).
+func stringWithElement(s *runtime.String, i int64, val runtime.Object) runtime.Object {
+	r, ok := val.(*runtime.String)
+	if !ok || i < 0 {
+		return nil
+	}
+	if s.IsPattern || r.IsPattern {
+		return withPatternItem(s, int(i), r)
+	}
+	if r.Len() != 1 {
+		return runtime.Errorf("assigning a string of length %d to an element of a string", r.Len())
+	}
+	if int(i) > s.Len() {
+		return runtime.Errorf("assigning element %d of a string of length %d", i, s.Len())
+	}
+	return s.WithRuneAt(int(i), r.Value[0], true)
+}
+
+// withElementUnderAttribute is template container, a list or string with
+// a length or ifpresent attribute, with element i set to val and its
+// attributes kept (ETSI ES 201 873-1 15.6.1 k, l; 15.6.3 c). An element of
+// a record of with ifpresent, or of a template list, complement, subset or
+// superset, is an error (15.6.3 b, f). ok is false for any other
+// container.
+func withElementUnderAttribute(container runtime.Object, i int64, val runtime.Object) (runtime.Object, bool) {
+	var wrap func(runtime.Object) runtime.Object
+	var inner runtime.Object
+	switch x := container.(type) {
+	case *runtime.LengthRestricted:
+		inner = x.Inner
+		wrap = func(o runtime.Object) runtime.Object {
+			return &runtime.LengthRestricted{Inner: o, Min: x.Min, Max: x.Max}
+		}
+	case *runtime.IfPresent:
+		inner = x.Inner
+		wrap = func(o runtime.Object) runtime.Object { return &runtime.IfPresent{Inner: o} }
+	default:
+		return nil, false
+	}
+	if i < 0 {
+		return runtime.Errorf("negative index %d", i), true
+	}
+	var out runtime.Object
+	switch x := inner.(type) {
+	case *runtime.String:
+		out = stringWithElement(x, i, val)
+		if out == nil {
+			return nil, false
+		}
+	case *runtime.LengthRestricted, *runtime.IfPresent:
+		if _, isIfp := container.(*runtime.IfPresent); isIfp {
+			if _, isList := innermost(x).(*runtime.List); isList {
+				return runtime.Errorf("assigning an element of a template with ifpresent (ETSI 15.6.3 f)"), true
+			}
+		}
+		var ok bool
+		if out, ok = withElementUnderAttribute(x, i, val); !ok {
+			return nil, false
+		}
+	case *runtime.List:
+		if _, isIfp := container.(*runtime.IfPresent); isIfp {
+			return runtime.Errorf("assigning an element of a template with ifpresent (ETSI 15.6.3 f)"), true
+		}
+		switch x.ListType {
+		case runtime.VALUE_LIST, runtime.COMPLEMENT, runtime.SUBSET, runtime.SUPERSET:
+			return runtime.Errorf("assigning element %d of a %s template (ETSI 15.6.3 b)", i, x.ListType), true
+		}
+		if len(x.FieldNames) > 0 {
+			return nil, false
+		}
+		var ok bool
+		if out, ok = assignedRecordOfTemplate(x, int(i), val); !ok {
+			elems := append([]runtime.Object(nil), x.Elements...)
+			for len(elems) <= int(i) {
+				elems = append(elems, runtime.Undefined)
+			}
+			elems[i] = val
+			out = &runtime.List{ListType: x.ListType, Elements: elems}
+		}
+	default:
+		return nil, false
+	}
+	if runtime.IsError(out) {
+		return out, true
+	}
+	return wrap(out), true
+}
+
+// innermost is o without its length and ifpresent attributes.
+func innermost(o runtime.Object) runtime.Object {
+	for {
+		switch x := o.(type) {
+		case *runtime.LengthRestricted:
+			o = x.Inner
+		case *runtime.IfPresent:
+			o = x.Inner
+		default:
+			return o
+		}
+	}
+}
+
+// withPatternItem is template s with item i set to r (ETSI ES 201 873-1
+// 15.6.1 e-h): a specific value becomes the pattern that matches it
+// alone; past the end, as many `?` as fill the gap come first; and a
+// pattern of more than one item becomes one group.
+func withPatternItem(s *runtime.String, i int, r *runtime.String) runtime.Object {
+	var items [][]rune
+	if s.IsPattern {
+		items = patternItems(s.Value)
+	} else {
+		for _, c := range s.Value {
+			items = append(items, escapePatternRune(c))
+		}
+	}
+	if !r.IsPattern && r.Len() != 1 {
+		return runtime.Errorf("assigning a string of length %d to an item of a pattern (ETSI 15.6.1)", r.Len())
+	}
+	var item []rune
+	if r.IsPattern {
+		parts := patternItems(r.Value)
+		item = append([]rune(nil), r.Value...)
+		if len(parts) > 1 {
+			item = append(append([]rune{'('}, item...), ')')
+		}
+	} else {
+		for _, c := range r.Value {
+			item = append(item, escapePatternRune(c)...)
+		}
+	}
+	for len(items) < i {
+		items = append(items, []rune{'?'})
+	}
+	if i < len(items) {
+		items[i] = item
+	} else {
+		items = append(items, item)
+	}
+	var out []rune
+	for _, it := range items {
+		out = append(out, it...)
+	}
+	return &runtime.String{Value: out, IsPattern: true, NoCase: s.NoCase || r.NoCase,
+		PatternComplex: s.PatternComplex || r.PatternComplex || r.IsPattern && len(item) > 1}
+}
+
+// escapePatternRune is c as a pattern matches it alone.
+func escapePatternRune(c rune) []rune {
+	if strings.ContainsRune(`?*\[]{}()#+|"`, c) {
+		return []rune{'\\', c}
+	}
+	return []rune{c}
+}
+
+// patternItems splits a pattern's source into the items indexing counts
+// (ETSI ES 201 873-1 15.6.1, table B.1): a character, an escape such as
+// `\d` or `\q{...}`, a set `[...]`, a reference `{...}` or a group
+// `(...)`, each with the repetition `+` or `#...` that follows it.
+func patternItems(src []rune) [][]rune {
+	var items [][]rune
+	// setEnd is the position of the `]` closing the set at i.
+	setEnd := func(i int) int {
+		j := i + 1
+		if j < len(src) && src[j] == '^' {
+			j++
+		}
+		if j < len(src) && src[j] == ']' {
+			j++
+		}
+		for j < len(src) && src[j] != ']' {
+			if src[j] == '\\' {
+				j++
+			}
+			j++
+		}
+		return j
+	}
+	// closing is the position of what closes the open at i, sets and
+	// escapes skipped, or i when nothing does: the character is then a
+	// literal (B.1.5).
+	closing := func(i int, open, close rune) int {
+		depth := 0
+		for j := i; j < len(src); j++ {
+			switch src[j] {
+			case '\\':
+				j++
+			case '[':
+				if open != '[' {
+					j = setEnd(j)
+				}
+			case open:
+				depth++
+			case close:
+				depth--
+				if depth == 0 {
+					return j
+				}
+			}
+		}
+		return i
+	}
+	for i := 0; i < len(src); {
+		j := i
+		switch src[i] {
+		case '\\':
+			j = i + 1
+			if j+1 < len(src) && (src[j] == 'N' || src[j] == 'q') && src[j+1] == '{' {
+				j = closing(j+1, '{', '}')
+			}
+		case '[':
+			j = setEnd(i)
+		case '{':
+			j = closing(i, '{', '}')
+		case '(':
+			j = closing(i, '(', ')')
+		}
+		if j >= len(src) {
+			j = len(src) - 1
+		}
+		j++
+		// A repetition belongs to the item before it.
+		for j < len(src) {
+			if src[j] == '+' {
+				j++
+				continue
+			}
+			if src[j] == '#' && j+1 < len(src) {
+				if src[j+1] == '(' {
+					j = closing(j+1, '(', ')') + 1
+				} else {
+					j += 2
+				}
+				continue
+			}
+			break
+		}
+		if j > len(src) {
+			j = len(src)
+		}
+		items = append(items, append([]rune(nil), src[i:j]...))
+		i = j
+	}
+	return items
 }
 
 // extractTemplateValue is `t.value` (ETSI 15.15): the string of a pattern

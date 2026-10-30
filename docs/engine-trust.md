@@ -6,8 +6,8 @@ exists at all, see the [feature matrix](ntt-vs-titan.md); for the work queue,
 [remaining work](conformance/remaining-work.md); for per-push numbers, the
 [conformance dashboard](conformance/index.html).
 
-Short answer, as of 2026-10-30: **4953 of 5164 ETSI conformance files match
-their expected outcome, 96.31%,** in the suite as upstream had it on
+Short answer, as of 2026-10-30: **4957 of 5164 ETSI conformance files match
+their expected outcome, 96.38%,** in the suite as upstream had it on
 2024-03-28. Of the 4948 files of the earlier copy (2022-09-07), 4803
 matched, 97.52%; the newer suite adds 216 tests, mostly of features not
 implemented yet, expects another outcome of 22 of the earlier ones and

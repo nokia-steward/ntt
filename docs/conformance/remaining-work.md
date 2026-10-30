@@ -1,5 +1,14 @@
 # Remaining Conformance Work
 
+**2026-10-30 (b) — referencing elements of templates (15.6.1, 15.6.3):
+4957 / 5164 (96.38%).** String template items and record of template
+elements follow the clauses; every example of 15.6.3 gives what the
+standard says but example 4, which contradicts rule g.
+`Sem_150601_..._003` expects no `?` where rule g puts one. Still open in
+15.6: map templates (15.6.6, a `*` element and the left-hand-side
+expansions, with 6.2.15's map notation), and the error for referencing an
+unbound element (`NegSem_150603_..._011`-`013`).
+
 **2026-10-30 — the 24 tests upstream changed, checked against V4.17.1:
 4953 / 5164 matched (96.31%), 21 skipped, 211 misses.** Each of the 24
 follows the standard, ntt did not: the 15.8 restriction tables (13, 13a,

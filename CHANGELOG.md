@@ -287,6 +287,24 @@ single functional test doubles as a performance probe. See
   `modifies ?` has its base expanded into the type's fields (`?` where
   mandatory, `*` where optional, 15.5 c) before the modification, and an
   element of a map template holding `?` is `*` (15.6.6 c).
+- **Referencing elements of string and record of templates** (15.6.1,
+  15.6.3): an element of a pattern is one of its items, a metacharacter,
+  set or group with its repetition, as table B.1 counts them, and of a
+  binary string template one symbol; assigning one makes the template a
+  pattern, past its end after `?`s, a pattern of several items as one
+  group. A record of template holding `?` or `*` expands when an element
+  is assigned (`{?, ?, 2, *}`); `* length(n)` counts as n elements; an
+  element at or past `*`, sheltered by a permutation, or of a template
+  list, complement, subset, superset or `*` is an error; a length
+  attribute bounds the index and is kept. All the examples of 15.6.3 give
+  what the standard says, except its example 4, which contradicts rule g
+  and is taken as an erratum. Strings follow 6.1.1.1: one element is
+  assigned, at most just past the end, and an element is read within it
+  (it padded with spaces, and read `undefined`). Conformance test
+  `Sem_150601_ReferencingIndividualStringElements_003` expects no `?`
+  where rule g puts one, and still fails. A record of template with a
+  permutation and a `* length(n)` matches: the `* length(n)` was taken
+  for one element.
 - **A template list with `omit` matches an omitted field**: `{ a := 1, b
   := (1, omit) }` did not match `{ a := 1, b := omit }` (B.1.2.1); nor did
   `* length(1)`, a length restricting a present value only (B.1.4.1).

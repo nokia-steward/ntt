@@ -994,6 +994,18 @@ func matchRecordOfPerm(vals, pats []runtime.Object) bool {
 		return len(vals) == 0
 	}
 	head, rest := pats[0], pats[1:]
+	// Top-level `* length(n..m)`: consume n..m values.
+	if lo, hi, ok := boundedStar(head); ok {
+		if hi == -1 || hi > len(vals) {
+			hi = len(vals)
+		}
+		for k := lo; k <= hi; k++ {
+			if matchRecordOfPerm(vals[k:], rest) {
+				return true
+			}
+		}
+		return false
+	}
 	// Top-level `*`: consume 0..len(vals) values.
 	if isStarElem(head) {
 		for k := 0; k <= len(vals); k++ {

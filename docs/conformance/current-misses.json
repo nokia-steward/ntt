@@ -1,14 +1,14 @@
 {
- "summary": "ran 5164 files: 4953 matched, 21 skipped (96.31% match rate)",
+ "summary": "ran 5164 files: 4957 matched, 21 skipped (96.38% match rate)",
  "source": "off.json",
- "miss_count": 211,
+ "miss_count": 207,
  "outcomes": {
-  "reject->pass": 67,
+  "reject->pass": 66,
   "pass->parse-error": 35,
   "reject->none": 27,
   "pass->error": 25,
   "->": 21,
-  "pass->fail": 18,
+  "pass->fail": 15,
   "error->parse-error": 8,
   "pass->semantic-error": 7,
   "pass->none": 3
@@ -49,17 +49,6 @@
    }
   },
   {
-   "chapter": "core_language/15_templates",
-   "misses": 22,
-   "outcomes": {
-    "->": 2,
-    "pass->fail": 7,
-    "reject->pass": 8,
-    "reject->none": 3,
-    "pass->error": 2
-   }
-  },
-  {
    "chapter": "core_language/16_functions_altsteps_testcases",
    "misses": 20,
    "outcomes": {
@@ -70,6 +59,17 @@
     "->": 1,
     "pass->none": 1,
     "pass->semantic-error": 1
+   }
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "misses": 18,
+   "outcomes": {
+    "->": 2,
+    "pass->fail": 4,
+    "reject->none": 3,
+    "reject->pass": 7,
+    "pass->error": 2
    }
   },
   {
@@ -1036,39 +1036,7 @@
    "expected": "pass",
    "actual": "fail",
    "outcome": "pass->fail",
-   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150601_referencing_individual_string_elements/Sem_150601_ReferencingIndividualStringElements_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150601_referencing_individual_string_elements/Sem_150601_ReferencingIndividualStringElements_002.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
    "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150601_referencing_individual_string_elements/Sem_150601_ReferencingIndividualStringElements_003.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150601_referencing_individual_string_elements/Sem_150601_ReferencingIndividualStringElements_005.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_010.ttcn",
    "message": ""
   },
   {
