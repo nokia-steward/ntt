@@ -98,6 +98,10 @@ func TestExprs(t *testing.T) {
 		{pass, `b := any from c.running -> @index value i`},
 		{pass, `p := decmatch M: {f1:= 10, f2 := '1001'B}`},
 		{pass, `p := decmatch ("UTF-8") M: {f1:= 10, f2 := '1001'B}`},
+		{pass, `decmatch(x)`},
+		{pass, `{f := decmatch(x)}`},
+		{pass, `{f := decmatch(x), g := 1}`},
+		{pass, `decmatch(x) ifpresent`},
 		{pass, `p := @decoded payload`},
 		{pass, `p := pattern ".*" & p & "$"`},
 		{pass, `p := pattern @nocase ".*" & p & "$"`},
@@ -137,6 +141,7 @@ func TestFuncDecls(t *testing.T) {
 		{pass, `function f() mtc C {}`},
 		{pass, `function f() runs on C mtc C system C {}`},
 		{pass, `altstep as() { var roi[-] a[4][4]; [] receive; [else] {}}`},
+		{pass, `altstep as1() { [] a1() [] a2() }`},
 		{pass, `altstep interleave interleaveStep() {  [] p1.receive; [] p2.check{}}`},
 		{pass, `signature f();`},
 		{pass, `signature f() exception (integer);`},
@@ -262,6 +267,7 @@ func TestTemplateDecls(t *testing.T) {
 		{pass, `template(omit)    int x := ?;`},
 		{pass, `template(value)   int x := ?;`},
 		{pass, `template(present) int x := ?;`},
+		{pass, `template T t := { f := decmatch(x) };`},
 	}
 
 	testParse(t, templateDecls, func(p *parser) { p.parseTemplateDecl() })
@@ -419,6 +425,14 @@ func TestStmts(t *testing.T) {
 		{pass, `interleave {}`},
 		{pass, `alt {}`},
 		{pass, `alt { [] receive; [23<foo()] p.timeout { var i x:=23; } [else] {}}`},
+		{pass, `alt { [] a1() [] a2() }`},
+		{pass, `alt { [] p.receive [] t.timeout {} }`},
+		{pass, `alt { [] p.receive(x) -> value v [] a2() {} }`},
+		{pass, `alt { [] a1() [else] {} }`},
+		{pass, `alt { [] as1() [x > 1] p.receive {} }`},
+		{pass, `alt { [] p[0].receive(a[1]) {} }`},
+		{pass, `alt { [] p.receive { x := g()[0]; } }`},
+		{pass, `x := g()[0];`},
 
 		// Init Statements
 		{pass, `if (var integer i := 1; match(i, 2)) {}`},
@@ -557,6 +571,69 @@ func TestTypeParametrization(t *testing.T) {
 		{fail, `const int x := a(b<x, y> X+2);`},
 	}
 	testParse(t, tests, func(p *parser) { p.parseModuleDef() })
+}
+
+func TestAltGuardSplit(t *testing.T) {
+	p := NewParser([]byte(`function f() { alt { [] as1() [x > 1] p.receive {} [] p[0].receive(a[1]) {} } }`))
+	def := p.parseFuncDecl()
+	if err := p.Err(); err != nil {
+		t.Fatal(err)
+	}
+	alt := def.Body.Stmts[0].(*AltStmt)
+	if len(alt.Body.Stmts) != 3 {
+		t.Fatalf("got %d guards, want 3", len(alt.Body.Stmts))
+	}
+
+	g0 := alt.Body.Stmts[0].(*CommClause)
+	if g0.X != nil || g0.Body != nil {
+		t.Fatalf("first guard: cond=%v body=%v", g0.X, g0.Body)
+	}
+	if _, ok := g0.Comm.(*ExprStmt).Expr.(*CallExpr); !ok {
+		t.Fatalf("first guard operation: %T", g0.Comm.(*ExprStmt).Expr)
+	}
+
+	g1 := alt.Body.Stmts[1].(*CommClause)
+	if g1.X == nil {
+		t.Fatal("second guard condition was parsed as an index")
+	}
+	if _, ok := g1.Comm.(*ExprStmt).Expr.(*SelectorExpr); !ok {
+		t.Fatalf("second guard operation: %T", g1.Comm.(*ExprStmt).Expr)
+	}
+
+	call := alt.Body.Stmts[2].(*CommClause).Comm.(*ExprStmt).Expr.(*CallExpr)
+	sel := call.Fun.(*SelectorExpr)
+	if _, ok := sel.X.(*IndexExpr); !ok {
+		t.Fatalf("port index: %T", sel.X)
+	}
+	if _, ok := call.Args.List[0].(*IndexExpr); !ok {
+		t.Fatalf("argument index: %T", call.Args.List[0])
+	}
+}
+
+func TestDecmatchParenTemplate(t *testing.T) {
+	p := NewParser([]byte(`decmatch(x)`))
+	e := p.parseExpr().(*DecmatchExpr)
+	if err := p.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if e.Params != nil {
+		t.Fatalf("Params = %#v, want nil", e.Params)
+	}
+	if _, ok := e.X.(*ParenExpr); !ok {
+		t.Fatalf("X = %T, want *ParenExpr", e.X)
+	}
+
+	p = NewParser([]byte(`decmatch ("UTF-8") M`))
+	e = p.parseExpr().(*DecmatchExpr)
+	if err := p.Err(); err != nil {
+		t.Fatal(err)
+	}
+	if e.Params == nil {
+		t.Fatal("decoding parameter was consumed as the template")
+	}
+	if _, ok := e.X.(*Ident); !ok {
+		t.Fatalf("X = %T, want *Ident", e.X)
+	}
 }
 
 func testParse(t *testing.T, tests []Test, f func(p *parser)) {

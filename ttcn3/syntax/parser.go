@@ -156,6 +156,10 @@ type parser struct {
 	names map[string]bool
 	uses  map[string]bool
 
+	// altGuard is true while parsing the operation of an alt guard.
+	// A '[' that follows it can start the next guard rather than an index.
+	altGuard bool
+
 	// Error recovery
 	// (used to limit the number of calls to advance
 	// w/o making scanning progress - avoids potential endless
@@ -714,6 +718,11 @@ L:
 		case DOT:
 			x = p.parseSelectorExpr(x)
 		case LBRACK:
+			// [] and [else], and a condition followed by another
+			// operation, begin the next alt guard. They are not indexes.
+			if p.bracketStartsAltGuard() {
+				break L
+			}
 			x = p.parseIndexExpr(x)
 		case LPAREN:
 			x = p.parseCallExpr(x)
@@ -907,10 +916,74 @@ func (p *parser) parseCallDecmatch() *DecmatchExpr {
 	c := new(DecmatchExpr)
 	c.Tok = p.expect(DECMATCH)
 	if p.tok == LPAREN {
-		c.Params = p.parseParenExpr()
+		// decmatch ["(" Expression ")"] TemplateInstance.
+		// A parenthesized expression is itself a template, so
+		// decmatch(x) keeps the parentheses as the template when
+		// nothing that can start a template follows.
+		paren := p.parseParenExpr()
+		if !startsExpr(p.tok) {
+			c.X = paren
+			return c
+		}
+		c.Params = paren
 	}
 	c.X = p.parseExpr()
 	return c
+}
+
+// startsExpr reports whether tok can start an expression or template.
+func startsExpr(tok Kind) bool {
+	switch tok {
+	case ADD, EXCL, NOT, NOT4B, SUB, INC, DEC, COLONCOLON,
+		ANYKW, ALL, UNIVERSAL,
+		ADDRESS, CHARSTRING, CLASS, MAP, MTC, SYSTEM, TESTCASE, TIMER, UNMAP,
+		IDENT,
+		INT, ANY, NOTIMPL, BSTRING, ERROR, NULL, OMIT, FAIL, FALSE, FLOAT,
+		INCONC, MUL, NAN, NONE, PASS, STRING, TRUE,
+		LPAREN, LBRACK, LBRACE,
+		MODIFIES, REGEXP, PATTERN, DECMATCH, MODIF, VALUE, PRESENT:
+		return true
+	default:
+		return false
+	}
+}
+
+// bracketStartsAltGuard reports whether the current '[' begins the next alt
+// guard rather than an index of the guard operation. An empty '[]' or
+// '[else]' does. A '[expr]' does when another operation follows the ']'.
+func (p *parser) bracketStartsAltGuard() bool {
+	if !p.altGuard || p.tok != LBRACK {
+		return false
+	}
+	switch p.peek(2).Kind() {
+	case RBRACK, ELSE:
+		return true
+	}
+
+	depth := 0
+	for i := 1; ; i++ {
+		k := p.peek(i).Kind()
+		switch k {
+		case EOF:
+			return false
+		case LBRACK, LPAREN, LBRACE:
+			depth++
+		case RBRACK, RPAREN, RBRACE:
+			depth--
+			if depth > 0 {
+				break
+			}
+			if k != RBRACK {
+				return false
+			}
+			switch p.peek(i + 1).Kind() {
+			case IDENT, ANYKW, ALL, MTC, SYSTEM:
+				return true
+			default:
+				return false
+			}
+		}
+	}
 }
 
 func (p *parser) parseModifier() Expr {
@@ -2559,6 +2632,12 @@ func (p *parser) parseBlockStmt() *BlockStmt {
 		defer un(trace(p, "BlockStmt"))
 	}
 
+	// A nested block, such as a guard body or '@dynamic' body, is not
+	// part of the guard operation being parsed.
+	savedGuard := p.altGuard
+	p.altGuard = false
+	defer func() { p.altGuard = savedGuard }()
+
 	x := &BlockStmt{LBrace: p.expect(LBRACE)}
 	for p.tok != RBRACE && p.tok != EOF {
 		x.Stmts = append(x.Stmts, p.parseStmt())
@@ -2837,7 +2916,10 @@ func (p *parser) parseAltGuard() *CommClause {
 		x.X = p.parseExpr()
 	}
 	x.RBrack = p.expect(RBRACK)
+	saved := p.altGuard
+	p.altGuard = true
 	x.Comm = p.parseSimpleStmt()
+	p.altGuard = saved
 	if p.tok == LBRACE {
 		x.Body = p.parseBlockStmt()
 	}
