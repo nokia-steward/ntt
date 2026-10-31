@@ -271,6 +271,9 @@ func DefinitionToken(tree *ttcn3.Tree, id syntax.Node) (SemanticTokenType, Seman
 	case *syntax.Module:
 		return Namespace, Definition
 	case *syntax.ImportDecl:
+		if id == n.Alias {
+			return Namespace, Declaration
+		}
 		return Namespace, Undefined
 	case *syntax.FormalPar:
 		return Parameter, Declaration

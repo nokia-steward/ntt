@@ -44,6 +44,7 @@ func TestScopes(t *testing.T) {
 				control {};
 				type enumerated E<type T> {E1}
 			}`, []string{"foo", "x", "control", "E", "E1"}},
+		{`module M { import from foo -> bar all; }`, []string{"bar"}},
 	}
 
 	for _, tt := range tests {

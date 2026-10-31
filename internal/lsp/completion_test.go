@@ -195,6 +195,18 @@ func TestImportModulenames(t *testing.T) {
 
 }
 
+func TestImportModuleAlias(t *testing.T) {
+	list := testCompletion(t, `module Test
+	{
+		import from A -> Tes¶
+		import from A all;
+	  }`, `module A
+	  {}`, `module B
+	  {}`)
+
+	assert.Nil(t, list)
+}
+
 func TestImportBehavioursCtrlSpc(t *testing.T) {
 	list := testCompletion(t, `module Test
     {

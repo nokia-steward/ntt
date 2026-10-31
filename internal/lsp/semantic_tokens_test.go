@@ -213,6 +213,38 @@ func TestModuleIds(t *testing.T) {
 	}, actual)
 }
 
+func TestModuleAlias(t *testing.T) {
+	actual := testTokens(t, nil, `
+        module Test
+        {
+                import from TestModuleAlias_Module_1 -> M1 all;
+                type M1.Byte MyByte;
+                const universal charstring c := M1.Byte.encode;
+        }
+        module TestModuleAlias_Module_1
+        {
+                type integer Byte;
+        }`)
+
+	assert.Equal(t, []Token{
+		{Line: 2, Text: "Test", Type: lsp.Namespace, Mod: lsp.Definition},
+		{Line: 4, Text: "TestModuleAlias_Module_1", Type: lsp.Namespace},
+		{Line: 4, Text: "M1", Type: lsp.Namespace, Mod: lsp.Declaration},
+		{Line: 5, Text: "M1", Type: lsp.Namespace},
+		{Line: 5, Text: "Byte", Type: lsp.Type},
+		{Line: 5, Text: "MyByte", Type: lsp.Type, Mod: lsp.Definition},
+		{Line: 6, Text: "universal", Type: lsp.Type, Mod: lsp.DefaultLibrary},
+		{Line: 6, Text: "charstring", Type: lsp.Type, Mod: lsp.DefaultLibrary},
+		{Line: 6, Text: "c", Type: lsp.Variable, Mod: lsp.Declaration | lsp.Readonly},
+		{Line: 6, Text: "M1", Type: lsp.Namespace},
+		{Line: 6, Text: "Byte", Type: lsp.Type},
+
+		{Line: 8, Text: "TestModuleAlias_Module_1", Type: lsp.Namespace, Mod: lsp.Definition},
+		{Line: 10, Text: "integer", Type: lsp.Type, Mod: lsp.DefaultLibrary},
+		{Line: 10, Text: "Byte", Type: lsp.Type, Mod: lsp.Definition},
+	}, actual)
+}
+
 func TestDeltaModuleKwTypeId(t *testing.T) {
 	actual := testTokens(t, SetRange(7, 1, 10, 17), `
         module Test

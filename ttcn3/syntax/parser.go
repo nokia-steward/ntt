@@ -832,6 +832,9 @@ func (p *parser) parseOperand() Expr {
 	case VALUE:
 		return p.make_use(p.consume())
 
+	case PRESENT:
+		return p.parseCallExpr(p.make_use(p.consume()))
+
 	default:
 		p.errorExpected("operand")
 	}
@@ -939,7 +942,12 @@ func (p *parser) parseDynamicModifier() *DynamicExpr {
 }
 
 func (p *parser) parseSelectorExpr(x Expr) *SelectorExpr {
-	return &SelectorExpr{X: x, Dot: p.consume(), Sel: p.parseRef()}
+	dot := p.consume()
+	switch p.tok {
+	case ENCODE, VARIANT, DISPLAY, EXTENSION, OPTIONAL, PRESENT:
+		return &SelectorExpr{X: x, Dot: dot, Sel: p.make_use(p.consume())}
+	}
+	return &SelectorExpr{X: x, Dot: dot, Sel: p.parseRef()}
 }
 
 func (p *parser) parseIndexExpr(x Expr) *IndexExpr {
@@ -1362,6 +1370,11 @@ func (p *parser) parseImport() *ImportDecl {
 		x.Language = p.parseLanguageSpec()
 	}
 
+	if p.tok == REDIR {
+		x.RedirTok = p.consume()
+		x.Alias = p.parseName()
+	}
+
 	switch p.tok {
 	case ALL:
 		y := &DefKindExpr{}
@@ -1560,6 +1573,15 @@ func (p *parser) parseWithStmt() *WithStmt {
 		x.RParen = p.expect(RPAREN)
 	}
 
+	if p.tok == LBRACE {
+		x.Value = &SelectorExpr{
+			X:   p.parseRelatedEncodings(),
+			Dot: p.expect(DOT),
+			Sel: &ValueLiteral{Tok: p.expect(STRING)},
+		}
+		return x
+	}
+
 	var v Expr = &ValueLiteral{Tok: p.expect(STRING)}
 	if p.tok == DOT {
 		v = &SelectorExpr{
@@ -1571,6 +1593,24 @@ func (p *parser) parseWithStmt() *WithStmt {
 	x.Value = v
 
 	return x
+}
+
+// RelatedEncodings ::= "{" STRING {"," STRING} [","] "}"
+func (p *parser) parseRelatedEncodings() *CompositeLiteral {
+	c := new(CompositeLiteral)
+	c.LBrace = p.expect(LBRACE)
+	for {
+		c.List = append(c.List, &ValueLiteral{Tok: p.expect(STRING)})
+		if p.tok != COMMA {
+			break
+		}
+		p.consume()
+		if p.tok == RBRACE {
+			break
+		}
+	}
+	c.RBrace = p.expect(RBRACE)
+	return c
 }
 
 func (p *parser) parseWithQualifier() Expr {

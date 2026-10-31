@@ -589,6 +589,11 @@ func (f *finder) typeOf(def *Node) []*Node {
 				q = append(q, &Node{Node: n.Return.Type, Tree: def.Tree})
 			}
 
+		case *syntax.ImportDecl:
+			if n.Alias != nil {
+				q = append(q, f.lookup(n.Module, def.Tree)...)
+			}
+
 		case *syntax.IndexExpr:
 			q = append(q, f.lookup(n, def.Tree)...)
 

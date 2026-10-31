@@ -4267,6 +4267,12 @@ func (n *ImportDecl) FirstTok() Token {
 	case n.Language != nil:
 		return n.Language.FirstTok()
 
+	case n.RedirTok != nil:
+		return n.RedirTok
+
+	case n.Alias != nil:
+		return n.Alias.FirstTok()
+
 	case n.LBrace != nil:
 		return n.LBrace
 
@@ -4299,6 +4305,12 @@ func (n *ImportDecl) LastTok() Token {
 	case n.LBrace != nil:
 		return n.LBrace
 
+	case n.Alias != nil:
+		return n.Alias.LastTok()
+
+	case n.RedirTok != nil:
+		return n.RedirTok
+
 	case n.Language != nil:
 		return n.Language.LastTok()
 
@@ -4317,7 +4329,7 @@ func (n *ImportDecl) LastTok() Token {
 }
 
 func (n *ImportDecl) Children() []Node {
-	ret := make([]Node, 0, 8)
+	ret := make([]Node, 0, 10)
 
 	if n.ImportTok != nil {
 		ret = append(ret, n.ImportTok)
@@ -4333,6 +4345,14 @@ func (n *ImportDecl) Children() []Node {
 
 	if n.Language != nil {
 		ret = append(ret, n.Language)
+	}
+
+	if n.RedirTok != nil {
+		ret = append(ret, n.RedirTok)
+	}
+
+	if n.Alias != nil {
+		ret = append(ret, n.Alias)
 	}
 
 	if n.LBrace != nil {
@@ -4364,6 +4384,13 @@ func (n *ImportDecl) Inspect(f func(Node) bool) {
 	}
 
 	if c := n.Language; c != nil {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+	if c := n.Alias; c != nil {
 		if f(c) {
 			c.Inspect(f)
 		}
