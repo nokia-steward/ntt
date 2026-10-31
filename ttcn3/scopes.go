@@ -269,7 +269,12 @@ func (scp *Scope) add(n syntax.Node) error {
 		scp.Insert(n, n.Name)
 
 	case *syntax.ImportDecl:
-		scp.Insert(n, n.Module)
+		// A renamed module is only visible by its new name.
+		if n.Alias != nil {
+			scp.Insert(n, n.Alias)
+		} else {
+			scp.Insert(n, n.Module)
+		}
 
 	case *syntax.GroupDecl:
 		// GroupDecl are not added to the scope, but their members are.

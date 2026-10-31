@@ -185,6 +185,26 @@ func TestLookup(t *testing.T) {
 				module R  {type M2.R.¶x x; import from M2 all}`,
 			want: []string{"x0"}},
 		{
+			name: "dot import alias",
+			input: `module M2 {type record R {int x}}
+				module M1 {import from M2 -> A all; type A.R.¶x x}`,
+			want: []string{"x0"}},
+		{
+			name: "dot import alias",
+			input: `module M2 {type integer x}
+				module M1 {import from M2 -> A all; type ¶A.x y}`,
+			want: []string{"A0"}},
+		{
+			name: "dot import alias",
+			input: `module M2 {type integer x}
+				module M1 {import from M2 -> A all; type A.¶x y}`,
+			want: []string{"x0"}},
+		{
+			name: "dot import alias",
+			input: `module M2 {type integer x}
+				module M1 {import from M2 -> A {type x}; type ¶x y}`,
+			want: []string{"x0"}},
+		{
 			name: "dot ambigious",
 			input: `module M2 {type record R {int x}}
 				module R  {type R.¶x x; import from M2 all}`,

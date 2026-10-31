@@ -343,6 +343,8 @@ func Complete(suite *Suite, pos int, nodes []syntax.Node, ownModName string) []p
 				switch {
 				case scndNode.LBrace != nil:
 					return CompleteImportkinds()
+				case n == scndNode.Alias:
+					return nil
 				case n.End() >= pos:
 					// look for available modules for import
 					return CompleteAllModules(suite, ownModName, " ")

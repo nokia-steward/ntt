@@ -648,6 +648,8 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.FromTok)
 			p.print(n.Module)
 			p.print(n.Language)
+			p.print(n.RedirTok)
+			p.print(n.Alias)
 			p.print(n.LBrace, indent)
 			p.print(n.List)
 			p.print(unindent, n.RBrace)

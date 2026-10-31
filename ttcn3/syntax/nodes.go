@@ -840,6 +840,8 @@ type (
 		FromTok   Token
 		Module    *Ident
 		Language  *LanguageSpec
+		RedirTok  Token
+		Alias     *Ident
 		LBrace    Token
 		List      []*DefKindExpr
 		RBrace    Token
