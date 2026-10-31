@@ -86,37 +86,34 @@ func buildSource(file string) ttcn3.Source {
 	src := ttcn3.Source{
 		Filename: file,
 	}
-	var visit func(n syntax.Node)
-	visit = func(n syntax.Node) {
-		if n == nil {
-			return
-		}
+	tree := ttcn3.ParseFile(file)
+	if tree.Root == nil {
+		fatal(tree.Err)
+	}
+	var stack []int
+	for _, e := range syntax.Serialize(tree.Root) {
+		begin := int(e.Node.Pos())
+		end := int(e.Node.End())
+		k := strings.TrimPrefix(strings.TrimPrefix(fmt.Sprintf("%T", e.Node), "*"), "syntax.")
 
-		k := strings.TrimPrefix(strings.TrimPrefix(fmt.Sprintf("%T", n), "*"), "syntax.")
-		begin := int(n.Pos())
-		end := int(n.End())
-
-		switch n := n.(type) {
-		case syntax.Token:
-			if n == nil {
-				break
-			}
+		switch e.Kind {
+		case syntax.TokenEvent:
 			src.Events = append(src.Events, ttcn3.NodeEvent{
 				Kind: "AddToken",
-				Text: n.String(),
+				Text: e.Token().String(),
 				Offs: begin,
 				Len:  end - begin,
 			})
-		default:
+		case syntax.OpenEvent:
+			stack = append(stack, len(src.Events))
 			src.Events = append(src.Events, ttcn3.NodeEvent{
 				Kind: "Open" + k,
 				Offs: begin,
 				Len:  end - begin,
 			})
-			idx := len(src.Events) - 1
-			for _, c := range n.Children() {
-				visit(c)
-			}
+		case syntax.CloseEvent:
+			idx := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
 			src.Events = append(src.Events, ttcn3.NodeEvent{
 				Kind:  "Close" + k,
 				Offs:  begin,
@@ -126,6 +123,5 @@ func buildSource(file string) ttcn3.Source {
 			src.Events[idx].Other = len(src.Events) - 1
 		}
 	}
-	visit(ttcn3.ParseFile(file).Root)
 	return src
 }

@@ -9,7 +9,9 @@ type NodeEvent struct {
 	// Kind is the type of an node event (AddToken, OpenFooBar, CloseFooBar).
 	Kind string `json:"kind"`
 
-	// Text is the text of a AddToken event.
+	// Text is the text of a AddToken event. AddToken events cover every
+	// token of the source file in order, including comments, commas,
+	// semicolons and preprocessor directives, but excluding EOF.
 	Text string `json:"text,omitempty"`
 
 	// Offset is the position of the first character belonging to the node.

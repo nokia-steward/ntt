@@ -92,8 +92,15 @@ func (p *CanonicalPrinter) tree(n syntax.Node) error {
 	// white-spaces before the first token.
 	p.firstToken = true
 
-	for tok := n.FirstTok(); tok != nil && tok.Kind() != syntax.EOF; tok = tok.NextTok() {
-		p.printToken(tok)
+	for _, e := range syntax.Serialize(n) {
+		switch e.Kind {
+		case syntax.OpenEvent:
+			p.stack = append(p.stack, e.Node)
+		case syntax.CloseEvent:
+			p.stack = p.stack[:len(p.stack)-1]
+		case syntax.TokenEvent:
+			p.printToken(e.Token())
+		}
 	}
 
 	// Terminate the last line with a newline.
