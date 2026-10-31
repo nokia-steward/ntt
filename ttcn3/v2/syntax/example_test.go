@@ -9,7 +9,7 @@ import (
 func main() {
 	root := syntax.Parse([]byte("1+2*3"))
 	root.Inspect(func(n syntax.Node) bool {
-		fmt.Printf(n.Kind().String())
+		fmt.Print(n.Kind().String())
 		return true
 	})
 }

@@ -368,7 +368,7 @@ func (p *parser) error(n Node, msg string, args ...interface{}) {
 
 func (p *parser) errorExpected(what string) {
 	tok := p.peek(1)
-	p.error(tok, "expected "+what+", found "+tok.String())
+	p.error(tok, "expected %s, found %s", what, tok.String())
 }
 
 func (p *parser) expect(k Kind) Token {

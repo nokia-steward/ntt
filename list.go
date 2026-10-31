@@ -284,7 +284,7 @@ func PrintMatch(filename string, pos syntax.Position, id string, tags ...string)
 	if showFiles {
 		fmt.Fprintf(w, "%s:%d\t", filename, pos.Line)
 	}
-	fmt.Fprintf(w, id)
+	fmt.Fprint(w, id)
 	for _, t := range tags {
 		fmt.Fprintf(w, "\t%s", t)
 	}

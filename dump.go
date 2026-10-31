@@ -65,7 +65,7 @@ var (
 						if kind.IsKeyword() {
 							fmt.Fprintf(w, "KEYWORD")
 						} else {
-							fmt.Fprintf(w, strings.ToUpper(kind.String()))
+							fmt.Fprint(w, strings.ToUpper(kind.String()))
 						}
 
 						if withValue {
