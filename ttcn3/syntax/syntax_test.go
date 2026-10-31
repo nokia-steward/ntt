@@ -87,3 +87,8 @@ func TestDoc(t *testing.T) {
 		assert.Equal(t, want, testDoc(t, input))
 	})
 }
+
+func TestErrorString(t *testing.T) {
+	root := syntax.Parse([]byte(`x := ;`))
+	assert.EqualError(t, root.Err(), "1 error occurred:\n\t* 1:6-1:7: expected operand, found ;\n\n")
+}

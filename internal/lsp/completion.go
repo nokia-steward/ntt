@@ -437,10 +437,10 @@ func (c *completer) selectorComponent(sel *syntax.SelectorExpr) []protocol.Compl
 }
 
 func (c *completer) componentExtends(comp *syntax.ComponentTypeDecl) []protocol.CompletionItem {
-	if comp.ExtendsTok == nil || comp.ExtendsTok.LastTok() == nil || comp.Body == nil || comp.Body.LBrace == nil {
+	if comp.ExtendsTok == nil || comp.ExtendsTok.LastTok() == nil || comp.Body == nil {
 		return nil
 	}
-	if comp.Body.LBrace.Pos() <= c.pos {
+	if comp.Body.LBrace != nil && comp.Body.LBrace.Pos() <= c.pos {
 		return nil
 	}
 	return c.componentTypesAndModules()

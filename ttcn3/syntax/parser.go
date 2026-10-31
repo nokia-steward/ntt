@@ -371,11 +371,27 @@ func (p *parser) errorExpected(what string) {
 	p.error(tok, "expected %s, found %s", what, tok.String())
 }
 
+// expect consumes the current token. If it is not of kind k, an error is
+// reported. A missing delimiter k is not substituted by the current token, but
+// returned as nil.
 func (p *parser) expect(k Kind) Token {
 	if p.tok != k {
 		p.errorExpected("'" + k.String() + "'")
+		if delimiters[k] && p.tok != EOF {
+			return nil
+		}
 	}
 	return p.consume() // make progress
+}
+
+var delimiters = map[Kind]bool{
+	LPAREN:    true,
+	RPAREN:    true,
+	LBRACK:    true,
+	RBRACK:    true,
+	LBRACE:    true,
+	RBRACE:    true,
+	SEMICOLON: true,
 }
 
 func (p *parser) expectSemi(tok Token) {
@@ -585,7 +601,7 @@ func (p *parser) parse() Node {
 		return p.parseStmt()
 
 	case TESTCASE:
-		if p.peek(1).Kind() == DOT {
+		if p.peek(2).Kind() == DOT {
 			return p.parseStmt()
 		}
 		return p.parseModuleDef()
@@ -1244,9 +1260,18 @@ func (p *parser) parseName() *Ident {
 		}
 		return id
 	}
-	p.expect(IDENT)
+	p.expectIdent()
 	return nil
 
+}
+
+// expectIdent reports a missing identifier. Unlike expect, it does not
+// consume a delimiter.
+func (p *parser) expectIdent() {
+	p.errorExpected("'IDENT'")
+	if !delimiters[p.tok] {
+		p.consume()
+	}
 }
 
 func (p *parser) parseIdent() *Ident {
@@ -1256,7 +1281,7 @@ func (p *parser) parseIdent() *Ident {
 	case IDENT, ADDRESS, ALIVE, CHARSTRING, CONTROL, TO, FROM, CREATE, VALUE, CLASS:
 		return p.make_use(p.consume())
 	default:
-		p.expect(IDENT) // use expect() error handling
+		p.expectIdent()
 		return nil
 	}
 }
@@ -2696,6 +2721,9 @@ func (p *parser) parseFormalPars() *FormalPars {
 	}
 	x := new(FormalPars)
 	x.LParen = p.expect(LPAREN)
+	if x.LParen == nil {
+		return x
+	}
 	for p.tok != RPAREN {
 		x.List = append(x.List, p.parseFormalPar())
 		if p.tok != COMMA {
@@ -2903,7 +2931,14 @@ func (p *parser) parseStmt() Stmt {
 		fallthrough
 	default:
 		p.errorExpected("statement")
-		p.advance(stmtStart)
+		switch p.tok {
+		case TYPE, FUNCTION, ALTSTEP, SIGNATURE, IMPORT, MODULEPAR, GROUP, FRIEND, EXTERNAL, CONTROL, PRIVATE, PUBLIC:
+			p.parseModuleDef()
+		case SEMICOLON, RBRACE, EOF:
+		default:
+			p.consume()
+			p.advance(stmtStart)
+		}
 		return &ErrorNode{From: etok, To: p.peek(1)}
 	}
 }
