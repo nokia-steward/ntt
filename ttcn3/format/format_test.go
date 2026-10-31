@@ -73,6 +73,30 @@ func TestSimpleFormatter(t *testing.T) {
 		{input: "p := {x := 1,\nx2:= 123}", want: "p := {x := 1,\n\tx2 := 123}\n"},
 		{input: "p := {\nx := 1,\nx2:= 123}", want: "p := {\n\tx := 1,\n\tx2 := 123}\n"},
 		{input: "p := {\nx := 1, // a\nx2:= 123 /* b */}", want: "p := {\n\tx := 1,   // a\n\tx2 := 123 /* b */}\n"},
+
+		// A broken line is indented once for that object.
+		{input: "var int x := a\n+\nb", want: "var int x := a\n\t+\n\tb\n"},
+		{input: "var int x := a +\nb +\nc", want: "var int x := a +\n\tb +\n\tc\n"},
+		{input: "var int x := a +\nb *\nc", want: "var int x := a +\n\tb *\n\t\tc\n"},
+		{input: "var int x :=\n1", want: "var int x :=\n\t1\n"},
+
+		// Parameter lists: () already indents once; <> does not.
+		{input: "function f(int a,\nint b) {}", want: "function f(int a,\n\tint b) {}\n"},
+		{input: "function f<type T,\ntype U>() {}", want: "function f<type T,\n\ttype U>() {}\n"},
+		{input: "function f(in\nint\nx) {}", want: "function f(in\n\t\tint\n\t\tx) {}\n"},
+		{input: "f(a +\nb,\nc)", want: "f(a +\n\t\tb,\n\tc)\n"},
+
+		// A broken expression inside a block stacks on the brace indent.
+		{input: "{\na +\nb\n}", want: "{\n\ta +\n\t\tb\n}\n"},
+
+		// A header break before a brace is not a continuation of the brace.
+		{input: "function f()\n{\nvar int x := 1\n}", want: "function f()\n{\n\tvar int x := 1\n}\n"},
+		{input: "return\n1", want: "return\n\t1\n"},
+
+		{input: "var int x := a + // c\nb", want: "var int x := a + // c\n\tb\n"},
+		{input: "var int x := a.\nb.\nc", want: "var int x := a.\n\tb.\n\tc\n"},
+		{input: "var int x := a +\n\nb", want: "var int x := a +\n\n\tb\n"},
+		{input: "f(\na,\nb)", want: "f(\n\ta,\n\tb)\n"},
 	}
 
 	for _, test := range tests {

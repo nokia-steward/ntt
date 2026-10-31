@@ -1,4 +1,3 @@
-// Package format implements pretty printers for TTCN-3 source code.
 package format
 
 import (
@@ -23,13 +22,15 @@ const (
 
 // Fprint formats src in canonical TTCN-3 style and writes the result to w or
 // returns an (I/O or syntax) error. src is expected to be syntactically
-// correct TTCN-3 source text.
+// correct TTCN-3 source text. The formatting rules are described in the
+// package documentation.
 func Fprint(w io.Writer, src interface{}) error {
 	return NewCanonicalPrinter(w).Fprint(src)
 }
 
 // CanonicalPrinter is a simple formatter that only fixes indentation and
-// various whitespace issues.
+// various whitespace issues. The formatting rules are described in the
+// package documentation.
 type CanonicalPrinter struct {
 	// UseSpaces controls whether to use spaces instead of tabs for indenting.
 	UseSpaces bool
@@ -45,7 +46,20 @@ type CanonicalPrinter struct {
 	lastPos, currPos syntax.Position
 	whiteBuf         string
 	firstToken       bool
-	stack            []syntax.Node
+	stack            []frame
+}
+
+// frame is one open syntax node.
+//
+// A line break inside an object indents its continuation one level, once
+// for that object. covers means the object already contributes that level,
+// because its opening bracket was printed or its continuation indent was
+// applied (cont).
+type frame struct {
+	node    syntax.Node
+	started bool // a token of this object has been printed
+	covers  bool
+	cont    bool
 }
 
 // NewCanonicalPrinter returns a new printer that formats source code.
@@ -91,13 +105,14 @@ func (p *CanonicalPrinter) tree(n syntax.Node) error {
 	// Prime the position tracker with the first token to avoid printing
 	// white-spaces before the first token.
 	p.firstToken = true
+	p.stack = p.stack[:0]
 
 	for _, e := range syntax.Serialize(n) {
 		switch e.Kind {
 		case syntax.OpenEvent:
-			p.stack = append(p.stack, e.Node)
+			p.stack = append(p.stack, frame{node: e.Node})
 		case syntax.CloseEvent:
-			p.stack = p.stack[:len(p.stack)-1]
+			p.closeFrame()
 		case syntax.TokenEvent:
 			p.printToken(e.Token())
 		}
@@ -125,6 +140,10 @@ func (p *CanonicalPrinter) printToken(n syntax.Token) {
 		if currPos.Begin.Line-p.lastPos.Line > 1 {
 			p.print(newline)
 		}
+		// The line before the first token is not a broken line.
+		if !p.firstToken {
+			p.continueIndent()
+		}
 	case currPos.Begin.Column > p.lastPos.Column:
 		p.print(blank)
 	}
@@ -133,8 +152,10 @@ func (p *CanonicalPrinter) printToken(n syntax.Token) {
 	switch k, s := n.Kind(), n.String(); {
 
 	// Increment indentation after opening {, [, (.
+	// That level is the object's one continuation indent.
 	case k == syntax.LBRACE, k == syntax.LBRACK, k == syntax.LPAREN:
 		p.print(s, indent)
+		p.markBracket()
 
 	// Decrement indentation before closing }, ], ).
 	case k == syntax.RBRACE, k == syntax.RBRACK, k == syntax.RPAREN:
@@ -170,6 +191,70 @@ func (p *CanonicalPrinter) printToken(n syntax.Token) {
 	// All other tokens are printed as is.
 	default:
 		p.print(s)
+	}
+	p.markStarted()
+}
+
+// continueIndent indents a broken line one level for the innermost object
+// that contains the break and has not already contributed an indent level.
+// Further breaks inside that same object do not indent again. Nested
+// objects each contribute their own level.
+func (p *CanonicalPrinter) continueIndent() {
+	for i := len(p.stack) - 1; i >= 0; i-- {
+		f := &p.stack[i]
+		if !f.started {
+			continue
+		}
+		if f.covers {
+			return
+		}
+		if !isContinuationObject(f.node) {
+			continue
+		}
+		f.covers = true
+		f.cont = true
+		p.print(indent)
+		return
+	}
+}
+
+// markBracket records that the innermost open object is delimited by a
+// bracket which already incremented the indent.
+func (p *CanonicalPrinter) markBracket() {
+	if len(p.stack) == 0 {
+		return
+	}
+	p.stack[len(p.stack)-1].covers = true
+}
+
+func (p *CanonicalPrinter) markStarted() {
+	for i := range p.stack {
+		p.stack[i].started = true
+	}
+}
+
+func (p *CanonicalPrinter) closeFrame() {
+	if len(p.stack) == 0 {
+		return
+	}
+	f := p.stack[len(p.stack)-1]
+	p.stack = p.stack[:len(p.stack)-1]
+	if f.cont {
+		p.print(unindent)
+	}
+}
+
+// isContinuationObject reports whether a broken line inside n is indented.
+// Bracket-delimited objects get that level from {, [, or ( instead.
+func isContinuationObject(n syntax.Node) bool {
+	if syntax.IsNil(n) {
+		return false
+	}
+	switch n.(type) {
+	case syntax.Expr, *syntax.FormalPars, *syntax.FormalPar, *syntax.Declarator, *syntax.ReturnStmt:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -244,10 +329,21 @@ func (p *CanonicalPrinter) printSpace() {
 	}
 	fmt.Fprint(p.w, p.whiteBuf)
 	if strings.HasSuffix(p.whiteBuf, "\n") {
-		for i := 0; i < p.Indent; i++ {
-			fmt.Fprint(p.w, "\t")
-		}
+		p.printIndent()
 	}
+}
+
+// printIndent writes the current indentation. Tabs are escaped so a tabwriter
+// cell, such as the one before a comment, does not treat them as columns.
+func (p *CanonicalPrinter) printIndent() {
+	if p.Indent <= 0 {
+		return
+	}
+	if p.UseSpaces {
+		fmt.Fprint(p.w, strings.Repeat(" ", p.Indent*p.TabWidth))
+		return
+	}
+	fmt.Fprint(p.w, "\xff", strings.Repeat("\t", p.Indent), "\xff")
 }
 
 func toBytes(v interface{}) ([]byte, error) {
