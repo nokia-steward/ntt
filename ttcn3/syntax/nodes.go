@@ -252,6 +252,18 @@ type (
 		Size *ParenExpr // Size expression
 	}
 
+	// A RepetitionExpr represents a repetition matching mechanism, e.g.
+	// "x #(1, 3)" or "x #2".
+	RepetitionExpr struct {
+		X      Expr  // Repeated template
+		Hash   Token // Position of "#"
+		LParen Token // Position of "(" or nil
+		Min    Expr  // Minimum count or nil
+		Comma  Token // Position of "," or nil
+		Max    Expr  // Maximum count or nil
+		RParen Token // Position of ")" or nil
+	}
+
 	// A RedirectExpr represents various redirect expressions
 	RedirectExpr struct {
 		X             Expr   // Preceding redirected expression
@@ -369,6 +381,7 @@ func (x *SelectorExpr) exprNode()      {}
 func (x *IndexExpr) exprNode()         {}
 func (x *CallExpr) exprNode()          {}
 func (x *LengthExpr) exprNode()        {}
+func (x *RepetitionExpr) exprNode()    {}
 func (x *RedirectExpr) exprNode()      {}
 func (x *ValueExpr) exprNode()         {}
 func (x *ParamExpr) exprNode()         {}

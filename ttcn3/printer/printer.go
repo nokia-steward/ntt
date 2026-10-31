@@ -145,6 +145,18 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.Len)
 			p.print(n.Size)
 
+		case *syntax.RepetitionExpr:
+			if n == nil {
+				return
+			}
+			p.print(n.X)
+			p.print(n.Hash)
+			p.print(n.LParen)
+			p.print(n.Min)
+			p.print(n.Comma)
+			p.print(n.Max)
+			p.print(n.RParen)
+
 		case *syntax.RedirectExpr:
 			if n == nil {
 				return

@@ -194,8 +194,11 @@ func (s *Scanner) Scan() (Kind, int, int) {
 	case ch == '\'':
 		typ = s.scanBitstring()
 	case ch == '#':
-		s.scanLine()
-		typ = PREPROC
+		typ = HASH
+		if isAlpha(next) || next == '!' {
+			s.scanLine()
+			typ = PREPROC
+		}
 	case ch == '"':
 		typ = s.scanString()
 	default:

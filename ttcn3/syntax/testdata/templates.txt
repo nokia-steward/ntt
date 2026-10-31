@@ -392,6 +392,135 @@ template integer t := conjunct((0 .. 10), complement(5));
               List: (ValueLiteral "5"))))))))
 
 ===
+Repetition
+===
+template RoI t := { 1 #(1, 3), 2 #(2), 3 #(, 5), 4 #(1, ), 5 #(), ? #3 };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "RoI")
+      Name: (Ident "t")
+      Value: (CompositeLiteral
+        List: (RepetitionExpr Hash: "#"
+          X: (ValueLiteral "1")
+          Min: (ValueLiteral "1")
+          Max: (ValueLiteral "3"))
+        List: (RepetitionExpr Hash: "#"
+          X: (ValueLiteral "2")
+          Min: (ValueLiteral "2"))
+        List: (RepetitionExpr Hash: "#"
+          X: (ValueLiteral "3")
+          Max: (ValueLiteral "5"))
+        List: (RepetitionExpr Hash: "#"
+          X: (ValueLiteral "4")
+          Min: (ValueLiteral "1"))
+        List: (RepetitionExpr Hash: "#"
+          X: (ValueLiteral "5"))
+        List: (RepetitionExpr Hash: "#"
+          X: (ValueLiteral "?")
+          Min: (ValueLiteral "3"))))))
+
+===
+Repetition of template
+===
+template RoI t := { 1, 2 } #(1, 3);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "RoI")
+      Name: (Ident "t")
+      Value: (RepetitionExpr Hash: "#"
+        X: (CompositeLiteral
+          List: (ValueLiteral "1")
+          List: (ValueLiteral "2"))
+        Min: (ValueLiteral "1")
+        Max: (ValueLiteral "3")))))
+
+===
+Implies
+===
+template integer t := ? implies (1 .. 3);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "integer")
+      Name: (Ident "t")
+      Value: (BinaryExpr Op: "implies"
+        X: (ValueLiteral "?")
+        Y: (ParenExpr
+          List: (BinaryExpr Op: ".."
+            X: (ValueLiteral "1")
+            Y: (ValueLiteral "3")))))))
+
+===
+Implies with length restriction
+===
+template charstring t := ? length(5 .. infinity) implies pattern "*abc" length(2 .. 10);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "charstring")
+      Name: (Ident "t")
+      Value: (LengthExpr Len: "length"
+        X: (BinaryExpr Op: "implies"
+          X: (LengthExpr Len: "length"
+            X: (ValueLiteral "?")
+            Size: (ParenExpr
+              List: (BinaryExpr Op: ".."
+                X: (ValueLiteral "5")
+                Y: (Ident "infinity"))))
+          Y: (PatternExpr Tok: "pattern"
+            X: (ValueLiteral "\"*abc\"")))
+        Size: (ParenExpr
+          List: (BinaryExpr Op: ".."
+            X: (ValueLiteral "2")
+            Y: (ValueLiteral "10")))))))
+
+===
+Except
+===
+template integer t := (1 .. 10) except 5;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "integer")
+      Name: (Ident "t")
+      Value: (BinaryExpr Op: "except"
+        X: (ParenExpr
+          List: (BinaryExpr Op: ".."
+            X: (ValueLiteral "1")
+            Y: (ValueLiteral "10")))
+        Y: (ValueLiteral "5")))))
+
+===
+Except with inline template
+===
+f(integer: ? except (pattern "abc*" length(3 .. 5)));
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "f")
+      Args: (ParenExpr
+        List: (BinaryExpr Op: "except"
+          X: (BinaryExpr Op: ":"
+            X: (Ident "integer")
+            Y: (ValueLiteral "?"))
+          Y: (ParenExpr
+            List: (LengthExpr Len: "length"
+              X: (PatternExpr Tok: "pattern"
+                X: (ValueLiteral "\"abc*\""))
+              Size: (ParenExpr
+                List: (BinaryExpr Op: ".."
+                  X: (ValueLiteral "3")
+                  Y: (ValueLiteral "5"))))))))))
+
+===
 All from in list
 ===
 template RoI t := { all from x, 3 };

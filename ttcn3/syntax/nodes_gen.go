@@ -6644,6 +6644,141 @@ func (n *RegexpExpr) End() int {
 	return -1
 }
 
+func (n *RepetitionExpr) Kind() Kind {
+	return RepetitionExprNode
+}
+
+func (n *RepetitionExpr) FirstTok() Token {
+	switch {
+
+	case n.X != nil:
+		return n.X.FirstTok()
+
+	case n.Hash != nil:
+		return n.Hash
+
+	case n.LParen != nil:
+		return n.LParen
+
+	case n.Min != nil:
+		return n.Min.FirstTok()
+
+	case n.Comma != nil:
+		return n.Comma
+
+	case n.Max != nil:
+		return n.Max.FirstTok()
+
+	case n.RParen != nil:
+		return n.RParen
+
+	default:
+		return nil
+	}
+}
+
+func (n *RepetitionExpr) LastTok() Token {
+	switch {
+
+	case n.RParen != nil:
+		return n.RParen
+
+	case n.Max != nil:
+		return n.Max.LastTok()
+
+	case n.Comma != nil:
+		return n.Comma
+
+	case n.Min != nil:
+		return n.Min.LastTok()
+
+	case n.LParen != nil:
+		return n.LParen
+
+	case n.Hash != nil:
+		return n.Hash
+
+	case n.X != nil:
+		return n.X.LastTok()
+
+	default:
+		return nil
+	}
+}
+
+func (n *RepetitionExpr) Children() []Node {
+	ret := make([]Node, 0, 7)
+
+	if n.X != nil {
+		ret = append(ret, n.X)
+	}
+
+	if n.Hash != nil {
+		ret = append(ret, n.Hash)
+	}
+
+	if n.LParen != nil {
+		ret = append(ret, n.LParen)
+	}
+
+	if n.Min != nil {
+		ret = append(ret, n.Min)
+	}
+
+	if n.Comma != nil {
+		ret = append(ret, n.Comma)
+	}
+
+	if n.Max != nil {
+		ret = append(ret, n.Max)
+	}
+
+	if n.RParen != nil {
+		ret = append(ret, n.RParen)
+	}
+
+	return ret
+}
+
+func (n *RepetitionExpr) Inspect(f func(Node) bool) {
+
+	if c := n.X; c != nil {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+	if c := n.Min; c != nil {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+	if c := n.Max; c != nil {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+}
+
+func (n *RepetitionExpr) Pos() int {
+	if tok := n.FirstTok(); tok != nil {
+		return tok.Pos()
+	}
+	return -1
+}
+
+func (n *RepetitionExpr) End() int {
+	if tok := n.LastTok(); tok != nil {
+		return tok.End()
+	}
+	return -1
+}
+
 func (n *RestrictionSpec) Kind() Kind {
 	return RestrictionSpecNode
 }
@@ -8823,6 +8958,7 @@ const (
 	RedirectExprNode
 	RefSpecNode
 	RegexpExprNode
+	RepetitionExprNode
 	RestrictionSpecNode
 	ReturnSpecNode
 	ReturnStmtNode

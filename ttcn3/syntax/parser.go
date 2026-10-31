@@ -604,6 +604,10 @@ func (p *parser) parseExprList() (list []Expr) {
 		defer un(trace(p, "ExprList"))
 	}
 
+	saved := p.noMatchAttr
+	p.noMatchAttr = false
+	defer func() { p.noMatchAttr = saved }()
+
 	list = append(list, p.parseExpr())
 	for p.tok == COMMA {
 		p.consume()
@@ -622,7 +626,32 @@ func (p *parser) parseExpr() Expr {
 		defer un(trace(p, "Expr"))
 	}
 
-	return p.parseBinaryExpr(LowestPrec + 1)
+	x := p.parseBinaryExpr(LowestPrec + 1)
+	if p.tok == HASH {
+		x = p.parseRepetition(x)
+	}
+	return x
+}
+
+// Repetition ::= Expr "#" ( PrimaryExpr | "(" [Expr] ["," [Expr]] ")" )
+func (p *parser) parseRepetition(x Expr) *RepetitionExpr {
+	r := &RepetitionExpr{X: x, Hash: p.expect(HASH)}
+	if p.tok != LPAREN {
+		r.Min = p.parsePrimaryExpr()
+		return r
+	}
+	r.LParen = p.consume()
+	if p.tok != COMMA && p.tok != RPAREN {
+		r.Min = p.parseExpr()
+	}
+	if p.tok == COMMA {
+		r.Comma = p.consume()
+		if p.tok != RPAREN {
+			r.Max = p.parseExpr()
+		}
+	}
+	r.RParen = p.expect(RPAREN)
+	return r
 }
 
 // BinaryExpr ::= UnaryExpr
@@ -649,6 +678,16 @@ func (p *parser) parseBinaryExpr(prec1 int) Expr {
 			}
 			continue
 		}
+		// "length" and "ifpresent" after "implies" or "except" match the
+		// whole template, not only the right operand.
+		if op.Kind() == IMPLIES || op.Kind() == EXCEPT {
+			saved := p.noMatchAttr
+			p.noMatchAttr = true
+			y := p.parseBinaryExpr(prec + 1)
+			p.noMatchAttr = saved
+			x = p.parseMatchAttrs(&BinaryExpr{X: x, Op: op, Y: y})
+			continue
+		}
 		y := p.parseBinaryExpr(prec + 1)
 		x = &BinaryExpr{X: x, Op: op, Y: y}
 	}
@@ -672,13 +711,7 @@ func (p *parser) parsePostfixExpr() Expr {
 		x = &PostExpr{X: x, Op: p.consume()}
 	}
 
-	if p.tok == LENGTH && !p.noMatchAttr {
-		x = p.parseLength(x)
-	}
-
-	if p.tok == IFPRESENT && !p.noMatchAttr {
-		x = &UnaryExpr{Op: p.consume(), X: x}
-	}
+	x = p.parseMatchAttrs(x)
 
 	if p.tok == TO || p.tok == FROM {
 		x = p.parseToFrom(x)
@@ -700,6 +733,17 @@ func (p *parser) parsePostfixExpr() Expr {
 		x = &UnaryExpr{Op: p.consume(), X: x}
 	}
 
+	return x
+}
+
+func (p *parser) parseMatchAttrs(x Expr) Expr {
+	if p.tok == LENGTH && !p.noMatchAttr {
+		x = p.parseLength(x)
+	}
+
+	if p.tok == IFPRESENT && !p.noMatchAttr {
+		x = &UnaryExpr{Op: p.consume(), X: x}
+	}
 	return x
 }
 
