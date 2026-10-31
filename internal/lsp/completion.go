@@ -1,10 +1,8 @@
 package lsp
 
 import (
-	"bytes"
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -15,1073 +13,1033 @@ import (
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
-type BehaviourInfo struct {
-	Label         string
-	Signature     string
-	Documentation string
-	HasRunsOn     bool
-	HasReturn     bool
-	HasParameters bool
-	TextFormat    protocol.InsertTextFormat
-}
-
-type BehavAttrib int
-
-// The list of behaviours.
+// Lexical rank prefixes. A leading space sorts the group before ordinary labels.
 const (
-	NONE        BehavAttrib = iota // neither return nor runs on spec
-	WITH_RETURN                    // only retrurn spec
-	WITH_RUNSON                    // only runs on spec
+	sortFirst  = " 1"
+	sortSecond = " 2"
+	sortThird  = " 3"
+	sortFourth = " 4"
+	sortImport = " "
 )
 
 var (
-	moduleDefKw               = []string{"import from ", "type ", "const ", "modulepar ", "template ", "function ", "external function ", "altstep ", "testcase ", "control ", "signature "}
-	importAfterModName        = []string{"all [except {}];", "{}"}
-	importAfterModNameSnippet = []string{"${1:all${2: except {$3\\}}};$0", "{$0}"}
-	importKinds               = []string{"type ", "const ", "modulepar ", "template ", "function ", "external function ", "altstep ", "testcase ", "control", "signature "}
-	predefinedTypes           = []string{"anytype ", "bitstring ", "boolean ", "charstring ", "default ", "float ", "hexstring ", "integer ", "octetstring ", "universal charstring ", "verdicttype "}
+	moduleDefLabels = []string{
+		"import from ", "type ", "const ", "modulepar ", "template ",
+		"function ", "external function ", "altstep ", "testcase ",
+		"control ", "signature ",
+	}
+	// "control" has no trailing space; the other kinds do.
+	importKindLabels = []string{
+		"type ", "const ", "modulepar ", "template ", "function ",
+		"external function ", "altstep ", "testcase ", "control", "signature ",
+	}
+	predefinedTypeLabels = []string{
+		"anytype ", "bitstring ", "boolean ", "charstring ", "default ",
+		"float ", "hexstring ", "integer ", "octetstring ",
+		"universal charstring ", "verdicttype ",
+	}
 )
 
 func (s *Server) completion(ctx context.Context, params *protocol.CompletionParams) (*protocol.CompletionList, error) {
 	start := time.Now()
 	defer func() {
-		elapsed := time.Since(start)
-		log.Debugf("Completion took %s.\n", elapsed)
-	}()
-	defer func() {
 		if err := recover(); err != nil {
-			// in case of a panic, just continue as this might be a common situation during typing
+			// Incomplete trees are common while the user is typing.
 			log.Debugf("Info: %s.\n", err)
 		}
+		log.Debugf("Completion took %s.\n", time.Since(start))
 	}()
-	if !params.TextDocument.URI.SpanURI().IsFile() {
-		log.Printf("for 'code completion' the new file %q needs to be saved at least once", string(params.TextDocument.URI))
+
+	uri := params.TextDocument.URI
+	if !uri.SpanURI().IsFile() {
+		log.Printf("for 'code completion' the new file %q needs to be saved at least once", string(uri))
 		return &protocol.CompletionList{}, nil
 	}
 
-	defaultModuleId := baseName(params.TextDocument.URI.SpanURI().Filename())
-
-	tree := ttcn3.ParseFile(params.TextDocument.URI.SpanURI().Filename())
+	file := uri.SpanURI().Filename()
+	tree := ttcn3.ParseFile(file)
 	if tree.Root == nil || len(tree.Modules()) == 0 {
-		ret := []protocol.CompletionItem{{
+		return &protocol.CompletionList{Items: []protocol.CompletionItem{{
 			Label:            "module",
-			InsertText:       "module ${1:" + defaultModuleId + "} {\n\t${0}\n}",
+			InsertText:       "module ${1:} {\n\t${0}\n}",
 			InsertTextFormat: protocol.SnippetTextFormat,
 			Kind:             protocol.KeywordCompletion,
-		}}
-		return &protocol.CompletionList{IsIncomplete: false, Items: ret}, nil
+		}}}, nil
 	}
 
-	pos := tree.PosFor(int(params.TextDocumentPositionParams.Position.Line+1), int(params.TextDocumentPositionParams.Position.Character+1))
-	nodeStack := LastNonWsToken(tree.Root, pos)
-	if len(nodeStack) == 0 {
+	line := int(params.Position.Line) + 1
+	col := int(params.Position.Character) + 1
+	pos := tree.PosFor(line, col)
+	nodes := LastNonWsToken(tree.Root, pos)
+	if len(nodes) == 0 {
 		return nil, nil
 	}
 
-	// NOTE: having the current file owned by more then one suite should not
-	// import from modules originating from both suites. This would
-	// in most ways end up with cyclic imports.
-	// Thus 'completion' shall collect items only from one suite.
-	// Decision: first suite
-	suites := s.Owners(params.TextDocument.URI)
+	suites := s.Owners(uri)
 	if len(suites) == 0 {
-		return nil, fmt.Errorf("no suite found for file %q", string(params.TextDocument.URI))
+		return nil, fmt.Errorf("no suite found for file %q", string(uri))
 	}
-
-	return &protocol.CompletionList{IsIncomplete: false, Items: Complete(suites[0], pos, nodeStack, defaultModuleId)}, nil
+	// A file owned by several suites must not mix their modules: that produces cyclic imports.
+	return &protocol.CompletionList{Items: Complete(suites[0], tree, pos, nodes)}, nil
 }
 
-// LastNonWsToken returns the last node slice before the given position.
+// LastNonWsToken returns the path from n down to the last node that begins at or before pos.
+// A trailing error token that ends at pos is included.
 func LastNonWsToken(n syntax.Node, pos int) []syntax.Node {
-
-	if pos < 0 {
+	if pos < 0 || n == nil {
 		return nil
 	}
 
 	var (
-		completed bool
-		isError   bool
-
-		nodeStack, lastStack []syntax.Node
+		stop  bool
+		stack = []syntax.Node{n}
+		last  []syntax.Node
 	)
+	snap := func() {
+		if cap(last) < len(stack) {
+			last = make([]syntax.Node, len(stack))
+		}
+		last = last[:len(stack)]
+		copy(last, stack)
+	}
 
-	nodeStack = append(nodeStack, n)
 	n.Inspect(func(n syntax.Node) bool {
-		if isError {
+		if stop {
 			return false
 		}
-
-		// called on node exit
 		if n == nil {
-			if len(nodeStack) > 0 {
-				nodeStack = nodeStack[:len(nodeStack)-1]
+			if len(stack) > 0 {
+				stack = stack[:len(stack)-1]
 			}
 			return false
 		}
-
 		if errNode, ok := n.(*syntax.ErrorNode); ok {
-			if errNode.LastTok().End() == pos {
-				isError = true
-				nodeStack = append(nodeStack, n)
-				lastStack = make([]syntax.Node, len(nodeStack))
-				copy(lastStack, nodeStack)
+			if tok := errNode.LastTok(); tok != nil && tok.End() == pos {
+				stop = true
+				stack = append(stack, n)
+				snap()
 				return false
 			}
 		}
-
-		// We don't need to descend any deeper if we're passt the
-		// position.
 		if pos < n.Pos() {
-			completed = true
+			stop = true
 			return false
 		}
-
-		nodeStack = append(nodeStack, n)
-		lastStack = make([]syntax.Node, len(nodeStack))
-		copy(lastStack, nodeStack)
-		return !completed
+		stack = append(stack, n)
+		snap()
+		return true
 	})
-
-	return lastStack
+	return last
 }
 
-func Complete(suite *Suite, pos int, nodes []syntax.Node, ownModName string) []protocol.CompletionItem {
-	var list []protocol.CompletionItem
-	l := len(nodes)
-	switch {
-	case isBehaviourBodyScope(nodes):
-		prevNode := nodes[l-2]
-
-		modName := ""
-		if n, ok := prevNode.(*syntax.SelectorExpr); ok {
-			if n.X == nil {
-				return nil
-			}
-			modName = n.X.LastTok().String()
-		}
-
-		kinds := []syntax.Kind{syntax.FUNCTION}
-		attrs := []BehavAttrib{WITH_RETURN}
-
-		switch {
-		case isStartOpArgument(nodes):
-			attrs = append(attrs, WITH_RUNSON)
-		case !isInsideExpression(nodes, modName != ""): // less restrictive than isStartOpArgument
-			kinds = append(kinds, syntax.ALTSTEP)
-			attrs = append(attrs, NONE, WITH_RUNSON)
-		}
-
-		if modName != "" {
-			file, err := suite.FindModule(modName)
-			if err == nil {
-				tree := ttcn3.ParseFile(file)
-				return CompleteBehaviours(tree, kinds, attrs, modName, " 1")
-			}
-
-			expr := prevNode.(*syntax.SelectorExpr)
-			var tgt syntax.Expr
-			if expr.Sel != nil && expr.Sel.LastTok().Pos() < pos {
-				tgt = expr
-			} else {
-				tgt = expr.X
-			}
-			if n, ok := tgt.(*syntax.SelectorExpr); ok && pos == tgt.End() {
-				tgt = n.X
-			}
-			return CompleteSelectorExpr(suite, ownModName, tgt)
-		} else if n, ok := prevNode.(*syntax.IndexExpr); ok {
-			return CompleteSelectorExpr(suite, ownModName, n)
-		}
-
-		if isArgListScope(nodes, pos) {
-			list = CompleteArgNames(suite, ownModName, nodes[l-2].(syntax.Expr), " 1")
-			if n, ok := nodes[l-2].(*syntax.BinaryExpr); ok && pos > n.Op.FirstTok().End() {
-				return list
-			}
-		}
-		list = append(list, CompleteAllLocalVariables(nodes, " 2")...)
-		list = append(list, CompleteAllBehaviours(suite, kinds, attrs, ownModName)...)
-		list = append(list, CompletePredefinedFunctions()...)
-		list = append(list, CompleteAllModules(suite, ownModName, " 4")...)
-		return list
-
-	case isControlBodyScope(nodes):
-		kinds := []syntax.Kind{syntax.FUNCTION}
-		attrs := []BehavAttrib{WITH_RETURN}
-
-		if n, ok := nodes[l-2].(*syntax.SelectorExpr); ok {
-			if n.X == nil {
-				return nil
-			}
-			modName := n.X.LastTok().String()
-
-			if !isInsideExpression(nodes, true) { // less restrictive than isStartOpArgument
-				attrs = append(attrs, NONE)
-			}
-			file, err := suite.FindModule(modName)
-			if err != nil {
-				log.Debugf("module %s not found\n", modName)
-				return nil
-			}
-			tree := ttcn3.ParseFile(file)
-			return CompleteBehaviours(tree, kinds, attrs, modName, " 1")
-		}
-
-		if !isInsideExpression(nodes, false) { // less restrictive than isStartOpArgument
-			attrs = append(attrs, NONE, WITH_RUNSON)
-		}
-
-		list = CompleteAllBehaviours(suite, kinds, attrs, ownModName)
-		list = append(list, CompletePredefinedFunctions()...)
-		list = append(list, CompleteAllModules(suite, ownModName, " 3")...)
-		return list
-
-	case isConstDeclScope(nodes):
-		n := getConstDeclNode(nodes)
-		if n == nil {
-			break
-		}
-
-		scndNode, _ := nodes[l-2].(*syntax.SelectorExpr)
-
-		switch {
-		case n.Type == nil || (n.Type != nil && (n.Type.Pos() > pos)):
-			if scndNode != nil && scndNode.X != nil {
-				// NOTE: the parser produces a wrong ast under certain circumstances
-				// see: func TestTemplateModuleDotType(t *testing.T)
-				return CompleteTypes(suite, scndNode.X.LastTok().String(), "")
-			}
-			list = CompleteAllTypes(suite, ownModName)
-			list = append(list, CompleteAllModules(suite, ownModName, " 3")...)
-			return list
-		case scndNode != nil && scndNode.X != nil:
-			modName := scndNode.X.LastTok().String()
-			file, err := suite.FindModule(modName)
-			if err != nil {
-				log.Debugf("module %s not found\n", modName)
-				return nil
-			}
-			tree := ttcn3.ParseFile(file)
-			return CompleteBehaviours(tree, []syntax.Kind{syntax.FUNCTION},
-				[]BehavAttrib{WITH_RETURN}, modName, " 1")
-		default:
-			list = CompleteAllBehaviours(suite, []syntax.Kind{syntax.FUNCTION},
-				[]BehavAttrib{WITH_RETURN}, ownModName)
-			list = append(list, CompletePredefinedFunctions()...)
-			list = append(list, CompleteAllModules(suite, ownModName, " 3")...)
-			return list
-		}
-	case isTemplateDeclScope(nodes):
-		n := getTemplateDeclNode(nodes)
-		if n == nil {
-			return nil
-		}
-
-		scndNode, _ := nodes[l-2].(*syntax.SelectorExpr)
-
-		switch {
-		case n.ModifiesTok != nil && n.AssignTok.Pos() > pos:
-			if scndNode != nil && scndNode.X != nil {
-				mname := scndNode.X.LastTok().String()
-				file, err := suite.FindModule(mname)
-				if err != nil {
-					log.Debugf("module %s not found\n", mname)
-					return nil
-				}
-				tree := ttcn3.ParseFile(file)
-				list = CompleteValueDecls(tree, n.TemplateTok.Kind(), false)
-				return list
-			}
-			list = CompleteAllValueDecls(suite, syntax.TEMPLATE)
-			list = append(list, CompleteAllModules(suite, ownModName, "")...)
-			return list
-
-		case n.Type == nil || n.Name == nil || (n.Name != nil && (n.Name.Pos() > pos)):
-			if scndNode != nil && scndNode.X != nil {
-				// NOTE: the parser produces a wrong ast under certain circumstances
-				// see: func TestTemplateModuleDotType(t *testing.T)
-				return CompleteTypes(suite, scndNode.X.LastTok().String(), "")
-			}
-			list = CompleteAllTypes(suite, ownModName)
-			list = append(list, CompleteAllModules(suite, ownModName, " 3")...)
-			return list
-		default:
-			switch {
-			case scndNode != nil && scndNode.X != nil:
-				modName := scndNode.X.LastTok().String()
-				file, err := suite.FindModule(modName)
-				if err != nil {
-					log.Debugf("module %s not found\n", modName)
-					return nil
-				}
-				tree := ttcn3.ParseFile(file)
-				list = CompleteBehaviours(tree, []syntax.Kind{syntax.FUNCTION},
-					[]BehavAttrib{WITH_RETURN}, modName, " 1")
-				return list
-			default:
-				list = CompleteAllBehaviours(suite, []syntax.Kind{syntax.FUNCTION},
-					[]BehavAttrib{WITH_RETURN}, ownModName)
-				list = append(list, CompletePredefinedFunctions()...)
-				list = append(list, CompleteAllModules(suite, ownModName, " 3")...)
-				return list
-			}
-		}
-	default:
-		switch n := nodes[l-1].(type) {
-		case *syntax.Ident:
-			if _, ok := nodes[0].(*syntax.Module); l == 2 && ok {
-				return CompleteModuleDefKeywords()
-			}
-			if l <= 2 {
-				return nil
-			}
-
-			switch scndNode := nodes[l-2].(type) {
-			case *syntax.ModuleDef:
-				return CompleteModuleDefKeywords()
-			case *syntax.ImportDecl:
-				switch {
-				case scndNode.LBrace != nil:
-					return CompleteImportkinds()
-				case n == scndNode.Alias:
-					return nil
-				case n.End() >= pos:
-					// look for available modules for import
-					return CompleteAllModules(suite, ownModName, " ")
-				default:
-					return CompleteImportAllKeyword()
-				}
-			case *syntax.DefKindExpr:
-				// happens after
-				// * the altstep/function/testcase kw while typing the identifier
-				// * inside the exception list after { while typing the kind
-				if l == 8 {
-					if _, ok := nodes[l-3].(*syntax.ExceptExpr); ok {
-						if scndNode.KindTok != nil {
-							if impDecl, ok := nodes[l-5].(*syntax.ImportDecl); ok {
-								return CompleteImportSpecs(suite, scndNode.KindTok.Kind(), impDecl.Module.Tok.String())
-							}
-						}
-						return CompleteImportkinds()
-					}
-					break
-				}
-				if impDecl, ok := nodes[l-3].(*syntax.ImportDecl); ok {
-					return CompleteImportSpecs(suite, scndNode.KindTok.Kind(), impDecl.Module.Tok.String())
-				}
-
-			case *syntax.ExceptExpr:
-				return CompleteImportkinds()
-			case *syntax.RunsOnSpec, *syntax.SystemSpec:
-				list = CompleteAllComponentTypes(suite, " 1")
-				list = append(list, CompleteAllModules(suite, ownModName, " 2")...)
-				return list
-			case *syntax.SelectorExpr:
-				if scndNode.X != nil {
-					switch nodes[l-3].(type) {
-					case *syntax.RunsOnSpec, *syntax.SystemSpec, *syntax.ComponentTypeDecl:
-						return CompleteComponentTypes(suite, scndNode.X.LastTok().String(), " 1")
-					}
-				}
-			case *syntax.ComponentTypeDecl:
-				// for ctrl+spc, after beginning to type an id after extends Token
-				if scndNode.ExtendsTok.LastTok() != nil && scndNode.Body.LBrace.Pos() > pos {
-					list = CompleteAllComponentTypes(suite, " 1")
-					list = append(list, CompleteAllModules(suite, ownModName, " 2")...)
-					return list
-				}
-			}
-
-		case *syntax.ImportDecl:
-			if n.Module == nil {
-				// look for available modules for import
-				return CompleteAllModules(suite, ownModName, " ")
-			}
-		case *syntax.DefKindExpr:
-			if n.KindTok == nil {
-				return CompleteImportkinds()
-			}
-			if impDecl, ok := nodes[l-2].(*syntax.ImportDecl); ok {
-				return CompleteImportSpecs(suite, n.KindTok.Kind(), impDecl.Module.Tok.String())
-			}
-			if _, ok := nodes[l-2].(*syntax.ExceptExpr); ok {
-				if impDecl, ok := nodes[l-4].(*syntax.ImportDecl); ok {
-					return CompleteImportSpecs(suite, n.KindTok.Kind(), impDecl.Module.Tok.String())
-				}
-			}
-		case *syntax.RunsOnSpec, *syntax.SystemSpec:
-			list = CompleteAllComponentTypes(suite, " 1")
-			list = append(list, CompleteAllModules(suite, ownModName, " 2")...)
-			return list
-		case *syntax.ErrorNode:
-			// i.e. user started typing => syntax.Ident might be detected instead of a kw
-			if l <= 1 {
-				return nil
-			}
-			switch scndNode := nodes[l-2].(type) {
-			case *syntax.ModuleDef:
-				// start a new module def
-				return CompleteModuleDefKeywords()
-			case *syntax.DefKindExpr:
-				// NOTE: not able to reproduce this situation. Maybe it is safe to remove this code.
-				// happens streight after the altstep kw if ctrl+space is pressed
-				if impDecl, ok := nodes[l-3].(*syntax.ImportDecl); ok {
-					return CompleteImportSpecs(suite, scndNode.KindTok.Kind(), impDecl.Module.Tok.String())
-				}
-				if _, ok := nodes[l-3].(*syntax.ExceptExpr); ok {
-					if impDecl, ok := nodes[l-5].(*syntax.ImportDecl); ok {
-						return CompleteImportSpecs(suite, scndNode.KindTok.Kind(), impDecl.Module.Tok.String())
-					}
-				}
-			}
-		case *syntax.Declarator:
-			if l <= 2 {
-				return nil
-			}
-			if valueDecl, ok := nodes[l-2].(*syntax.ValueDecl); ok {
-				if valueDecl.KindTok.Kind() == syntax.PORT {
-					list = CompleteAllPortTypes(suite, ownModName)
-					list = append(list, CompleteAllModules(suite, ownModName, " 3")...)
-					return list
-				}
-			}
-		default:
-			log.Debugf("Node not considered yet: %#v\n", n)
-		}
-	}
-	return list
-}
-func CompletePredefinedFunctions() []protocol.CompletionItem {
-	ret := make([]protocol.CompletionItem, 0, len(PredefinedFunctions))
-	for _, v := range PredefinedFunctions {
-		markup := protocol.MarkupContent{Kind: "markdown", Value: v.Documentation}
-		ret = append(ret, protocol.CompletionItem{
-			Label: v.Label, Kind: protocol.FunctionCompletion,
-			Detail:           v.Signature,
-			InsertTextFormat: v.TextFormat,
-			InsertText:       v.InsertText,
-			Documentation:    markup})
-	}
-	return ret
-}
-
-func CompleteImportkinds() []protocol.CompletionItem {
-	var ret []protocol.CompletionItem
-	for _, v := range importKinds {
-		ret = append(ret, protocol.CompletionItem{Label: v, Kind: protocol.KeywordCompletion})
-	}
-	return ret
-}
-
-func CompletePredefinedTypes() []protocol.CompletionItem {
-	var ret []protocol.CompletionItem
-	for _, v := range predefinedTypes {
-		ret = append(ret, protocol.CompletionItem{Label: v, Kind: protocol.KeywordCompletion})
-	}
-	return ret
-}
-
-func CompleteBehaviours(tree *ttcn3.Tree, kinds []syntax.Kind, attribs []BehavAttrib, mname string, sortPref string) []protocol.CompletionItem {
-	var (
-		items []*BehaviourInfo
-		ret   []protocol.CompletionItem
-	)
-
-	for _, kind := range kinds {
-		items = append(items, behaviourInfos(tree, kind)...)
-	}
-
-	for _, v := range items {
-		insertText := v.Label + "()"
-		if v.HasParameters {
-			insertText = v.Label + "($1)$0"
-		}
-		isSelected := false
-		for _, attrib := range attribs {
-			switch attrib {
-			case NONE:
-				isSelected = isSelected || !(v.HasReturn || v.HasRunsOn)
-			case WITH_RETURN:
-				isSelected = isSelected || v.HasReturn
-			case WITH_RUNSON:
-				isSelected = isSelected || v.HasRunsOn
-			}
-		}
-		if isSelected {
-			ret = append(ret, protocol.CompletionItem{
-				Label:            v.Label + "()",
-				InsertText:       insertText,
-				Kind:             protocol.FunctionCompletion,
-				SortText:         sortPref + v.Label,
-				Detail:           v.Signature,
-				Documentation:    v.Documentation,
-				InsertTextFormat: v.TextFormat,
-			})
-		}
-	}
-	return ret
-}
-
-func CompleteAllBehaviours(suite *Suite, kinds []syntax.Kind, attribs []BehavAttrib, mname string) []protocol.CompletionItem {
-	var ret []protocol.CompletionItem
-	for _, f := range suite.Files() {
-		fileName := baseName(f)
-		file, err := suite.FindModule(fileName)
-		if err != nil {
-			log.Debugf("module %s not found\n", mname)
-			return nil
-		}
-		tree := ttcn3.ParseFile(file)
-
-		sortPref := " 2"
-		if fileName == mname {
-			sortPref = " 1"
-		}
-		ret = append(ret, CompleteBehaviours(tree, kinds, attribs, fileName, sortPref)...)
-	}
-	return ret
-}
-
-func CompleteValueDecls(tree *ttcn3.Tree, kind syntax.Kind, withDetail bool) []protocol.CompletionItem {
-	var (
-		ret   []protocol.CompletionItem
-		mname string
-	)
-	tree.Inspect(func(n syntax.Node) bool {
-		if n == nil {
-			// called on node exit
-			return false
-		}
-
-		switch node := n.(type) {
-		case *syntax.Module:
-			mname = node.Name.String()
-			return true
-		case *syntax.FuncDecl, *syntax.ComponentTypeDecl:
-			// do not descent into TESTCASE, FUNCTION, ALTSTEP,
-			// component type
-			return false
-		case *syntax.ValueDecl:
-			if node.KindTok.Kind() != kind {
-				return false
-			}
-			return true
-		case *syntax.Declarator:
-			break
-		case *syntax.TemplateDecl:
-			if kind == syntax.TEMPLATE {
-				break
-			}
-			return false
-		default:
-			return true
-		}
-
-		v := syntax.Name(n)
-		item := protocol.CompletionItem{
-			Label: v,
-			Kind:  protocol.ConstantCompletion,
-		}
-		if withDetail {
-			item.Detail = joinNames(mname, v)
-		}
-		ret = append(ret, item)
-		return false
-	})
-	return ret
-}
-
-func CompleteModuleDefKeywords() []protocol.CompletionItem {
-	var ret []protocol.CompletionItem
-	for _, v := range moduleDefKw {
-		ret = append(ret, protocol.CompletionItem{Label: v, Kind: protocol.KeywordCompletion})
-	}
-	return ret
-}
-
-func CompleteImportAllKeyword() []protocol.CompletionItem {
-	var ret []protocol.CompletionItem
-	for i, v := range importAfterModName {
-		ret = append(ret, protocol.CompletionItem{Label: v,
-			InsertText:       importAfterModNameSnippet[i],
-			InsertTextFormat: protocol.SnippetTextFormat, Kind: protocol.KeywordCompletion})
-	}
-	return ret
-}
-
-func CompleteImportSpecs(suite *Suite, kind syntax.Kind, mname string) []protocol.CompletionItem {
-	file, err := suite.FindModule(mname)
-	if err != nil {
-		log.Debugf("module %s not found\n", mname)
+// Complete returns completion items for the cursor at pos.
+// nodes is the ancestor path from LastNonWsToken in tree, leaf last.
+// The module being edited is the module declaration on that path.
+func Complete(suite *Suite, tree *ttcn3.Tree, pos int, nodes []syntax.Node) []protocol.CompletionItem {
+	if len(nodes) == 0 || tree == nil {
 		return nil
 	}
-	tree := ttcn3.ParseFile(file)
+	c := completer{suite: suite, tree: tree, pos: pos, nodes: nodes, mod: enclosingModule(nodes)}
+	return c.complete()
+}
 
+// completer is one completion request.
+type completer struct {
+	suite  *Suite
+	tree   *ttcn3.Tree
+	pos    int
+	nodes  []syntax.Node
+	mod    string
+	parsed []*ttcn3.Tree
+	loaded bool
+}
+
+// behavMatch selects function-like declarations.
+// A declaration matches when any set flag matches its signature.
+type behavMatch struct {
+	kinds  []syntax.Kind
+	plain  bool // no return and no runs-on
+	ret    bool
+	runsOn bool
+}
+
+func (m behavMatch) allows(fn *syntax.FuncDecl) bool {
+	hasRet := fn.Return != nil
+	hasRuns := fn.RunsOn != nil
+	if (m.ret && hasRet) || (m.runsOn && hasRuns) {
+		return true
+	}
+	return m.plain && !hasRet && !hasRuns
+}
+
+func (c *completer) complete() []protocol.CompletionItem {
+	switch {
+	case behaviourBody(c.nodes):
+		return c.behaviourBody()
+	case controlBody(c.nodes):
+		return c.controlBody()
+	case constScope(c.nodes):
+		return c.constDecl()
+	case templateScope(c.nodes):
+		return c.templateDecl()
+	default:
+		return c.byLeaf()
+	}
+}
+
+func (c *completer) behaviourBody() []protocol.CompletionItem {
+	prev := c.at(1)
+	sel, _ := prev.(*syntax.SelectorExpr)
+	mod := ""
+	if sel != nil {
+		if sel.X == nil {
+			return nil
+		}
+		mod = tokText(sel.X.LastTok())
+	}
+
+	match := behavMatch{kinds: []syntax.Kind{syntax.FUNCTION}, ret: true}
+	switch {
+	case startArg(c.nodes):
+		match.runsOn = true
+	case !insideExpr(c.nodes, mod != ""):
+		match.kinds = []syntax.Kind{syntax.FUNCTION, syntax.ALTSTEP}
+		match.plain = true
+		match.runsOn = true
+	}
+
+	if mod != "" {
+		if tree := c.treeByModule(mod); tree != nil {
+			return behaviours(tree, match, constRank(sortFirst))
+		}
+		return c.fieldsOf(selectorTarget(sel, c.pos))
+	}
+	if idx, ok := prev.(*syntax.IndexExpr); ok {
+		return c.fieldsOf(idx)
+	}
+
+	var items []protocol.CompletionItem
+	if expr, ok := prev.(syntax.Expr); ok && c.inArgList() {
+		items = c.argNames(expr)
+		if bin, ok := prev.(*syntax.BinaryExpr); ok && bin.Op != nil && c.pos > bin.Op.FirstTok().End() {
+			return items
+		}
+	}
+	items = append(items, c.locals(sortSecond)...)
+	items = append(items, c.allBehaviours(match)...)
+	items = append(items, predefinedFunctionItems()...)
+	return append(items, c.modules(sortFourth)...)
+}
+
+func (c *completer) controlBody() []protocol.CompletionItem {
+	match := behavMatch{kinds: []syntax.Kind{syntax.FUNCTION}, ret: true}
+	if sel, ok := c.at(1).(*syntax.SelectorExpr); ok {
+		if sel.X == nil {
+			return nil
+		}
+		if !insideExpr(c.nodes, true) {
+			match.plain = true
+		}
+		mod := tokText(sel.X.LastTok())
+		tree := c.treeByModule(mod)
+		if tree == nil {
+			log.Debugf("module %s not found\n", mod)
+			return nil
+		}
+		return behaviours(tree, match, constRank(sortFirst))
+	}
+	if !insideExpr(c.nodes, false) {
+		match.plain = true
+		match.runsOn = true
+	}
+	items := c.allBehaviours(match)
+	items = append(items, predefinedFunctionItems()...)
+	return append(items, c.modules(sortThird)...)
+}
+
+func (c *completer) constDecl() []protocol.CompletionItem {
+	decl := valueDeclNode(c.nodes)
+	if decl == nil {
+		return nil
+	}
+	sel, _ := c.at(1).(*syntax.SelectorExpr)
+	if decl.Type == nil || decl.Type.Pos() > c.pos {
+		return c.typeNames(sel)
+	}
+	return c.returningFuncs(sel)
+}
+
+func (c *completer) templateDecl() []protocol.CompletionItem {
+	decl := templateDeclNode(c.nodes)
+	if decl == nil {
+		return nil
+	}
+	sel, _ := c.at(1).(*syntax.SelectorExpr)
+	switch {
+	case decl.ModifiesTok != nil && decl.AssignTok != nil && decl.AssignTok.Pos() > c.pos:
+		return c.modifiedTemplate(decl, sel)
+	case decl.Type == nil || decl.Name == nil || decl.Name.Pos() > c.pos:
+		return c.typeNames(sel)
+	default:
+		return c.returningFuncs(sel)
+	}
+}
+
+func (c *completer) modifiedTemplate(decl *syntax.TemplateDecl, sel *syntax.SelectorExpr) []protocol.CompletionItem {
+	if sel != nil && sel.X != nil {
+		mod := tokText(sel.X.LastTok())
+		tree := c.treeByModule(mod)
+		if tree == nil {
+			log.Debugf("module %s not found\n", mod)
+			return nil
+		}
+		return valueDecls(tree, templateKind(decl), false)
+	}
+	return append(c.allValueDecls(syntax.TEMPLATE), c.modules("")...)
+}
+
+func (c *completer) typeNames(sel *syntax.SelectorExpr) []protocol.CompletionItem {
+	if sel != nil && sel.X != nil {
+		return c.typesIn(tokText(sel.X.LastTok()), "")
+	}
+	return append(c.allTypes(), c.modules(sortThird)...)
+}
+
+func (c *completer) returningFuncs(sel *syntax.SelectorExpr) []protocol.CompletionItem {
+	match := behavMatch{kinds: []syntax.Kind{syntax.FUNCTION}, ret: true}
+	if sel != nil && sel.X != nil {
+		mod := tokText(sel.X.LastTok())
+		tree := c.treeByModule(mod)
+		if tree == nil {
+			log.Debugf("module %s not found\n", mod)
+			return nil
+		}
+		return behaviours(tree, match, constRank(sortFirst))
+	}
+	items := c.allBehaviours(match)
+	items = append(items, predefinedFunctionItems()...)
+	return append(items, c.modules(sortThird)...)
+}
+
+func (c *completer) byLeaf() []protocol.CompletionItem {
+	switch n := c.at(0).(type) {
+	case *syntax.Ident:
+		return c.ident(n)
+	case *syntax.ImportDecl:
+		if n.Module == nil {
+			return c.modules(sortImport)
+		}
+	case *syntax.DefKindExpr:
+		return c.defKind(n)
+	case *syntax.RunsOnSpec, *syntax.SystemSpec:
+		return c.componentTypesAndModules()
+	case *syntax.ErrorNode:
+		return c.onError()
+	case *syntax.Declarator:
+		return c.onDeclarator()
+	default:
+		log.Debugf("Node not considered yet: %#v\n", n)
+	}
+	return nil
+}
+
+func (c *completer) ident(id *syntax.Ident) []protocol.CompletionItem {
+	if _, ok := c.nodes[0].(*syntax.Module); ok && len(c.nodes) == 2 {
+		return keywordItems(moduleDefLabels...)
+	}
+	parent := c.at(1)
+	if parent == nil {
+		return nil
+	}
+	switch parent := parent.(type) {
+	case *syntax.ModuleDef:
+		return keywordItems(moduleDefLabels...)
+	case *syntax.ImportDecl:
+		return c.importIdent(id, parent)
+	case *syntax.DefKindExpr:
+		return c.defKindIdent(parent)
+	case *syntax.ExceptExpr:
+		return keywordItems(importKindLabels...)
+	case *syntax.RunsOnSpec, *syntax.SystemSpec:
+		return c.componentTypesAndModules()
+	case *syntax.SelectorExpr:
+		return c.selectorComponent(parent)
+	case *syntax.ComponentTypeDecl:
+		return c.componentExtends(parent)
+	default:
+		return nil
+	}
+}
+
+func (c *completer) importIdent(id *syntax.Ident, imp *syntax.ImportDecl) []protocol.CompletionItem {
+	switch {
+	case imp.LBrace != nil:
+		return keywordItems(importKindLabels...)
+	case id == imp.Alias:
+		return nil
+	case id.End() >= c.pos:
+		return c.modules(sortImport)
+	default:
+		return importAllItems()
+	}
+}
+
+func (c *completer) defKindIdent(kind *syntax.DefKindExpr) []protocol.CompletionItem {
+	// Eight ancestors is the except-list shape: import, all except, '{', kind, ident.
+	if len(c.nodes) == 8 {
+		if _, ok := c.at(2).(*syntax.ExceptExpr); !ok {
+			return nil
+		}
+		if kind.KindTok != nil {
+			if imp, ok := c.at(4).(*syntax.ImportDecl); ok {
+				return c.importSpecs(kind.KindTok.Kind(), imp)
+			}
+		}
+		return keywordItems(importKindLabels...)
+	}
+	if imp, ok := c.at(2).(*syntax.ImportDecl); ok {
+		if kind.KindTok == nil {
+			return nil
+		}
+		return c.importSpecs(kind.KindTok.Kind(), imp)
+	}
+	return nil
+}
+
+func (c *completer) defKind(kind *syntax.DefKindExpr) []protocol.CompletionItem {
+	if kind.KindTok == nil {
+		return keywordItems(importKindLabels...)
+	}
+	if imp, ok := c.at(1).(*syntax.ImportDecl); ok {
+		return c.importSpecs(kind.KindTok.Kind(), imp)
+	}
+	if _, ok := c.at(1).(*syntax.ExceptExpr); ok {
+		if imp, ok := c.at(3).(*syntax.ImportDecl); ok {
+			return c.importSpecs(kind.KindTok.Kind(), imp)
+		}
+	}
+	return nil
+}
+
+func (c *completer) onError() []protocol.CompletionItem {
+	switch parent := c.at(1).(type) {
+	case *syntax.ModuleDef:
+		return keywordItems(moduleDefLabels...)
+	case *syntax.DefKindExpr:
+		if parent.KindTok == nil {
+			return nil
+		}
+		if imp, ok := c.at(2).(*syntax.ImportDecl); ok {
+			return c.importSpecs(parent.KindTok.Kind(), imp)
+		}
+		if _, ok := c.at(2).(*syntax.ExceptExpr); ok {
+			if imp, ok := c.at(4).(*syntax.ImportDecl); ok {
+				return c.importSpecs(parent.KindTok.Kind(), imp)
+			}
+		}
+	}
+	return nil
+}
+
+func (c *completer) onDeclarator() []protocol.CompletionItem {
+	decl, ok := c.at(1).(*syntax.ValueDecl)
+	if !ok || decl.KindTok == nil || decl.KindTok.Kind() != syntax.PORT {
+		return nil
+	}
+	return append(c.allPortTypes(), c.modules(sortThird)...)
+}
+
+func (c *completer) selectorComponent(sel *syntax.SelectorExpr) []protocol.CompletionItem {
+	if sel.X == nil {
+		return nil
+	}
+	switch c.at(2).(type) {
+	case *syntax.RunsOnSpec, *syntax.SystemSpec, *syntax.ComponentTypeDecl:
+		return c.componentsIn(tokText(sel.X.LastTok()), sortFirst)
+	default:
+		return nil
+	}
+}
+
+func (c *completer) componentExtends(comp *syntax.ComponentTypeDecl) []protocol.CompletionItem {
+	if comp.ExtendsTok == nil || comp.ExtendsTok.LastTok() == nil || comp.Body == nil || comp.Body.LBrace == nil {
+		return nil
+	}
+	if comp.Body.LBrace.Pos() <= c.pos {
+		return nil
+	}
+	return c.componentTypesAndModules()
+}
+
+func (c *completer) componentTypesAndModules() []protocol.CompletionItem {
+	return append(c.allComponentTypes(sortFirst), c.modules(sortSecond)...)
+}
+
+func (c *completer) importSpecs(kind syntax.Kind, imp *syntax.ImportDecl) []protocol.CompletionItem {
+	if imp.Module == nil {
+		return nil
+	}
+	mod := tokText(imp.Module.Tok)
+	tree := c.treeByModule(mod)
+	if tree == nil {
+		log.Debugf("module %s not found\n", mod)
+		return nil
+	}
+
+	var items []protocol.CompletionItem
 	switch kind {
 	case syntax.ALTSTEP, syntax.FUNCTION, syntax.TESTCASE:
-		var ret []protocol.CompletionItem
-		tree.Inspect(func(n syntax.Node) bool {
-			f, ok := n.(*syntax.FuncDecl)
-			if !ok {
-				return true
-			}
-
-			if f.KindTok.Kind() == kind {
-				ret = append(ret, protocol.CompletionItem{Label: syntax.Name(f), Kind: protocol.FunctionCompletion})
-			}
-			return false
-		})
-		ret = append(ret, protocol.CompletionItem{Label: "all;", Kind: protocol.KeywordCompletion})
-		return ret
-
+		items = funcNames(tree, kind)
 	case syntax.TEMPLATE, syntax.CONST, syntax.MODULEPAR:
-		ret := CompleteValueDecls(tree, kind, false)
-		ret = append(ret, protocol.CompletionItem{Label: "all;", Kind: protocol.KeywordCompletion})
-		return ret
-
+		items = valueDecls(tree, kind, false)
 	case syntax.TYPE:
-		var ret []protocol.CompletionItem
-		tree.Inspect(func(n syntax.Node) bool {
-			if !isType(n) {
-				return true
-			}
-			// NOTE: instead of 'StructCompletion' a better matching kind could be used
-			ret = append(ret, protocol.CompletionItem{Label: syntax.Name(n), Kind: protocol.StructCompletion})
-			return false
-		})
-		ret = append(ret, protocol.CompletionItem{Label: "all;", Kind: protocol.KeywordCompletion})
-		return ret
-
+		items = importTypeNames(tree)
 	default:
 		log.Debugf("Kind not considered yet: %#v\n", kind)
 		return nil
 	}
+	return append(items, protocol.CompletionItem{Label: "all;", Kind: protocol.KeywordCompletion})
 }
 
-func CompleteAllModules(suite *Suite, ownModName string, sortPref string) []protocol.CompletionItem {
-	var ret []protocol.CompletionItem
-	for _, f := range suite.Files() {
-		fileName := baseName(f)
-		if fileName == ownModName {
-			continue
-		}
-		item := protocol.CompletionItem{
-			Label: fileName,
-			Kind:  protocol.ModuleCompletion,
-		}
-		if sortPref != "" {
-			item.SortText = sortPref + fileName
-		}
-		ret = append(ret, item)
+// trees returns one syntax tree per suite file. Module names are read from those trees.
+func (c *completer) trees() []*ttcn3.Tree {
+	if c.loaded {
+		return c.parsed
 	}
-	return ret
+	c.loaded = true
+	for _, file := range c.suite.Files() {
+		c.parsed = append(c.parsed, ttcn3.ParseFile(file))
+	}
+	return c.parsed
 }
 
-func CompleteTypes(suite *Suite, mname string, sortPref string) []protocol.CompletionItem {
-	file, err := suite.FindModule(mname)
-	if err != nil {
-		log.Debugf("module %s not found\n", mname)
+// treeByModule returns the tree that declares name.
+func (c *completer) treeByModule(name string) *ttcn3.Tree {
+	if name == "" {
 		return nil
 	}
-
-	var ret []protocol.CompletionItem
-	tree := ttcn3.ParseFile(file)
-	tree.Inspect(func(n syntax.Node) bool {
-		if mod, ok := n.(*syntax.Module); ok {
-			mname = mod.Name.String()
+	if file, err := c.suite.FindModule(name); err == nil {
+		if tree := ttcn3.ParseFile(file); declares(tree, name) {
+			return tree
 		}
-		if !isType(n) {
-			return true
+	}
+	// FindModule may guess by file name, or miss files indexed under another path spelling.
+	for _, tree := range c.trees() {
+		if declares(tree, name) {
+			return tree
 		}
-		v := syntax.Name(n)
-		item := protocol.CompletionItem{
-			Label:  v + " ",
-			Kind:   protocol.StructCompletion, // NOTE: instead of 'StructCompletion' a better matching kind could be used
-			Detail: joinNames(mname, v),
-		}
-		if sortPref != "" {
-			item.SortText = sortPref + v
-		}
-		ret = append(ret, item)
-		return false
-	})
-	return ret
+	}
+	return nil
 }
 
-func CompleteComponentTypes(suite *Suite, mname string, sortPref string) []protocol.CompletionItem {
-	file, err := suite.FindModule(mname)
-	if err != nil {
-		log.Debugf("module %s not found\n", mname)
+func declares(tree *ttcn3.Tree, name string) bool {
+	for _, m := range tree.Modules() {
+		if syntax.Name(m.Node) == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (c *completer) allBehaviours(match behavMatch) []protocol.CompletionItem {
+	var items []protocol.CompletionItem
+	for _, tree := range c.trees() {
+		items = append(items, behaviours(tree, match, c.rank)...)
+	}
+	return items
+}
+
+func behaviours(tree *ttcn3.Tree, match behavMatch, sortOf func(string) string) []protocol.CompletionItem {
+	var items []protocol.CompletionItem
+	for _, kind := range match.kinds {
+		items = append(items, behavioursOfKind(tree, kind, match, sortOf)...)
+	}
+	return items
+}
+
+func behavioursOfKind(tree *ttcn3.Tree, kind syntax.Kind, match behavMatch, sortOf func(string) string) []protocol.CompletionItem {
+	var (
+		items []protocol.CompletionItem
+		mod   string
+	)
+	tree.Inspect(func(n syntax.Node) bool {
+		if syntax.IsNil(n) {
+			return false
+		}
+		if m, ok := n.(*syntax.Module); ok {
+			mod = syntax.Name(m)
+			return true
+		}
+		fn, ok := n.(*syntax.FuncDecl)
+		if !ok {
+			return true
+		}
+		if fn.KindTok != nil && fn.KindTok.Kind() == kind && match.allows(fn) {
+			items = append(items, behaviourItem(fn, mod, sortOf(mod)))
+		}
+		return false
+	})
+	return items
+}
+
+func behaviourItem(fn *syntax.FuncDecl, mod, sortPref string) protocol.CompletionItem {
+	name := syntax.Name(fn)
+	var sig strings.Builder
+	sig.WriteString(fn.KindTok.String() + " " + mod + "." + name)
+	before := sig.Len()
+	printer.Print(&sig, fn.Params)
+	hasParams := sig.Len()-before > 2
+	writeClause := func(n syntax.Node) {
+		if syntax.IsNil(n) {
+			return
+		}
+		sig.WriteString("\n  ")
+		printer.Print(&sig, n)
+	}
+	writeClause(fn.RunsOn)
+	writeClause(fn.System)
+	writeClause(fn.Return)
+
+	format := protocol.PlainTextTextFormat
+	insert := name + "()"
+	if hasParams {
+		format = protocol.SnippetTextFormat
+		insert = name + "($1)$0"
+	}
+	return protocol.CompletionItem{
+		Label:            name + "()",
+		InsertText:       insert,
+		Kind:             protocol.FunctionCompletion,
+		SortText:         sortPref + name,
+		Detail:           sig.String(),
+		Documentation:    syntax.Doc(fn),
+		InsertTextFormat: format,
+	}
+}
+
+func (c *completer) locals(sortPref string) []protocol.CompletionItem {
+	var fn *syntax.FuncDecl
+	for _, n := range c.nodes {
+		if f, ok := n.(*syntax.FuncDecl); ok {
+			fn = f
+			break
+		}
+	}
+	if fn == nil {
 		return nil
 	}
-
-	var ret []protocol.CompletionItem
-	tree := ttcn3.ParseFile(file)
-	tree.Inspect(func(n syntax.Node) bool {
-		if mod, ok := n.(*syntax.Module); ok {
-			mname = mod.Name.String()
+	var items []protocol.CompletionItem
+	fn.Inspect(func(n syntax.Node) bool {
+		if syntax.IsNil(n) {
+			return false
 		}
-		if _, ok := n.(*syntax.ComponentTypeDecl); !ok {
+		d, ok := n.(*syntax.Declarator)
+		if !ok {
 			return true
 		}
-		v := syntax.Name(n)
-		item := protocol.CompletionItem{
-			Label:  v,
-			Kind:   protocol.StructCompletion,
-			Detail: joinNames(mname, v),
+		name := syntax.Name(d)
+		if name == "" {
+			return false
 		}
-		if sortPref != "" {
-			item.SortText = sortPref + v
-		}
-		ret = append(ret, item)
+		items = append(items, protocol.CompletionItem{
+			Label:    name,
+			Kind:     protocol.VariableCompletion,
+			SortText: sortPref + name,
+		})
 		return false
 	})
-	return ret
+	return items
 }
 
-func CompletePortTypes(suite *Suite, mname string, sortPref string) []protocol.CompletionItem {
-	file, err := suite.FindModule(mname)
-	if err != nil {
-		log.Debugf("module %s not found\n", mname)
+func (c *completer) modules(sortPref string) []protocol.CompletionItem {
+	var items []protocol.CompletionItem
+	seen := make(map[string]bool)
+	for _, tree := range c.trees() {
+		for _, m := range tree.Modules() {
+			name := syntax.Name(m.Node)
+			if name == "" || name == c.mod || seen[name] {
+				continue
+			}
+			seen[name] = true
+			item := protocol.CompletionItem{Label: name, Kind: protocol.ModuleCompletion}
+			if sortPref != "" {
+				item.SortText = sortPref + name
+			}
+			items = append(items, item)
+		}
+	}
+	return items
+}
+
+func (c *completer) rank(name string) string {
+	if name == c.mod {
+		return sortFirst
+	}
+	return sortSecond
+}
+
+func (c *completer) allTypes() []protocol.CompletionItem {
+	var items []protocol.CompletionItem
+	for _, tree := range c.trees() {
+		items = append(items, declItems(tree, c.rank, " ", protocol.StructCompletion, isTypeDecl)...)
+	}
+	return append(items, keywordItems(predefinedTypeLabels...)...)
+}
+
+func (c *completer) allComponentTypes(sortPref string) []protocol.CompletionItem {
+	var items []protocol.CompletionItem
+	rank := constRank(sortPref)
+	for _, tree := range c.trees() {
+		items = append(items, declItems(tree, rank, "", protocol.StructCompletion, isComponentDecl)...)
+	}
+	return items
+}
+
+func (c *completer) allPortTypes() []protocol.CompletionItem {
+	var items []protocol.CompletionItem
+	for _, tree := range c.trees() {
+		items = append(items, declItems(tree, c.rank, "", protocol.InterfaceCompletion, isPortDecl)...)
+	}
+	return items
+}
+
+func (c *completer) typesIn(mod, sortPref string) []protocol.CompletionItem {
+	return c.declsIn(mod, constRank(sortPref), " ", protocol.StructCompletion, isTypeDecl)
+}
+
+func (c *completer) componentsIn(mod, sortPref string) []protocol.CompletionItem {
+	return c.declsIn(mod, constRank(sortPref), "", protocol.StructCompletion, isComponentDecl)
+}
+
+func (c *completer) declsIn(mod string, sortOf func(string) string, suffix string, kind protocol.CompletionItemKind, want func(syntax.Node) bool) []protocol.CompletionItem {
+	tree := c.treeByModule(mod)
+	if tree == nil {
+		log.Debugf("module %s not found\n", mod)
 		return nil
 	}
-
-	var ret []protocol.CompletionItem
-	tree := ttcn3.ParseFile(file)
-	tree.Inspect(func(n syntax.Node) bool {
-		if mod, ok := n.(*syntax.Module); ok {
-			mname = mod.Name.String()
-		}
-		if _, ok := n.(*syntax.PortTypeDecl); !ok {
-			return true
-		}
-		v := syntax.Name(n)
-		item := protocol.CompletionItem{
-			Label:  v,
-			Kind:   protocol.InterfaceCompletion,
-			Detail: joinNames(mname, v),
-		}
-		if sortPref != "" {
-			item.SortText = sortPref + v
-		}
-		ret = append(ret, item)
-		return false
-	})
-	return ret
+	return declItems(tree, sortOf, suffix, kind, want)
 }
 
-func CollectParams(n syntax.Node) []protocol.CompletionItem {
-	var list []protocol.CompletionItem
-
-	switch n := n.(type) {
-	case *syntax.FormalPars:
-		for _, par := range n.List {
-			list = append(list, protocol.CompletionItem{Label: par.Name.String(), Detail: syntax.Name(par.Type)})
+func declItems(tree *ttcn3.Tree, sortOf func(string) string, suffix string, kind protocol.CompletionItemKind, want func(syntax.Node) bool) []protocol.CompletionItem {
+	var (
+		items []protocol.CompletionItem
+		modID string
+	)
+	tree.Inspect(func(n syntax.Node) bool {
+		if syntax.IsNil(n) {
+			return false
 		}
-	case *syntax.StructTypeDecl:
-		for _, field := range n.Fields {
-			if name := syntax.Name(field); name != "" {
-				list = append(list, protocol.CompletionItem{Label: name, Detail: syntax.Name(field.Type)})
+		if m, ok := n.(*syntax.Module); ok {
+			modID = syntax.Name(m)
+			return true
+		}
+		if !want(n) {
+			return true
+		}
+		name := syntax.Name(n)
+		item := protocol.CompletionItem{
+			Label:  name + suffix,
+			Kind:   kind,
+			Detail: modID + "." + name,
+		}
+		if sortOf != nil {
+			if pref := sortOf(modID); pref != "" {
+				item.SortText = pref + name
 			}
 		}
-	}
-
-	return list
+		items = append(items, item)
+		return false
+	})
+	return items
 }
 
-func CompleteParams(tgt syntax.Node, cur int, sortPref string, completeAssign bool) []protocol.CompletionItem {
-	var insertText string
-	if completeAssign {
-		insertText = "%s := ${1:}"
-	} else {
-		insertText = "%s"
+func (c *completer) allValueDecls(kind syntax.Kind) []protocol.CompletionItem {
+	var items []protocol.CompletionItem
+	for _, tree := range c.trees() {
+		items = append(items, valueDecls(tree, kind, true)...)
 	}
+	return items
+}
 
-	items := CollectParams(tgt)
-	if len(items) > cur {
-		items = items[cur:]
+func valueDecls(tree *ttcn3.Tree, kind syntax.Kind, withDetail bool) []protocol.CompletionItem {
+	var (
+		items []protocol.CompletionItem
+		mod   string
+	)
+	tree.Inspect(func(n syntax.Node) bool {
+		if syntax.IsNil(n) {
+			return false
+		}
+		switch n := n.(type) {
+		case *syntax.Module:
+			mod = syntax.Name(n)
+			return true
+		case *syntax.FuncDecl, *syntax.ComponentTypeDecl:
+			return false
+		case *syntax.ValueDecl:
+			return n.KindTok != nil && n.KindTok.Kind() == kind
+		case *syntax.TemplateDecl:
+			if kind != syntax.TEMPLATE {
+				return false
+			}
+		case *syntax.Declarator:
+		default:
+			return true
+		}
+		name := syntax.Name(n)
+		item := protocol.CompletionItem{Label: name, Kind: protocol.ConstantCompletion}
+		if withDetail {
+			item.Detail = mod + "." + name
+		}
+		items = append(items, item)
+		return false
+	})
+	return items
+}
+
+func funcNames(tree *ttcn3.Tree, kind syntax.Kind) []protocol.CompletionItem {
+	var items []protocol.CompletionItem
+	tree.Inspect(func(n syntax.Node) bool {
+		if syntax.IsNil(n) {
+			return false
+		}
+		fn, ok := n.(*syntax.FuncDecl)
+		if !ok {
+			return true
+		}
+		if fn.KindTok != nil && fn.KindTok.Kind() == kind {
+			items = append(items, protocol.CompletionItem{Label: syntax.Name(fn), Kind: protocol.FunctionCompletion})
+		}
+		return false
+	})
+	return items
+}
+
+func importTypeNames(tree *ttcn3.Tree) []protocol.CompletionItem {
+	var items []protocol.CompletionItem
+	tree.Inspect(func(n syntax.Node) bool {
+		if syntax.IsNil(n) {
+			return false
+		}
+		if !isTypeDecl(n) {
+			return true
+		}
+		items = append(items, protocol.CompletionItem{Label: syntax.Name(n), Kind: protocol.StructCompletion})
+		return false
+	})
+	return items
+}
+
+func (c *completer) argNames(n syntax.Expr) []protocol.CompletionItem {
+	tree := c.tree
+	assign := true
+	if _, ok := n.(*syntax.BinaryExpr); ok {
+		parent, _ := tree.ParentOf(n).(syntax.Expr)
+		n = parent
+		assign = false
+	}
+	if _, ok := n.(*syntax.ParenExpr); ok {
+		parent, _ := tree.ParentOf(n).(syntax.Expr)
+		n = parent
+	}
+	switch n := n.(type) {
+	case *syntax.CallExpr:
+		if n.Args == nil {
+			return nil
+		}
+		defs := tree.LookupWithDB(n.Fun, c.suite.DB)
+		if len(defs) == 0 {
+			return nil
+		}
+		params := getDeclarationParams(defs[0].Node)
+		if params == nil {
+			return nil
+		}
+		return paramItems(params, len(n.Args.List)-1, sortFirst, assign)
+	case *syntax.CompositeLiteral:
+		defs := tree.TypeOf(n, c.suite.DB)
+		if len(defs) == 0 {
+			return nil
+		}
+		node := defs[0].Node
+		if _, ok := node.(*syntax.ListSpec); ok {
+			node, _ = actualType(c.suite.DB, defs[0])
+		}
+		return paramItems(node, 0, sortFirst, assign)
+	default:
+		return nil
+	}
+}
+
+func paramItems(n syntax.Node, from int, sortPref string, assign bool) []protocol.CompletionItem {
+	items := collectParams(n)
+	if from >= 0 && from < len(items) {
+		items = items[from:]
+	}
+	insert := "%s"
+	if assign {
+		insert = "%s := ${1:}"
 	}
 	for i := range items {
 		items[i].Documentation = ""
 		items[i].Kind = protocol.EnumMemberCompletion
 		items[i].SortText = sortPref + items[i].Label
-		items[i].InsertText = fmt.Sprintf(insertText, items[i].Label)
+		items[i].InsertText = fmt.Sprintf(insert, items[i].Label)
 		items[i].InsertTextFormat = protocol.SnippetTextFormat
 	}
-
 	return items
 }
 
-func CompleteArgNames(suite *Suite, mname string, n syntax.Expr, sortPref string) []protocol.CompletionItem {
-	file, err := suite.FindModule(mname)
-	if err != nil {
-		log.Debugf("module %s not found\n", mname)
-		return nil
-	}
-	tree := ttcn3.ParseFile(file)
-
-	completeAssignOperator := true
-	if _, ok := n.(*syntax.BinaryExpr); ok {
-		n = tree.ParentOf(n).(syntax.Expr)
-		completeAssignOperator = false
-	}
-
-	if _, ok := n.(*syntax.ParenExpr); ok {
-		n = tree.ParentOf(n).(syntax.Expr)
-	}
-
+func collectParams(n syntax.Node) []protocol.CompletionItem {
 	switch n := n.(type) {
-	case *syntax.CallExpr:
-		if defs := tree.LookupWithDB(n.Fun, suite.DB); len(defs) > 0 {
-			def := defs[0]
-			if params := getDeclarationParams(def.Node); params != nil {
-				return CompleteParams(params, len(n.Args.List)-1, sortPref, completeAssignOperator)
+	case *syntax.FormalPars:
+		items := make([]protocol.CompletionItem, 0, len(n.List))
+		for _, par := range n.List {
+			if par == nil {
+				continue
 			}
+			items = append(items, protocol.CompletionItem{Label: syntax.Name(par), Detail: syntax.Name(par.Type)})
 		}
-	case *syntax.CompositeLiteral:
-		defs := tree.TypeOf(n, suite.DB)
-		if len(defs) > 0 {
-			def := defs[0]
-			n := def.Node
-			if _, ok := n.(*syntax.ListSpec); ok {
-				n, _ = ExtractActualType(def.Tree, suite.DB, n, 0)
-			}
-			return CompleteParams(n, 0, sortPref, completeAssignOperator)
-		}
-	}
-
-	return nil
-}
-
-func CompleteFields(suite *Suite, tree *ttcn3.Tree, wtype syntax.Node, depth int) []protocol.CompletionItem {
-	var ret []protocol.CompletionItem
-
-	typ, typeDepth := ExtractActualType(tree, suite.DB, wtype, 0)
-
-	switch n := typ.(type) {
+		return items
 	case *syntax.StructTypeDecl:
-		if typeDepth == depth {
-			for _, field := range n.Fields {
-				name := syntax.Name(field)
-				if name == "" {
-					continue
-				}
-				ret = append(ret, protocol.CompletionItem{
-					Label:         name,
-					Kind:          protocol.FieldCompletion,
-					Detail:        syntax.Name(field.Type),
-					Documentation: "",
-				})
+		items := make([]protocol.CompletionItem, 0, len(n.Fields))
+		for _, field := range n.Fields {
+			if name := syntax.Name(field); name != "" {
+				items = append(items, protocol.CompletionItem{Label: name, Detail: syntax.Name(field.Type)})
 			}
 		}
-	}
-
-	return ret
-}
-
-func ExtractActualType(tree *ttcn3.Tree, db *ttcn3.DB, t syntax.Node, depth int) (syntax.Node, int) {
-	q := []*ttcn3.Node{{Node: t, Tree: tree}}
-
-	for len(q) > 0 {
-		c := q[0]
-		q = q[1:]
-
-		switch n := c.Node.(type) {
-		case *syntax.RefSpec:
-			if defs := tree.TypeOf(n, db); len(defs) > 0 {
-				def := defs[0]
-				if def.Node != t {
-					q = append(q, def)
-					continue
-				}
-			}
-		case *syntax.ListSpec:
-			q = append(q, &ttcn3.Node{Node: n.ElemType, Tree: tree})
-			depth++
-		default:
-			return n, depth
-		}
-	}
-
-	return nil, -1
-}
-
-func CompleteSelectorExpr(suite *Suite, mname string, expr syntax.Expr) []protocol.CompletionItem {
-	file, err := suite.FindModule(mname)
-	if err != nil {
-		log.Debugf("module %s not found\n", mname)
+		return items
+	default:
 		return nil
 	}
+}
 
+func (c *completer) fieldsOf(expr syntax.Expr) []protocol.CompletionItem {
+	if syntax.IsNil(expr) {
+		return nil
+	}
 	depth := 0
 	for {
-		if n, ok := expr.(*syntax.IndexExpr); ok {
-			expr = n.X
-			depth++
-			continue
+		idx, ok := expr.(*syntax.IndexExpr)
+		if !ok {
+			break
 		}
-		break
+		expr = idx.X
+		depth++
 	}
-
-	tree := ttcn3.ParseFile(file)
-	defs := tree.TypeOf(expr, suite.DB)
+	defs := c.tree.TypeOf(expr, c.suite.DB)
 	if len(defs) == 0 {
 		return nil
 	}
-
-	return CompleteFields(suite, tree, defs[0].Node, depth)
-}
-
-func CompleteAllComponentTypes(suite *Suite, sortPref string) []protocol.CompletionItem {
-	var ret []protocol.CompletionItem
-	for _, f := range suite.Files() {
-		items := CompleteComponentTypes(suite, baseName(f), sortPref)
-		ret = append(ret, items...)
-	}
-	return ret
-}
-
-func CompleteAllPortTypes(suite *Suite, ownModName string) []protocol.CompletionItem {
-	var ret []protocol.CompletionItem
-	for _, f := range suite.Files() {
-		mName := baseName(f)
-		prefix := " 2"
-		if mName == ownModName {
-			prefix = " 1"
-		}
-		items := CompletePortTypes(suite, mName, prefix)
-		ret = append(ret, items...)
-	}
-	return ret
-}
-
-func CompleteAllTypes(suite *Suite, ownModName string) []protocol.CompletionItem {
-	var ret []protocol.CompletionItem
-	for _, f := range suite.Files() {
-		mName := baseName(f)
-		prefix := " 2"
-		if mName == ownModName {
-			prefix = " 1"
-		}
-		items := CompleteTypes(suite, mName, prefix)
-		ret = append(ret, items...)
-	}
-	ret = append(ret, CompletePredefinedTypes()...)
-	return ret
-}
-
-func CompleteAllValueDecls(suite *Suite, kind syntax.Kind) []protocol.CompletionItem {
-	var ret []protocol.CompletionItem
-	for _, f := range suite.Files() {
-		mname := baseName(f)
-		file, err := suite.FindModule(mname)
-		if err != nil {
-			log.Debugf("module %s not found\n", mname)
-			return nil
-		}
-		tree := ttcn3.ParseFile(file)
-		items := CompleteValueDecls(tree, kind, true)
-		ret = append(ret, items...)
-	}
-	return ret
-}
-
-func CompleteAllLocalVariables(nodes []syntax.Node, sortPref string) []protocol.CompletionItem {
-	var ret []protocol.CompletionItem
-
-	var funcDecl *syntax.FuncDecl = nil
-	for _, n := range nodes {
-		if n, ok := n.(*syntax.FuncDecl); ok {
-			funcDecl = n
-			break
-		}
-	}
-	if funcDecl == nil {
+	typ, typeDepth := actualType(c.suite.DB, defs[0])
+	st, ok := typ.(*syntax.StructTypeDecl)
+	if !ok || typeDepth != depth {
 		return nil
 	}
-
-	funcDecl.Inspect(func(n syntax.Node) bool {
-		if n == nil {
-			return false
+	items := make([]protocol.CompletionItem, 0, len(st.Fields))
+	for _, field := range st.Fields {
+		name := syntax.Name(field)
+		if name == "" {
+			continue
 		}
-		switch n := n.(type) {
-		case *syntax.Declarator:
-			name := n.Name.String()
-			ret = append(ret, protocol.CompletionItem{
-				Label:    name,
-				Kind:     protocol.VariableCompletion,
-				SortText: sortPref + name,
-			})
-		default:
-			return true
-		}
-		return false
-	})
-
-	return ret
-}
-
-func behaviourInfos(tree *ttcn3.Tree, kind syntax.Kind) []*BehaviourInfo {
-	var ret []*BehaviourInfo
-	mname := ""
-	tree.Inspect(func(n syntax.Node) bool {
-		if mod, ok := n.(*syntax.Module); ok {
-			mname = mod.Name.String()
-		}
-		node, ok := n.(*syntax.FuncDecl)
-		if !ok {
-			return true
-		}
-
-		if node.KindTok.Kind() != kind {
-			return false
-		}
-
-		var sig bytes.Buffer
-		textFormat := protocol.PlainTextTextFormat
-		sig.WriteString(node.KindTok.String() + " " + joinNames(mname, node.Name.String()))
-		len1 := len(sig.String())
-		printer.Print(&sig, node.Params)
-		hasParams := (len(sig.String()) - len1) > 2
-		if hasParams {
-			textFormat = protocol.SnippetTextFormat
-		}
-		if node.RunsOn != nil {
-			sig.WriteString("\n  ")
-			printer.Print(&sig, node.RunsOn)
-		}
-		if node.System != nil {
-			sig.WriteString("\n  ")
-			printer.Print(&sig, node.System)
-		}
-		if node.Return != nil {
-			sig.WriteString("\n  ")
-			printer.Print(&sig, node.Return)
-		}
-		ret = append(ret, &BehaviourInfo{
-			Label:         node.Name.String(),
-			HasRunsOn:     (node.RunsOn != nil),
-			HasReturn:     (node.Return != nil),
-			Signature:     sig.String(),
-			Documentation: syntax.Doc(node),
-			HasParameters: hasParams,
-			TextFormat:    textFormat})
-		return false
-
-	})
-	return ret
-}
-
-func joinNames(s string, ss ...string) string {
-	if len(ss) == 0 {
-		return s
+		items = append(items, protocol.CompletionItem{
+			Label:         name,
+			Kind:          protocol.FieldCompletion,
+			Detail:        syntax.Name(field.Type),
+			Documentation: "",
+		})
 	}
-	return s + "." + strings.Join(ss, ".")
+	return items
 }
 
-func isType(n syntax.Node) bool {
+// actualType follows references and counts list wrappers around n.
+// References resolve in the tree of the definition they appear in. Cycles yield (nil, -1).
+func actualType(db *ttcn3.DB, n *ttcn3.Node) (syntax.Node, int) {
+	depth := 0
+	seen := make(map[syntax.Node]bool)
+	for n != nil && !syntax.IsNil(n.Node) {
+		if seen[n.Node] {
+			return nil, -1
+		}
+		seen[n.Node] = true
+		switch cur := n.Node.(type) {
+		case *syntax.RefSpec:
+			defs := n.Tree.TypeOf(cur, db)
+			if len(defs) == 0 {
+				return nil, -1
+			}
+			n = defs[0]
+		case *syntax.ListSpec:
+			n = &ttcn3.Node{Node: cur.ElemType, Tree: n.Tree}
+			depth++
+		default:
+			return cur, depth
+		}
+	}
+	return nil, -1
+}
+
+func predefinedFunctionItems() []protocol.CompletionItem {
+	items := make([]protocol.CompletionItem, len(PredefinedFunctions))
+	for i, fn := range PredefinedFunctions {
+		items[i] = protocol.CompletionItem{
+			Label:            fn.Label,
+			Kind:             protocol.FunctionCompletion,
+			Detail:           fn.Signature,
+			InsertText:       fn.InsertText,
+			InsertTextFormat: fn.TextFormat,
+			Documentation:    protocol.MarkupContent{Kind: "markdown", Value: fn.Documentation},
+		}
+	}
+	return items
+}
+
+func keywordItems(labels ...string) []protocol.CompletionItem {
+	items := make([]protocol.CompletionItem, len(labels))
+	for i, label := range labels {
+		items[i] = protocol.CompletionItem{Label: label, Kind: protocol.KeywordCompletion}
+	}
+	return items
+}
+
+func importAllItems() []protocol.CompletionItem {
+	return []protocol.CompletionItem{
+		{
+			Label:            "all [except {}];",
+			InsertText:       "${1:all${2: except {$3\\}}};$0",
+			InsertTextFormat: protocol.SnippetTextFormat,
+			Kind:             protocol.KeywordCompletion,
+		},
+		{
+			Label:            "{}",
+			InsertText:       "{$0}",
+			InsertTextFormat: protocol.SnippetTextFormat,
+			Kind:             protocol.KeywordCompletion,
+		},
+	}
+}
+
+func templateKind(decl *syntax.TemplateDecl) syntax.Kind {
+	if decl.RestrictionSpec != nil && decl.TemplateTok != nil {
+		return decl.TemplateTok.Kind()
+	}
+	return syntax.TEMPLATE
+}
+
+func isComponentDecl(n syntax.Node) bool {
+	_, ok := n.(*syntax.ComponentTypeDecl)
+	return ok
+}
+
+func isPortDecl(n syntax.Node) bool {
+	_, ok := n.(*syntax.PortTypeDecl)
+	return ok
+}
+
+func isTypeDecl(n syntax.Node) bool {
 	switch n.(type) {
 	case *syntax.BehaviourTypeDecl,
+		*syntax.ClassTypeDecl,
 		*syntax.ComponentTypeDecl,
 		*syntax.EnumTypeDecl,
 		*syntax.PortTypeDecl,
@@ -1094,144 +1052,190 @@ func isType(n syntax.Node) bool {
 	}
 }
 
-func baseName(name string) string {
-	name = filepath.Base(name)
-	name = name[:len(name)-len(filepath.Ext(name))]
-	return name
+// enclosingModule is the module declaration that contains the cursor.
+func enclosingModule(nodes []syntax.Node) string {
+	for _, n := range nodes {
+		if m, ok := n.(*syntax.Module); ok {
+			return syntax.Name(m)
+		}
+	}
+	return ""
 }
 
-func isArgListScope(nodes []syntax.Node, pos int) bool {
-	l := len(nodes)
-	off := 2
+func constRank(pref string) func(string) string {
+	return func(string) string { return pref }
+}
 
-	if n, ok := nodes[l-off].(*syntax.BinaryExpr); ok {
-		if n.Op.FirstTok().Pos() < pos {
+// at returns the node i steps above the leaf. at(0) is the leaf.
+func (c *completer) at(i int) syntax.Node {
+	j := len(c.nodes) - 1 - i
+	if j < 0 || j >= len(c.nodes) {
+		return nil
+	}
+	return c.nodes[j]
+}
+
+func behaviourBody(nodes []syntax.Node) bool {
+	inside := false
+	for _, n := range nodes {
+		switch n.(type) {
+		case *syntax.FuncDecl:
+			inside = true
+		case *syntax.BlockStmt:
+			if inside {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func controlBody(nodes []syntax.Node) bool {
+	inside := false
+	for _, n := range nodes {
+		switch n.(type) {
+		case *syntax.ControlPart:
+			inside = true
+		case *syntax.BlockStmt:
+			if inside {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func constScope(nodes []syntax.Node) bool {
+	for i := len(nodes) - 1; i > 0; i-- {
+		if _, ok := nodes[i].(*syntax.ValueDecl); !ok {
+			continue
+		}
+		if _, ok := nodes[i-1].(*syntax.ModuleDef); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func templateScope(nodes []syntax.Node) bool {
+	for i := len(nodes) - 1; i > 0; i-- {
+		if _, ok := nodes[i].(*syntax.TemplateDecl); !ok {
+			continue
+		}
+		if _, ok := nodes[i-1].(*syntax.ModuleDef); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func valueDeclNode(nodes []syntax.Node) *syntax.ValueDecl {
+	for _, n := range nodes {
+		if v, ok := n.(*syntax.ValueDecl); ok {
+			return v
+		}
+	}
+	return nil
+}
+
+func templateDeclNode(nodes []syntax.Node) *syntax.TemplateDecl {
+	for _, n := range nodes {
+		if t, ok := n.(*syntax.TemplateDecl); ok {
+			return t
+		}
+	}
+	return nil
+}
+
+func insideExpr(nodes []syntax.Node, fromModule bool) bool {
+	i := len(nodes)
+	if i <= 1 {
+		return false
+	}
+	i--
+	if _, ok := nodes[i].(*syntax.Ident); ok {
+		i--
+	}
+	if fromModule {
+		if i == 0 {
 			return false
 		}
-		if n.Op.String() == ":=" {
+		i--
+	}
+	switch nodes[i].(type) {
+	case *syntax.SelectorExpr, *syntax.ExprStmt, *syntax.BlockStmt:
+		return false
+	default:
+		return true
+	}
+}
+
+func startArg(nodes []syntax.Node) bool {
+	for i := len(nodes) - 1; i >= 0; i-- {
+		if _, ok := nodes[i].(*syntax.ParenExpr); !ok || i < 1 {
+			continue
+		}
+		call, ok := nodes[i-1].(*syntax.CallExpr)
+		if !ok {
+			continue
+		}
+		fun, ok := call.Fun.(*syntax.SelectorExpr)
+		if !ok {
+			return false
+		}
+		return syntax.Name(fun.Sel) == "start"
+	}
+	return false
+}
+
+func (c *completer) inArgList() bool {
+	n := len(c.nodes)
+	off := 2
+	if n < off {
+		return false
+	}
+	if bin, ok := c.nodes[n-off].(*syntax.BinaryExpr); ok {
+		if bin.Op == nil {
+			return false
+		}
+		if bin.Op.FirstTok().Pos() < c.pos {
+			return false
+		}
+		if bin.Op.String() == ":=" {
 			off++
 		}
 	}
-
-	if _, ok := nodes[l-off].(*syntax.ParenExpr); ok {
-		if _, ok := nodes[l-off-1].(*syntax.CallExpr); ok {
-			return true
-		}
-	} else if _, ok := nodes[l-off].(*syntax.CompositeLiteral); ok {
-		return true
+	if n < off {
+		return false
 	}
-
-	return false
-}
-
-func isBehaviourBodyScope(nodes []syntax.Node) bool {
-	insideBehav := false
-	for _, node := range nodes {
-		switch node.(type) {
-		case *syntax.FuncDecl:
-			insideBehav = true
-		case *syntax.BlockStmt:
-			if insideBehav {
-				return true
-			}
-		}
-	}
-	return false
-}
-func isControlBodyScope(nodes []syntax.Node) bool {
-	insideControl := false
-	for _, node := range nodes {
-		switch node.(type) {
-		case *syntax.ControlPart:
-			insideControl = true
-		case *syntax.BlockStmt:
-			if insideControl {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func isConstDeclScope(nodes []syntax.Node) bool {
-	for i := len(nodes) - 1; i > 0; i-- {
-		if _, ok := nodes[i].(*syntax.ValueDecl); ok {
-			if _, ok := nodes[i-1].(*syntax.ModuleDef); ok {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func getConstDeclNode(nodes []syntax.Node) *syntax.ValueDecl {
-	for _, n := range nodes {
-		if val, ok := n.(*syntax.ValueDecl); ok {
-			return val
-		}
-	}
-	return nil
-}
-
-func isTemplateDeclScope(nodes []syntax.Node) bool {
-	for i := len(nodes) - 1; i > 0; i-- {
-		if _, ok := nodes[i].(*syntax.TemplateDecl); ok {
-			if _, ok := nodes[i-1].(*syntax.ModuleDef); ok {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func getTemplateDeclNode(nodes []syntax.Node) *syntax.TemplateDecl {
-	for _, n := range nodes {
-		if templ, ok := n.(*syntax.TemplateDecl); ok {
-			return templ
-		}
-	}
-	return nil
-}
-
-func isInsideExpression(nodes []syntax.Node, fromModuleDot bool) bool {
-	i := len(nodes)
-	if i > 1 {
-		i--
-		if _, ok := nodes[i].(*syntax.Ident); ok {
-			i--
-		}
-		if fromModuleDot {
-			if i == 0 {
-				return false
-			}
-			i--
-		}
-		switch nodes[i].(type) {
-		case *syntax.SelectorExpr:
+	if _, ok := c.nodes[n-off].(*syntax.ParenExpr); ok {
+		if n-off-1 < 0 {
 			return false
-		case *syntax.ExprStmt:
-			return false
-		case *syntax.BlockStmt:
-			return false
-		default:
-			return true
 		}
+		_, ok := c.nodes[n-off-1].(*syntax.CallExpr)
+		return ok
 	}
-	return false
+	_, ok := c.nodes[n-off].(*syntax.CompositeLiteral)
+	return ok
 }
 
-func isStartOpArgument(nodes []syntax.Node) bool {
-	for i := len(nodes) - 1; i >= 0; i-- {
-		if _, ok := nodes[i].(*syntax.ParenExpr); ok {
-			if i >= 1 {
-				if n, ok := nodes[i-1].(*syntax.CallExpr); ok {
-					if fun, ok := n.Fun.(*syntax.SelectorExpr); ok {
-						return syntax.Name(fun.Sel) == "start"
-					}
-					return false
-				}
-			}
-		}
+func selectorTarget(sel *syntax.SelectorExpr, pos int) syntax.Expr {
+	if sel == nil {
+		return nil
 	}
-	return false
+	var tgt syntax.Expr = sel.X
+	if sel.Sel != nil && sel.Sel.LastTok() != nil && sel.Sel.LastTok().Pos() < pos {
+		tgt = sel
+	}
+	if nested, ok := tgt.(*syntax.SelectorExpr); ok && pos == nested.End() {
+		return nested.X
+	}
+	return tgt
+}
+
+func tokText(tok syntax.Token) string {
+	if tok == nil {
+		return ""
+	}
+	return tok.String()
 }

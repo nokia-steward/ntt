@@ -97,6 +97,8 @@ func Name(n Node) string {
 		return Name(n.Name)
 	case *BehaviourTypeDecl:
 		return Name(n.Name)
+	case *ClassTypeDecl:
+		return Name(n.Name)
 	case *Declarator:
 		return Name(n.Name)
 	case *FormalPar:

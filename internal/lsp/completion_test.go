@@ -2,8 +2,8 @@ package lsp_test
 
 import (
 	"fmt"
-	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/nokia/ntt/internal/fs"
 	"github.com/nokia/ntt/internal/lsp"
@@ -48,11 +48,9 @@ func testCompletion(t *testing.T, input string, imports ...string) []protocol.Co
 
 	syntax := ttcn3.ParseFile(name(0))
 	nodeStack := lsp.LastNonWsToken(syntax.Root, cursor)
-	basename := name(0)
-	basename = basename[:len(basename)-len(filepath.Ext(basename))]
 
 	var items []protocol.CompletionItem
-	for _, item := range lsp.Complete(suite, cursor, nodeStack, basename) {
+	for _, item := range lsp.Complete(suite, syntax, cursor, nodeStack) {
 		if predefMap[item.Label] {
 			continue
 		}
@@ -176,8 +174,8 @@ func TestImportModulenamesCtrlSpc(t *testing.T) {
 	  {}`)
 
 	assert.Equal(t, []protocol.CompletionItem{
-		{Label: "TestImportModulenamesCtrlSpc_Module_1", Kind: protocol.ModuleCompletion, SortText: " TestImportModulenamesCtrlSpc_Module_1"},
-		{Label: "TestImportModulenamesCtrlSpc_Module_2", Kind: protocol.ModuleCompletion, SortText: " TestImportModulenamesCtrlSpc_Module_2"}}, list)
+		{Label: "A", Kind: protocol.ModuleCompletion, SortText: " A"},
+		{Label: "B", Kind: protocol.ModuleCompletion, SortText: " B"}}, list)
 }
 
 func TestImportModulenames(t *testing.T) {
@@ -190,8 +188,8 @@ func TestImportModulenames(t *testing.T) {
 	  {}`)
 
 	assert.Equal(t, []protocol.CompletionItem{
-		{Label: "TestImportModulenames_Module_1", Kind: protocol.ModuleCompletion, SortText: " TestImportModulenames_Module_1"},
-		{Label: "TestImportModulenames_Module_2", Kind: protocol.ModuleCompletion, SortText: " TestImportModulenames_Module_2"}}, list)
+		{Label: "A", Kind: protocol.ModuleCompletion, SortText: " A"},
+		{Label: "B", Kind: protocol.ModuleCompletion, SortText: " B"}}, list)
 
 }
 
@@ -1523,4 +1521,73 @@ func TestRecordItemSelectorMultidimensionalNotDeepEnoughCompletion(t *testing.T)
 	}`)
 
 	assert.Equal(t, []protocol.CompletionItem(nil), list)
+}
+
+func TestRecordItemSelectorCyclicCompletion(t *testing.T) {
+	done := make(chan []protocol.CompletionItem, 1)
+	go func() {
+		done <- testCompletion(t, `module Test
+    {
+		type record of B A;
+		type record of C B;
+		type record of B C;
+
+		function f1() {
+			var A a;
+			a[0].¶;
+		}
+	}`)
+	}()
+
+	select {
+	case list := <-done:
+		assert.Equal(t, []protocol.CompletionItem(nil), list)
+	case <-time.After(10 * time.Second):
+		t.Fatal("completion did not terminate on cyclic record of")
+	}
+}
+
+func TestRecordItemSelectorImportedCompletion(t *testing.T) {
+	list := testCompletion(t, `module Test
+    {
+		import from X all;
+
+		function f1() {
+			var RoStructure v;
+			v[0].¶;
+		}
+	}`, `module X
+	{
+		import from Y all;
+		type record of Structure RoStructure;
+	}`, `module Y
+	{
+		type record Structure
+		{
+			integer firstField,
+			boolean secondField
+		}
+	}`)
+
+	assert.Equal(t, []protocol.CompletionItem{
+		{Label: "firstField", Kind: protocol.FieldCompletion, Detail: "integer", Documentation: ""},
+		{Label: "secondField", Kind: protocol.FieldCompletion, Detail: "boolean", Documentation: ""}},
+		list)
+}
+
+func TestImportClassTypes(t *testing.T) {
+	list := testCompletion(t, `module Test
+    {
+        import from X {
+            type ¶}
+	  }`, `module X
+      {
+		  type class C1 {}
+		  type record R1 {integer f1}
+	  }`)
+
+	assert.Equal(t, []protocol.CompletionItem{
+		{Label: "C1", Kind: protocol.StructCompletion},
+		{Label: "R1", Kind: protocol.StructCompletion},
+		{Label: "all;", Kind: protocol.KeywordCompletion}}, list)
 }
