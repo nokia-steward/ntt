@@ -430,6 +430,61 @@ func TestLookup(t *testing.T) {
 					}
 				}`,
 			want: []string{"x1", "x2"}},
+		{
+			name: "embedded fields",
+			input: `module M {
+					type record B { int x }
+					type record R { B, int y }
+					control { var R r; r.¶B.x := 1 }
+				}`,
+			want: []string{"B1"}},
+		{
+			name: "embedded fields",
+			input: `module M {
+					type record B { int x }
+					type record R { B, int y }
+					control { var R r; r.B.¶x := 1 }
+				}`,
+			want: []string{"x0"}},
+		{
+			name: "nested type in formal parameter",
+			input: `module M {
+					function f(record { int x } p) { p.¶x := 1 }
+				}`,
+			want: []string{"x0"}},
+		{
+			name: "decoded field reference",
+			input: `module M {
+					type record P { int x }
+					type record R { bitstring payload }
+					control { var R r; var int i := (r.payload => P).¶x }
+				}`,
+			want: []string{"x0"}},
+		{
+			name: "decoded field reference",
+			input: `module M {
+					type record P { int x }
+					type record R { bitstring payload }
+					control { var R r; var int i := r.payload => P.¶x }
+				}`,
+			want: []string{"x0"}},
+		{
+			name: "select union init",
+			input: `module M {
+					type union U { int x }
+					control { select union (var U u := {x := 1}; ¶u) { case (x) {} } }
+				}`,
+			want: []string{"u0"}},
+		{
+			name: "import alias",
+			input: `module M2 {type integer x}
+				module M1 {import from M2 -> A all; type ¶A.x y}`,
+			want: []string{"A0"}},
+		{
+			name: "import alias",
+			input: `module M2 {type integer x}
+				module M1 {import from M2 -> A all; type A.¶x y}`,
+			want: []string{"x0"}},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

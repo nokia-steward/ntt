@@ -59,6 +59,7 @@ func TestWithStmts(t *testing.T) {
 		{pass, `encode (signature all) "str";`},
 		{pass, `encode (modulepar all) "str";`},
 		{pass, `encode (type all except {a,b}) "str";`},
+		{pass, `variant {"Codec1","Codec2"}."Rule1";`},
 	}
 
 	testParse(t, withStmts, func(p *parser) { p.parseWithStmt() })
@@ -122,6 +123,14 @@ func TestExprs(t *testing.T) {
 		{pass, `-???`},
 		{pass, `"Hello " & ???`},
 		{pass, `???("reason")`},
+
+		// Decoded field references
+		{pass, `v.payload => Payload`},
+		{pass, `v.payload => Payload.field`},
+		{pass, `v.payload => (Payload, "UTF-8")`},
+		{pass, `v.payload => universal charstring`},
+
+		{pass, `???("Hello " & ???)`},
 	}
 
 	testParse(t, exprs, func(p *parser) { p.parseExprList() })
@@ -159,6 +168,14 @@ func TestFuncDecls(t *testing.T) {
 		{pass, `signature f() return int exception (integer, a.b[0]);`},
 		{pass, `signature f() noblock;`},
 		{pass, `signature f() noblock exception (integer, a.b[0]);`},
+		{pass, `signature f(record of integer p) return record of integer;`},
+		{pass, `signature f() exception (record {}, integer);`},
+		{pass, `function f() return record of integer {}`},
+		{pass, `function f() return template set of integer {}`},
+		{pass, `function f(in integer i...) {}`},
+		{pass, `function f(in integer i... := {1, 2, 3}) {}`},
+		{pass, `altstep as1(in integer items...) {}`},
+		{pass, `function f(in integer i := ???) {}`},
 	}
 
 	testParse(t, funcDecls, func(p *parser) { p.parseFuncDecl() })
@@ -215,6 +232,12 @@ func TestModuleDefs(t *testing.T) {
 		{fail, `modulepar := 1;`},
 		{pass, `private function fn() {}`},
 		{pass, `group foo { group bar { import from m all; } }`},
+		{pass, `import from m -> alias { type t };`},
+		{pass, `import from m -> alias all;`},
+		{pass, `modulepar x := 1;`},
+		{pass, `modulepar record of charstring x := {"a"};`},
+		{pass, `modulepar charstring reason := ???;`},
+		{pass, `template Roi aRoi(in integer numbers...) := {}`},
 	}
 	testParse(t, moduleDefs, func(p *parser) { p.parseModuleDef() })
 }
@@ -258,6 +281,9 @@ func TestValueDecls(t *testing.T) {
 		{pass, `var r := {1,2,3}`},
 		{pass, `var integer i := ???;`},
 		{pass, `modulepar charstring reason := ???;`},
+		{pass, `var union { integer i, float f } u;`},
+		{pass, `var enumerated { e1, e2 } e;`},
+		{pass, `const map from charstring to integer m := {};`},
 	}
 
 	testParse(t, valueDecls, func(p *parser) { p.parseValueDecl() })
@@ -281,6 +307,7 @@ func TestTemplateDecls(t *testing.T) {
 		{pass, `template(value)   int x := ?;`},
 		{pass, `template(present) int x := ?;`},
 		{pass, `template T t := { f := decmatch(x) };`},
+		{pass, `template record of integer x := {1, 2};`},
 	}
 
 	testParse(t, templateDecls, func(p *parser) { p.parseTemplateDecl() })
@@ -368,6 +395,11 @@ func TestTypes(t *testing.T) {
 		{pass, `type set s {altstep interleave(integer p_i) runs on C is_callback}`},
 		{pass, `type union s {@default set of int f1 optional}`},
 		{pass, `type union s {enumerated { e(1) } foo}`},
+		{pass, `type record R { integer, B }`},
+		{pass, `type record R { integer, M.B optional, float f }`},
+		{pass, `type set S { integer }`},
+		{pass, `type union U { integer, charstring }`},
+		{fail, `type integer;`},
 		{pass, `type enumerated a {e, e(1), e(1)}`},
 		{pass, `type record r {int a, int b,}`},
 		{pass, `type record r {integer a optional, charstring b,}`},
@@ -442,6 +474,8 @@ func TestStmts(t *testing.T) {
 		{pass, `if (1) {} else if (2) {} else {}`},
 		{pass, `select union (p.x()) { case(1) {} case else {}}`},
 		{pass, `select  (23) {case(1) {} case else {}}`},
+		{pass, `select union (var U v := { s := "abc" }; v) { case(s) {} }`},
+		{pass, `select (const integer i := f(); i) { case(1) {} }`},
 		{pass, `interleave {}`},
 		{pass, `alt {}`},
 		{pass, `alt { [] receive; [23<foo()] p.timeout { var i x:=23; } [else] {}}`},
@@ -521,6 +555,35 @@ func TestStmts(t *testing.T) {
 		{pass, `p.call(foo) to 80;`},
 		{pass, `p[i].call(S:{});`},
 		{pass, `p.call(S:{}) {[] receive; [else] {}}`},
+		{pass, `p.call(S:{}) to all component {[] p.getreply {}}`},
+
+		// Test component call operation
+		{pass, `v_ptc.call(f());`},
+		{pass, `v_ptc.call(f(), 1.0);`},
+		{pass, `v_ptc.call(f()) -> value v_int;`},
+		{pass, `v_ptc.call(f()) -> verdict v_verdict;`},
+		{pass, `v_ptc.call(f()) catch (stop) {}`},
+		{pass, `v_ptc.call(f(), 1.0) catch(timeout) {} catch(stop) {}`},
+		{pass, `v_ptc.call(f()) -> value v_int catch(stop) {}`},
+		{pass, `v_ptc.call(f()) -> verdict v_verdict catch(stop) {}`},
+
+		// @nodefault modifier
+		{pass, `@nodefault AltSet1();`},
+		{pass, `@nodefault all component.done;`},
+		{pass, `@nodefault ptc.killed;`},
+		{pass, `@nodefault messagePort.receive(MyInt);`},
+		{pass, `@nodefault messagePort.trigger(integer:?) -> value v_int;`},
+		{pass, `@nodefault p[0].getreply(S:{});`},
+		{pass, `@nodefault t_timer.timeout;`},
+		{pass, `@nodefault any timer.timeout;`},
+		{pass, `@nodefault p.check(receive(integer:?) -> value v_rec);`},
+		{pass, `alt @nodefault {}`},
+		{pass, `interleave @nodefault {}`},
+		{fail, `@nodefault {}`},
+
+		// Not implemented statement
+		{pass, `???;`},
+		{pass, `???("reason");`},
 	}
 	testParse(t, stmts, func(p *parser) { p.parseStmt() })
 }

@@ -224,3 +224,21 @@ func TestSignatureDecl(t *testing.T) {
 						{Kind: protocol.Struct, Name: "float", Detail: "type", Text: "float"}}}}}}
 	assert.Equal(t, want, testDocumentSymbol(t, input))
 }
+
+func TestNewSyntaxDocumentSymbol(t *testing.T) {
+	input := `
+	module Test
+	{
+		type record R { B, integer i }
+		modulepar mp := 1;
+		function f(in integer p..., record of integer q) {}
+	}`
+	want := []Symbol{
+		{Kind: protocol.Struct, Name: "R", Detail: "record type",
+			Text: "type record R { B, integer i }"},
+		{Kind: protocol.Constant, Name: "mp", Detail: "modulepar",
+			Text: "modulepar mp := 1"},
+		{Kind: protocol.Function, Name: "f", Detail: "function definition",
+			Text: "function f(in integer p..., record of integer q) {}"}}
+	assert.Equal(t, want, testDocumentSymbol(t, input))
+}

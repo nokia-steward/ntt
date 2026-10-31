@@ -153,6 +153,7 @@ var builtins = map[string]SemanticTokenType{
 	"oct2str":              Function,
 	"oct2unichar":          Function,
 	"octetstring":          Type,
+	"present":              Function,
 	"regexp":               Function,
 	"remove_bom":           Function,
 	"replace":              Function,

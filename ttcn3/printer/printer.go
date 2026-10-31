@@ -25,6 +25,11 @@ func Print(w io.Writer, n syntax.Node) error {
 	return p.err
 }
 
+func isDefKind(n syntax.Expr) bool {
+	_, ok := n.(*syntax.DefKindExpr)
+	return ok
+}
+
 type printer struct {
 	w                io.Writer
 	indent           int
@@ -87,8 +92,13 @@ func (p *printer) print(values ...interface{}) {
 			if n == nil {
 				return
 			}
-			p.print(n.Op)
-			p.print(n.X)
+			if n.Op.Kind() == syntax.IFPRESENT || n.Op.Kind() == syntax.ALIVE {
+				p.print(n.X)
+				p.print(n.Op)
+			} else {
+				p.print(n.Op)
+				p.print(n.X)
+			}
 
 		case *syntax.PostExpr:
 			if n == nil {
@@ -165,6 +175,8 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.Tok)
 			p.print(n.ValueTok)
 			p.print(n.Value)
+			p.print(n.VerdictTok)
+			p.print(n.Verdict)
 			p.print(n.ParamTok)
 			p.print(n.Param)
 			p.print(n.SenderTok)
@@ -240,6 +252,13 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.Params)
 			p.print(n.X)
 
+		case *syntax.DynamicExpr:
+			if n == nil {
+				return
+			}
+			p.print(n.Tok)
+			p.print(n.Body)
+
 		case *syntax.DefKindExpr:
 			if n == nil {
 				return
@@ -253,8 +272,23 @@ func (p *printer) print(values ...interface{}) {
 			}
 			p.print(n.X)
 			p.print(n.ExceptTok)
+			if n.LBrace == nil {
+				p.print(n.List)
+				return
+			}
 			p.print(n.LBrace, indent)
-			p.print(n.List)
+			for i, item := range n.List {
+				switch {
+				// import specifications: "except { type all; const c }"
+				case isDefKind(item):
+					p.print(item, ";", "\n")
+				// references of with qualifiers: "except { c1, c2 }"
+				case i < len(n.List)-1:
+					p.print(item, ",")
+				default:
+					p.print(item)
+				}
+			}
 			p.print(unindent, n.RBrace)
 
 		case *syntax.BlockStmt:
@@ -306,6 +340,17 @@ func (p *printer) print(values ...interface{}) {
 			}
 			p.print(n.Stmt)
 			p.print(n.Body)
+			for _, c := range n.Catches {
+				p.print(c)
+			}
+
+		case *syntax.CatchClause:
+			if n == nil {
+				return
+			}
+			p.print(n.Tok)
+			p.print(n.Arg)
+			p.print(n.Body)
 
 		case *syntax.ForStmt:
 			if n == nil {
@@ -352,7 +397,9 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.DoTok)
 			p.print(n.Body)
 			p.print(n.WhileTok)
+			p.print(n.LParen)
 			p.print(n.Cond)
+			p.print(n.RParen)
 
 		case *syntax.IfStmt:
 			if n == nil {
@@ -388,6 +435,9 @@ func (p *printer) print(values ...interface{}) {
 				return
 			}
 			p.print(n.Tok)
+			if n.Case == nil {
+				p.print("else")
+			}
 			p.print(n.Case)
 			p.print(n.Body)
 
@@ -463,8 +513,9 @@ func (p *printer) print(values ...interface{}) {
 				return
 			}
 			p.print(n.KindTok)
+			p.print(n.Interleave)
 			p.print(n.Params)
-			p.print(n.Return)
+			p.print(n.RunsOn)
 			p.print(n.System)
 			p.print(n.Return)
 
@@ -522,8 +573,9 @@ func (p *printer) print(values ...interface{}) {
 			}
 			p.print(n.External)
 			p.print(n.KindTok)
-			p.print(n.Name)
+			p.print(n.Interleave)
 			p.print(n.Modif)
+			p.print(n.Name)
 			p.print(n.TypePars)
 			p.print(n.Params)
 			p.print(n.RunsOn)
@@ -568,6 +620,32 @@ func (p *printer) print(values ...interface{}) {
 			p.print(unindent, n.RBrace)
 			p.print(n.With)
 
+		case *syntax.ClassTypeDecl:
+			if n == nil {
+				return
+			}
+			p.print(n.TypeTok)
+			p.print(n.KindTok)
+			p.print(n.Modif)
+			p.print(n.Name)
+			p.print(n.ExtendsTok)
+			p.print(n.Extends)
+			p.print(n.RunsOn)
+			p.print(n.Mtc)
+			p.print(n.System)
+			p.print(n.LBrace, indent)
+			p.print(n.Defs)
+			p.print(unindent, n.RBrace)
+			p.print(n.With)
+
+		case *syntax.ConstructorDecl:
+			if n == nil {
+				return
+			}
+			p.print(n.Name)
+			p.print(n.Params)
+			p.print(n.Body)
+
 		case *syntax.MapTypeDecl:
 			if n == nil {
 				return
@@ -597,6 +675,7 @@ func (p *printer) print(values ...interface{}) {
 			}
 			p.print(n.TypeTok)
 			p.print(n.KindTok)
+			p.print(n.Interleave)
 			p.print(n.Name)
 			p.print(n.TypePars)
 			p.print(n.Params)
@@ -616,7 +695,9 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.KindTok)
 			p.print(n.Realtime)
 			p.print(n.LBrace, indent)
-			p.print(n.Attrs)
+			for _, attr := range n.Attrs {
+				p.print(attr, ";", "\n")
+			}
 			p.print(unindent, n.RBrace)
 			p.print(n.With)
 
@@ -664,8 +745,8 @@ func (p *printer) print(values ...interface{}) {
 			if n == nil {
 				return
 			}
-			p.print(n.Def)
 			p.print(n.Visibility)
+			p.print(n.Def)
 
 		case *syntax.ControlPart:
 			if n == nil {
@@ -686,9 +767,16 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.Recursive)
 			p.print(n.RedirTok)
 			p.print(n.Alias)
-			p.print(n.LBrace, indent)
-			p.print(n.List)
-			p.print(unindent, n.RBrace)
+			if n.LBrace == nil {
+				// import from m all [except {...}]
+				for _, item := range n.List {
+					p.print(item)
+				}
+			} else {
+				p.print(n.LBrace, indent)
+				p.print(n.List)
+				p.print(unindent, n.RBrace)
+			}
 			p.print(n.With)
 
 		case *syntax.GroupDecl:
@@ -808,11 +896,8 @@ func (p *printer) print(values ...interface{}) {
 				p.print(item, "")
 			}
 		case []*syntax.DefKindExpr:
-			for i, item := range n {
-				p.print(item)
-				if i < len(n)-1 {
-					p.print(",")
-				}
+			for _, item := range n {
+				p.print(item, ";", "\n")
 			}
 		case []*syntax.Field:
 			for i, item := range n {
@@ -832,12 +917,10 @@ func (p *printer) print(values ...interface{}) {
 			for _, item := range n {
 				p.print(item, ";", "\n")
 			}
+		// array definitions: "[2][3]"
 		case []*syntax.ParenExpr:
-			for i, item := range n {
+			for _, item := range n {
 				p.print(item)
-				if i < len(n)-1 {
-					p.print(",")
-				}
 			}
 		case []*syntax.ValueDecl:
 			for _, item := range n {
@@ -848,8 +931,6 @@ func (p *printer) print(values ...interface{}) {
 				p.print(item)
 				if i < len(n)-1 {
 					p.print(",")
-				} else {
-					p.print(";", "\n")
 				}
 			}
 		case []*syntax.WithStmt:

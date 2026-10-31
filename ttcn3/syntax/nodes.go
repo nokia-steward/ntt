@@ -270,6 +270,8 @@ type (
 		Tok           Token  // Position of "->"
 		ValueTok      Token  // Position of "value" or nil
 		Value         []Expr // Value expression
+		VerdictTok    Token  // Position of "verdict" or nil
+		Verdict       Expr   // Verdict expression
 		ParamTok      Token  // Position of "param" or nil
 		Param         []Expr // Param expression
 		SenderTok     Token  // Position of "sender" or nil
@@ -435,10 +437,20 @@ type (
 		Body      *BlockStmt // Block statement with alternations
 	}
 
-	// A CallStmt represents a "call" statement with communication-block.
+	// A CallStmt represents a "call" statement with communication-block or,
+	// for calls of test component behaviour, with catch clauses.
 	CallStmt struct {
-		Stmt Stmt       // "call" statement
-		Body *BlockStmt // Block statement with alternations
+		Stmt    Stmt           // "call" statement
+		Body    *BlockStmt     // Block statement with alternations or nil
+		Catches []*CatchClause // Catch clauses of a component call
+	}
+
+	// A CatchClause represents a "catch (stop)" or "catch (timeout)" clause
+	// of a test component call operation.
+	CatchClause struct {
+		Tok  Token      // Position of "catch"
+		Arg  *ParenExpr // "(stop)" or "(timeout)"
+		Body *BlockStmt // Handler body
 	}
 
 	// A ForStmt represents a "for" statement.
@@ -499,14 +511,18 @@ type (
 	}
 
 	// A SelectStmt represents a select statements.
+	//
+	// If the header contains an init statement, like in
+	// "select union (var U u := f(); u)", LParen, Init, InitSemi and RParen
+	// are set and Tag holds the expression list without parentheses.
 	SelectStmt struct {
 		Tok      Token         // Position of "select"
 		Union    Token         // Position of "union" or nil
-		LParen   Token         // Position of "("
+		LParen   Token         // Position of "(" or nil
 		Init     Stmt          // Init statement or nil
 		InitSemi Token         // Position of ";" or nil
 		Tag      Expr          // Tag expression
-		RParen   Token         // Position of ")"
+		RParen   Token         // Position of ")" or nil
 		LBrace   Token         // Position of "{"
 		Body     []*CaseClause // List of case clauses
 		RBrace   Token         // Position of "}"
@@ -536,6 +552,7 @@ func (x *ExprStmt) stmtNode()     {}
 func (x *BranchStmt) stmtNode()   {}
 func (x *ReturnStmt) stmtNode()   {}
 func (x *CallStmt) stmtNode()     {}
+func (x *CatchClause) stmtNode()  {}
 func (x *AltStmt) stmtNode()      {}
 func (x *ForStmt) stmtNode()      {}
 func (x *ForRangeStmt) stmtNode() {}
@@ -622,7 +639,8 @@ func (x *MapSpec) typeSpecNode()       {}
 func (x *EnumSpec) typeSpecNode()      {}
 func (x *BehaviourSpec) typeSpecNode() {}
 
-// Nested type definitions may be used where a type reference is expected.
+// Nested type definitions may be used wherever a type reference is expected,
+// e.g. "function f(record of integer p)".
 func (x *StructSpec) exprNode() {}
 func (x *ListSpec) exprNode()   {}
 func (x *MapSpec) exprNode()    {}
@@ -898,9 +916,9 @@ type (
 		FromTok   Token
 		Module    *Ident
 		Language  *LanguageSpec
-		Recursive Token // Position of "recursive" or nil
-		RedirTok  Token
-		Alias     *Ident
+		Recursive Token  // Position of "recursive" or nil
+		RedirTok  Token  // Position of "->" or nil
+		Alias     *Ident // Local name of the imported module or nil
 		LBrace    Token
 		List      []*DefKindExpr
 		RBrace    Token

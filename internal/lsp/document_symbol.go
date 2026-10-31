@@ -240,7 +240,11 @@ func valueDetail(n *syntax.ValueDecl) (string, protocol.SymbolKind) {
 	if n.KindTok == nil {
 		return detail, kind
 	}
-	detail = n.KindTok.String() + " " + detail
+	if detail == "" {
+		detail = n.KindTok.String()
+	} else {
+		detail = n.KindTok.String() + " " + detail
+	}
 	switch n.KindTok.Kind() {
 	case syntax.PORT:
 		kind = protocol.Interface
