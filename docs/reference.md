@@ -7,38 +7,6 @@
 
 # Commands
 
-## k3objdump
-
-k3objdump displays information about files in [TTCN-3 executable format](https://pkg.go.dev/github.com/nokia/ntt/k3/t3xf) files.
-T3XF is a binary representation of input TTCN-3 source text.
-
-You may use command line flags `--all` or `--legacy` disassemble T3XF files:
-
-```
-$ k3objdump --all example.t3xf
-       0: 03 00 00 00 nop
-       4: 43 01 00 00 natlong
-          02 00 00 00 2
-      12: 33 00 00 00 version
-      16: d3 00 00 00 scan
-      20: 06 00 00 00   =1
-      24: d3 00 00 00   scan
-      28: 0e 00 00 00     =3
-      32: d3 00 00 00     scan
-      36: 53 01 00 00       ieee754dp
-          00 00 00 00
-          00 00 f0 3f       1.000000
-      48: 83 00 00 00     block
-      52: 43 0e 00 00     float
-      56: 83 01 00 00     name
-          0a 00 00 00
-          67 75 61 72
-          64 54 69 6d
-          65 72 00 00     'guardTimer'
-      76: 13 0a 00 00     mpard
-          ...
-```
-
 ## ntt
 
 `ntt` is the main command line front end for working with TTCN-3.
@@ -91,24 +59,20 @@ like `ntt.env`:
 
 **Debugging**
 
-For debugging purposes you may increase ntt's loglevel with the `--verbose`
-command line option or `K3_DEBUG` environment variable.
+For debugging purposes you may increase ntt's log level with `--verbose` or
+with the `NTT_DEBUG` environment variable. `NTT_TRACE` raises the log level
+further.
 
 For performance analysis you may enable [profiling](https://blog.golang.org/pprof)
 using the `--cpuprofile` option.
 
 
-## ntt build
-_Note, the build command is only available for Nokia internal environments._  
+## ntt compile
 
-The build command provides package manager functionality and builds a test
-executable.
-If no arguments are specified ntt builds a test executable from current
-directory.  
-Use environment variable `PARALLEL_BUILD_JOBS` to specify how many build
-steps shall be executed in parallel (default is number of CPU cores).  
-Imported ASN1 files will be pass to OSS ASN.1 toolchain, every C and C++ file
-will be compiled into a K3 runtime plugin.  
+`ntt compile` reads the suite sources and imports and writes JSON source
+metadata to stdout. `--generator <name>` (short `-G`) runs `ntt-gen-<name>` and
+pipes that JSON to the generator's stdin. The default generator name is
+`stdout`, which prints the JSON and does not start a generator.
 
 
 ## ntt completion
@@ -126,6 +90,40 @@ Note, if bash-completion is not installed on Linux, please install the
 
 Note, the generated completion file is not compatible with zsh. Please open an
 issue (or even pull request) should require support for zsh.
+
+
+## ntt dump
+
+`ntt dump` prints syntax trees for the suite sources and imports.
+
+| Flag | Output |
+| ---- | ------ |
+| (none) | indented text tree |
+| `--ttcn3` | canonical TTCN-3 formatting |
+| `--dot` | Graphviz |
+| `--plain --only-tokens` | one token per line |
+
+`--with-trivia`, `--with-position`, and `--with-value` add trivia, offsets, and
+token text to the `--plain --only-tokens` dump. `--plain` without
+`--only-tokens` is rejected.
+
+
+## ntt format
+
+`ntt format` rewrites TTCN-3 sources in the canonical style. Files from imports
+are left unchanged. With no arguments it scans the current directory for
+`package.yml` and TTCN-3 sources.
+
+The formatter has no line-length or indent-style settings. `--tabs-to-spaces N`
+converts each tab to N spaces.
+
+| Flag | Effect |
+| ---- | ------ |
+| `--in-place`, `-i` | write the formatted source back to the file |
+| `--diff`, `-d` | print a diff; exit non-zero when a file would change |
+| `--list`, `-l` | print paths that would change; exit non-zero when any would |
+
+Exit status is zero when no errors were encountered.
 
 
 ## ntt langserver
@@ -164,6 +162,7 @@ problem was reported.
 * `naming.altsteps`: Checks for altstep identifiers.
 * `naming.parameters`: Checks for parameter identifiers.
 * `naming.component_vars`: Checks for component variable identifiers.
+* `naming.component_var_templates`: Checks for variable templates that are component variables.
 * `naming.var_templates`: Checks for variable template identifiers.
 * `naming.port_types`: Checks for port type identifiers.
 * `naming.ports`: Checks for port instance identifiers.
@@ -171,7 +170,18 @@ problem was reported.
 * `naming.component_consts`: Checks for component scoped constant identifiers.
 * `naming.templates`: Checks for constant template identifiers.
 * `naming.locals`: Checks for local variable identifiers.
+* `naming.record`: Checks for record identifiers.
+* `naming.record_fields`: Checks for identifiers of record fields.
+* `naming.record_of`: Checks for record-of identifiers.
+* `naming.set`: Checks for set identifiers.
+* `naming.set_fields`: Checks for identifiers of set fields.
+* `naming.set_of`: Checks for set-of identifiers.
+* `naming.union`: Checks for union identifiers.
+* `naming.union_fields`: Checks for identifiers of union fields.
+* `naming.enum`: Checks for enum identifiers.
+* `naming.enum_label`: Checks for labels of enumerated types.
 
+* `tags.modules`: Checks for module tags.
 * `tags.tests`: Checks for test-case tags.
 
 
@@ -247,7 +257,8 @@ ignore:
 ```
 
 ## ntt list
-List various types of objects.
+List various types of objects. Subcommands are `tests` (the default), `modules`,
+`imports`, `controls`, and `modulepars`.
 
 List control parts, modules, imports or tests. The list command without any explicit
 sub-commands will output tests.
@@ -336,6 +347,9 @@ If a basket is not defined by an environment variable, it's equivalent to a
 	$ ntt list --tags-regex="@wip|@flaky"
 
 ## ntt mcov
+
+`ntt mcov` is the `ntt-mcov` helper. It is a separate program, not part of the
+`ntt` binary. When `ntt-mcov` is on `PATH`, `ntt mcov` runs it.
 
 Extensive usage of wild cards `*` and `?` in templates causes gaps in message
 content validation. `ntt mcov` helps detecting those gaps and thus improve test
@@ -550,19 +564,6 @@ JSON template:
 {% endraw %}
 ```
 
-## ntt run
-_Note, the build command is only available for Nokia internal environments._  
-
-Run tests from a TTCN-3 test suite.
-
-**Module Parameters**
-
-Module parameters can be passed by file and will be read by ntt automatically.
-Default name is `$NTT_NAME.parameters`. This value can be overwritten by
-configuration key `parameters_file` in the manifest file.
-
-Test specific module parameter are load from file `$SCT_SOURCE_DIR/modulePar/$MODULE/$TEST.parameters`.
-
 ## ntt show
 Show test suite information like name, sources, environment variables, ...
 The show command provide additional output formats:
@@ -575,42 +576,25 @@ processing by Python, JavaScript and other languages. Example:
 $ ntt show --json
 {
   "args": [],
-  "datadir": "/usr/local/share/k3",
-  "error": null,
   "name": "example",
-  "parameters_file": "example.parameters",
-  "session_id": 1,
   "source_dir": "~/src/suite",
-  "test_hook": "~/src/suite/example.control",
-  "timeout": 555,
+  "parameters_file": "example.parameters",
+  "hooks_file": "example.hooks",
+  "lint_file": "ntt-lint.yml",
   "env": [
-    "NTT_LIST_BASKETS_ipv4=-X @ipv6",
-    "NTT_LIST_BASKETS_stable=-X @wip|@flaky",
-    "NTT_LIST_BASKETS_stable_ipv4=-X @wip|@flaky|@ipv6",
-    "NTT_LIST_BASKETS_stable_ipv6=-X @wip|@flaky -R @ipv6"
+    "NTT_LIST_BASKETS_stable=-X @wip|@flaky"
   ],
   "sources": [
     "test.ttcn3",
     "components.ttcn3"
   ],
   "imports": [
-    "segfault",
-    "abort"
+    "lib"
   ],
   "files": [
     "test.ttcn3",
-    "components.ttcn3",
-    "abort/abort.ttcn3"
-  ],
-  "ossinfo": "/usr/local/share/k3/asn1",
-  "k3": {
-    "compiler": "/usr/local/bin/k3c",
-    "runtime": "/usr/local/bin/k3r",
-    "builtins": [
-      "/usr/local/lib64/k3/plugins",
-      "/usr/local/share/k3/ttcn3"
-    ]
-  }
+    "components.ttcn3"
+  ]
 }
 ```
 
@@ -639,31 +623,19 @@ Note, the shell output mostly uses the `K3` prefix for variables. This may chang
 # k3-hook calls the K3 test hook (if defined) with action passed by $1.
 function k3-hook()
 {
-    if [ -n "$K3_TEST_HOOK" ]; then
+    if [ -n "$K3_HOOKS_FILE" ]; then
         K3_SOURCES="${K3_SOURCES[*]}" \
         K3_IMPORTS="${K3_IMPORTS[*]}" \
         K3_TTCN3_FILES="${K3_TTCN3_FILES[*]}" \
-            "$K3_TEST_HOOK" "$@" 1>&2
+            "$K3_HOOKS_FILE" "$@" 1>&2
     fi
 }
 
 export K3_NAME='example'
-export K3_TIMEOUT='555'
-export K3_PARAMETERS_FILE='example.parameters'
-export K3_TEST_HOOK='/home/mef/src/suite/example.control'
-export K3_SOURCE_DIR='/home/mef/src/suite'
-export K3_DATADIR='/usr/local/share/k3'
-export K3_SESSION_ID='1'
+export K3_HOOKS_FILE='/home/user/src/suite/example.hooks'
+export K3_SOURCE_DIR='/home/user/src/suite'
 
-export K3C='/usr/local/bin/k3c'
-export K3R='/usr/local/bin/k3r'
-export OSSINFO='/usr/local/share/k3/asn1'
-
-export 'NTT_LIST_BASKETS_ipv4=-X @ipv6'
 export 'NTT_LIST_BASKETS_stable=-X @wip|@flaky'
-export 'NTT_LIST_BASKETS_stable_ipv4=-X @wip|@flaky|@ipv6'
-export 'NTT_LIST_BASKETS_stable_ipv6=-X @wip|@flaky -R @ipv6'
-
 
 K3_SOURCES=(
 	test.ttcn3
@@ -671,25 +643,15 @@ K3_SOURCES=(
 )
 
 K3_IMPORTS=(
-	segfault
-	abort
+	lib
 )
 
 K3_TTCN3_FILES=(
 	test.ttcn3
 	components.ttcn3
-	abort/abort.ttcn3
-
-	# Auxiliary files from K3
-	/usr/local/lib64/k3/plugins/ttcn3/CCS.ttcn3
-	/usr/local/lib64/k3/plugins/ttcn3/config.ttcn3
-	/usr/local/lib64/k3/plugins/ttcn3/math.ttcn3
-	/usr/local/lib64/k3/plugins/ttcn3/os.ttcn3
 )
 
 K3_BUILTINS=(
-	/usr/local/lib64/k3/plugins
-	/usr/local/share/k3/ttcn3
 )
 ```
 
@@ -708,24 +670,15 @@ The tags command will also generate tags for fields, members, ... .
 ## ntt version
 Display ntt version if available.
 
-## ttcn3c
-ttcn3c parses TTCN-3 files and generates output based on the options given. The `--generator` argument specifies what generator plugin shall be used by ttcn3c. Default is a t3xf output.
-
-ttcn3c uses [Protobuf](#gRPC) for plugin communication. We'll provide more details, as soon as the initial version is released.
-
 # API
 
-The Go API is described here:
-* [k3](https://pkg.go.dev/github.com/nokia/ntt/k3): convenience functions for supporting k3 toolchain
-* [k3/log](https://pkg.go.dev/github.com/nokia/ntt/k3/log): parsing k3 runtime log files
-* [k3/t3xf](https://pkg.go.dev/github.com/nokia/ntt/k3/t3xf): decoding TTCN-3 Executable Format
+The Go packages are:
 
-# gRPC
-
-ntt provides [Protobuf mappings for
-TTCN-3](https://github.com/nokia/ntt/tree/master/protobuf). The goal of these
-mappings is to simplify the development of code generators ([ttcn3c](#ttcn3c)), test
-adapters and more.
+* [ttcn3](https://pkg.go.dev/github.com/nokia/ntt/ttcn3): parse trees and semantic lookup
+* [ttcn3/syntax](https://pkg.go.dev/github.com/nokia/ntt/ttcn3/syntax): scanner and parser
+* [project](https://pkg.go.dev/github.com/nokia/ntt/project): `package.yml` and suite configuration
+* [runtime](https://pkg.go.dev/github.com/nokia/ntt/runtime): value representation used by the interpreter
+* [interpreter](https://pkg.go.dev/github.com/nokia/ntt/interpreter): evaluates TTCN-3 syntax trees
 
 
 # Manifest file package.yml
@@ -743,20 +696,27 @@ the root of the test suite directory structure. Supported fields:
 | Name               | Type              | Details
 | ------------------ | ----------------- | --------
 | `name`             | string            | Name of the test suite.
-| `sources`          | string[]          | TTCN-3 Source files containing tests.
-| `imports`          | string[]          | Packages the suite depends on. This could be adapters, codecs, generators, ...
-| `timeout`          | number            | Default timeout for tests in seconds.
-| `test_hook`        | string            | Path to test hook script.
-| `parameters_file`  | string            | Path to module parameters file.
-| `variables`        | map[string]string | A key value list of custom variables.
+| `sources`          | string[]          | TTCN-3 source files containing tests.
+| `imports`          | string[]          | Dependencies such as adapters, codecs, or libraries.
+| `timeout`          | duration          | Default timeout for tests.
+| `parameters_file`  | string            | Path to the parameters file. Default: `${NTT_SOURCE_DIR}/${NTT_NAME}.parameters`.
+| `hooks_file`       | string            | Path to the hooks file. Default: `${NTT_SOURCE_DIR}/${NTT_NAME}.hooks`.
+| `lint_file`        | string            | Path to the lint configuration. Default: `${NTT_SOURCE_DIR}/ntt-lint.yml`.
+| `diagnostics`      | string[]          | Diagnostics flags.
+| `variables`        | map[string]string | Variables. `ntt.env` and the process environment overwrite these.
+| `before_build`     | string[]          | Shell commands run before a build. A non-zero status cancels the build.
+| `after_build`      | string[]          | Shell commands run after a build.
+| `before_run`       | string[]          | Shell commands run before the tests.
+| `after_run`        | string[]          | Shell commands run after the tests.
+| `before_test`      | string[]          | Shell commands run before each test.
+| `after_test`       | string[]          | Shell commands run after each test.
 
 
 **Environment Variables**
 
-Manifest values can be overwritten by environment variables. Environment
-variables will always take precedence over regular variables. Regular variables
-have to be declared in a TOML formatted file `ntt.env` or in `variables` section in
-the manifest:
+Values in the manifest can refer to variables with `$NAME`. A variable defined
+in the process environment wins over the same name in `ntt.env`, which wins
+over the `variables` section. `ntt.env` is a list of `KEY=VALUE` lines:
 
     $ echo '{"variables": {"NTT_NAME": "OrignalName" }, "name": "$NTT_NAME" }' > package.yml
 
@@ -767,9 +727,10 @@ the manifest:
     NewName
 
 
-You also can overwrite arrays like `sources` or `imports` with environment
-variables (`NTT_SOURCES="foo.ttcn3 bar.ttcn3" ...`), but note that spaces might
-become problematic.
+`NTT_NAME`, `NTT_SOURCES`, `NTT_IMPORTS`, `NTT_PARAMETERS_FILE`,
+`NTT_HOOKS_FILE`, `NTT_LINT_FILE`, and `NTT_TIMEOUT` overwrite the matching
+manifest fields. `NTT_SOURCES` and `NTT_IMPORTS` are split on the platform
+path-list separator (`:` on Linux).
 
 # CMake
 
@@ -801,10 +762,11 @@ Add a TTCN-3 test suite manifest for use with NTT and CTest:
         [DEPENDS ...]
         [NAME name]
         [TIMEOUT secs]
-        [TEST_HOOK executable]
-        [PARAMETER_FILE file]
+        [HOOKS_FILE executable]
+        [PARAMETERS_FILE file]
         [WORKING_DIRECTORY dir]
         [TARGETS target1...]
+        [DIAGNOSTICS flags]
   )
 ```
 
@@ -814,7 +776,7 @@ Add a TTCN-3 test suite manifest for use with NTT and CTest:
 The options are:
 
 `SOURCES src1...`  
-The list of .ttcn3 source files or source directories. When passing directories ntt will automatically include new TTCN-3 files in the test suite (globbing)without need to rerun CMake configuration.
+The list of `.ttcn3` source files. Files specified in `SOURCES` usually are testcases.
 
 `DEPENDS target1...|directory...`  
 Specifies additional TTCN-3 packages required by the test suite.
@@ -830,22 +792,25 @@ will assign one.
 `TIMEOUT seconds`  
 Specifies a timeout after which a test case will be aborted.
 
-`TEST_HOOK executable`  
+`HOOKS_FILE executable`  
 Specifies an executable to be used as test hook.
-If TEST_HOOK specifies an executable target (created by ADD_EXECUTABLE) it
+If `HOOKS_FILE` specifies an executable target (created by `add_executable`) it
 will automatically be replaced by the location of the executable created at
 build time. Additionally a target-level dependency will be added so that
 the executable target will be built before this hook is used.
 
-`PARAMETER_FILE file`  
-Specifies a file containing TOML formatted test configuration.
+`PARAMETERS_FILE file`  
+Specifies a YAML file with test configuration.
 
 `WORKING_DIRECTORY dir`  
 Specifies the directory in which to run the tests. If this option is not
 provided, the current binary directory is used.
 
 `TARGETS target1...`  
-Add additional target-level dependencies. This is used to assure SUTs or thid-party code generators are built before a test is executed.
+Add additional target-level dependencies. This is used to assure SUTs or third-party code generators are built before a test is executed.
+
+`DIAGNOSTICS flags`  
+Writes a `diagnostics` list into `package.yml`. Spaces in the argument separate flags.
 
 
 
@@ -873,7 +838,7 @@ protobuf_generate_ttcn3(proto_itf
 
 add_ttcn3_suite(suite1
     SOURCES   tests.ttcn3
-    TEST_HOOK hook.py
+    HOOKS_FILE hook.py
     DEPENDS
         proto_itf # see https://github.com/nokia/ntt/issues/195
     TARGETS
@@ -898,12 +863,24 @@ Access VSCode settings by pressing `Ctrl` and `,` and then search for `ttcn3`:
 
 Contributed settings:
 
-| Name                  | Description                                                                    | Default
-| --------------------- | ------------------------------------------------------------------------------ | -------
-| ttcn3.server.enabled  | Enable TTCN-3 language server for advanced features, like go to defintion, ... | false
-| ttcn3.server.update   | Install and update TTCN-3 language server automatically                        | true
-| ttcn3.server.codelens | Enable CodeLens for running tests from inside your editor.                     | false
-| ttcn3.trace.server    | Trace communication between VS Code and the language server.                   | off
+| Name                                 | Description                                                                 | Default
+| ------------------------------------ | --------------------------------------------------------------------------- | -------
+| `ttcn3.server.command`               | Command to start the language server. Empty uses the bundled server.       | empty
+| `ttcn3.server.automaticUpdate`       | Install and update the language server. Ignored when `command` is set.     | `true`
+| `ttcn3.server.usePrereleases`        | Use pre-release language server builds.                                     | `false`
+| `ttcn3.server.updateServerURL`       | Base URL for the latest-release query (`$URL/releases/latest`).            | `https://ttcn3.dev/api/v1/ntt`
+| `ttcn3.server.ignoreCertificateErrors` | Skip certificate checks while downloading the language server.            | `false`
+| `ttcn3.server.toolsPath`             | Extra directories searched for TTCN-3 tools, in the listed order.          | `[]`
+
+The language server also reads these settings. When a client does not send
+one, ntt treats it as `false`:
+
+| Name | Description |
+| ---- | ----------- |
+| `ttcn3.experimental.format.enabled` | Enable document formatting. |
+| `ttcn3.experimental.semanticTokens.enabled` | Enable semantic tokens. |
+| `ttcn3.experimental.inlayHint.enabled` | Enable inlay hints. |
+| `ttcn3.experimental.diagnostics.enabled` | Publish parse errors as diagnostics. |
 
 
 **Commands**
@@ -914,8 +891,9 @@ Access VSCode command by pressing `Ctrl`, `Shift`, `P` and then type `ttcn3`:
 
 Contributed commands:
 
-| Name                         | Description
-| ---------------------------- | ----------------------------
-| ttcn3.languageServer.restart | Restart language server
-| ttcn3.languageServer.status  | Show language server status
+| Name                              | Description
+| --------------------------------- | ----------------------------
+| `ttcn3.languageServer.restart`    | Restart language server
+| `ttcn3.languageServer.status`     | Show language server status
+| `ttcn3.languageServer.debug.toggle` | Toggle language server debug mode
 

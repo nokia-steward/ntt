@@ -25,31 +25,33 @@ For most editors or IDEs you have to install ntt manually at a place where your
 editor can find it. Check out the ntt [install
 section](https://github.com/nokia/ntt#install) for details.
 
-<!-- This table is disabled until we have some features finished and something to show:
-
 ## Features
 
-| Name                        | Method                            |                    |
-| --------------------------- | --------------------------------- | ------------------ |
-| Workspace Symbols           | `workspace/symbol`                | :x:                |
-| Execute Command             | `workspace/executeCommand`        | :x:                |
-| Diagnostics                 | `textDocument/publishDiagnostics` | :x:                |
-| Completion                  | `textDocument/completion`         | :x:                |
-| Hover                       | `textDocument/hover`              | :x:                |
-| Signature Help              | `textDocument/signatureHelp`      | :x:                |
-| Goto Definition             | `textDocument/definition`         | :heavy_check_mark: |
-| Goto Type Definition        | `textDocument/typeDefinition`     | :x:                |
-| Goto Implementation         | `textDocument/implementation`     | :x:                |
-| Find References             | `textDocument/references`         | :x:                |
-| Document Highlights         | `textDocument/documentHighlight`  | :x:                |
-| Document Symbols            | `textDocument/documentSymbol`     | :x:                |
-| Code Action                 | `textDocument/codeAction`         | :x:                |
-| Code Lens                   | `textDocument/codeLens`           | :x:                |
-| Document Formatting         | `textDocument/formatting`         | :x:                |
-| Document Range Formatting   | `textDocument/rangeFormatting`    | :x:                |
-| Document on Type Formatting | `textDocument/onTypeFormatting`   | :x:                |
-| Rename                      | `textDocument/rename`             | :x:                |
--->
+| Name                | Method                            |
+| ------------------- | --------------------------------- |
+| Completion          | `textDocument/completion`         |
+| Hover               | `textDocument/hover`              |
+| Goto Definition     | `textDocument/definition`         |
+| Find References     | `textDocument/references`         |
+| Document Symbols    | `textDocument/documentSymbol`     |
+| Document Formatting | `textDocument/formatting`         |
+| Semantic Tokens     | `textDocument/semanticTokens`     |
+| Inlay Hints         | `textDocument/inlayHint`          |
+| Diagnostics         | `textDocument/publishDiagnostics` |
+
+Completion, hover, go to definition, find references, and document symbols are
+always available. Formatting, semantic tokens, inlay hints, and parse
+diagnostics run only when the client sets the matching setting to `true`:
+
+| Setting | Method |
+| ------- | ------ |
+| `ttcn3.experimental.format.enabled` | `textDocument/formatting` |
+| `ttcn3.experimental.semanticTokens.enabled` | `textDocument/semanticTokens` |
+| `ttcn3.experimental.inlayHint.enabled` | `textDocument/inlayHint` |
+| `ttcn3.experimental.diagnostics.enabled` | `textDocument/publishDiagnostics` |
+
+Each of those settings defaults to `false` when the client does not send it.
+Diagnostics then report parse errors.
 
 
 **Troubleshooting: Go to Definition does not work**
@@ -76,14 +78,9 @@ common issue that we see. If you have suggestions on how to improve this, we'd
 love to hear from you.
 
 
-The language server is still work in progress. Not all TTCN-3 semantic is
-implemented already, therefore some TTCN-3 structure might not work as
-expected:
-
-* _Component Variables_
-* _Signatures_
-* _Dot Expressions_ (such as `foo.bar`)
-* _Ambiguous Module Definitions_ (only the first hit is returned)
+Semantic analysis does not cover every TTCN-3 construct. Go to definition and
+find references can miss a symbol, or return only the first match, when the
+index does not know that construct.
 
 
 
@@ -96,13 +93,12 @@ The TTCN-3 extension is named TTCN-3 and it's published by Nokia:
 
 ![vscode TTCN-3 extension preview](/static/vscode-ttcn3-extension-preview.png)
 
-**ntt** is still in beta and therefore disabled by default. Enable it by
-opening [vscode settings](https://code.visualstudio.com/docs/getstarted/settings) and set
-`ttcn3.useLanguageServer` to `true`.
+The extension starts the bundled language server. Leave `ttcn3.server.command`
+empty to use that server. Set `ttcn3.server.command` when you want a specific
+`ntt langserver` binary. `ttcn3.server.automaticUpdate` installs and updates
+that server and defaults to `true`.
 
-If you use an older version of this extension, ntt won't be installed
-automatically. Either you [install ntt manually](https://github.com/nokia/ntt#install)
-or you update the TTCN-3 extension.
+Settings and commands are listed in the [reference](docs/reference#vscode-extension).
 
 ## Vim 8
 

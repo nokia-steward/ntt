@@ -24,16 +24,18 @@ builds upon 15 years of experience of running production workloads at Nokia.
 ntt is designed with low latency and high fidelity appliances in mind.  Current
 releases include:
 
-* a [TTCN-3 language server](editors) for a better IDE experience.
-* comfortable [tools](getting-started) supporting Nokia [best practices](getting-started) for test
-  suite configuration and analysis.
-* a CMake module for easier [build system integration](getting-started#cmake).
-* and [more to come](#roadmap) ...
+* a [TTCN-3 language server](editors) with completion, hover, go to definition,
+  find references, and document symbols. Formatting, semantic tokens, inlay
+  hints, and parse diagnostics are implemented and stay off until the matching
+  `ttcn3.experimental.*.enabled` setting is true.
+* [command line tools](getting-started) for listing, linting, formatting, and
+  reporting on a test suite.
+* a CMake module for [build system integration](docs/reference#cmake).
 
-**ntt** is still a young project, so we do not provide a TTCN-3 compiler,
-runtime or any open ASN.1 tools, yet. If you need such, we recommend
-[Titan](https://github.com/eclipse/titan.core)! Titan offers a mature compiler
-and runtime with an extensive set of adapters and modules.
+**ntt** does not ship a TTCN-3 compiler, a test runtime, or ASN.1 tools. If you
+need those, we recommend [Titan](https://github.com/eclipse/titan.core). Titan
+offers a mature compiler and runtime with an extensive set of adapters and
+modules.
 
 
 ## What's TTCN-3?
@@ -52,30 +54,29 @@ some excellent features for testing protocols and services:
 
 ## What's the project status?
 
-**ntt** is used in production by Nokia in 4G and 5G. But still, consider this
-software unstable. Like in every young project features need time to settle and
-not all parts have the same test coverage, yet. ntt is no exception. Also,
-consider ntt experimental as we are exploring new ways of working with TTCN-3.
+**ntt** is used in production by Nokia in 4G and 5G. It is still in
+development, and not every feature has the same test coverage. Verify ntt
+before you rely on it in an automation environment.
 
 
-**ntt** has full support for TTCN-3 version 4.10.1 and understands most parts
-of the standardized extensions for documentation comments, performance and
-real-time testing, advanced parameterization, behaviour types, as well as
-various extensions from [Titan](https://github.com/eclipse/titan.core) and
-[k3](#k3).
+**ntt** has full support for
+[TTCN-3 Core Language v4.11.1](https://www.etsi.org/deliver/etsi_es/201800_201899/20187301/04.11.01_60/es_20187301v041101p.pdf)
+and understands most parts of the standardized extensions for documentation
+comments, performance and real-time testing, advanced parameterization,
+behaviour types, as well as various extensions from
+[Titan](https://github.com/eclipse/titan.core) and [k3](#k3).
 
 
 ## Roadmap
 
 Our major goal is to improve the TTCN-3 user experience by providing modern
 tools and by establishing best practices for working with TTCN-3 test suites.
-We will also continue updating ntt for the latest TTCN-3 standards and will be
-adding one or the other feature.  
-But our focus is on advanced [IDE support](editors) first and your feedback can
-help us to achieve this goal.
+We will also continue updating ntt for the latest TTCN-3 standards.
 
-We plan on finishing goto-definition first and then we'll implement initial
-diagnostics.
+[IDE support](editors) covers go to definition, completion, hover, references,
+and document symbols. Formatting, semantic tokens, inlay hints, and parse
+diagnostics are present and gated by experimental settings. Further language
+coverage still depends on your feedback.
 
 
 ## Call for Contributors

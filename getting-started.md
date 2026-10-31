@@ -18,25 +18,15 @@ ntt is a free and open application stack for TTCN-3, which lets you focus on wri
 </details>
 
 
-_**We are currently updating this page, most content should be back until Friday.  
-Sorry for the inconvenience.**_
-
-<!--
-
-
-
-# Command Line Interface
-
-provide a uniform user interface, where possible:
+## Command Line Interface
 
     ntt <command> [<sources>...] [--] [<args>...]
 
-* `<command>`: The command you want to execute, sub-commands are possible.
-* `<sources>...`: The test suite sources. This might be a list of .ttcn3 files
+* `<command>`: The command you want to execute. Sub-commands are possible.
+* `<sources>...`: The test suite sources. This might be a list of `.ttcn3` files
   or the test suite root directory. If your test suite requires additional
   adapters, the test suite root directory must contain a manifest file (see below).
-* `--`: This marker is required to separate the sources list from the
-  remaining arguments.
+* `--`: This marker separates the sources list from the remaining arguments.
 * `<args>...`: Remaining arguments.
 
 Example:
@@ -44,77 +34,61 @@ Example:
     ntt show foo.ttcn3 bar.ttcn3 -- name sources
 
 
-## Available Commands
+### Available Commands
 
-| Command         | Details
-| --------------- | -------
-| `ntt version`    | Displays version, git revision and build time if available.
-| `ntt list`       | Lists tests, imports and modules of a test suite.
+| Command          | Details
+| ---------------- | -------
+| `ntt version`    | Shows version, git revision, and build time when available.
+| `ntt list`       | Lists tests, controls, modules, imports, or module parameters.
 | `ntt show`       | Shows manifest information and variables.
-| `ntt tags`       | Creates a tags file with exuberant ctags format.
-| `ntt lint`       | Shows warnings and errors. This is a work in progress.
-| `ntt mcov`       | Reads a ntt runtime log and reports message coverage.
-| `ntt langserver` | Starts a language server waiting on stdin.
+| `ntt tags`       | Writes a ctags file to stdout.
+| `ntt lint`       | Reports suspicious or invalid TTCN-3 code.
+| `ntt format`     | Formats files in the canonical TTCN-3 style.
+| `ntt compile`    | Emits source metadata as JSON, or pipes it to `ntt-gen-<generator>`.
+| `ntt dump`       | Dumps syntax trees (`text`, `ttcn3`, `dot`, or tokens).
+| `ntt report`     | Summarizes the latest test run.
+| `ntt langserver` | Starts the language server on stdin/stdout.
+| `ntt completion` | Prints bash completion code.
+
+The command reference is in [docs/reference](docs/reference).
 
 
-## Custom Commands
+### Custom Commands
 
-You can extend and customize ntt through custom commands. Place any executable
-with a name like `ntt-jaegerschnitzel` in your `PATH` and ntt will automatically
-make it available as a subcommand. You can then call it just like any other ntt
-command:
+Place an executable named `ntt-jaegerschnitzel` on your `PATH` and ntt exposes
+it as a subcommand:
 
     $ ntt jaegerschnitzel +6000
 
 
+### Environment variables
 
-## Environment variables
+`NTT_SOURCE_DIR` selects the test suite root when you do not pass sources:
 
-You may define environment variable `NTT_SOURCE_DIR` to specify a test suite root directory:
-
-    $ ntt list                      # Lists tests in current working directory
+    $ ntt list                      # Lists tests in the current directory
 
     $ export NTT_SOURCE_DIR=~/foo
-    $ ntt list                      # Now, ntt lists tests in ~/foo
+    $ ntt list                      # Lists tests in ~/foo
 
 
-Environment variable `NTT_CACHE` is a colon-separated list of directories and has
-similar purpose and behaviour like GNU Make's VPATH. It is use to find files
-like `ntt.env`:
+`NTT_CACHE` is a colon-separated list of directories, used like GNU Make's
+`VPATH`, to find files such as `ntt.env`:
 
     $ echo "FOO=23" > ntt.env
     $ mkdir -p build && cd build
     $ NTT_CACHE=.. ntt show -- FOO
     23
 
-## Related Tools and Scripts
+`ntt.env` is a list of `KEY=VALUE` lines.
 
-This section will be completed in a few day. Sorry for the inconvenience.
+These environment variables overwrite the matching manifest fields:
+`NTT_NAME`, `NTT_SOURCES`, `NTT_IMPORTS`, `NTT_PARAMETERS_FILE`,
+`NTT_HOOKS_FILE`, `NTT_LINT_FILE`, and `NTT_TIMEOUT`. `NTT_SOURCES` and
+`NTT_IMPORTS` are split on the platform path-list separator (`:` on Linux).
 
--->
+`NTT_DEBUG` raises the log level. `NTT_TRACE` raises it further. `--verbose`
+does the same from the command line.
 
-<!--
-
-## ttcn3c
-
-## k3objdump
-
-## ntt-mcov
-
-## Formatting
-
-Much energy spent in arguing about coding style. Which is a waste especially because
-formatting rules play only a minor role in code quality.  
-Future versions ntt will include a formatter for TTCN-3 code.
-
-## CMake
-
-_Description of our CMake scripts will be published in a few days._
-
-## gRPC
-
-_Description of our gRPC interfaces will also be published in a few days._
--->
 
 ## Test Suite Manifest
 
@@ -131,20 +105,27 @@ the root of the test suite directory structure. Supported fields:
 | Name               | Type              | Details
 | ------------------ | ----------------- | --------
 | `name`             | string            | Name of the test suite.
-| `sources`          | string[]          | TTCN-3 Source files containing tests.
-| `imports`          | string[]          | Packages the suite depends on. This could be adapters, codecs, generators, ...
-| `timeout`          | number            | Default timeout for tests in seconds.
-| `test_hook`        | string            | Path to test hook script.
-| `parameters_file`  | string            | Path to module parameters file.
-| `variables`        | map[string]string | A key value list of custom variables.
+| `sources`          | string[]          | TTCN-3 source files containing tests.
+| `imports`          | string[]          | Dependencies such as adapters, codecs, or libraries.
+| `timeout`          | duration          | Default timeout for tests.
+| `parameters_file`  | string            | Path to the parameters file. Default: `${NTT_SOURCE_DIR}/${NTT_NAME}.parameters`.
+| `hooks_file`       | string            | Path to the hooks file. Default: `${NTT_SOURCE_DIR}/${NTT_NAME}.hooks`.
+| `lint_file`        | string            | Path to the lint configuration. Default: `${NTT_SOURCE_DIR}/ntt-lint.yml`.
+| `diagnostics`      | string[]          | Diagnostics flags.
+| `variables`        | map[string]string | Variables. `ntt.env` and the process environment overwrite these.
+| `before_build`     | string[]          | Shell commands run before a build. A non-zero status cancels the build.
+| `after_build`      | string[]          | Shell commands run after a build.
+| `before_run`       | string[]          | Shell commands run before the tests.
+| `after_run`        | string[]          | Shell commands run after the tests.
+| `before_test`      | string[]          | Shell commands run before each test.
+| `after_test`       | string[]          | Shell commands run after each test. |
 
 
 **Environment Variables**
 
-Manifest values can be overwritten by environment variables. Environment
-variables will always take precedence over regular variables. Regular variables
-have to be declared in a TOML formatted file `ntt.env` or in `variables` section in
-the manifest:
+Values in the manifest can refer to variables with `$NAME`. A variable defined
+in the process environment wins over the same name in `ntt.env`, which wins
+over the `variables` section:
 
     $ echo '{"variables": {"NTT_NAME": "OrignalName" }, "name": "$NTT_NAME" }' > package.yml
 
@@ -155,8 +136,8 @@ the manifest:
     NewName
 
 
-You also can overwrite arrays like `sources` or `imports` with environment
-variables (`NTT_SOURCES="foo.ttcn3 bar.ttcn3" ...`), but note that spaces might
-become problematic.
+`NTT_SOURCES` and `NTT_IMPORTS` replace the `sources` and `imports` lists. Separate
+entries with the platform path-list separator, for example
+`NTT_SOURCES=foo.ttcn3:bar.ttcn3` on Linux.
 
 
