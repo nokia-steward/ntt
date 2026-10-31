@@ -2,34 +2,22 @@ package lsp
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/nokia/ntt/internal/log"
 	"github.com/nokia/ntt/internal/lsp/protocol"
-	"github.com/nokia/ntt/ttcn3"
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
 func (s *Server) definition(ctx context.Context, params *protocol.DefinitionParams) (protocol.Definition, error) {
-	var (
-		locs []protocol.Location
-		file = string(params.TextDocument.URI.SpanURI())
-		line = int(params.Position.Line) + 1
-		col  = int(params.Position.Character) + 1
-	)
+	defer logDuration("DefinitionRequest", time.Now())
 
-	start := time.Now()
-	defer func() {
-		log.Debug(fmt.Sprintf("DefintionRequest took %s.\n", time.Since(start)))
-	}()
-
-	tree := ttcn3.ParseFile(file)
-	x := tree.IdentifierAt(line, col)
+	tree, x := identifierAt(params.TextDocument, params.Position)
 	if x == nil {
-		log.Debug(fmt.Sprintf("No expression at %s:%d:%d\n", file, line, col))
+		return nil, nil
 	}
 
+	var locs []protocol.Location
 	for _, def := range tree.LookupWithDB(x, &s.db) {
 		span := syntax.SpanOf(def.Ident)
 		log.Debugf("Definition found at %s\n", &span)

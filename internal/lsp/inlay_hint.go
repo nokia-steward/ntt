@@ -13,10 +13,11 @@ func (s *Server) inlayHint(ctx context.Context, params *protocol.InlayHintParams
 		return nil, nil
 	}
 
-	file := string(params.TextDocument.URI)
-	tree := ttcn3.ParseFile(file)
-	begin := tree.PosFor(int(params.Range.Start.Line)+1, int(params.Range.Start.Character+1))
-	end := tree.PosFor(int(params.Range.End.Line+1), int(params.Range.End.Character+1))
+	tree := parseDocument(params.TextDocument)
+	if tree == nil {
+		return nil, nil
+	}
+	begin, end := offsets(tree, params.Range)
 	return ProcessInlayHint(tree, &s.db, begin, end), nil
 }
 
@@ -51,11 +52,8 @@ func ProcessInlayHint(tree *ttcn3.Tree, db *ttcn3.DB, begin int, end int) []prot
 						name := params.List[idx].Name.Tok.String()
 						lbl := protocol.InlayHintLabelPart{Value: name + " :="}
 						pos := syntax.Begin(arg)
-						pos.Line -= 1
-						pos.Column -= 1
-						ppos := protocol.Position{Line: uint32(pos.Line), Character: uint32(pos.Column)}
 						hint := protocol.InlayHint{
-							Position:     ppos,
+							Position:     position(pos.Line, pos.Column),
 							Label:        []protocol.InlayHintLabelPart{lbl},
 							Kind:         protocol.Parameter,
 							PaddingRight: true,

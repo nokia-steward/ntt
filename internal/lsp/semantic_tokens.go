@@ -2,7 +2,6 @@ package lsp
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/nokia/ntt/internal/log"
@@ -173,26 +172,27 @@ var builtins = map[string]SemanticTokenType{
 }
 
 func (s *Server) semanticTokens(ctx context.Context, params *protocol.SemanticTokensParams) (*protocol.SemanticTokens, error) {
-	if !s.serverConfig.SemantikTokensEnabled {
+	if !s.serverConfig.SemanticTokensEnabled {
 		return nil, nil
 	}
 
-	file := string(params.TextDocument.URI)
-	tree := ttcn3.ParseFile(file)
-	begin := tree.Pos()
-	end := tree.End()
-	return s.semanticTokensRecover(tree, &s.db, begin, end)
+	tree := parseDocument(params.TextDocument)
+	if tree == nil {
+		return nil, nil
+	}
+	return s.semanticTokensRecover(tree, &s.db, tree.Pos(), tree.End())
 }
 
 func (s *Server) semanticTokensRange(ctx context.Context, params *protocol.SemanticTokensRangeParams) (*protocol.SemanticTokens, error) {
-	if !s.serverConfig.SemantikTokensEnabled {
+	if !s.serverConfig.SemanticTokensEnabled {
 		return nil, nil
 	}
 
-	file := string(params.TextDocument.URI)
-	tree := ttcn3.ParseFile(file)
-	begin := tree.PosFor(int(params.Range.Start.Line)+1, int(params.Range.Start.Character+1))
-	end := tree.PosFor(int(params.Range.End.Line+1), int(params.Range.End.Character+1))
+	tree := parseDocument(params.TextDocument)
+	if tree == nil {
+		return nil, nil
+	}
+	begin, end := offsets(tree, params.Range)
 	return s.semanticTokensRecover(tree, &s.db, begin, end)
 }
 
@@ -203,7 +203,7 @@ func (s *Server) semanticTokensRecover(tree *ttcn3.Tree, db *ttcn3.DB, begin int
 		if err := recover(); err != nil {
 			log.Debugf("Recovered from panic: %v\n", err)
 		}
-		log.Debug(fmt.Sprintf("SemanticTokens for %s took %s.", tree.Filename(), time.Since(start)))
+		logDuration("SemanticTokens for "+tree.Filename(), start)
 	}()
 
 	return &protocol.SemanticTokens{Data: SemanticTokens(tree, db, begin, end)}, nil
@@ -245,20 +245,19 @@ func SemanticTokens(tree *ttcn3.Tree, db *ttcn3.DB, begin int, end int) []uint32
 }
 
 func appendToken(tokens []uint32, tok syntax.Token, tree *ttcn3.Tree, typ SemanticTokenType, mod SemanticTokenModifiers, line int, col int) ([]uint32, int, int) {
-	pos := syntax.Begin(tok)
-	pos.Line -= 1
-	pos.Column -= 1
+	begin := syntax.Begin(tok)
+	pos := position(begin.Line, begin.Column)
 
 	// relative line
-	relLine := pos.Line - line
+	relLine := int(pos.Line) - line
 	if relLine != 0 {
 		col = 0
 	}
-	line = pos.Line
+	line = int(pos.Line)
 
 	// relative column
-	relCol := pos.Column - col
-	col = pos.Column
+	relCol := int(pos.Character) - col
+	col = int(pos.Character)
 
 	// token width
 	width := int(tok.End() - tok.Pos())

@@ -110,6 +110,33 @@ func TestPlainTextHoverForPortDefFromUsage(t *testing.T) {
 	assert.Equal(t, expected, actual.Contents.Value)
 }
 
+func TestMarkdownHoverForPortDefFromUsage(t *testing.T) {
+	actual := testHover(t, `
+        module Test {
+            type component Component {
+                port P p1;
+            }
+            function myfunc(integer x)
+                runs on Component
+            {
+                map(system:p1, mtc:p1);
+                p1.receive;
+            }
+        }`,
+		protocol.Position{Line: 9, Character: 16},
+		&lsp.MarkdownHover{})
+
+	expected :=
+		"```ttcn3\n" +
+			"port P p1\n" +
+			"```\n" +
+			"_possible map / connect statements_\n" +
+			" - - -\n" +
+			"[/TestMarkdownHoverForPortDefFromUsage.ttcn3:9](file:///TestMarkdownHoverForPortDefFromUsage.ttcn3#L9)  \n"
+
+	assert.Equal(t, expected, actual.Contents.Value)
+}
+
 func testHover(t *testing.T, text string, position protocol.Position, capability lsp.HoverContentProvider) *protocol.Hover {
 	t.Helper()
 	suite := &lsp.Suite{
@@ -119,7 +146,7 @@ func testHover(t *testing.T, text string, position protocol.Position, capability
 	file := fmt.Sprintf("file://%s.ttcn3", t.Name())
 	fs.SetContent(file, []byte(text))
 	suite.Config.Sources = append(suite.Config.Sources, file)
-	suite.DB.Index(suite.Config.Sources...)
+	suite.DB.Index(suite.Files()...)
 	params := protocol.HoverParams{
 		TextDocumentPositionParams: protocol.TextDocumentPositionParams{
 			Position: position,

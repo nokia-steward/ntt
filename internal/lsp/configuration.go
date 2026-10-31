@@ -57,8 +57,8 @@ func (s *Server) didChangeConfiguration(ctx context.Context, _ *protocol.DidChan
 	if !ok {
 		confRes = false
 	}
-	if s.clientCapability.HasDynRegForSemTok && s.serverConfig.SemantikTokensEnabled != confRes {
-		s.serverConfig.SemantikTokensEnabled = confRes
+	if s.clientCapability.HasDynRegForSemTok && s.serverConfig.SemanticTokensEnabled != confRes {
+		s.serverConfig.SemanticTokensEnabled = confRes
 		if confRes {
 			regList = append(regList, protocol.Registration{
 				ID:              "TEXTDOCUMENT_SEMANTICTOKENS",

@@ -2,73 +2,136 @@ package lsp
 
 import (
 	"context"
-	"errors"
-	"fmt"
 	"sort"
 	"time"
 
-	"github.com/nokia/ntt/internal/log"
 	"github.com/nokia/ntt/internal/lsp/protocol"
 	"github.com/nokia/ntt/ttcn3"
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
-func newAllIdsWithSameNameFromFile(file string, idName string) []protocol.Location {
-	list := make([]protocol.Location, 0, 10)
-	tree := ttcn3.ParseFile(file)
-	tree.Inspect(func(n syntax.Node) bool {
-		if n == nil {
-			// called on node exit
-			return false
-		}
-
-		switch node := n.(type) {
-		case *syntax.Ident:
-			if idName == node.Tok.String() {
-				list = append(list, location(syntax.SpanOf(node.Tok)))
+// sortedFiles returns the sorted union of the given file sets.
+func sortedFiles(sets ...map[string]bool) []string {
+	seen := make(map[string]bool)
+	var files []string
+	for _, set := range sets {
+		for file := range set {
+			if !seen[file] {
+				seen[file] = true
+				files = append(files, file)
 			}
-			if node.Tok2 != nil && idName == node.Tok2.String() {
-				list = append(list, location(syntax.SpanOf(node.Tok2)))
+		}
+	}
+	sort.Strings(files)
+	return files
+}
+
+// inspectIdents calls fn for every identifier spelled name in tree. expr is
+// the enclosing selector expression if id is its selector, otherwise id.
+func inspectIdents(tree *ttcn3.Tree, name string, fn func(id *syntax.Ident, expr syntax.Expr)) {
+	if tree.Root == nil {
+		return
+	}
+	sels := make(map[*syntax.Ident]*syntax.SelectorExpr)
+	tree.Inspect(func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case nil:
+			return false
+		case *syntax.SelectorExpr:
+			if id, ok := n.Sel.(*syntax.Ident); ok && id != nil && id.String() == name {
+				sels[id] = n
+			}
+			return true
+		case *syntax.Ident:
+			if n.String() == name {
+				if sel, ok := sels[n]; ok {
+					fn(n, sel)
+				} else {
+					fn(n, n)
+				}
 			}
 			return false
 		default:
 			return true
 		}
 	})
-	return list
 }
 
-func NewAllIdsWithSameName(db *ttcn3.DB, name string) []protocol.Location {
+type defKey struct {
+	file string
+	pos  int
+}
+
+func keyOf(def *ttcn3.Node) (defKey, bool) {
+	if def == nil || def.Ident == nil || def.Tree == nil {
+		return defKey{}, false
+	}
+	return defKey{file: def.Tree.Filename(), pos: def.Ident.Pos()}, true
+}
+
+// FindReferences returns the locations of all identifiers resolving to the
+// same definitions as the identifier at the given position. Declarations are
+// included only if includeDecl is set.
+func FindReferences(db *ttcn3.DB, tree *ttcn3.Tree, line, col int, includeDecl bool) []protocol.Location {
+	if tree.Root == nil {
+		return nil
+	}
+
 	var (
-		locs       []protocol.Location
-		candidates []string
+		expr = tree.IdentifierAt(line, col)
+		id   *syntax.Ident
 	)
-	for file := range db.Uses[name] {
-		candidates = append(candidates, file)
+	switch x := expr.(type) {
+	case *syntax.Ident:
+		id = x
+	case *syntax.SelectorExpr:
+		id, _ = x.Sel.(*syntax.Ident)
 	}
-	sort.Strings(candidates)
-	for _, file := range candidates {
-		locs = append(locs, newAllIdsWithSameNameFromFile(file, name)...)
+	if id == nil {
+		return nil
 	}
-	return locs
+
+	return referencesTo(db, id.String(), tree.LookupWithDB(expr, db), includeDecl)
+}
+
+func referencesTo(db *ttcn3.DB, name string, targets []*ttcn3.Node, includeDecl bool) []protocol.Location {
+	keys := make(map[defKey]bool)
+	for _, def := range targets {
+		if k, ok := keyOf(def); ok {
+			keys[k] = true
+		}
+	}
+	if len(keys) == 0 {
+		return nil
+	}
+
+	var locs []protocol.Location
+	for _, file := range sortedFiles(db.Uses[name], db.Names[name]) {
+		tree := ttcn3.ParseFile(file)
+		inspectIdents(tree, name, func(id *syntax.Ident, expr syntax.Expr) {
+			if keys[defKey{file: tree.Filename(), pos: id.Pos()}] {
+				if includeDecl {
+					locs = append(locs, location(syntax.SpanOf(id)))
+				}
+				return
+			}
+			for _, def := range tree.LookupWithDB(expr, db) {
+				if k, ok := keyOf(def); ok && keys[k] {
+					locs = append(locs, location(syntax.SpanOf(id)))
+					return
+				}
+			}
+		})
+	}
+	return unifyLocs(locs)
 }
 
 func (s *Server) references(ctx context.Context, params *protocol.ReferenceParams) ([]protocol.Location, error) {
-	var (
-		file = string(params.TextDocument.URI.SpanURI())
-		line = int(params.Position.Line) + 1
-		col  = int(params.Position.Character) + 1
-	)
+	defer logDuration("References", time.Now())
 
-	start := time.Now()
-	defer func() {
-		log.Debug(fmt.Sprintf("References took %s.", time.Since(start)))
-	}()
-
-	tree := ttcn3.ParseFile(file)
-	id, ok := tree.IdentifierAt(line, col).(*syntax.Ident)
-	if !ok || id == nil {
-		return nil, errors.New("no identifier at cursor")
+	tree, line, col := parseAt(params.TextDocument, params.Position)
+	if tree == nil {
+		return nil, nil
 	}
-	return NewAllIdsWithSameName(&s.db, id.String()), nil
+	return FindReferences(&s.db, tree, line, col, params.Context.IncludeDeclaration), nil
 }

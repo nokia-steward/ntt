@@ -40,24 +40,24 @@ var (
 	}
 )
 
-func (s *Server) completion(ctx context.Context, params *protocol.CompletionParams) (*protocol.CompletionList, error) {
+func (s *Server) completion(ctx context.Context, params *protocol.CompletionParams) (list *protocol.CompletionList, err error) {
 	start := time.Now()
+	uri := params.TextDocument.URI
 	defer func() {
-		if err := recover(); err != nil {
+		if r := recover(); r != nil {
 			// Incomplete trees are common while the user is typing.
-			log.Debugf("Info: %s.\n", err)
+			log.Debugf("completion at %s:%d:%d recovered from panic: %v\n", uri, params.Position.Line+1, params.Position.Character+1, r)
+			list, err = &protocol.CompletionList{}, nil
 		}
 		log.Debugf("Completion took %s.\n", time.Since(start))
 	}()
 
-	uri := params.TextDocument.URI
 	if !uri.SpanURI().IsFile() {
 		log.Printf("for 'code completion' the new file %q needs to be saved at least once", string(uri))
 		return &protocol.CompletionList{}, nil
 	}
 
-	file := uri.SpanURI().Filename()
-	tree := ttcn3.ParseFile(file)
+	tree := ttcn3.ParseFile(uri.SpanURI().Filename())
 	if tree.Root == nil || len(tree.Modules()) == 0 {
 		return &protocol.CompletionList{Items: []protocol.CompletionItem{{
 			Label:            "module",
@@ -67,17 +67,17 @@ func (s *Server) completion(ctx context.Context, params *protocol.CompletionPara
 		}}}, nil
 	}
 
+	suites := s.Owners(uri)
+	if len(suites) == 0 {
+		return nil, fmt.Errorf("no suite found for file %q", string(uri))
+	}
+
 	line := int(params.Position.Line) + 1
 	col := int(params.Position.Character) + 1
 	pos := tree.PosFor(line, col)
 	nodes := LastNonWsToken(tree.Root, pos)
 	if len(nodes) == 0 {
-		return nil, nil
-	}
-
-	suites := s.Owners(uri)
-	if len(suites) == 0 {
-		return nil, fmt.Errorf("no suite found for file %q", string(uri))
+		return &protocol.CompletionList{}, nil
 	}
 	// A file owned by several suites must not mix their modules: that produces cyclic imports.
 	return &protocol.CompletionList{Items: Complete(suites[0], tree, pos, nodes)}, nil
@@ -173,43 +173,40 @@ func (m behavMatch) allows(fn *syntax.FuncDecl) bool {
 }
 
 func (c *completer) complete() []protocol.CompletionItem {
-	switch {
-	case behaviourBody(c.nodes):
+	if inBlockOf[*syntax.FuncDecl](c.nodes) {
 		return c.behaviourBody()
-	case controlBody(c.nodes):
-		return c.controlBody()
-	case constScope(c.nodes):
-		return c.constDecl()
-	case templateScope(c.nodes):
-		return c.templateDecl()
-	default:
-		return c.byLeaf()
 	}
+	if inBlockOf[*syntax.ControlPart](c.nodes) {
+		return c.controlBody()
+	}
+	if decl, ok := moduleLevel[*syntax.ValueDecl](c.nodes); ok {
+		return c.constDecl(decl)
+	}
+	if decl, ok := moduleLevel[*syntax.TemplateDecl](c.nodes); ok {
+		return c.templateDecl(decl)
+	}
+	return c.byLeaf()
 }
 
 func (c *completer) behaviourBody() []protocol.CompletionItem {
 	prev := c.at(1)
 	sel, _ := prev.(*syntax.SelectorExpr)
-	mod := ""
-	if sel != nil {
-		if sel.X == nil {
-			return nil
-		}
-		mod = tokText(sel.X.LastTok())
+	if sel != nil && sel.X == nil {
+		return nil
 	}
 
 	match := behavMatch{kinds: []syntax.Kind{syntax.FUNCTION}, ret: true}
 	switch {
 	case startArg(c.nodes):
 		match.runsOn = true
-	case !insideExpr(c.nodes, mod != ""):
+	case !insideExpr(c.nodes, sel != nil):
 		match.kinds = []syntax.Kind{syntax.FUNCTION, syntax.ALTSTEP}
 		match.plain = true
 		match.runsOn = true
 	}
 
-	if mod != "" {
-		if tree := c.treeByModule(mod); tree != nil {
+	if sel != nil {
+		if tree := c.treeByModule(c.moduleRef(sel.X)); tree != nil {
 			return behaviours(tree, match, constRank(sortFirst))
 		}
 		return c.fieldsOf(selectorTarget(sel, c.pos))
@@ -231,6 +228,21 @@ func (c *completer) behaviourBody() []protocol.CompletionItem {
 	return append(items, c.modules(sortFourth)...)
 }
 
+// moduleRef returns the module name x refers to, or "" when x is not a bare
+// identifier or resolves to something other than a module.
+func (c *completer) moduleRef(x syntax.Expr) string {
+	id, ok := x.(*syntax.Ident)
+	if !ok {
+		return ""
+	}
+	for _, def := range c.tree.LookupWithDB(id, c.suite.DB) {
+		if _, ok := def.Node.(*syntax.Module); !ok {
+			return ""
+		}
+	}
+	return tokText(id.LastTok())
+}
+
 func (c *completer) controlBody() []protocol.CompletionItem {
 	match := behavMatch{kinds: []syntax.Kind{syntax.FUNCTION}, ret: true}
 	if sel, ok := c.at(1).(*syntax.SelectorExpr); ok {
@@ -240,13 +252,7 @@ func (c *completer) controlBody() []protocol.CompletionItem {
 		if !insideExpr(c.nodes, true) {
 			match.plain = true
 		}
-		mod := tokText(sel.X.LastTok())
-		tree := c.treeByModule(mod)
-		if tree == nil {
-			log.Debugf("module %s not found\n", mod)
-			return nil
-		}
-		return behaviours(tree, match, constRank(sortFirst))
+		return behaviours(c.treeByModule(tokText(sel.X.LastTok())), match, constRank(sortFirst))
 	}
 	if !insideExpr(c.nodes, false) {
 		match.plain = true
@@ -257,11 +263,7 @@ func (c *completer) controlBody() []protocol.CompletionItem {
 	return append(items, c.modules(sortThird)...)
 }
 
-func (c *completer) constDecl() []protocol.CompletionItem {
-	decl := valueDeclNode(c.nodes)
-	if decl == nil {
-		return nil
-	}
+func (c *completer) constDecl(decl *syntax.ValueDecl) []protocol.CompletionItem {
 	sel, _ := c.at(1).(*syntax.SelectorExpr)
 	if decl.Type == nil || decl.Type.Pos() > c.pos {
 		return c.typeNames(sel)
@@ -269,15 +271,11 @@ func (c *completer) constDecl() []protocol.CompletionItem {
 	return c.returningFuncs(sel)
 }
 
-func (c *completer) templateDecl() []protocol.CompletionItem {
-	decl := templateDeclNode(c.nodes)
-	if decl == nil {
-		return nil
-	}
+func (c *completer) templateDecl(decl *syntax.TemplateDecl) []protocol.CompletionItem {
 	sel, _ := c.at(1).(*syntax.SelectorExpr)
 	switch {
 	case decl.ModifiesTok != nil && decl.AssignTok != nil && decl.AssignTok.Pos() > c.pos:
-		return c.modifiedTemplate(decl, sel)
+		return c.modifiedTemplate(sel)
 	case decl.Type == nil || decl.Name == nil || decl.Name.Pos() > c.pos:
 		return c.typeNames(sel)
 	default:
@@ -285,36 +283,31 @@ func (c *completer) templateDecl() []protocol.CompletionItem {
 	}
 }
 
-func (c *completer) modifiedTemplate(decl *syntax.TemplateDecl, sel *syntax.SelectorExpr) []protocol.CompletionItem {
+func (c *completer) modifiedTemplate(sel *syntax.SelectorExpr) []protocol.CompletionItem {
 	if sel != nil && sel.X != nil {
-		mod := tokText(sel.X.LastTok())
-		tree := c.treeByModule(mod)
-		if tree == nil {
-			log.Debugf("module %s not found\n", mod)
-			return nil
-		}
-		return valueDecls(tree, templateKind(decl), false)
+		return valueDecls(c.treeByModule(tokText(sel.X.LastTok())), syntax.TEMPLATE, false)
 	}
-	return append(c.allValueDecls(syntax.TEMPLATE), c.modules("")...)
+	items := c.collect(func(tree *ttcn3.Tree) []protocol.CompletionItem {
+		return valueDecls(tree, syntax.TEMPLATE, true)
+	})
+	return append(items, c.modules("")...)
 }
 
 func (c *completer) typeNames(sel *syntax.SelectorExpr) []protocol.CompletionItem {
 	if sel != nil && sel.X != nil {
-		return c.typesIn(tokText(sel.X.LastTok()), "")
+		return declItems(c.treeByModule(tokText(sel.X.LastTok())), constRank(""), " ", protocol.StructCompletion, isTypeDecl)
 	}
-	return append(c.allTypes(), c.modules(sortThird)...)
+	items := c.collect(func(tree *ttcn3.Tree) []protocol.CompletionItem {
+		return declItems(tree, c.rank, " ", protocol.StructCompletion, isTypeDecl)
+	})
+	items = append(items, keywordItems(predefinedTypeLabels...)...)
+	return append(items, c.modules(sortThird)...)
 }
 
 func (c *completer) returningFuncs(sel *syntax.SelectorExpr) []protocol.CompletionItem {
 	match := behavMatch{kinds: []syntax.Kind{syntax.FUNCTION}, ret: true}
 	if sel != nil && sel.X != nil {
-		mod := tokText(sel.X.LastTok())
-		tree := c.treeByModule(mod)
-		if tree == nil {
-			log.Debugf("module %s not found\n", mod)
-			return nil
-		}
-		return behaviours(tree, match, constRank(sortFirst))
+		return behaviours(c.treeByModule(tokText(sel.X.LastTok())), match, constRank(sortFirst))
 	}
 	items := c.allBehaviours(match)
 	items = append(items, predefinedFunctionItems()...)
@@ -344,14 +337,7 @@ func (c *completer) byLeaf() []protocol.CompletionItem {
 }
 
 func (c *completer) ident(id *syntax.Ident) []protocol.CompletionItem {
-	if _, ok := c.nodes[0].(*syntax.Module); ok && len(c.nodes) == 2 {
-		return keywordItems(moduleDefLabels...)
-	}
-	parent := c.at(1)
-	if parent == nil {
-		return nil
-	}
-	switch parent := parent.(type) {
+	switch parent := c.at(1).(type) {
 	case *syntax.ModuleDef:
 		return keywordItems(moduleDefLabels...)
 	case *syntax.ImportDecl:
@@ -385,40 +371,17 @@ func (c *completer) importIdent(id *syntax.Ident, imp *syntax.ImportDecl) []prot
 }
 
 func (c *completer) defKindIdent(kind *syntax.DefKindExpr) []protocol.CompletionItem {
-	// Eight ancestors is the except-list shape: import, all except, '{', kind, ident.
-	if len(c.nodes) == 8 {
-		if _, ok := c.at(2).(*syntax.ExceptExpr); !ok {
-			return nil
-		}
-		if kind.KindTok != nil {
-			if imp, ok := c.at(4).(*syntax.ImportDecl); ok {
-				return c.importSpecs(kind.KindTok.Kind(), imp)
-			}
-		}
+	if _, except := c.at(2).(*syntax.ExceptExpr); except && kind.KindTok == nil {
 		return keywordItems(importKindLabels...)
 	}
-	if imp, ok := c.at(2).(*syntax.ImportDecl); ok {
-		if kind.KindTok == nil {
-			return nil
-		}
-		return c.importSpecs(kind.KindTok.Kind(), imp)
-	}
-	return nil
+	return c.kindSpecs(kind, 1)
 }
 
 func (c *completer) defKind(kind *syntax.DefKindExpr) []protocol.CompletionItem {
 	if kind.KindTok == nil {
 		return keywordItems(importKindLabels...)
 	}
-	if imp, ok := c.at(1).(*syntax.ImportDecl); ok {
-		return c.importSpecs(kind.KindTok.Kind(), imp)
-	}
-	if _, ok := c.at(1).(*syntax.ExceptExpr); ok {
-		if imp, ok := c.at(3).(*syntax.ImportDecl); ok {
-			return c.importSpecs(kind.KindTok.Kind(), imp)
-		}
-	}
-	return nil
+	return c.kindSpecs(kind, 0)
 }
 
 func (c *completer) onError() []protocol.CompletionItem {
@@ -426,19 +389,28 @@ func (c *completer) onError() []protocol.CompletionItem {
 	case *syntax.ModuleDef:
 		return keywordItems(moduleDefLabels...)
 	case *syntax.DefKindExpr:
-		if parent.KindTok == nil {
-			return nil
-		}
-		if imp, ok := c.at(2).(*syntax.ImportDecl); ok {
-			return c.importSpecs(parent.KindTok.Kind(), imp)
-		}
-		if _, ok := c.at(2).(*syntax.ExceptExpr); ok {
-			if imp, ok := c.at(4).(*syntax.ImportDecl); ok {
-				return c.importSpecs(parent.KindTok.Kind(), imp)
-			}
-		}
+		return c.kindSpecs(parent, 1)
 	}
 	return nil
+}
+
+// kindSpecs completes the definitions of kind, found at c.at(i), in its import's module.
+// kind sits either directly in the import or in its except list.
+func (c *completer) kindSpecs(kind *syntax.DefKindExpr, i int) []protocol.CompletionItem {
+	if kind.KindTok == nil {
+		return nil
+	}
+	var imp *syntax.ImportDecl
+	switch p := c.at(i + 1).(type) {
+	case *syntax.ImportDecl:
+		imp = p
+	case *syntax.ExceptExpr:
+		imp, _ = c.at(i + 3).(*syntax.ImportDecl)
+	}
+	if imp == nil {
+		return nil
+	}
+	return c.importSpecs(kind.KindTok.Kind(), imp)
 }
 
 func (c *completer) onDeclarator() []protocol.CompletionItem {
@@ -446,7 +418,10 @@ func (c *completer) onDeclarator() []protocol.CompletionItem {
 	if !ok || decl.KindTok == nil || decl.KindTok.Kind() != syntax.PORT {
 		return nil
 	}
-	return append(c.allPortTypes(), c.modules(sortThird)...)
+	items := c.collect(func(tree *ttcn3.Tree) []protocol.CompletionItem {
+		return declItems(tree, c.rank, "", protocol.InterfaceCompletion, isPortTypeDecl)
+	})
+	return append(items, c.modules(sortThird)...)
 }
 
 func (c *completer) selectorComponent(sel *syntax.SelectorExpr) []protocol.CompletionItem {
@@ -455,7 +430,7 @@ func (c *completer) selectorComponent(sel *syntax.SelectorExpr) []protocol.Compl
 	}
 	switch c.at(2).(type) {
 	case *syntax.RunsOnSpec, *syntax.SystemSpec, *syntax.ComponentTypeDecl:
-		return c.componentsIn(tokText(sel.X.LastTok()), sortFirst)
+		return componentTypes(c.treeByModule(tokText(sel.X.LastTok())))
 	default:
 		return nil
 	}
@@ -472,28 +447,33 @@ func (c *completer) componentExtends(comp *syntax.ComponentTypeDecl) []protocol.
 }
 
 func (c *completer) componentTypesAndModules() []protocol.CompletionItem {
-	return append(c.allComponentTypes(sortFirst), c.modules(sortSecond)...)
+	return append(c.collect(componentTypes), c.modules(sortSecond)...)
+}
+
+func componentTypes(tree *ttcn3.Tree) []protocol.CompletionItem {
+	return declItems(tree, constRank(sortFirst), "", protocol.StructCompletion, isComponentDecl)
 }
 
 func (c *completer) importSpecs(kind syntax.Kind, imp *syntax.ImportDecl) []protocol.CompletionItem {
 	if imp.Module == nil {
 		return nil
 	}
-	mod := tokText(imp.Module.Tok)
-	tree := c.treeByModule(mod)
+	tree := c.treeByModule(tokText(imp.Module.Tok))
 	if tree == nil {
-		log.Debugf("module %s not found\n", mod)
 		return nil
 	}
 
 	var items []protocol.CompletionItem
 	switch kind {
 	case syntax.ALTSTEP, syntax.FUNCTION, syntax.TESTCASE:
-		items = funcNames(tree, kind)
+		items = declNames(tree, protocol.FunctionCompletion, func(n syntax.Node) bool {
+			fn, ok := n.(*syntax.FuncDecl)
+			return ok && fn.KindTok != nil && fn.KindTok.Kind() == kind
+		})
 	case syntax.TEMPLATE, syntax.CONST, syntax.MODULEPAR:
 		items = valueDecls(tree, kind, false)
 	case syntax.TYPE:
-		items = importTypeNames(tree)
+		items = declNames(tree, protocol.StructCompletion, isTypeDecl)
 	default:
 		log.Debugf("Kind not considered yet: %#v\n", kind)
 		return nil
@@ -523,12 +503,13 @@ func (c *completer) treeByModule(name string) *ttcn3.Tree {
 			return tree
 		}
 	}
-	// FindModule may guess by file name, or miss files indexed under another path spelling.
+	// FindModule may guess by file name or miss files not yet indexed.
 	for _, tree := range c.trees() {
 		if declares(tree, name) {
 			return tree
 		}
 	}
+	log.Debugf("module %s not found\n", name)
 	return nil
 }
 
@@ -541,44 +522,63 @@ func declares(tree *ttcn3.Tree, name string) bool {
 	return false
 }
 
-func (c *completer) allBehaviours(match behavMatch) []protocol.CompletionItem {
+// collect concatenates f over all suite trees.
+func (c *completer) collect(f func(*ttcn3.Tree) []protocol.CompletionItem) []protocol.CompletionItem {
 	var items []protocol.CompletionItem
 	for _, tree := range c.trees() {
-		items = append(items, behaviours(tree, match, c.rank)...)
+		items = append(items, f(tree)...)
 	}
 	return items
 }
 
-func behaviours(tree *ttcn3.Tree, match behavMatch, sortOf func(string) string) []protocol.CompletionItem {
-	var items []protocol.CompletionItem
-	for _, kind := range match.kinds {
-		items = append(items, behavioursOfKind(tree, kind, match, sortOf)...)
-	}
-	return items
-}
-
-func behavioursOfKind(tree *ttcn3.Tree, kind syntax.Kind, match behavMatch, sortOf func(string) string) []protocol.CompletionItem {
-	var (
-		items []protocol.CompletionItem
-		mod   string
-	)
-	tree.Inspect(func(n syntax.Node) bool {
-		if syntax.IsNil(n) {
-			return false
-		}
-		if m, ok := n.(*syntax.Module); ok {
-			mod = syntax.Name(m)
-			return true
-		}
-		fn, ok := n.(*syntax.FuncDecl)
-		if !ok {
-			return true
-		}
-		if fn.KindTok != nil && fn.KindTok.Kind() == kind && match.allows(fn) {
-			items = append(items, behaviourItem(fn, mod, sortOf(mod)))
-		}
-		return false
+func (c *completer) allBehaviours(match behavMatch) []protocol.CompletionItem {
+	return c.collect(func(tree *ttcn3.Tree) []protocol.CompletionItem {
+		return behaviours(tree, match, c.rank)
 	})
+}
+
+// eachModuleDef calls f for every module-level definition in tree, including those in groups.
+func eachModuleDef(tree *ttcn3.Tree, f func(mod string, def syntax.Node)) {
+	if tree == nil {
+		return
+	}
+	var walk func(mod string, defs []*syntax.ModuleDef)
+	walk = func(mod string, defs []*syntax.ModuleDef) {
+		for _, d := range defs {
+			if d == nil || syntax.IsNil(d.Def) {
+				continue
+			}
+			if g, ok := d.Def.(*syntax.GroupDecl); ok {
+				walk(mod, g.Defs)
+				continue
+			}
+			f(mod, d.Def)
+		}
+	}
+	for _, m := range tree.Modules() {
+		mod := m.Node.(*syntax.Module)
+		walk(syntax.Name(mod), mod.Defs)
+	}
+}
+
+// behaviours lists matching declarations grouped by match.kinds, in that order.
+func behaviours(tree *ttcn3.Tree, match behavMatch, sortOf func(string) string) []protocol.CompletionItem {
+	byKind := make([][]protocol.CompletionItem, len(match.kinds))
+	eachModuleDef(tree, func(mod string, def syntax.Node) {
+		fn, ok := def.(*syntax.FuncDecl)
+		if !ok || fn.KindTok == nil || !match.allows(fn) {
+			return
+		}
+		for i, kind := range match.kinds {
+			if fn.KindTok.Kind() == kind {
+				byKind[i] = append(byKind[i], behaviourItem(fn, mod, sortOf(mod)))
+			}
+		}
+	})
+	var items []protocol.CompletionItem
+	for _, group := range byKind {
+		items = append(items, group...)
+	}
 	return items
 }
 
@@ -633,11 +633,12 @@ func (c *completer) locals(sortPref string) []protocol.CompletionItem {
 		if syntax.IsNil(n) {
 			return false
 		}
-		d, ok := n.(*syntax.Declarator)
-		if !ok {
+		switch n.(type) {
+		case *syntax.Declarator, *syntax.FormalPar:
+		default:
 			return true
 		}
-		name := syntax.Name(d)
+		name := syntax.Name(n)
 		if name == "" {
 			return false
 		}
@@ -678,154 +679,62 @@ func (c *completer) rank(name string) string {
 	return sortSecond
 }
 
-func (c *completer) allTypes() []protocol.CompletionItem {
-	var items []protocol.CompletionItem
-	for _, tree := range c.trees() {
-		items = append(items, declItems(tree, c.rank, " ", protocol.StructCompletion, isTypeDecl)...)
-	}
-	return append(items, keywordItems(predefinedTypeLabels...)...)
-}
-
-func (c *completer) allComponentTypes(sortPref string) []protocol.CompletionItem {
-	var items []protocol.CompletionItem
-	rank := constRank(sortPref)
-	for _, tree := range c.trees() {
-		items = append(items, declItems(tree, rank, "", protocol.StructCompletion, isComponentDecl)...)
-	}
-	return items
-}
-
-func (c *completer) allPortTypes() []protocol.CompletionItem {
-	var items []protocol.CompletionItem
-	for _, tree := range c.trees() {
-		items = append(items, declItems(tree, c.rank, "", protocol.InterfaceCompletion, isPortDecl)...)
-	}
-	return items
-}
-
-func (c *completer) typesIn(mod, sortPref string) []protocol.CompletionItem {
-	return c.declsIn(mod, constRank(sortPref), " ", protocol.StructCompletion, isTypeDecl)
-}
-
-func (c *completer) componentsIn(mod, sortPref string) []protocol.CompletionItem {
-	return c.declsIn(mod, constRank(sortPref), "", protocol.StructCompletion, isComponentDecl)
-}
-
-func (c *completer) declsIn(mod string, sortOf func(string) string, suffix string, kind protocol.CompletionItemKind, want func(syntax.Node) bool) []protocol.CompletionItem {
-	tree := c.treeByModule(mod)
-	if tree == nil {
-		log.Debugf("module %s not found\n", mod)
-		return nil
-	}
-	return declItems(tree, sortOf, suffix, kind, want)
-}
-
 func declItems(tree *ttcn3.Tree, sortOf func(string) string, suffix string, kind protocol.CompletionItemKind, want func(syntax.Node) bool) []protocol.CompletionItem {
-	var (
-		items []protocol.CompletionItem
-		modID string
-	)
-	tree.Inspect(func(n syntax.Node) bool {
-		if syntax.IsNil(n) {
-			return false
+	var items []protocol.CompletionItem
+	eachModuleDef(tree, func(mod string, def syntax.Node) {
+		if !want(def) {
+			return
 		}
-		if m, ok := n.(*syntax.Module); ok {
-			modID = syntax.Name(m)
-			return true
-		}
-		if !want(n) {
-			return true
-		}
-		name := syntax.Name(n)
+		name := syntax.Name(def)
 		item := protocol.CompletionItem{
 			Label:  name + suffix,
 			Kind:   kind,
-			Detail: modID + "." + name,
+			Detail: mod + "." + name,
 		}
-		if sortOf != nil {
-			if pref := sortOf(modID); pref != "" {
-				item.SortText = pref + name
-			}
+		if pref := sortOf(mod); pref != "" {
+			item.SortText = pref + name
 		}
 		items = append(items, item)
-		return false
 	})
 	return items
 }
 
-func (c *completer) allValueDecls(kind syntax.Kind) []protocol.CompletionItem {
+// declNames lists the names of wanted module definitions without detail or rank.
+func declNames(tree *ttcn3.Tree, kind protocol.CompletionItemKind, want func(syntax.Node) bool) []protocol.CompletionItem {
 	var items []protocol.CompletionItem
-	for _, tree := range c.trees() {
-		items = append(items, valueDecls(tree, kind, true)...)
-	}
+	eachModuleDef(tree, func(_ string, def syntax.Node) {
+		if want(def) {
+			items = append(items, protocol.CompletionItem{Label: syntax.Name(def), Kind: kind})
+		}
+	})
 	return items
 }
 
 func valueDecls(tree *ttcn3.Tree, kind syntax.Kind, withDetail bool) []protocol.CompletionItem {
-	var (
-		items []protocol.CompletionItem
-		mod   string
-	)
-	tree.Inspect(func(n syntax.Node) bool {
-		if syntax.IsNil(n) {
-			return false
-		}
-		switch n := n.(type) {
-		case *syntax.Module:
-			mod = syntax.Name(n)
-			return true
-		case *syntax.FuncDecl, *syntax.ComponentTypeDecl:
-			return false
-		case *syntax.ValueDecl:
-			return n.KindTok != nil && n.KindTok.Kind() == kind
-		case *syntax.TemplateDecl:
-			if kind != syntax.TEMPLATE {
-				return false
-			}
-		case *syntax.Declarator:
-		default:
-			return true
-		}
-		name := syntax.Name(n)
+	var items []protocol.CompletionItem
+	add := func(mod, name string) {
 		item := protocol.CompletionItem{Label: name, Kind: protocol.ConstantCompletion}
 		if withDetail {
 			item.Detail = mod + "." + name
 		}
 		items = append(items, item)
-		return false
-	})
-	return items
-}
-
-func funcNames(tree *ttcn3.Tree, kind syntax.Kind) []protocol.CompletionItem {
-	var items []protocol.CompletionItem
-	tree.Inspect(func(n syntax.Node) bool {
-		if syntax.IsNil(n) {
-			return false
+	}
+	eachModuleDef(tree, func(mod string, def syntax.Node) {
+		switch def := def.(type) {
+		case *syntax.ValueDecl:
+			if def.KindTok == nil || def.KindTok.Kind() != kind {
+				return
+			}
+			for _, d := range def.Decls {
+				if d != nil {
+					add(mod, syntax.Name(d))
+				}
+			}
+		case *syntax.TemplateDecl:
+			if kind == syntax.TEMPLATE {
+				add(mod, syntax.Name(def))
+			}
 		}
-		fn, ok := n.(*syntax.FuncDecl)
-		if !ok {
-			return true
-		}
-		if fn.KindTok != nil && fn.KindTok.Kind() == kind {
-			items = append(items, protocol.CompletionItem{Label: syntax.Name(fn), Kind: protocol.FunctionCompletion})
-		}
-		return false
-	})
-	return items
-}
-
-func importTypeNames(tree *ttcn3.Tree) []protocol.CompletionItem {
-	var items []protocol.CompletionItem
-	tree.Inspect(func(n syntax.Node) bool {
-		if syntax.IsNil(n) {
-			return false
-		}
-		if !isTypeDecl(n) {
-			return true
-		}
-		items = append(items, protocol.CompletionItem{Label: syntax.Name(n), Kind: protocol.StructCompletion})
-		return false
 	})
 	return items
 }
@@ -861,11 +770,19 @@ func (c *completer) argNames(n syntax.Expr) []protocol.CompletionItem {
 		if len(defs) == 0 {
 			return nil
 		}
-		node := defs[0].Node
-		if _, ok := node.(*syntax.ListSpec); ok {
-			node, _ = actualType(c.suite.DB, defs[0])
+		// TypeOf resolves nested literals to the outermost type; each nesting level is one list element.
+		nesting := 0
+		for p := tree.ParentOf(n); ; p = tree.ParentOf(p) {
+			if _, ok := p.(*syntax.CompositeLiteral); !ok {
+				break
+			}
+			nesting++
 		}
-		return paramItems(node, 0, sortFirst, assign)
+		typ, depth := actualType(c.suite.DB, defs[0])
+		if depth != nesting {
+			return nil
+		}
+		return paramItems(typ, 0, sortFirst, assign)
 	default:
 		return nil
 	}
@@ -873,7 +790,10 @@ func (c *completer) argNames(n syntax.Expr) []protocol.CompletionItem {
 
 func paramItems(n syntax.Node, from int, sortPref string, assign bool) []protocol.CompletionItem {
 	items := collectParams(n)
-	if from >= 0 && from < len(items) {
+	if from > 0 {
+		if from >= len(items) {
+			return nil
+		}
 		items = items[from:]
 	}
 	insert := "%s"
@@ -988,7 +908,7 @@ func predefinedFunctionItems() []protocol.CompletionItem {
 			Detail:           fn.Signature,
 			InsertText:       fn.InsertText,
 			InsertTextFormat: fn.TextFormat,
-			Documentation:    protocol.MarkupContent{Kind: "markdown", Value: fn.Documentation},
+			Documentation:    protocol.MarkupContent{Kind: protocol.Markdown, Value: fn.Documentation},
 		}
 	}
 	return items
@@ -1019,19 +939,12 @@ func importAllItems() []protocol.CompletionItem {
 	}
 }
 
-func templateKind(decl *syntax.TemplateDecl) syntax.Kind {
-	if decl.RestrictionSpec != nil && decl.TemplateTok != nil {
-		return decl.TemplateTok.Kind()
-	}
-	return syntax.TEMPLATE
-}
-
 func isComponentDecl(n syntax.Node) bool {
 	_, ok := n.(*syntax.ComponentTypeDecl)
 	return ok
 }
 
-func isPortDecl(n syntax.Node) bool {
+func isPortTypeDecl(n syntax.Node) bool {
 	_, ok := n.(*syntax.PortTypeDecl)
 	return ok
 }
@@ -1075,76 +988,30 @@ func (c *completer) at(i int) syntax.Node {
 	return c.nodes[j]
 }
 
-func behaviourBody(nodes []syntax.Node) bool {
+// inBlockOf reports whether the path enters a block below a node of type T.
+func inBlockOf[T syntax.Node](nodes []syntax.Node) bool {
 	inside := false
 	for _, n := range nodes {
-		switch n.(type) {
-		case *syntax.FuncDecl:
+		if _, ok := n.(T); ok {
 			inside = true
-		case *syntax.BlockStmt:
-			if inside {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func controlBody(nodes []syntax.Node) bool {
-	inside := false
-	for _, n := range nodes {
-		switch n.(type) {
-		case *syntax.ControlPart:
-			inside = true
-		case *syntax.BlockStmt:
-			if inside {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func constScope(nodes []syntax.Node) bool {
-	for i := len(nodes) - 1; i > 0; i-- {
-		if _, ok := nodes[i].(*syntax.ValueDecl); !ok {
-			continue
-		}
-		if _, ok := nodes[i-1].(*syntax.ModuleDef); ok {
+		} else if _, ok := n.(*syntax.BlockStmt); ok && inside {
 			return true
 		}
 	}
 	return false
 }
 
-func templateScope(nodes []syntax.Node) bool {
-	for i := len(nodes) - 1; i > 0; i-- {
-		if _, ok := nodes[i].(*syntax.TemplateDecl); !ok {
-			continue
-		}
-		if _, ok := nodes[i-1].(*syntax.ModuleDef); ok {
-			return true
-		}
-	}
-	return false
-}
-
-func valueDeclNode(nodes []syntax.Node) *syntax.ValueDecl {
-	for _, n := range nodes {
-		if v, ok := n.(*syntax.ValueDecl); ok {
-			return v
+// moduleLevel returns the node of type T on the path that is a module definition.
+func moduleLevel[T syntax.Node](nodes []syntax.Node) (T, bool) {
+	for i := 1; i < len(nodes); i++ {
+		if decl, ok := nodes[i].(T); ok {
+			if _, ok := nodes[i-1].(*syntax.ModuleDef); ok {
+				return decl, true
+			}
 		}
 	}
-	return nil
-}
-
-func templateDeclNode(nodes []syntax.Node) *syntax.TemplateDecl {
-	for _, n := range nodes {
-		if t, ok := n.(*syntax.TemplateDecl); ok {
-			return t
-		}
-	}
-	return nil
+	var zero T
+	return zero, false
 }
 
 func insideExpr(nodes []syntax.Node, fromModule bool) bool {

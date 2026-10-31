@@ -13,32 +13,19 @@ import (
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
-// removeDuplicateNodes
-// NOTE: this function is a workaround for a scoping problem which
-// occurs inside `tree.LookupWithDB`.
-// following test is provoking the situation:
-// TestPlainTextHoverForPortDefFromDecl (hover_test.go)
-func removeDuplicateNodes(nodes []*ttcn3.Node) []*ttcn3.Node {
-	uNodes := make(map[*syntax.Ident]bool, len(nodes))
-	res := make([]*ttcn3.Node, 0, len(nodes))
-	for _, n := range nodes {
-		if _, ok := uNodes[n.Ident]; !ok {
-			uNodes[n.Ident] = true
-			res = append(res, n)
-		}
-	}
-	return res
-}
-
-func (md *MarkdownHover) Print(sign string, comment string, posRef string) protocol.MarkupContent {
+func (md *MarkdownHover) Print(sign string, comment string, posRef string, mapOrConnect []protocol.Location) protocol.MarkupContent {
 	// make line breaks conform to markdown spec
 	comment = strings.ReplaceAll(comment, "\n", "  \n")
-	res := "```ttcn3\n" + string(sign) + "\n```\n"
+	res := "```ttcn3\n" + sign + "\n```\n"
 	if len(comment) > 0 {
 		res += " - - -\n" + comment
 	}
-	if len(md.mapOrConnectLinks) > 0 {
-		res += "_possible map / connect statements_\n - - -\n" + md.mapOrConnectLinks
+	if len(mapOrConnect) > 0 {
+		res += "_possible map / connect statements_\n - - -\n"
+		for _, l := range mapOrConnect {
+			line := l.Range.Start.Line + 1
+			res += fmt.Sprintf("[%s:%d](%s#L%d)  \n", l.URI.SpanURI().Filename(), line, l.URI, line)
+		}
 	}
 	if len(posRef) > 0 {
 		res += "\n - - -\n" + posRef
@@ -48,18 +35,10 @@ func (md *MarkdownHover) Print(sign string, comment string, posRef string) proto
 
 func (md *MarkdownHover) LinkForNode(def *ttcn3.Node) string {
 	p := syntax.Begin(def.Node)
-	return fmt.Sprintf("[module %s](%s#L%dC%d)", def.ModuleOf(def.Node).Name.String(), def.Filename(), p.Line, p.Column)
+	return fmt.Sprintf("[%s](%s#L%dC%d)", moduleLabel(def), def.Filename(), p.Line, p.Column)
 }
 
-func (md *MarkdownHover) GatherMapOrConnectLinks(fileName string, line uint32, uri protocol.DocumentURI) {
-	md.mapOrConnectLinks += fmt.Sprintf("[%s:%d](%s#L%d)  \n", fileName, line+1, uri, line+1)
-}
-
-func (md *MarkdownHover) Reset() {
-	md.mapOrConnectLinks = ""
-}
-
-func (pt *PlainTextHover) Print(sign string, comment string, posRef string) protocol.MarkupContent {
+func (pt *PlainTextHover) Print(sign string, comment string, posRef string, mapOrConnect []protocol.Location) protocol.MarkupContent {
 	val := sign
 	if len(val) > 0 && val[len(val)-1] != '\n' {
 		val += "\n"
@@ -71,8 +50,11 @@ func (pt *PlainTextHover) Print(sign string, comment string, posRef string) prot
 			val += "\n"
 		}
 	}
-	if len(pt.mapOrConnectRefs) > 0 {
-		val += "possible map / connect statements\n_________________________________\n" + pt.mapOrConnectRefs
+	if len(mapOrConnect) > 0 {
+		val += "possible map / connect statements\n_________________________________\n"
+		for _, l := range mapOrConnect {
+			val += fmt.Sprintf("%s:%d\n", l.URI.SpanURI().Filename(), l.Range.Start.Line+1)
+		}
 	}
 	if len(posRef) > 0 {
 		val += strings.Repeat("_", len(posRef)+2) + "\n" + posRef
@@ -81,25 +63,29 @@ func (pt *PlainTextHover) Print(sign string, comment string, posRef string) prot
 }
 
 func (pt *PlainTextHover) LinkForNode(def *ttcn3.Node) string {
-	return fmt.Sprintf("[module %s]", def.ModuleOf(def.Node).Name.String())
+	return fmt.Sprintf("[%s]", moduleLabel(def))
 }
 
-func (pt *PlainTextHover) GatherMapOrConnectLinks(fileName string, line uint32, uri protocol.DocumentURI) {
-	pt.mapOrConnectRefs += fmt.Sprintf("%s:%d\n", fileName, line+1)
-}
-
-func (pt *PlainTextHover) Reset() {
-	pt.mapOrConnectRefs = ""
+// moduleLabel returns "module <name>" for the module enclosing def, or the
+// file name of def if there is none.
+func moduleLabel(def *ttcn3.Node) string {
+	if mod := def.ModuleOf(def.Node); mod != nil && mod.Name != nil {
+		return "module " + mod.Name.String()
+	}
+	return def.Filename()
 }
 
 func getSignature(def *ttcn3.Node) string {
 	var sig bytes.Buffer
 	var prefix = ""
-	fh := fs.Open(def.Filename())
-	content, _ := fh.Bytes()
+	content, err := fs.Open(def.Filename()).Bytes()
+	if err != nil {
+		log.Debugf("getSignature: %s\n", err)
+		return ""
+	}
 	switch node := def.Node.(type) {
 	case *syntax.FuncDecl:
-		if tok := node.KindTok; tok != nil {
+		if node.KindTok != nil {
 			sig.WriteString(node.KindTok.String() + " ")
 		}
 		sig.WriteString(node.Name.String())
@@ -137,62 +123,46 @@ func getSignature(def *ttcn3.Node) string {
 	return prefix + sig.String()
 }
 
+func isPortDecl(n syntax.Node) bool {
+	decl, ok := n.(*syntax.ValueDecl)
+	return ok && decl.KindTok != nil && decl.KindTok.Kind() == syntax.PORT
+}
+
 func (s *Server) hover(ctx context.Context, params *protocol.HoverParams) (*protocol.Hover, error) {
 	return ProcessHover(params, &s.db, s.clientCapability.HoverContent)
 }
 
 func ProcessHover(params *protocol.HoverParams, db *ttcn3.DB, capability HoverContentProvider) (*protocol.Hover, error) {
-	var (
-		file      = string(params.TextDocument.URI.SpanURI())
-		line      = int(params.Position.Line) + 1
-		col       = int(params.Position.Character) + 1
-		comment   string
-		signature string
-		posRef    string
-		defFound  = false
-	)
-
-	tree := ttcn3.ParseFile(file)
-	x := tree.IdentifierAt(line, col)
+	tree, x := identifierAt(params.TextDocument, params.Position)
 	if x == nil {
 		return nil, nil
 	}
 
-	for _, def := range removeDuplicateNodes(tree.LookupWithDB(x, db)) {
-		defFound = true
+	var (
+		comment      string
+		signature    string
+		posRef       string
+		mapOrConnect []protocol.Location
+	)
+	if defs := tree.LookupWithDB(x, db); len(defs) > 0 {
+		def := defs[0]
 		comment = syntax.Doc(def.Node)
 		signature = getSignature(def)
 		if tree.Root != def.Root {
 			posRef = capability.LinkForNode(def)
 		}
-
-		if firstTok := def.Node.FirstTok(); firstTok == nil {
-			continue
-		} else {
-			if node, ok := def.Node.(*syntax.ValueDecl); ok {
-				if tok := node.KindTok; tok != nil && tok.Kind() == syntax.PORT {
-					locations := FindMapConnectStatementForPortIdMatchingTheName(db, syntax.Name(x))
-					for _, l := range locations {
-						capability.GatherMapOrConnectLinks(l.URI.SpanURI().Filename(), l.Range.Start.Line, l.URI)
-					}
-				}
-			}
+		if isPortDecl(def.Node) {
+			mapOrConnect = FindMapConnectStatementForPortIdMatchingTheName(db, syntax.Name(x))
 		}
-	}
-	if !defFound {
-		// look for predefined functions
-		if id := syntax.Name(x); len(id) > 0 {
-			for _, predef := range PredefinedFunctions {
-				if predef.Label == id+"(...)" {
-					comment = predef.Documentation
-					signature = predef.Signature
-				}
+	} else if id := syntax.Name(x); len(id) > 0 {
+		for _, predef := range PredefinedFunctions {
+			if predef.Label == id+"(...)" {
+				comment = predef.Documentation
+				signature = predef.Signature
+				break
 			}
 		}
 	}
 
-	hoverContents := capability.Print(signature, comment, posRef)
-	hover := &protocol.Hover{Contents: hoverContents}
-	capability.Reset()
-	return hover, nil
+	return &protocol.Hover{Contents: capability.Print(signature, comment, posRef, mapOrConnect)}, nil
 }

@@ -44,7 +44,7 @@ func testCompletion(t *testing.T, input string, imports ...string) []protocol.Co
 		fs.SetContent(name(i+1), []byte(str))
 		suite.Config.Sources = append(suite.Config.Sources, name(i+1))
 	}
-	suite.DB.Index(suite.Config.Sources...)
+	suite.DB.Index(suite.Files()...)
 
 	syntax := ttcn3.ParseFile(name(0))
 	nodeStack := lsp.LastNonWsToken(syntax.Root, cursor)
@@ -69,14 +69,6 @@ func TestLastNonWsToken(t *testing.T) {
 	}{
 		{"", nil},
 		{"module M {}", nil},
-
-		// {"¶", []string{
-		// 	"*syntax.Root",
-		// }},
-
-		// {"¶ module A {}", []string{
-		// 	"*syntax.Root",
-		// }},
 
 		{"module ¶ module A {}", []string{
 			"*syntax.Root",
@@ -159,10 +151,6 @@ func TestLastNonWsToken(t *testing.T) {
 		assert.Equal(t, tt.want, got, fmt.Sprintf("%q", tt.input))
 	}
 }
-
-// Completion within Import statement.
-// TODO: func TestImportTypes(t *testing.T) {}
-// TODO: func TestImportTypesCtrlSpc(t *testing.T) {}
 
 func TestImportModulenamesCtrlSpc(t *testing.T) {
 	list := testCompletion(t, `module Test
@@ -1124,26 +1112,6 @@ func TestFuncComplInsideConstDeclBody(t *testing.T) {
 		list)
 }
 
-// TODO: fixing this issue requires more effort.
-/*
-func TestSyntaxErrorProvokingInvalidPos(t *testing.T) {
-	suite := buildSuite(t, `module Test
-    {
-    type component Ptc {}
-    type component Sys {}
-    function setColor(integer p_color) runs on {
-        log(p_color);
-    }
-    testcase tc1() runs on test.Ptc system Sys { }
-    c
-	  }`)
-	name := fmt.Sprintf("%s_Module_0.ttcn3", t.Name())
-	syntax := suite.ParseWithAllErrors(name)
-	pos := syntax.Pos(9, 6)
-	assert.Equal(t, pos, 203)
-}
-*/
-
 func TestSelectorComplWithStructTypeDecl(t *testing.T) {
 	list := testCompletion(t, `module Test
     {
@@ -1590,4 +1558,184 @@ func TestImportClassTypes(t *testing.T) {
 		{Label: "C1", Kind: protocol.StructCompletion},
 		{Label: "R1", Kind: protocol.StructCompletion},
 		{Label: "all;", Kind: protocol.KeywordCompletion}}, list)
+}
+
+func TestNamedParamsBeyondLastParam(t *testing.T) {
+	list := testCompletion(t, `module Test
+    {
+		function fn(integer intParam) {}
+
+		function f1() {
+			fn(1, i¶)
+		}
+	}`)
+
+	assert.Equal(t, []protocol.CompletionItem(nil), list)
+}
+
+func TestLocalsIncludeFormalParams(t *testing.T) {
+	list := testCompletion(t, `module Test
+    {
+		function f2() return boolean {}
+		testcase tc1(integer p_x) {
+			var integer i := 2 * ¶f//
+		};
+	}`)
+
+	assert.Equal(t, []protocol.CompletionItem{
+		{Label: "p_x", Kind: protocol.VariableCompletion, SortText: " 2p_x"},
+		{Label: "i", Kind: protocol.VariableCompletion, SortText: " 2i"},
+		{Label: "f2()", Kind: protocol.FunctionCompletion, SortText: " 1f2", InsertText: "f2()", InsertTextFormat: protocol.PlainTextTextFormat,
+			Detail: "function Test.f2()\n  return boolean", Documentation: ""}},
+		list)
+}
+
+func TestImportExceptInsideGroup(t *testing.T) {
+	list := testCompletion(t, `module Test
+    {
+		group G {
+			import from X all except {
+				const c¶_ }
+		}
+	}`, `module X
+	{
+		const integer c_a := 1;
+		const integer c_b := 2;
+	}`)
+
+	assert.Equal(t, []protocol.CompletionItem{
+		{Label: "c_a", Kind: protocol.ConstantCompletion},
+		{Label: "c_b", Kind: protocol.ConstantCompletion},
+		{Label: "all;", Kind: protocol.KeywordCompletion}}, list)
+}
+
+func TestImportInsideGroup(t *testing.T) {
+	list := testCompletion(t, `module Test
+    {
+		group G {
+			import from X {
+				const c¶_ }
+		}
+	}`, `module X
+	{
+		const integer c_a := 1;
+		const integer c_b := 2;
+	}`)
+
+	assert.Equal(t, []protocol.CompletionItem{
+		{Label: "c_a", Kind: protocol.ConstantCompletion},
+		{Label: "c_b", Kind: protocol.ConstantCompletion},
+		{Label: "all;", Kind: protocol.KeywordCompletion}}, list)
+}
+
+func TestSelectorOnVariableNamedLikeModule(t *testing.T) {
+	list := testCompletion(t, `module Test
+    {
+		type record Structure
+		{
+			integer firstField,
+			boolean secondField
+		}
+
+		function f1() {
+			var Structure X := {};
+			X.¶
+		}
+	}`, `module X
+	{
+		function fx() return integer {}
+	}`)
+
+	assert.Equal(t, []protocol.CompletionItem{
+		{Label: "firstField", Kind: protocol.FieldCompletion, Detail: "integer", Documentation: ""},
+		{Label: "secondField", Kind: protocol.FieldCompletion, Detail: "boolean", Documentation: ""}},
+		list)
+}
+
+func TestRecordOfCompositeLiteralCompletion(t *testing.T) {
+	list := testCompletion(t, `module Test
+    {
+		type record Structure
+		{
+			integer firstField,
+			boolean secondField
+		}
+
+		type record of Structure RoStructure;
+
+		function f1() {
+			var RoStructure x := {
+				f¶
+			};
+		}
+	}`)
+
+	assert.Equal(t, []protocol.CompletionItem{
+		{Label: "x", Kind: protocol.VariableCompletion, SortText: " 2x"}},
+		list)
+}
+
+func TestRecordOfElementCompositeLiteralCompletion(t *testing.T) {
+	list := testCompletion(t, `module Test
+    {
+		type record Structure
+		{
+			integer firstField,
+			boolean secondField
+		}
+
+		type record of Structure RoStructure;
+
+		function f1() {
+			var RoStructure x := {
+				{ f¶ }
+			};
+		}
+	}`)
+
+	assert.Equal(t, []protocol.CompletionItem{
+		{Label: "firstField", Kind: protocol.EnumMemberCompletion, Detail: "integer", Documentation: "", InsertText: "firstField := ${1:}",
+			InsertTextFormat: protocol.SnippetTextFormat, SortText: " 1firstField"},
+		{Label: "secondField", Kind: protocol.EnumMemberCompletion, Detail: "boolean", Documentation: "", InsertText: "secondField := ${1:}",
+			InsertTextFormat: protocol.SnippetTextFormat, SortText: " 1secondField"},
+		{Label: "x", Kind: protocol.VariableCompletion, SortText: " 2x"}},
+		list)
+}
+
+func TestInsideControlBody(t *testing.T) {
+	list := testCompletion(t, `module Test
+    {
+		function f1() {}
+		function f2() return boolean {}
+		altstep a1() {}
+		control {
+			f¶
+		}
+	}`, `module TestInsideControlBody_Module_1
+	{
+		function f3() {}
+	}`)
+
+	assert.Equal(t, []protocol.CompletionItem{
+		{Label: "f1()", Kind: protocol.FunctionCompletion, SortText: " 1f1", InsertText: "f1()", InsertTextFormat: protocol.PlainTextTextFormat,
+			Detail: "function Test.f1()", Documentation: ""},
+		{Label: "f2()", Kind: protocol.FunctionCompletion, SortText: " 1f2", InsertText: "f2()", InsertTextFormat: protocol.PlainTextTextFormat,
+			Detail: "function Test.f2()\n  return boolean", Documentation: ""},
+		{Label: "f3()", Kind: protocol.FunctionCompletion, SortText: " 2f3", InsertText: "f3()", InsertTextFormat: protocol.PlainTextTextFormat,
+			Detail: "function TestInsideControlBody_Module_1.f3()", Documentation: ""},
+		{Label: "TestInsideControlBody_Module_1", Kind: protocol.ModuleCompletion, SortText: " 3TestInsideControlBody_Module_1"}},
+		list)
+}
+
+func TestImportAfterModuleName(t *testing.T) {
+	list := testCompletion(t, `module Test
+    {
+		import from A ¶
+	}`, `module A
+	{}`)
+
+	assert.Equal(t, []protocol.CompletionItem{
+		{Label: "all [except {}];", InsertText: "${1:all${2: except {$3\\}}};$0", InsertTextFormat: protocol.SnippetTextFormat, Kind: protocol.KeywordCompletion},
+		{Label: "{}", InsertText: "{$0}", InsertTextFormat: protocol.SnippetTextFormat, Kind: protocol.KeywordCompletion}},
+		list)
 }

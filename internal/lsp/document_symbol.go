@@ -17,10 +17,14 @@ func (s *Server) documentSymbol(ctx context.Context, params *protocol.DocumentSy
 			// Incomplete trees are common while the user is typing.
 			log.Debugf("Panic: %#v\n", err)
 		}
-		log.Debugf("DocumentSymbol took %s.\n", time.Since(start))
+		logDuration("DocumentSymbol", start)
 	}()
 
-	syms := DocumentSymbols(ttcn3.ParseFile(params.TextDocument.URI.SpanURI().Filename()))
+	tree := parseDocument(params.TextDocument)
+	if tree == nil {
+		return nil, nil
+	}
+	syms := DocumentSymbols(tree)
 	out := make([]interface{}, len(syms))
 	for i := range syms {
 		out[i] = syms[i]

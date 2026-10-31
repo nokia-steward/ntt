@@ -2,6 +2,7 @@ package ttcn3_test
 
 import (
 	"testing"
+	"time"
 
 	"github.com/nokia/ntt/internal/ntttest"
 	"github.com/nokia/ntt/ttcn3"
@@ -274,6 +275,18 @@ func TestLookup(t *testing.T) {
 				}`,
 			want: []string{"x0"}},
 		{
+			name:  "component member",
+			input: `module M {type component C { port P ¶x; }}`,
+			want:  []string{"x0"}},
+		{
+			name:  "component member",
+			input: `module M {type component C { var int x; var int y := ¶x; }}`,
+			want:  []string{"x0"}},
+		{
+			name:  "components",
+			input: `module M {type component C { var int x; }; function f() runs on C mtc C system C { ¶x }}`,
+			want:  []string{"x0"}},
+		{
 			name:  "init statements",
 			input: `module M { control { if (var int x := 1; ¶x > 0) {} }}`,
 			want:  []string{"x0"}},
@@ -438,6 +451,86 @@ func TestLookup(t *testing.T) {
 
 			if !equal(actual, tt.want) {
 				t.Errorf("Mismatch:\n\twant=%v,\n\t got=%v", tt.want, actual)
+			}
+		})
+	}
+}
+
+func TestLookupCycles(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  []string
+	}{
+		{
+			name: "extends self",
+			input: `module M {
+					type component A extends A { var int x; }
+					function f() runs on A { ¶x }
+				}`,
+			want: []string{"x0"}},
+		{
+			name: "extends mutual",
+			input: `module M {
+					type component A extends B { var int x; }
+					type component B extends A {}
+					function f() runs on A { ¶x }
+				}`,
+			want: []string{"x0"}},
+		{
+			name: "subtype self",
+			input: `module M {
+					type A A;
+					control { var A a; a.¶x }
+				}`,
+			want: []string{}},
+		{
+			name: "subtype mutual",
+			input: `module M {
+					type A B;
+					type B A;
+					control { var A a; a.¶x }
+				}`,
+			want: []string{}},
+		{
+			name: "subtype record",
+			input: `module M {
+					type B A;
+					type R B;
+					type record R { int x };
+					control { var A a; a.¶x }
+				}`,
+			want: []string{"x0"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var cursor int
+			tt.input, cursor = ntttest.CutCursor(tt.input)
+
+			tree := parseFile(t, t.Name(), tt.input)
+			pos := tree.Position(cursor)
+			ids := enumerateIDs(tree.Root)
+
+			db := &ttcn3.DB{}
+			db.Index(tree.Filename())
+
+			done := make(chan []string, 1)
+			go func() {
+				actual := []string{}
+				n := tree.IdentifierAt(pos.Line, pos.Column)
+				for _, d := range tree.LookupWithDB(n, db) {
+					actual = append(actual, ids[d.Ident])
+				}
+				done <- actual
+			}()
+
+			select {
+			case actual := <-done:
+				if !equal(actual, tt.want) {
+					t.Errorf("Mismatch:\n\twant=%v,\n\t got=%v", tt.want, actual)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatal("lookup did not terminate")
 			}
 		})
 	}

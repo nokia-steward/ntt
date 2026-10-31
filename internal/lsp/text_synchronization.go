@@ -63,21 +63,9 @@ func (s *Server) didClose(ctx context.Context, params *protocol.DidCloseTextDocu
 }
 
 func (s *Server) registerFile(doc protocol.TextDocumentItem) {
-	s.filesMu.Lock()
-	defer s.filesMu.Unlock()
-
-	f := fs.Open(string(doc.URI.SpanURI()))
-	f.SetBytes([]byte(doc.Text))
-	if !s.files[f] {
-		s.files[f] = true
-	}
+	fs.Open(string(doc.URI.SpanURI())).SetBytes([]byte(doc.Text))
 }
 
 func (s *Server) unregisterFile(doc protocol.TextDocumentIdentifier) {
-	s.filesMu.Lock()
-	defer s.filesMu.Unlock()
-
-	f := fs.Open(string(doc.URI.SpanURI()))
-	f.Close()
-	delete(s.files, f)
+	fs.Open(string(doc.URI.SpanURI())).Close()
 }

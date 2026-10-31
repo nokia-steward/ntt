@@ -10,13 +10,13 @@ import (
 
 // DB implements database for querying TTCN-3 source code bases.
 type DB struct {
-	// Names is a map from symbol name to a list of files that define the symbol.
+	// Names maps from symbol name to the set of files that define the symbol.
 	Names map[string]map[string]bool
 
-	// Uses maps from symbol name to a list of files that use the symbol.
+	// Uses maps from symbol name to the set of files that use the symbol.
 	Uses map[string]map[string]bool
 
-	// Modules maps from module name to file path.
+	// Modules maps from module name to the set of files that define the module.
 	Modules map[string]map[string]bool
 
 	mu sync.Mutex
@@ -24,16 +24,6 @@ type DB struct {
 
 // Index parses TTCN-3 source files and adds names and dependencies to the database.
 func (db *DB) Index(files ...string) {
-	if db.Names == nil {
-		db.Names = make(map[string]map[string]bool)
-	}
-	if db.Uses == nil {
-		db.Uses = make(map[string]map[string]bool)
-	}
-	if db.Modules == nil {
-		db.Modules = make(map[string]map[string]bool)
-	}
-
 	var (
 		syms  int
 		wg    sync.WaitGroup
@@ -69,7 +59,7 @@ func (db *DB) Index(files ...string) {
 
 // VisibleModules returns a list of modules that may contain the given
 // symbol. First parameter id specifies the symbol to look for and second
-// parameter module specifies where the imports come from.
+// parameter mod specifies where the imports come from.
 func (db *DB) VisibleModules(id string, mod *syntax.Module) []*Node {
 	importedModules := make(map[string]bool)
 	importedFiles := make(map[string]bool)
@@ -123,6 +113,9 @@ func (db *DB) VisibleModules(id string, mod *syntax.Module) []*Node {
 }
 
 func (db *DB) addModule(file string, name string) {
+	if db.Modules == nil {
+		db.Modules = make(map[string]map[string]bool)
+	}
 	if db.Modules[name] == nil {
 		db.Modules[name] = make(map[string]bool)
 	}
@@ -130,6 +123,9 @@ func (db *DB) addModule(file string, name string) {
 }
 
 func (db *DB) addDefinition(file string, name string) {
+	if db.Names == nil {
+		db.Names = make(map[string]map[string]bool)
+	}
 	if db.Names[name] == nil {
 		db.Names[name] = make(map[string]bool)
 	}
@@ -137,6 +133,9 @@ func (db *DB) addDefinition(file string, name string) {
 }
 
 func (db *DB) addRef(file string, name string) {
+	if db.Uses == nil {
+		db.Uses = make(map[string]map[string]bool)
+	}
 	if db.Uses[name] == nil {
 		db.Uses[name] = make(map[string]bool)
 	}

@@ -57,8 +57,8 @@ func TestFindAllMaps(t *testing.T) {
 	// Lookup `Msg`
 	list := lsp.FindMapConnectStatementForPortIdMatchingTheName(db, "p")
 	assert.Equal(t, []protocol.Location{
-		{URI: "test://TestFindAllMaps_input1", Range: protocol.Range{Start: protocol.Position{12, 3}, End: protocol.Position{12, 23}}},
-		{URI: "test://TestFindAllMaps_input2", Range: protocol.Range{Start: protocol.Position{4, 4}, End: protocol.Position{4, 24}}},
-		{URI: "test://TestFindAllMaps_input3", Range: protocol.Range{Start: protocol.Position{3, 4}, End: protocol.Position{3, 24}}},
+		{URI: "test://TestFindAllMaps_input1", Range: protocol.Range{Start: protocol.Position{Line: 12, Character: 3}, End: protocol.Position{Line: 12, Character: 23}}},
+		{URI: "test://TestFindAllMaps_input2", Range: protocol.Range{Start: protocol.Position{Line: 4, Character: 4}, End: protocol.Position{Line: 4, Character: 24}}},
+		{URI: "test://TestFindAllMaps_input3", Range: protocol.Range{Start: protocol.Position{Line: 3, Character: 4}, End: protocol.Position{Line: 3, Character: 24}}},
 	}, list)
 }

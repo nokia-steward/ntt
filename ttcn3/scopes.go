@@ -1,8 +1,6 @@
 package ttcn3
 
 import (
-	"fmt"
-
 	"github.com/nokia/ntt/internal/log"
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
@@ -40,7 +38,7 @@ func (scp *Scope) Insert(n syntax.Node, id *syntax.Ident) {
 	}
 }
 
-// Lookup returns a list of defintions for the given identifier.
+// Lookup returns a list of definitions for the given identifier.
 // Lookup may be called with nil as receiver.
 func (scp *Scope) Lookup(name string) []*Node {
 	if scp == nil {
@@ -55,7 +53,7 @@ func (scp *Scope) Lookup(name string) []*Node {
 	return defs
 }
 
-// NewScope builts and populares a new scope from the given syntax node.
+// NewScope builds and populates a new scope from the given syntax node.
 // NewScope returns nil if no valid scope could be built.
 func NewScope(n syntax.Node, tree *Tree) *Scope {
 	tree.scopesMu.Lock()
@@ -211,9 +209,9 @@ func (scp *Scope) addField(n *syntax.Field) {
 }
 
 // add adds definitions to the scope;
-func (scp *Scope) add(n syntax.Node) error {
+func (scp *Scope) add(n syntax.Node) {
 	if syntax.IsNil(n) {
-		return nil
+		return
 	}
 	switch n := n.(type) {
 
@@ -310,6 +308,4 @@ func (scp *Scope) add(n syntax.Node) error {
 	case *syntax.FormalPar:
 		scp.Insert(n, n.Name)
 	}
-
-	return fmt.Errorf("%T is not a declaration", n)
 }

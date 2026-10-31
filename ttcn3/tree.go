@@ -212,7 +212,7 @@ func (t *Tree) ModulePars() []*Node {
 	return defs
 }
 
-// IdentifierAt returns the primary expression enclosing the identifer at the
+// IdentifierAt returns the primary expression enclosing the identifier at the
 // given position.
 func (t *Tree) IdentifierAt(line, col int) syntax.Expr {
 	pos := t.PosFor(line, col)
@@ -239,7 +239,9 @@ func (t *Tree) IdentifierAt(line, col int) syntax.Expr {
 // ExprAt returns the expression at given position.
 func (t *Tree) ExprAt(pos int) syntax.Expr {
 	if s := t.sliceAt(pos); len(s) > 0 {
-		return s[0].(syntax.Expr)
+		if x, ok := s[0].(syntax.Expr); ok {
+			return x
+		}
 	}
 	return nil
 }
@@ -276,13 +278,7 @@ func (t *Tree) sliceAt(pos int) []syntax.Node {
 	return path
 }
 
-// Lookup returns the definitions of the given expression. For handling imports
-// and multiple modules, use LookupWithDB.
-func (t *Tree) Lookup(n syntax.Expr) []*Node {
-	return newFinder(&DB{}).lookup(n, t)
-}
-
-// LookupWithDB returns the definitions of the given expression, but uses the database for import resoltion.
+// LookupWithDB returns the definitions of the given expression, but uses the database for import resolution.
 func (t *Tree) LookupWithDB(n syntax.Expr, db *DB) []*Node {
 	return newFinder(db).lookup(n, t)
 
@@ -348,7 +344,7 @@ func (f *finder) ident(id *syntax.Ident, tree *Tree) []*Node {
 				var results []*Node
 				for _, c := range f.lookup(ppp.Fun, tree) {
 					results = append(results, Definitions(id.String(), c.Node, c.Tree)...)
-					// Bellow switch is required to handle behvaiour types references.
+					// Below switch is required to handle behaviour types references.
 					// See tests TestLookup/parameters#01 and TestLookup/parameters#02.
 					//
 					// This brute force solution is not ideal, but it works for now.
@@ -370,9 +366,15 @@ func (f *finder) ident(id *syntax.Ident, tree *Tree) []*Node {
 func (f *finder) globals(id *syntax.Ident, tree *Tree) []*Node {
 	var defs, q []*Node
 
-	// Traverse parent scopes (P+) and collect imports scopes (I*)
+	// Traverse parent scopes (P+) and collect runs on, system and mtc
+	// component references
 	for n := tree.ParentOf(id); n != nil; n = tree.ParentOf(n) {
 		switch n := n.(type) {
+		case *syntax.BlockStmt:
+			// The scope of ComponentTypeDecl already includes its body.
+			if _, ok := tree.ParentOf(n).(*syntax.ComponentTypeDecl); ok {
+				continue
+			}
 		case *syntax.FuncDecl:
 			if n.RunsOn != nil {
 				q = append(q, &Node{Node: n.RunsOn.Comp, Tree: tree})
@@ -407,7 +409,8 @@ func (f *finder) globals(id *syntax.Ident, tree *Tree) []*Node {
 		}
 	}
 
-	// Traverse import scopes (I*)
+	// Traverse scopes of the collected components and the components they extend
+	visited := make(map[syntax.Node]bool)
 	for len(q) > 0 {
 		def := q[0]
 		q = q[1:]
@@ -418,6 +421,10 @@ func (f *finder) globals(id *syntax.Ident, tree *Tree) []*Node {
 		}
 
 		for _, d := range f.lookup(n, def.Tree) {
+			if visited[d.Node] {
+				continue
+			}
+			visited[d.Node] = true
 			defs = append(defs, Definitions(id.String(), d.Node, d.Tree)...)
 			if c, ok := d.Node.(*syntax.ComponentTypeDecl); ok {
 				for _, e := range c.Extends {
@@ -427,7 +434,7 @@ func (f *finder) globals(id *syntax.Ident, tree *Tree) []*Node {
 		}
 	}
 
-	// Traver visible module scopes (I*)
+	// Traverse visible module scopes (I*)
 	if mod := tree.ModuleOf(id); mod != nil {
 		for _, m := range f.VisibleModules(id.String(), mod) {
 			if id.String() == m.Ident.String() {
@@ -545,12 +552,17 @@ func (f *finder) typeOf(def *Node) []*Node {
 	var result []*Node
 
 	q := []*Node{def}
-	var prev syntax.Node = nil
+	visited := make(map[syntax.Node]bool)
 
 	for len(q) > 0 {
 
 		def := q[0]
 		q = q[1:]
+
+		if visited[def.Node] {
+			continue
+		}
+		visited[def.Node] = true
 
 		switch n := def.Node.(type) {
 		case *syntax.CompositeLiteral:
@@ -598,12 +610,7 @@ func (f *finder) typeOf(def *Node) []*Node {
 			q = append(q, f.lookup(n, def.Tree)...)
 
 		case *syntax.RefSpec:
-			r := f.lookup(n.X, def.Tree)
-			for _, v := range r {
-				if v.Node != prev {
-					q = append(q, v)
-				}
-			}
+			q = append(q, f.lookup(n.X, def.Tree)...)
 
 		// Nested type definitions are expressions, too. Hence this case
 		// must precede the syntax.Expr case.
@@ -625,8 +632,6 @@ func (f *finder) typeOf(def *Node) []*Node {
 		case syntax.Expr:
 			q = append(q, f.lookup(n, def.Tree)...)
 		}
-
-		prev = def.Node
 	}
 	return result
 }
