@@ -392,3 +392,32 @@ module M {
     Defs: (ModuleDef
       Def: (ErrorNode From: "123" To: "}"))))
 ERROR 2:3-2:6: expected module definition, found 123
+
+===
+Conflicting template modifiers
+===
+template @lazy @fuzzy integer t := 1;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" Modif: "@lazy" AssignTok: ":="
+      Type: (Ident "integer")
+      Name: (Ident "t")
+      Value: (ValueLiteral "1"))))
+ERROR 1:16-1:22: unexpected modifier @fuzzy
+
+===
+Modifier after deterministic
+===
+function f(@deterministic @lazy integer a) {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar Deterministic: "@deterministic"
+          Type: (Ident "integer")
+          Name: (Ident "a")))
+      Body: (BlockStmt))))
+ERROR 1:27-1:32: unexpected modifier @lazy

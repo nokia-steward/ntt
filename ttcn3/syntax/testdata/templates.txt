@@ -37,6 +37,18 @@ template @lazy integer t := f();
         Args: (ParenExpr)))))
 
 ===
+Deterministic template
+===
+template @deterministic integer t := 1;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" Deterministic: "@deterministic" AssignTok: ":="
+      Type: (Ident "integer")
+      Name: (Ident "t")
+      Value: (ValueLiteral "1"))))
+
+===
 Parameterized template
 ===
 template R t(integer a, template charstring b := ?) := { a := a, b := b };
