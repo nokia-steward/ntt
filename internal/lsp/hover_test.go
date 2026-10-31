@@ -2,6 +2,7 @@ package lsp_test
 
 import (
 	"fmt"
+	"path/filepath"
 	"testing"
 
 	"github.com/nokia/ntt/internal/fs"
@@ -80,7 +81,7 @@ func TestPlainTextHoverForPortDefFromDecl(t *testing.T) {
 		"port P p1\n" +
 			"possible map / connect statements\n" +
 			"_________________________________\n" +
-			"/TestPlainTextHoverForPortDefFromDecl.ttcn3:9\n"
+			filepath.FromSlash("/TestPlainTextHoverForPortDefFromDecl.ttcn3") + ":9\n"
 
 	assert.Equal(t, expected, actual.Contents.Value)
 }
@@ -105,7 +106,7 @@ func TestPlainTextHoverForPortDefFromUsage(t *testing.T) {
 		"port P p1\n" +
 			"possible map / connect statements\n" +
 			"_________________________________\n" +
-			"/TestPlainTextHoverForPortDefFromUsage.ttcn3:9\n"
+			filepath.FromSlash("/TestPlainTextHoverForPortDefFromUsage.ttcn3") + ":9\n"
 
 	assert.Equal(t, expected, actual.Contents.Value)
 }
