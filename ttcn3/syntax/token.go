@@ -399,8 +399,6 @@ func (tok Kind) Precedence() int {
 		return 1
 	case COLON:
 		return 2
-	case DECODE:
-		return 3
 	case RANGE:
 		return 4
 	case EXCL:

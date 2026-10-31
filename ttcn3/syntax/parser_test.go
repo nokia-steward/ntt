@@ -1,6 +1,7 @@
 package syntax
 
 import (
+	"fmt"
 	"testing"
 )
 
@@ -652,6 +653,138 @@ func TestDecmatchParenTemplate(t *testing.T) {
 	}
 	if _, ok := e.X.(*Ident); !ok {
 		t.Fatalf("X = %T, want *Ident", e.X)
+	}
+}
+
+func TestExprBinding(t *testing.T) {
+	exprs := []struct {
+		in, want string
+	}{
+		{"not a == b", "not((a==b))"},
+		{"not a < b", "not((a<b))"},
+		{"not a and b", "(not(a)andb)"},
+		{"a and not b", "(aandnot(b))"},
+		{"not4b a + b", "not4b((a+b))"},
+		{"not4b a & b", "not4b((a&b))"},
+		{"not4b a << b", "(not4b(a)<<b)"},
+		{"not4b a * b", "not4b((a*b))"},
+		{"-a * b", "(-(a)*b)"},
+		{"y => C == z", "((y=>C)==z)"},
+		{"a.b => e.f", "(a.b=>e).f"},
+		{"a.b[0] => e.f", "((a.b[0])=>e).f"},
+		{`v => (T, "UTF-8").f`, `(v=>(T,"UTF-8")).f`},
+		{"pattern \"a\" length(3) ifpresent", "ifpresent(length(pattern(\"a\")))"},
+		{"pattern \"a\" & \"b\" length(3)", "length(pattern((\"a\"&\"b\")))"},
+	}
+	for _, tt := range exprs {
+		p := NewParser([]byte(tt.in))
+		got := exprShape(p.parseExpr())
+		if err := p.Err(); err != nil {
+			t.Errorf("Parse(%q): %v", tt.in, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("Parse(%q) = %s, want %s", tt.in, got, tt.want)
+		}
+	}
+
+	stmts := []struct {
+		in, want string
+	}{
+		{"p.receive(x) from c -> value v sender s", "(-> (p.receive(x)fromc) value v sender s)"},
+		{"p.send(x) to c -> timestamp t", "(-> (p.send(x)toc) timestamp t)"},
+		{"p.getreply(S:{}) -> value v param(a) sender s", "(-> p.getreply((S:{})) value v param sender s)"},
+		{"p.getreply(S:{} value 5)", "p.getreply(value((S:{})))"},
+		{"p.reply(S:{} value 5)", "p.reply(value((S:{})))"},
+		{"p.check(from c -> sender s)", "p.check((-> (fromc) sender s))"},
+		{"p.call(S:{}) to c { [] p.getreply {} }", "call{ (p.call((S:{}))toc) }"},
+		{"p.call(S:{}) -> timestamp t { [] p.getreply {} }", "call{ (-> p.call((S:{})) timestamp t) }"},
+		{"p.call(S:{}) { [] p.getreply {} }", "call{ p.call((S:{})) }"},
+	}
+	for _, tt := range stmts {
+		p := NewParser([]byte(tt.in))
+		got := exprShape(p.parseStmt())
+		if err := p.Err(); err != nil {
+			t.Errorf("Parse(%q): %v", tt.in, err)
+			continue
+		}
+		if got != tt.want {
+			t.Errorf("Parse(%q) = %s, want %s", tt.in, got, tt.want)
+		}
+	}
+}
+
+func exprShape(n Node) string {
+	if n == nil {
+		return ""
+	}
+	switch n := n.(type) {
+	case *ExprStmt:
+		return exprShape(n.Expr)
+	case *CallStmt:
+		return "call{ " + exprShape(n.Stmt) + " }"
+	case *UnaryExpr:
+		return n.Op.String() + "(" + exprShape(n.X) + ")"
+	case *BinaryExpr:
+		return "(" + exprShape(n.X) + n.Op.String() + exprShape(n.Y) + ")"
+	case *Ident:
+		return n.String()
+	case *ValueLiteral:
+		return n.Tok.String()
+	case *SelectorExpr:
+		return exprShape(n.X) + "." + exprShape(n.Sel)
+	case *IndexExpr:
+		return "(" + exprShape(n.X) + "[" + exprShape(n.Index) + "])"
+	case *CallExpr:
+		args := ""
+		if n.Args != nil {
+			for i, a := range n.Args.List {
+				if i > 0 {
+					args += ","
+				}
+				args += exprShape(a)
+			}
+		}
+		return exprShape(n.Fun) + "(" + args + ")"
+	case *ParenExpr:
+		s := ""
+		for i, a := range n.List {
+			if i > 0 {
+				s += ","
+			}
+			s += exprShape(a)
+		}
+		return "(" + s + ")"
+	case *CompositeLiteral:
+		return "{}"
+	case *RedirectExpr:
+		s := "(-> " + exprShape(n.X)
+		if len(n.Value) > 0 {
+			s += " value"
+			for _, v := range n.Value {
+				s += " " + exprShape(v)
+			}
+		}
+		if len(n.Param) > 0 {
+			s += " param"
+		}
+		if n.Sender != nil {
+			s += " sender " + exprShape(n.Sender)
+		}
+		if n.Timestamp != nil {
+			s += " timestamp " + exprShape(n.Timestamp)
+		}
+		return s + ")"
+	case *ValueExpr:
+		return "value(" + exprShape(n.X) + ")"
+	case *PatternExpr:
+		return "pattern(" + exprShape(n.X) + ")"
+	case *LengthExpr:
+		return "length(" + exprShape(n.X) + ")"
+	case *ParamExpr:
+		return "param(" + exprShape(n.X) + ")"
+	default:
+		return fmt.Sprintf("%T", n)
 	}
 }
 

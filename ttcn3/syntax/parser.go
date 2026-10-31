@@ -160,6 +160,15 @@ type parser struct {
 	// A '[' that follows it can start the next guard rather than an index.
 	altGuard bool
 
+	// noRedirect, noParam, noValue and noMatchAttr stop a nested expression
+	// from consuming a token that belongs to the surrounding construct:
+	// "->" after a to/from address, "param" after "-> value", "value" after
+	// the right-hand side of ":", and "length"/"ifpresent" after "pattern".
+	noRedirect  bool
+	noParam     bool
+	noValue     bool
+	noMatchAttr bool
+
 	// Error recovery
 	// (used to limit the number of calls to advance
 	// w/o making scanning progress - avoids potential endless
@@ -620,16 +629,40 @@ func (p *parser) parseExpr() Expr {
 //
 //	| BinaryExpr OP BinaryExpr
 func (p *parser) parseBinaryExpr(prec1 int) Expr {
-	x := p.parsePostfixExpr()
+	x := p.parsePrefixExpr()
 	for {
 		prec := p.tok.Precedence()
 		if prec < prec1 {
 			return x
 		}
 		op := p.consume()
+		// "value" matches the whole "Type : template", not the template
+		// on the right of ":".
+		if op.Kind() == COLON {
+			saved := p.noValue
+			p.noValue = true
+			y := p.parseBinaryExpr(prec + 1)
+			p.noValue = saved
+			x = &BinaryExpr{X: x, Op: op, Y: y}
+			if p.tok == VALUE && !p.noValue {
+				x = &ValueExpr{X: x, Tok: p.consume(), Y: p.parseExpr()}
+			}
+			continue
+		}
 		y := p.parseBinaryExpr(prec + 1)
 		x = &BinaryExpr{X: x, Op: op, Y: y}
 	}
+}
+
+// parsePrefixExpr parses "not" and "not4b". They bind looser than the
+// operators above them in the precedence table: "not a == b" is
+// "not (a == b)" and "not4b a + b" is "not4b (a + b)".
+func (p *parser) parsePrefixExpr() Expr {
+	if p.tok == NOT || p.tok == NOT4B {
+		op := p.consume()
+		return &UnaryExpr{Op: op, X: p.parseBinaryExpr(op.Kind().Precedence() + 1)}
+	}
+	return p.parsePostfixExpr()
 }
 
 func (p *parser) parsePostfixExpr() Expr {
@@ -639,27 +672,27 @@ func (p *parser) parsePostfixExpr() Expr {
 		x = &PostExpr{X: x, Op: p.consume()}
 	}
 
-	if p.tok == LENGTH {
+	if p.tok == LENGTH && !p.noMatchAttr {
 		x = p.parseLength(x)
 	}
 
-	if p.tok == IFPRESENT {
+	if p.tok == IFPRESENT && !p.noMatchAttr {
 		x = &UnaryExpr{Op: p.consume(), X: x}
 	}
 
 	if p.tok == TO || p.tok == FROM {
-		x = &BinaryExpr{X: x, Op: p.consume(), Y: p.parseExpr()}
+		x = p.parseToFrom(x)
 	}
 
-	if p.tok == REDIR {
+	if p.tok == REDIR && !p.noRedirect {
 		x = p.parseRedirect(x)
 	}
 
-	if p.tok == VALUE {
+	if p.tok == VALUE && !p.noValue {
 		x = &ValueExpr{X: x, Tok: p.consume(), Y: p.parseExpr()}
 	}
 
-	if p.tok == PARAM {
+	if p.tok == PARAM && !p.noParam {
 		x = &ParamExpr{X: x, Tok: p.consume(), Y: p.parseParenExpr()}
 	}
 
@@ -672,11 +705,14 @@ func (p *parser) parsePostfixExpr() Expr {
 
 // UnaryExpr ::= "-"
 //
-//	| ("-"|"+"|"!"|"not"|"not4b") UnaryExpr
+//	| ("-"|"+"|"!") UnaryExpr
 //	| PrimaryExpr
+//
+// "not" and "not4b" are parsed by parsePrefixExpr so they follow
+// the precedence table instead of binding like unary "-".
 func (p *parser) parseUnaryExpr() Expr {
 	switch p.tok {
-	case ADD, EXCL, NOT, NOT4B, SUB, INC, DEC:
+	case ADD, EXCL, SUB, INC, DEC:
 		tok := p.consume()
 		// handle unused expr '-'
 		if tok.Kind() == SUB {
@@ -721,6 +757,11 @@ L:
 		switch p.tok {
 		case DOT:
 			x = p.parseSelectorExpr(x)
+		case DECODE:
+			// "=>" is evaluated left to right together with "." and "[]":
+			// a.b=>e.f is (((a.b)=>e).f). The type is one identifier, or a
+			// parenthesized type with an optional encoding.
+			x = p.parseDecodeExpr(x)
 		case LBRACK:
 			// [] and [else], and a condition followed by another
 			// operation, begin the next alt guard. They are not indexes.
@@ -912,7 +953,12 @@ func (p *parser) parseCallPattern() *PatternExpr {
 	if p.tok == MODIF {
 		c.NoCase = p.consume()
 	}
+	// "length" and "ifpresent" match the whole pattern, so the pattern
+	// body must not consume them. The caller applies them afterwards.
+	saved := p.noMatchAttr
+	p.noMatchAttr = true
 	c.X = p.parseExpr()
+	p.noMatchAttr = saved
 	return c
 }
 
@@ -1018,6 +1064,35 @@ func (p *parser) parseDynamicModifier() *DynamicExpr {
 	return d
 }
 
+// parseToFrom parses "to" or "from" and its address. A following "->"
+// belongs to the operation, not to the address.
+func (p *parser) parseToFrom(x Expr) Expr {
+	op := p.consume()
+	saved := p.noRedirect
+	p.noRedirect = true
+	y := p.parseExpr()
+	p.noRedirect = saved
+	return &BinaryExpr{X: x, Op: op, Y: y}
+}
+
+// parseDecodeExpr parses "=>" Type. Dots and indexes after the type refer
+// to the decoded value, so the type itself stops after one name.
+func (p *parser) parseDecodeExpr(x Expr) Expr {
+	op := p.consume()
+	var y Expr
+	switch p.tok {
+	case LPAREN:
+		y = p.parseParenExpr()
+	case UNIVERSAL:
+		y = p.parseUniversalCharstring()
+	case ADDRESS, CHARSTRING, TIMER, PORT, CLASS:
+		y = p.make_use(p.consume())
+	default:
+		y = p.parseRef()
+	}
+	return &BinaryExpr{X: x, Op: op, Y: y}
+}
+
 func (p *parser) parseSelectorExpr(x Expr) *SelectorExpr {
 	dot := p.consume()
 	switch p.tok {
@@ -1047,7 +1122,7 @@ func (p *parser) parseCallExpr(x Expr) *CallExpr {
 			var x Expr
 			if p.tok == TO || p.tok == FROM {
 				// TODO: Shouldn't this be a FromExpr?
-				x = &BinaryExpr{X: x, Op: p.consume(), Y: p.parseExpr()}
+				x = p.parseToFrom(x)
 			}
 			if p.tok == REDIR {
 				x = p.parseRedirect(x)
@@ -1078,7 +1153,12 @@ func (p *parser) parseRedirect(x Expr) *RedirectExpr {
 
 	if p.tok == VALUE {
 		r.ValueTok = p.expect(VALUE)
+		// "param", "sender" and "@index" that follow belong to this
+		// redirect. "param" would otherwise become part of the value.
+		saved := p.noParam
+		p.noParam = true
 		r.Value = p.parseExprList()
+		p.noParam = saved
 	}
 
 	if p.tok == PARAM {
@@ -2719,24 +2799,9 @@ func (p *parser) parseStmt() Stmt {
 	case IDENT, TESTCASE, ANYKW, ALL, MAP, UNMAP, MTC, INC, DEC:
 		x := p.parseSimpleStmt()
 
-		// try call-statement block
-		if p.tok == LBRACE {
-			c, ok := x.Expr.(*CallExpr)
-			if !ok {
-				return x
-			}
-			s, ok := c.Fun.(*SelectorExpr)
-			if !ok {
-				return x
-			}
-			id, ok := s.Sel.(*Ident)
-			if !ok {
-				return x
-			}
-			if id.Tok.String() != "call" {
-				return x
-			}
-
+		// A call with a body: "p.call(...) to c -> timestamp t { ... }".
+		// "to" and "->" wrap the call, so it is not a bare CallExpr.
+		if p.tok == LBRACE && isNamedCall(x.Expr, "call") {
 			call := new(CallStmt)
 			call.Stmt = x
 			call.Body = p.parseBlockStmt()
@@ -2783,6 +2848,27 @@ func (p *parser) parseStmt() Stmt {
 		p.advance(stmtStart)
 		return &ErrorNode{From: etok, To: p.peek(1)}
 	}
+}
+
+// isNamedCall reports whether e is a call of name, allowing "to", "from"
+// and "->" to wrap the call.
+func isNamedCall(e Expr, name string) bool {
+	switch e := e.(type) {
+	case *RedirectExpr:
+		return isNamedCall(e.X, name)
+	case *BinaryExpr:
+		if e.Op.Kind() == TO || e.Op.Kind() == FROM {
+			return isNamedCall(e.X, name)
+		}
+	case *CallExpr:
+		s, ok := e.Fun.(*SelectorExpr)
+		if !ok {
+			return false
+		}
+		id, ok := s.Sel.(*Ident)
+		return ok && id.Tok.String() == name
+	}
+	return false
 }
 
 func (p *parser) parseForLoop() Stmt {
