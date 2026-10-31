@@ -626,7 +626,7 @@ func (p *parser) parseBinaryExpr(prec1 int) Expr {
 func (p *parser) parsePostfixExpr() Expr {
 	x := p.parseUnaryExpr()
 
-	if p.tok == INC || p.tok == DEC {
+	if p.tok == INC || p.tok == DEC || p.tok == ELIPSIS {
 		x = &PostExpr{X: x, Op: p.consume()}
 	}
 
@@ -1083,6 +1083,26 @@ func (p *parser) parseTypeRef() Expr {
 		defer un(trace(p, "TypeRef"))
 	}
 	return p.parsePrimaryExpr()
+}
+
+// TypeOrNestedTypeDef ::= TypeRef | NestedTypeDef
+func (p *parser) parseTypeOrNestedTypeDef() Expr {
+	switch p.tok {
+	case RECORD, SET, UNION, ENUMERATED:
+		return p.parseTypeSpec().(Expr)
+	case MAP:
+		if p.peek(2).Kind() == FROM {
+			return p.parseMapSpec()
+		}
+	}
+	return p.parseTypeRef()
+}
+
+func (p *parser) parseDeterministic() Token {
+	if p.tok == MODIF && p.lit(1) == "@deterministic" {
+		return p.consume()
+	}
+	return nil
 }
 
 func (p *parser) tryTypeParameters() *ParenExpr {
@@ -1718,7 +1738,7 @@ func (p *parser) parseStructTypeDecl() *StructTypeDecl {
 	}
 	x.LBrace = p.expect(LBRACE)
 	for p.tok != RBRACE && p.tok != EOF {
-		x.Fields = append(x.Fields, p.parseField())
+		x.Fields = append(x.Fields, p.parseField(true))
 		if p.tok != COMMA {
 			break
 		}
@@ -1886,12 +1906,12 @@ func (p *parser) parseSubTypeDecl() *SubTypeDecl {
 	}
 	x := new(SubTypeDecl)
 	x.TypeTok = p.consume()
-	x.Field = p.parseField()
+	x.Field = p.parseField(false)
 	x.With = p.parseWith()
 	return x
 }
 
-func (p *parser) parseField() *Field {
+func (p *parser) parseField(allowEmbedded bool) *Field {
 	if p.trace {
 		defer un(trace(p, "Field"))
 	}
@@ -1904,20 +1924,24 @@ func (p *parser) parseField() *Field {
 		x.DefaultTok = p.consume()
 	}
 	x.Type = p.parseTypeSpec()
-	x.Name = p.parseName()
-	if p.tok == LT {
-		x.TypePars = p.parseTypeFormalPars()
-	}
 
-	if p.tok == LBRACK {
-		x.ArrayDef = p.parseArrayDefs()
-	}
+	embedded := allowEmbedded && (p.tok == COMMA || p.tok == RBRACE || p.tok == OPTIONAL)
+	if !embedded {
+		x.Name = p.parseName()
+		if p.tok == LT {
+			x.TypePars = p.parseTypeFormalPars()
+		}
 
-	if p.tok == LPAREN {
-		x.ValueConstraint = p.parseParenExpr()
-	}
-	if p.tok == LENGTH {
-		x.LengthConstraint = p.parseLength(nil)
+		if p.tok == LBRACK {
+			x.ArrayDef = p.parseArrayDefs()
+		}
+
+		if p.tok == LPAREN {
+			x.ValueConstraint = p.parseParenExpr()
+		}
+		if p.tok == LENGTH {
+			x.LengthConstraint = p.parseLength(nil)
+		}
 	}
 
 	if p.tok == OPTIONAL {
@@ -1961,7 +1985,7 @@ func (p *parser) parseStructSpec() *StructSpec {
 	x.KindTok = p.consume()
 	x.LBrace = p.expect(LBRACE)
 	for p.tok != RBRACE && p.tok != EOF {
-		x.Fields = append(x.Fields, p.parseField())
+		x.Fields = append(x.Fields, p.parseField(true))
 		if p.tok != COMMA {
 			break
 		}
@@ -2065,6 +2089,7 @@ func (p *parser) parseTemplateDecl() *TemplateDecl {
 	if p.tok == MODIF {
 		x.Modif = p.consume()
 	}
+	x.Deterministic = p.parseDeterministic()
 
 	x.Type = p.parseTypeRef()
 	if _, ok := x.Type.(*ErrorNode); ok {
@@ -2106,7 +2131,9 @@ func (p *parser) parseModulePar() Decl {
 		for p.tok != RBRACE && p.tok != EOF {
 			d := new(ValueDecl)
 			d.TemplateRestriction = p.parseRestrictionSpec()
-			d.Type = p.parseTypeRef()
+			if p.peek(2).Kind() != ASSIGN {
+				d.Type = p.parseTypeOrNestedTypeDef()
+			}
 			d.Decls = p.parseDeclList()
 			p.expectSemi(d.Decls[len(d.Decls)-1].LastTok())
 			x.Decls = append(x.Decls, d)
@@ -2118,7 +2145,9 @@ func (p *parser) parseModulePar() Decl {
 
 	x := &ValueDecl{KindTok: tok}
 	x.TemplateRestriction = p.parseRestrictionSpec()
-	x.Type = p.parseTypeRef()
+	if p.peek(2).Kind() != ASSIGN {
+		x.Type = p.parseTypeOrNestedTypeDef()
+	}
 	x.Decls = p.parseDeclList()
 	x.With = p.parseWith()
 	return x
@@ -2139,9 +2168,10 @@ func (p *parser) parseValueDecl() *ValueDecl {
 		if p.tok == MODIF {
 			x.Modif = p.consume()
 		}
+		x.Deterministic = p.parseDeterministic()
 	}
 	if tok := p.peek(2).Kind(); tok != ASSIGN && tok != IN {
-		x.Type = p.parseTypeRef()
+		x.Type = p.parseTypeOrNestedTypeDef()
 	}
 	x.Decls = p.parseDeclList()
 	x.With = p.parseWith()
@@ -2329,7 +2359,15 @@ func (p *parser) parseSignatureDecl() *SignatureDecl {
 
 	if p.tok == EXCEPTION {
 		x.ExceptionTok = p.consume()
-		x.Exception = p.parseParenExpr()
+		x.Exception = &ParenExpr{LParen: p.expect(LPAREN)}
+		for p.tok != RPAREN && p.tok != EOF {
+			x.Exception.List = append(x.Exception.List, p.parseTypeOrNestedTypeDef())
+			if p.tok != COMMA {
+				break
+			}
+			p.consume()
+		}
+		x.Exception.RParen = p.expect(RPAREN)
 	}
 	x.With = p.parseWith()
 	return x
@@ -2364,7 +2402,10 @@ func (p *parser) parseReturn() *ReturnSpec {
 	if p.tok == MODIF {
 		x.Modif = p.consume()
 	}
-	x.Type = p.parseTypeRef()
+	x.Type = p.parseTypeOrNestedTypeDef()
+	if p.tok == LBRACK {
+		x.ArrayDef = p.parseArrayDefs()
+	}
 	return x
 }
 
@@ -2404,11 +2445,15 @@ func (p *parser) parseFormalPar() *FormalPar {
 	if p.tok == MODIF {
 		x.Modif = p.consume()
 	}
-	x.Type = p.parseTypeRef()
+	x.Deterministic = p.parseDeterministic()
+	x.Type = p.parseTypeOrNestedTypeDef()
 	x.Name = p.parseName()
 
 	if p.tok == LBRACK {
 		x.ArrayDef = p.parseArrayDefs()
+	}
+	if p.tok == ELIPSIS {
+		x.Variadic = p.consume()
 	}
 	if p.tok == ASSIGN {
 		x.AssignTok = p.consume()

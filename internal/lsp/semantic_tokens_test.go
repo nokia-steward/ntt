@@ -47,6 +47,22 @@ func TestEnum(t *testing.T) {
 	}, actual)
 }
 
+func TestEmbeddedFields(t *testing.T) {
+	actual := testTokens(t, nil, `
+        module Test {
+	        type record R { B, integer }
+	        type record B { integer x }
+	}`)
+	assert.Equal(t, []Token{
+		{Line: 2, Text: "Test", Type: lsp.Namespace, Mod: lsp.Definition},
+		{Line: 3, Text: "R", Type: lsp.Struct, Mod: lsp.Definition},
+		{Line: 3, Text: "B", Type: lsp.Struct},
+		{Line: 3, Text: "integer", Type: lsp.Type, Mod: lsp.DefaultLibrary},
+		{Line: 4, Text: "B", Type: lsp.Struct, Mod: lsp.Definition},
+		{Line: 4, Text: "integer", Type: lsp.Type, Mod: lsp.DefaultLibrary},
+	}, actual)
+}
+
 func TestComponentDef(t *testing.T) {
 	actual := testTokens(t, nil, `
         module Test

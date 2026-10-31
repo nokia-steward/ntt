@@ -203,7 +203,7 @@ type (
 		X  Expr
 	}
 
-	// A postfix expresseion (i++, i--)
+	// A postfix expresseion (i++, i--) or an actual variadic parameter (x...)
 	PostExpr struct {
 		X  Expr
 		Op Token
@@ -535,7 +535,7 @@ type (
 	Field struct {
 		DefaultTok       Token        // Position of "@default" or nil
 		Type             TypeSpec     // Type
-		Name             *Ident       // Name
+		Name             *Ident       // Name or nil for embedded fields
 		ArrayDef         []*ParenExpr // Array definitions
 		TypePars         *FormalPars
 		ValueConstraint  *ParenExpr  // Value constraint or nil
@@ -600,13 +600,46 @@ func (x *MapSpec) typeSpecNode()       {}
 func (x *EnumSpec) typeSpecNode()      {}
 func (x *BehaviourSpec) typeSpecNode() {}
 
+// Nested type definitions may be used where a type reference is expected.
+func (x *StructSpec) exprNode() {}
+func (x *ListSpec) exprNode()   {}
+func (x *MapSpec) exprNode()    {}
+func (x *EnumSpec) exprNode()   {}
+
+// EmbeddedName returns the implicit name of an embedded field, which is the
+// unqualified name of its type reference. EmbeddedName returns nil for
+// regular fields.
+func (x *Field) EmbeddedName() *Ident {
+	if x.Name != nil {
+		return nil
+	}
+	ref, ok := x.Type.(*RefSpec)
+	if !ok {
+		return nil
+	}
+	e := ref.X
+	for {
+		switch n := e.(type) {
+		case *SelectorExpr:
+			e = n.Sel
+		case *ParametrizedIdent:
+			e = n.Ident
+		case *Ident:
+			return n
+		default:
+			return nil
+		}
+	}
+}
+
 type (
 	// A ValueDecl represents a value declaration.
 	ValueDecl struct {
 		KindTok             Token // VAR, CONST, TIMER, PORT, TEMPLATE, MODULEPAR
 		TemplateRestriction *RestrictionSpec
 		Modif               Token // "@lazy", "@fuzzy" or nil
-		Type                Expr
+		Deterministic       Token // Position of "@deterministic" or nil
+		Type                Expr  // Type reference, nested type definition or nil
 		Decls               []*Declarator
 		With                *WithSpec
 	}
@@ -621,16 +654,17 @@ type (
 
 	TemplateDecl struct {
 		*RestrictionSpec
-		Modif       Token // "@lazy", "@fuzzy" or nil
-		Type        Expr
-		Name        *Ident
-		TypePars    *FormalPars
-		Params      *FormalPars
-		ModifiesTok Token
-		Base        Expr
-		AssignTok   Token
-		Value       Expr
-		With        *WithSpec
+		Modif         Token // "@lazy", "@fuzzy" or nil
+		Deterministic Token // Position of "@deterministic" or nil
+		Type          Expr
+		Name          *Ident
+		TypePars      *FormalPars
+		Params        *FormalPars
+		ModifiesTok   Token
+		Base          Expr
+		AssignTok     Token
+		Value         Expr
+		With          *WithSpec
 	}
 
 	// A ModuleParameterGroup represents a deprecated module parameter list
@@ -899,7 +933,8 @@ type (
 		Tok         Token
 		Restriction *RestrictionSpec
 		Modif       Token
-		Type        Expr
+		Type        Expr         // Type reference or nested type definition
+		ArrayDef    []*ParenExpr // Array definitions of nested type definitions
 	}
 
 	FormalPars struct {
@@ -912,9 +947,11 @@ type (
 		Direction           Token
 		TemplateRestriction *RestrictionSpec
 		Modif               Token
-		Type                Expr
+		Deterministic       Token // Position of "@deterministic" or nil
+		Type                Expr  // Type reference or nested type definition
 		Name                *Ident
 		ArrayDef            []*ParenExpr
+		Variadic            Token // Position of "..." or nil
 		AssignTok           Token
 		Value               Expr
 	}

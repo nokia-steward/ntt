@@ -398,8 +398,13 @@ func (f *finder) globals(id *syntax.Ident, tree *Tree) []*Node {
 				q = append(q, &Node{Node: n.System.Comp, Tree: tree})
 			}
 		}
-		found := Definitions(id.String(), n, tree)
-		defs = append(defs, found...)
+		for _, d := range Definitions(id.String(), n, tree) {
+			// The type reference of an embedded field is also its
+			// implicit name, but does not refer to the field.
+			if _, ok := d.Node.(*syntax.Field); !ok || d.Ident != id || id.IsName {
+				defs = append(defs, d)
+			}
+		}
 	}
 
 	// Traverse import scopes (I*)
@@ -443,9 +448,49 @@ func (f *finder) dot(n *syntax.SelectorExpr, tree *Tree) []*Node {
 	candidates := f.lookup(n.X, tree)
 	for _, c := range candidates {
 		for _, t := range f.typeOf(c) {
-			if defs := Definitions(syntax.Name(n.Sel), t.Node, t.Tree); len(defs) > 0 {
-				result = append(result, defs...)
+			result = append(result, f.fields(syntax.Name(n.Sel), t)...)
+		}
+	}
+	return result
+}
+
+// fields returns the definitions of name in the given type. If the type has
+// no such definition, the fields of embedded fields are searched (promoted
+// fields), level by level.
+func (f *finder) fields(name string, typ *Node) []*Node {
+	visited := make(map[syntax.Node]bool)
+	for q := []*Node{typ}; len(q) > 0; {
+		var defs, next []*Node
+		for _, t := range q {
+			if visited[t.Node] {
+				continue
 			}
+			visited[t.Node] = true
+			defs = append(defs, Definitions(name, t.Node, t.Tree)...)
+			for _, e := range embeddedFields(t.Node) {
+				next = append(next, f.typeOf(&Node{Node: e, Tree: t.Tree})...)
+			}
+		}
+		if len(defs) > 0 {
+			return defs
+		}
+		q = next
+	}
+	return nil
+}
+
+func embeddedFields(n syntax.Node) []*syntax.Field {
+	var fields []*syntax.Field
+	switch n := n.(type) {
+	case *syntax.StructTypeDecl:
+		fields = n.Fields
+	case *syntax.StructSpec:
+		fields = n.Fields
+	}
+	var result []*syntax.Field
+	for _, f := range fields {
+		if f.EmbeddedName() != nil {
+			result = append(result, f)
 		}
 	}
 	return result
@@ -455,6 +500,10 @@ func (f *finder) index(n *syntax.IndexExpr, tree *Tree) []*Node {
 	var result []*Node
 	candidates := f.lookup(n.X, tree)
 	for _, c := range candidates {
+		if p, ok := c.Node.(*syntax.FormalPar); ok && p.Variadic != nil {
+			result = append(result, &Node{Node: p.Type, Tree: c.Tree})
+			continue
+		}
 		for _, t := range f.typeOf(c) {
 			if l, ok := t.Node.(*syntax.ListSpec); ok {
 				result = append(result, &Node{Node: l.ElemType, Tree: t.Tree})
@@ -543,9 +592,6 @@ func (f *finder) typeOf(def *Node) []*Node {
 		case *syntax.IndexExpr:
 			q = append(q, f.lookup(n, def.Tree)...)
 
-		case syntax.Expr:
-			q = append(q, f.lookup(n, def.Tree)...)
-
 		case *syntax.RefSpec:
 			r := f.lookup(n.X, def.Tree)
 			for _, v := range r {
@@ -554,6 +600,8 @@ func (f *finder) typeOf(def *Node) []*Node {
 				}
 			}
 
+		// Nested type definitions are expressions, too. Hence this case
+		// must precede the syntax.Expr case.
 		case *syntax.BehaviourSpec,
 			*syntax.BehaviourTypeDecl,
 			*syntax.ComponentTypeDecl,
@@ -568,6 +616,9 @@ func (f *finder) typeOf(def *Node) []*Node {
 			*syntax.MapTypeDecl,
 			*syntax.ClassTypeDecl:
 			result = append(result, &Node{Node: n, Tree: def.Tree})
+
+		case syntax.Expr:
+			q = append(q, f.lookup(n, def.Tree)...)
 		}
 
 		prev = def.Node

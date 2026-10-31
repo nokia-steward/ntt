@@ -56,11 +56,17 @@ func parseFunction(name string) (string, *syntax.FormalPars, error) {
 }
 
 func checkArgs(pars *syntax.FormalPars, args ...Object) error {
-	if len(args) != len(pars.List) {
+	n := len(pars.List)
+	variadic := n > 0 && pars.List[n-1].Variadic != nil
+	if len(args) != n && !(variadic && len(args) >= n-1) {
 		return ErrInvalidArgCount
 	}
 	for i := range args {
-		if err := checkArg(pars.List[i], args[i]); err != nil {
+		par := pars.List[n-1]
+		if i < n {
+			par = pars.List[i]
+		}
+		if err := checkArg(par, args[i]); err != nil {
 			return err
 		}
 	}

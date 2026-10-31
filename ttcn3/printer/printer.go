@@ -90,6 +90,13 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.Op)
 			p.print(n.X)
 
+		case *syntax.PostExpr:
+			if n == nil {
+				return
+			}
+			p.print(n.X)
+			p.print(n.Op)
+
 		case *syntax.BinaryExpr:
 			if n == nil {
 				return
@@ -442,6 +449,7 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.KindTok)
 			p.print(n.TemplateRestriction)
 			p.print(n.Modif)
+			p.print(n.Deterministic)
 			p.print(n.Type)
 			p.print(n.Decls)
 			p.print(n.With)
@@ -459,8 +467,9 @@ func (p *printer) print(values ...interface{}) {
 			if n == nil {
 				return
 			}
-			p.print(&n.RestrictionSpec)
+			p.print(n.RestrictionSpec)
 			p.print(n.Modif)
+			p.print(n.Deterministic)
 			p.print(n.Type)
 			p.print(n.Name)
 			p.print(n.TypePars)
@@ -720,6 +729,7 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.Restriction)
 			p.print(n.Modif)
 			p.print(n.Type)
+			p.print(n.ArrayDef)
 
 		case *syntax.FormalPars:
 			if n == nil {
@@ -736,9 +746,11 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.Direction)
 			p.print(n.TemplateRestriction)
 			p.print(n.Modif)
+			p.print(n.Deterministic)
 			p.print(n.Type)
 			p.print(n.Name)
 			p.print(n.ArrayDef)
+			p.print(n.Variadic)
 			p.print(n.AssignTok)
 			p.print(n.Value)
 

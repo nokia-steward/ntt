@@ -35,6 +35,11 @@ func TestBuiltinArgumentChecks(t *testing.T) {
 		{sig: "foo(integer x, boolean y)", args: []runtime.Object{runtime.NewInt(23), runtime.NewBool(true)}},
 		{sig: "foo(integer x, bool y)", args: []runtime.Object{runtime.NewInt(23), runtime.NewBool(true)}, want: runtime.ErrNotImplemented},
 		{sig: "foo(integer x[23])", args: []runtime.Object{nil}, want: runtime.ErrNotImplemented},
+		{sig: "foo(integer x...)", args: []runtime.Object{}},
+		{sig: "foo(integer x...)", args: []runtime.Object{runtime.NewInt(1), runtime.NewInt(2)}},
+		{sig: "foo(integer x...)", args: []runtime.Object{runtime.NewInt(1), runtime.NewBool(true)}, want: runtime.ErrTypeMismatch},
+		{sig: "foo(boolean b, integer x...)", args: []runtime.Object{runtime.NewBool(true)}},
+		{sig: "foo(boolean b, integer x...)", args: []runtime.Object{}, want: runtime.ErrInvalidArgCount},
 	}
 	for _, tt := range tests {
 		t.Run(t.Name(), func(t *testing.T) {

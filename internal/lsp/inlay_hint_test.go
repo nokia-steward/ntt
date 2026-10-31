@@ -82,6 +82,20 @@ module Test {
 	}[0], actual[0])
 }
 
+func TestInlayHintVariadic(t *testing.T) {
+	actual := testInlayHint(t, nil, `
+module Test {
+    function f(integer a, integer b...) {}
+    function test() {
+        f(1, 2, 3)
+    }
+}`)
+
+	assert.Equal(t, []Hint{
+		{Line: 4, Char: 10, Label: "a :="},
+	}, actual)
+}
+
 func testInlayHint(t *testing.T, rng *protocol.Range, text string) []Hint {
 	t.Helper()
 

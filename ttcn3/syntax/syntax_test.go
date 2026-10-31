@@ -7,6 +7,22 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestFieldName(t *testing.T) {
+	root := syntax.Parse([]byte(`type record R { integer a, integer, M.T, P<integer> optional, record {} }`))
+	if err := root.Err(); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	root.Inspect(func(n syntax.Node) bool {
+		if f, ok := n.(*syntax.Field); ok {
+			names = append(names, syntax.Name(f))
+			return false
+		}
+		return true
+	})
+	assert.Equal(t, []string{"a", "integer", "T", "P", ""}, names)
+}
+
 func TestDoc(t *testing.T) {
 	t.Parallel()
 

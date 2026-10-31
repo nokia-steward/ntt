@@ -44,6 +44,10 @@ func ProcessInlayHint(tree *ttcn3.Tree, db *ttcn3.DB, begin int, end int) []prot
 							}
 						}
 
+						if idx >= len(params.List) || params.List[idx].Variadic != nil {
+							break
+						}
+
 						name := params.List[idx].Name.Tok.String()
 						lbl := protocol.InlayHintLabelPart{Value: name + " :="}
 						pos := syntax.Begin(arg)

@@ -83,6 +83,8 @@ func TestExprs(t *testing.T) {
 		{pass, `p := pattern @nocase ".*" & p & "$"`},
 		{pass, `regexp @nocase(x,charstring:"?+(text)?+",0)`},
 		{pass, `match(ptc.alive, false)`},
+		{pass, `f(r...)`},
+		{pass, `f({1, 2, 3}...)`},
 		{pass, `x.universal charstring := "FF80"`},
 		{pass, `::E + NS::E`},
 	}
@@ -101,6 +103,12 @@ func TestFuncDecls(t *testing.T) {
 		{pass, `function f() return template(value) int {}`},
 		{pass, `function f() return value int {}`},
 		{pass, `function @deterministic f() {}`},
+		{pass, `function f() return record of integer {}`},
+		{pass, `function f() return record of record {}[3] {}`},
+		{pass, `function f() return template set { integer a } {}`},
+		{pass, `function f(@lazy @deterministic integer p) {}`},
+		{pass, `altstep as1(in integer items...) {}`},
+		{pass, `testcase tc(in verdicttype verdicts...) runs on C {}`},
 		{pass, `function f() runs on A[-] {}`},
 		{pass, `function f() mtc C {}`},
 		{pass, `function f() runs on C mtc C system C {}`},
@@ -149,6 +157,16 @@ func TestModuleDefs(t *testing.T) {
 
 		{pass, `friend module m;`},
 		{pass, `public modulepar integer x;`},
+		{pass, `modulepar mpar := 1;`},
+		{pass, `modulepar a := 1, b := "x";`},
+		{pass, `modulepar record of charstring IDs := {"a", "b"};`},
+		{pass, `modulepar template record { integer a } t := ?;`},
+		{pass, `modulepar { mpar := 1; record of integer r; }`},
+		{pass, `signature A() return record of integer;`},
+		{pass, `signature B(record of integer p);`},
+		{pass, `signature C() exception (record {}, integer);`},
+		{pass, `signature D() exception (integer, a.b[0],);`},
+		{fail, `modulepar := 1;`},
 		{pass, `private function fn() {}`},
 		{pass, `group foo { group bar { import from m all; } }`},
 	}
@@ -174,6 +192,16 @@ func TestValueDecls(t *testing.T) {
 		{pass, `var present int x;`},
 		{pass, `var value @lazy int x;`},
 		{pass, `var value @lazy int x, y := ?;`},
+		{pass, `var @fuzzy @deterministic integer x := 1;`},
+		{pass, `var template @lazy @deterministic U t := ?;`},
+		{pass, `var template record of integer t := {1, *, 3};`},
+		{pass, `var record {} v[3];`},
+		{pass, `var set of enumerated { a, b } x;`},
+		{pass, `var map from integer to charstring m;`},
+		{pass, `const record of integer c := {1, 2, 3};`},
+		{fail, `const record of integer := {1, 2, 3};`},
+		{fail, `var @deterministic @lazy integer x;`},
+		{fail, `var @lazy @fuzzy integer x;`},
 		{pass, `timer x, y := 1.0, y;`},
 		{pass, `port P x[len], y := 1, z := 2 ;`},
 		{pass, `modulepar RoI[-] x, y:=23, z;`},
@@ -197,6 +225,9 @@ func TestTemplateDecls(t *testing.T) {
 		{pass, `template @lazy int x(int i) := i;`},
 		{pass, `template @lazy int  x(int i) modifies y := ?;`},
 		{pass, `template @lazy a[-] x(int i) modifies y := ?;`},
+		{pass, `template @fuzzy @deterministic integer x := ?;`},
+		{pass, `template RoI x(in integer numbers...) := {};`},
+		{fail, `template @deterministic @fuzzy integer x := ?;`},
 		{pass, `template(omit)    int x := ?;`},
 		{pass, `template(value)   int x := ?;`},
 		{pass, `template(present) int x := ?;`},
@@ -215,8 +246,47 @@ func TestFormalPars(t *testing.T) {
 		{pass, `(out timer y, in template(value) @fuzzy timer x := 1)`},
 		{pass, `(out timer y := -, in value @fuzzy timer x := 1)`},
 		{pass, `(out timer y := -, in value timer x := (1,2,3))`},
+		{pass, `(@lazy @deterministic integer x)`},
+		{pass, `(template @fuzzy @deterministic integer x)`},
+		{pass, `(in integer x...)`},
+		{pass, `(integer x[3]...)`},
+		{pass, `(in integer x... := {1, 2, 3})`},
+		{pass, `(int x, template int y...)`},
+		{pass, `(in record of integer x)`},
+		{pass, `(template record of integer x)`},
+		{pass, `(set length(2) of record { integer a } x)`},
+		{pass, `(union { integer a, boolean } x)`},
+		{pass, `(enumerated { a, b } x)`},
+		{pass, `(map from integer to charstring x)`},
+		{fail, `(integer... x)`},
+		{fail, `(@lazy @fuzzy integer x)`},
+		{fail, `(record of integer)`},
 	}
 	testParse(t, formalPars, func(p *parser) { p.parseFormalPars() })
+}
+
+func TestFormalParNodes(t *testing.T) {
+	p := NewParser([]byte(`(in template @lazy @deterministic record of integer x[2]... := {})`))
+	pars := p.parseFormalPars()
+	if err := p.Err(); err != nil {
+		t.Fatal(err)
+	}
+	x := pars.List[0]
+	if x.Modif == nil || x.Modif.String() != "@lazy" {
+		t.Errorf("Modif = %v, want @lazy", x.Modif)
+	}
+	if x.Deterministic == nil || x.Deterministic.String() != "@deterministic" {
+		t.Errorf("Deterministic = %v, want @deterministic", x.Deterministic)
+	}
+	if _, ok := x.Type.(*ListSpec); !ok {
+		t.Errorf("Type = %T, want *ListSpec", x.Type)
+	}
+	if x.Variadic == nil || x.Variadic.Kind() != ELIPSIS {
+		t.Errorf("Variadic = %v, want ...", x.Variadic)
+	}
+	if x.Value == nil {
+		t.Errorf("Value = nil, want default value")
+	}
 }
 
 func TestTypes(t *testing.T) {
@@ -246,6 +316,18 @@ func TestTypes(t *testing.T) {
 		{pass, `type union s {@default set of int f1 optional}`},
 		{pass, `type union s {enumerated { e(1) } foo}`},
 		{pass, `type enumerated a {e, e(1), e(1)}`},
+		{pass, `type record r {int a, int b,}`},
+		{pass, `type record r {record { int i, float f, } nr}`},
+
+		// Embedded Fields
+		{pass, `type record r {int, r optional, m.t}`},
+		{pass, `type record r {int a, b<int>}`},
+		{pass, `type set s {int}`},
+		{pass, `type union u {int, @default boolean, r,}`},
+		{pass, `type record r {record { int i } x, set { b }}`},
+		{fail, `type int optional`},
+		{fail, `type int`},
+		{fail, `type record r {int a; int b}`},
 
 		// Map Types
 		{pass, `type map from charstring to integer m`},

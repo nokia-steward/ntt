@@ -1157,6 +1157,28 @@ func TestSelectorComplWithStructTypeDecl(t *testing.T) {
 		list)
 }
 
+func TestSelectorComplWithEmbeddedFields(t *testing.T) {
+	list := testCompletion(t, `module Test
+    {
+		type record Structure
+		{
+			integer,
+			M.AnotherStructure,
+			record {} optional
+		}
+
+		function f1() {
+			var template Structure st := {};
+			st.¶
+		}
+	}`)
+
+	assert.Equal(t, []protocol.CompletionItem{
+		{Label: "integer", Kind: protocol.FieldCompletion, Detail: "integer", Documentation: ""},
+		{Label: "AnotherStructure", Kind: protocol.FieldCompletion, Detail: "M.AnotherStructure", Documentation: ""}},
+		list)
+}
+
 func TestDeepSelectorComplWithStructTypeDecl(t *testing.T) {
 	list := testCompletion(t, `module Test
     {

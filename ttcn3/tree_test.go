@@ -289,6 +289,74 @@ func TestLookup(t *testing.T) {
 				}`,
 			want: []string{"x1"}},
 		{
+			name: "embedded fields",
+			input: `module M {
+					type record A { B }
+					type record B { int x }
+					control { var A a; a.¶B.x := 1 }
+				}`,
+			want: []string{"B0"}},
+		{
+			name: "embedded fields",
+			input: `module M {
+					type record A { ¶B }
+					type record B { int x }
+				}`,
+			want: []string{"B1"}},
+		{
+			name: "embedded fields",
+			input: `module M {
+					type record A { M.B }
+					type record B { int x }
+					control { var A a := { ¶B := { x := 1 } } }
+				}`,
+			want: []string{"B0"}},
+		{
+			name: "promoted fields",
+			input: `module M {
+					type record A { B }
+					type record B { C, int y }
+					type record C { int x }
+					control { var A a; a.¶x := 1 }
+				}`,
+			want: []string{"x0"}},
+		{
+			name: "promoted fields",
+			input: `module M {
+					type record A { B }
+					type record B { C, int x }
+					type record C { int x }
+					control { var A a; a.¶x := 1 }
+				}`,
+			want: []string{"x0"}},
+		{
+			name: "promoted fields",
+			input: `module M {
+					type record A { A optional }
+					control { var A a; a.¶x := 1 }
+				}`,
+			want: []string{}},
+		{
+			name: "nested types",
+			input: `module M {
+					function f(record { int x } p) { p.¶x := 1 }
+				}`,
+			want: []string{"x0"}},
+		{
+			name: "nested types",
+			input: `module M {
+					function f() return record of record { int x } {}
+					control { f()[0].¶x := 1 }
+				}`,
+			want: []string{"x0"}},
+		{
+			name: "variadic parameters",
+			input: `module M {
+					type record R { int x }
+					function f(R p...) { p[0].¶x := 1 }
+				}`,
+			want: []string{"x0"}},
+		{
 			name: "field assignment",
 			input: `module M {
 					const int x := 1;

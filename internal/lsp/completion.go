@@ -778,7 +778,9 @@ func CollectParams(n syntax.Node) []protocol.CompletionItem {
 		}
 	case *syntax.StructTypeDecl:
 		for _, field := range n.Fields {
-			list = append(list, protocol.CompletionItem{Label: field.Name.String(), Detail: syntax.Name(field.Type)})
+			if name := syntax.Name(field); name != "" {
+				list = append(list, protocol.CompletionItem{Label: name, Detail: syntax.Name(field.Type)})
+			}
 		}
 	}
 
@@ -858,8 +860,12 @@ func CompleteFields(suite *Suite, tree *ttcn3.Tree, wtype syntax.Node, depth int
 	case *syntax.StructTypeDecl:
 		if typeDepth == depth {
 			for _, field := range n.Fields {
+				name := syntax.Name(field)
+				if name == "" {
+					continue
+				}
 				ret = append(ret, protocol.CompletionItem{
-					Label:         field.Name.String(),
+					Label:         name,
 					Kind:          protocol.FieldCompletion,
 					Detail:        syntax.Name(field.Type),
 					Documentation: "",

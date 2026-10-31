@@ -260,7 +260,11 @@ func (scp *Scope) add(n syntax.Node) error {
 		}
 
 	case *syntax.Field:
-		scp.Insert(n, n.Name)
+		if id := n.EmbeddedName(); id != nil {
+			scp.Insert(n, id)
+		} else {
+			scp.Insert(n, n.Name)
+		}
 
 	case *syntax.Module:
 		scp.Insert(n, n.Name)

@@ -170,6 +170,11 @@ func TestFunc(t *testing.T) {
 		{"function f(integer x) { return x }; f(6)", 6},
 		{"function add(integer x, integer y) { return x+y }; add(1,2)", 3},
 		{"function add(integer x, integer y) { return x+y }; add(1,add(2,4))", 7},
+		{"function f(integer x...) { return lengthof(x) }; f()", 0},
+		{"function f(integer x...) { return lengthof(x) }; f(1, 2, 3)", 3},
+		{"function f(integer x, integer y...) { return x+y[1] }; f(1, 2, 3)", 4},
+		{"function f(integer x...) { return lengthof(x) }; f({1, 2}...)", 2},
+		{"function f(integer x, integer y...) { return x+y[0] }; f(1, {5}...)", 6},
 	}
 
 	for _, tt := range tests {

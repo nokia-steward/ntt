@@ -87,6 +87,11 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 	case *syntax.UnaryExpr:
 		return evalUnary(n, env)
 
+	case *syntax.PostExpr:
+		if n.Op.Kind() == syntax.ELIPSIS {
+			return eval(n.X, env)
+		}
+
 	case *syntax.BinaryExpr:
 		return evalBinary(n, env)
 
@@ -192,6 +197,16 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		args := evalExprList(n.Args.List, env)
 		if len(args) == 1 && runtime.IsError(args[0]) {
 			return args[0]
+		}
+
+		if i := len(n.Args.List) - 1; i >= 0 {
+			if x, ok := n.Args.List[i].(*syntax.PostExpr); ok && x.Op.Kind() == syntax.ELIPSIS {
+				l, ok := args[i].(*runtime.List)
+				if !ok {
+					return runtime.Errorf("cannot expand %s", args[i].Type())
+				}
+				args = append(args[:i], l.Elements...)
+			}
 		}
 
 		return apply(f, args)
@@ -692,6 +707,10 @@ func apply(obj runtime.Object, args []runtime.Object) runtime.Object {
 	case *runtime.Function:
 		fenv := runtime.NewEnv(fn.Env)
 		for i, param := range fn.Params.List {
+			if param.Variadic != nil {
+				fenv.Set(param.Name.String(), runtime.NewRecordOf(args[i:]...))
+				break
+			}
 			fenv.Set(param.Name.String(), args[i])
 		}
 		return unwrap(eval(fn.Body, fenv))

@@ -77,6 +77,9 @@ func Name(n Node) string {
 	case *Module:
 		return Name(n.Name)
 	case *Field:
+		if id := n.EmbeddedName(); id != nil {
+			return Name(id)
+		}
 		return Name(n.Name)
 	case *PortTypeDecl:
 		return Name(n.Name)
