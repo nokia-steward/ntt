@@ -92,35 +92,27 @@ func buildSource(file string) ttcn3.Source {
 	}
 	var stack []int
 	for _, e := range syntax.Serialize(tree.Root) {
-		begin := int(e.Node.Pos())
-		end := int(e.Node.End())
-		k := strings.TrimPrefix(strings.TrimPrefix(fmt.Sprintf("%T", e.Node), "*"), "syntax.")
-
 		switch e.Kind {
 		case syntax.TokenEvent:
 			src.Events = append(src.Events, ttcn3.NodeEvent{
-				Kind: "AddToken",
+				Kind: "add",
 				Text: e.Token().String(),
-				Offs: begin,
-				Len:  end - begin,
+				Offs: int(e.Node.Pos()),
 			})
 		case syntax.OpenEvent:
+			k := strings.TrimPrefix(strings.TrimPrefix(fmt.Sprintf("%T", e.Node), "*"), "syntax.")
 			stack = append(stack, len(src.Events))
 			src.Events = append(src.Events, ttcn3.NodeEvent{
-				Kind: "Open" + k,
-				Offs: begin,
-				Len:  end - begin,
+				Kind: "open",
+				Node: k,
 			})
 		case syntax.CloseEvent:
 			idx := stack[len(stack)-1]
 			stack = stack[:len(stack)-1]
 			src.Events = append(src.Events, ttcn3.NodeEvent{
-				Kind:  "Close" + k,
-				Offs:  begin,
-				Len:   end - begin,
-				Other: idx,
+				Kind: "close",
 			})
-			src.Events[idx].Other = len(src.Events) - 1
+			src.Events[idx].End = len(src.Events) - 1
 		}
 	}
 	return src

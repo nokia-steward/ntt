@@ -1,11 +1,12 @@
 package main
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 
+	"github.com/nokia/ntt/ttcn3"
 	"github.com/nokia/ntt/ttcn3/syntax"
 	"github.com/stretchr/testify/assert"
 )
@@ -31,20 +32,15 @@ func TestBuildSource(t *testing.T) {
 
 	var got []string
 	for i, e := range src.Events {
-		switch {
-		case e.Kind == "AddToken":
+		switch e.Kind {
+		case "add":
 			got = append(got, e.Text)
-			assert.Equal(t, e.Text, input[e.Offs:e.Offs+e.Len])
-		case strings.HasPrefix(e.Kind, "Open"):
-			if assert.Less(t, i, e.Other) {
-				close := src.Events[e.Other]
-				assert.Equal(t, "Close"+strings.TrimPrefix(e.Kind, "Open"), close.Kind)
-				assert.Equal(t, i, close.Other)
+			assert.Equal(t, e.Text, input[e.Offs:e.Offs+len(e.Text)])
+		case "open":
+			if assert.Less(t, i, e.End) {
+				assert.Equal(t, "close", src.Events[e.End].Kind)
 			}
-		case strings.HasPrefix(e.Kind, "Close"):
-			if assert.Less(t, e.Other, i) {
-				assert.Equal(t, i, src.Events[e.Other].Other)
-			}
+		case "close":
 		default:
 			t.Errorf("unexpected event kind %q", e.Kind)
 		}
@@ -54,6 +50,22 @@ func TestBuildSource(t *testing.T) {
 	assert.Contains(t, got, "/* trailer */")
 	assert.Contains(t, got, ",")
 	assert.Contains(t, got, ";")
-	assert.Equal(t, "OpenRoot", src.Events[0].Kind)
-	assert.Equal(t, "CloseRoot", src.Events[len(src.Events)-1].Kind)
+	assert.Equal(t, "open", src.Events[0].Kind)
+	assert.Equal(t, "Root", src.Events[0].Node)
+	assert.Equal(t, len(src.Events)-1, src.Events[0].End)
+	assert.Equal(t, "close", src.Events[len(src.Events)-1].Kind)
+}
+
+func TestNodeEventJSON(t *testing.T) {
+	add, err := json.Marshal(ttcn3.NodeEvent{Kind: "add", Text: "module", Offs: 0})
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"kind":"add","text":"module","offs":0}`, string(add))
+
+	open, err := json.Marshal(ttcn3.NodeEvent{Kind: "open", Node: "Module", End: 5})
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"kind":"open","node":"Module","end":5}`, string(open))
+
+	closeEv, err := json.Marshal(ttcn3.NodeEvent{Kind: "close", Node: "Module", End: 1, Text: "module", Offs: 0})
+	assert.NoError(t, err)
+	assert.JSONEq(t, `{"kind":"close"}`, string(closeEv))
 }
