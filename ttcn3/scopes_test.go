@@ -29,6 +29,11 @@ func TestScopes(t *testing.T) {
 		{`type port P<type T}> message { inout T; map param(int p)}`, []string{"T"}},
 		{`type component C<type T> extends D {var T x}`, []string{"T", "x"}},
 		{`for (var int i;true;i:=i+1) {var int x}`, []string{"i"}},
+		{`if (var int i := 1; i > 0) {var int x}`, []string{"i"}},
+		{`if (i := 1; i > 0) {var int x}`, []string{}},
+		{`while (var int i := 1; i < 10) {var int x}`, []string{"i"}},
+		{`select (var int i := 1; i) { case (1) {var int x} }`, []string{"i"}},
+		{`select union (var U u := {}; u) { case (a) {var int x} }`, []string{"u"}},
 		{`
 			module M {
 				import from foo all;

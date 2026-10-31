@@ -156,6 +156,13 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return eval(n.Expr, env)
 
 	case *syntax.IfStmt:
+		if n.Init != nil {
+			val := eval(n.Init, env)
+			if runtime.IsError(val) {
+				return val
+			}
+		}
+
 		b, err := evalBoolExpr(n.Cond, env)
 		if runtime.IsError(err) {
 			return err
@@ -212,6 +219,13 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return apply(f, args)
 
 	case *syntax.WhileStmt:
+		if n.Init != nil {
+			val := eval(n.Init, env)
+			if runtime.IsError(val) {
+				return val
+			}
+		}
+
 		for {
 			cond, err := evalBoolExpr(n.Cond, env)
 			if runtime.IsError(err) {
@@ -365,6 +379,8 @@ func evalLiteral(n *syntax.ValueLiteral, env runtime.Scope) runtime.Object {
 		return runtime.AnyOrNone
 	case syntax.ANY:
 		return runtime.Any
+	case syntax.NOTIMPL:
+		return runtime.Errorf("not implemented")
 
 	}
 	return runtime.Errorf("unknown literal kind %q (%s)", n.Tok.Kind(), n.Tok.String())

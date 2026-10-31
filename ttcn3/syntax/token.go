@@ -53,6 +53,7 @@ const (
 	REDIR      // ->
 	DECODE     // =>
 	ANY        // ?
+	NOTIMPL    // ???
 	EXCL       // !
 	RANGE      // ..
 	ELIPSIS    // ...
@@ -225,6 +226,7 @@ var tokens = [...]string{
 	REDIR:   "->",
 	DECODE:  "=>",
 	ANY:     "?",
+	NOTIMPL: "???",
 	EXCL:    "!",
 	RANGE:   "..",
 	ELIPSIS: "...",

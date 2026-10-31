@@ -141,8 +141,15 @@ func NewScope(n syntax.Node, tree *Tree) *Scope {
 		scp.add(n.Init)
 
 	case *syntax.IfStmt:
+		scp.add(n.Init)
 		scp.add(n.Then)
 		scp.add(n.Else)
+
+	case *syntax.WhileStmt:
+		scp.add(n.Init)
+
+	case *syntax.SelectStmt:
+		scp.add(n.Init)
 
 	case *syntax.StructSpec:
 		for _, n := range n.Fields {

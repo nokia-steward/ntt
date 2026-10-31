@@ -14,6 +14,7 @@ func TestTokenize(t *testing.T) {
 	}{
 		{"", []string{"EOF"}},
 		{"\n", []string{"EOF"}},
+		{"? ??? ?? ????", []string{"?", "???", "?", "?", "???", "?", "EOF"}},
 
 		{"foo\n", []string{
 			`IDENT "foo"`,

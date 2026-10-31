@@ -399,7 +399,8 @@ type (
 	// An ExprStmt represents a expression used as statement, like an
 	// assignment or function call.
 	ExprStmt struct {
-		Expr Expr
+		NoDefault Token // Position of "@nodefault" or nil
+		Expr      Expr
 	}
 
 	// A BranchStmt represents a branch statement.
@@ -452,11 +453,13 @@ type (
 
 	// A WhilStmt represents a "while" statement.
 	WhileStmt struct {
-		Tok    Token      // Position of "while"
-		LParen Token      // Position of "("
-		Cond   Expr       // Conditional expression
-		RParen Token      // Position of ")"
-		Body   *BlockStmt // Loop-body
+		Tok      Token      // Position of "while"
+		LParen   Token      // Position of "("
+		Init     Stmt       // Init statement or nil
+		InitSemi Token      // Position of ";" or nil
+		Cond     Expr       // Conditional expression
+		RParen   Token      // Position of ")"
+		Body     *BlockStmt // Loop-body
 	}
 
 	// A DoWhileStmt represents a do-while statement.
@@ -471,23 +474,29 @@ type (
 
 	// A IfStmt represents a conditional statement.
 	IfStmt struct {
-		Tok     Token // Position of "if"
-		LParen  Token
-		Cond    Expr // Conditional expression
-		RParen  Token
-		Then    *BlockStmt // True branch
-		ElseTok Token      // Position of "else" or nil
-		Else    Stmt       // Else branch
+		Tok      Token // Position of "if"
+		LParen   Token
+		Init     Stmt  // Init statement or nil
+		InitSemi Token // Position of ";" or nil
+		Cond     Expr  // Conditional expression
+		RParen   Token
+		Then     *BlockStmt // True branch
+		ElseTok  Token      // Position of "else" or nil
+		Else     Stmt       // Else branch
 	}
 
 	// A SelectStmt represents a select statements.
 	SelectStmt struct {
-		Tok    Token         // Position of "select"
-		Union  Token         // Position of "union" or nil
-		Tag    *ParenExpr    // Tag expression
-		LBrace Token         // Position of "{"
-		Body   []*CaseClause // List of case clauses
-		RBrace Token         // Position of "}"
+		Tok      Token         // Position of "select"
+		Union    Token         // Position of "union" or nil
+		LParen   Token         // Position of "("
+		Init     Stmt          // Init statement or nil
+		InitSemi Token         // Position of ";" or nil
+		Tag      Expr          // Tag expression
+		RParen   Token         // Position of ")"
+		LBrace   Token         // Position of "{"
+		Body     []*CaseClause // List of case clauses
+		RBrace   Token         // Position of "}"
 	}
 
 	// A CaseClause represents a case clause.

@@ -461,6 +461,7 @@ var operandStart = map[Kind]bool{
 	ANY:        true,
 	ANYKW:      true,
 	BSTRING:    true,
+	NOTIMPL:    true,
 	CHARSTRING: true,
 	ERROR:      true,
 	FAIL:       true,
@@ -781,6 +782,7 @@ func (p *parser) parseOperand() Expr {
 
 	case INT,
 		ANY,
+		NOTIMPL,
 		BSTRING,
 		ERROR,
 		NULL,
@@ -2605,11 +2607,20 @@ func (p *parser) parseStmt() Stmt {
 	case INT, FLOAT, STRING, BSTRING, TRUE, FALSE, PASS, FAIL, NONE, INCONC, ERROR:
 		return p.parseSimpleStmt()
 
+	case NOTIMPL:
+		return p.parseSimpleStmt()
+
 	case MODIF:
+		switch v := p.lit(1); v {
+		case "@nodefault":
+			tok := p.consume()
+			x := p.parseSimpleStmt()
+			x.NoDefault = tok
+			return x
+
 		// This enables parsing of Titan specific try/catch blocks.
 		// Note, we only parse the structure for prevent syntax-errors,
 		// Titan exceptions are not implemented in the rest of ntt.
-		switch v := p.lit(1); v {
 		case "@try":
 			p.consume()
 			return p.parseBlockStmt()
@@ -2689,14 +2700,28 @@ func hasAssignment(n Node) bool {
 	}
 }
 
+// CondWithInit ::= [ ( VarInstance | Assignment ) ";" ] Expr
+func (p *parser) parseCondWithInit() (init Stmt, semi Token, cond Expr) {
+	if p.tok == VAR {
+		init = &DeclStmt{Decl: p.parseValueDecl()}
+		return init, p.expect(SEMICOLON), p.parseExpr()
+	}
+	x := p.parseExpr()
+	if p.tok != SEMICOLON {
+		return nil, nil, x
+	}
+	return &ExprStmt{Expr: x}, p.consume(), p.parseExpr()
+}
+
 func (p *parser) parseWhileLoop() *WhileStmt {
-	return &WhileStmt{
+	x := &WhileStmt{
 		Tok:    p.consume(),
 		LParen: p.expect(LPAREN),
-		Cond:   p.parseExpr(),
-		RParen: p.expect(RPAREN),
-		Body:   p.parseBlockStmt(),
 	}
+	x.Init, x.InitSemi, x.Cond = p.parseCondWithInit()
+	x.RParen = p.expect(RPAREN)
+	x.Body = p.parseBlockStmt()
+	return x
 }
 
 func (p *parser) parseDoWhileLoop() *DoWhileStmt {
@@ -2714,10 +2739,10 @@ func (p *parser) parseIfStmt() *IfStmt {
 	x := &IfStmt{
 		Tok:    p.consume(),
 		LParen: p.expect(LPAREN),
-		Cond:   p.parseExpr(),
-		RParen: p.expect(RPAREN),
-		Then:   p.parseBlockStmt(),
 	}
+	x.Init, x.InitSemi, x.Cond = p.parseCondWithInit()
+	x.RParen = p.expect(RPAREN)
+	x.Then = p.parseBlockStmt()
 	if p.tok == ELSE {
 		x.ElseTok = p.consume()
 		if p.tok == IF {
@@ -2735,7 +2760,9 @@ func (p *parser) parseSelect() *SelectStmt {
 	if p.tok == UNION {
 		x.Union = p.consume()
 	}
-	x.Tag = p.parseParenExpr()
+	x.LParen = p.expect(LPAREN)
+	x.Init, x.InitSemi, x.Tag = p.parseCondWithInit()
+	x.RParen = p.expect(RPAREN)
 	x.LBrace = p.expect(LBRACE)
 	for p.tok == CASE {
 		x.Body = append(x.Body, p.parseCaseStmt())

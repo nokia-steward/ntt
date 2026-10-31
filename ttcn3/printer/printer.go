@@ -263,6 +263,7 @@ func (p *printer) print(values ...interface{}) {
 			if n == nil {
 				return
 			}
+			p.print(n.NoDefault)
 			p.print(n.Expr)
 
 		case *syntax.BranchStmt:
@@ -284,6 +285,7 @@ func (p *printer) print(values ...interface{}) {
 				return
 			}
 			p.print(n.Tok)
+			p.print(n.NoDefault)
 			p.print(n.Body)
 
 		case *syntax.CallStmt:
@@ -324,7 +326,11 @@ func (p *printer) print(values ...interface{}) {
 				return
 			}
 			p.print(n.Tok)
+			p.print(n.LParen)
+			p.print(n.Init)
+			p.print(n.InitSemi)
 			p.print(n.Cond)
+			p.print(n.RParen)
 			p.print(n.Body)
 
 		case *syntax.DoWhileStmt:
@@ -341,7 +347,11 @@ func (p *printer) print(values ...interface{}) {
 				return
 			}
 			p.print(n.Tok)
+			p.print(n.LParen)
+			p.print(n.Init)
+			p.print(n.InitSemi)
 			p.print(n.Cond)
+			p.print(n.RParen)
 			p.print(n.Then)
 			p.print(n.ElseTok)
 			p.print(n.Else)
@@ -352,7 +362,11 @@ func (p *printer) print(values ...interface{}) {
 			}
 			p.print(n.Tok)
 			p.print(n.Union)
+			p.print(n.LParen)
+			p.print(n.Init)
+			p.print(n.InitSemi)
 			p.print(n.Tag)
+			p.print(n.RParen)
 			p.print(n.LBrace, indent)
 			p.print(n.Body)
 			p.print(unindent, n.RBrace)

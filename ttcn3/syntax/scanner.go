@@ -74,6 +74,10 @@ func (s *Scanner) Scan() (Kind, int, int) {
 		typ = CONCAT
 	case ch == '?':
 		typ = ANY
+		if next == '?' && s.pos+1 < len(s.src) && s.src[s.pos+1] == '?' {
+			s.pos += 2
+			typ = NOTIMPL
+		}
 	case ch == '(':
 		typ = LPAREN
 	case ch == '[':

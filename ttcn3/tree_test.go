@@ -254,6 +254,34 @@ func TestLookup(t *testing.T) {
 				}`,
 			want: []string{"x0"}},
 		{
+			name:  "init statements",
+			input: `module M { control { if (var int x := 1; ¶x > 0) {} }}`,
+			want:  []string{"x0"}},
+		{
+			name:  "init statements",
+			input: `module M { control { if (var int x := 1; x > 0) { ¶x } }}`,
+			want:  []string{"x0"}},
+		{
+			name:  "init statements",
+			input: `module M { control { if (var int x := 1; x > 0) {} else { ¶x } }}`,
+			want:  []string{"x0"}},
+		{
+			name:  "init statements",
+			input: `module M { control { if (var int x := 1; x > 0) {}; ¶x }}`,
+			want:  []string{}},
+		{
+			name:  "init statements",
+			input: `module M { control { while (var int x := 1; x < 10) { ¶x } }}`,
+			want:  []string{"x0"}},
+		{
+			name:  "init statements",
+			input: `module M { control { select (var int x := 1; x) { case (1) { ¶x } } }}`,
+			want:  []string{"x0"}},
+		{
+			name:  "init statements",
+			input: `module M { control { select union (var int x := 1; ¶x) { case (a) {} } }}`,
+			want:  []string{"x0"}},
+		{
 			name: "parameters",
 			input: `module M {
 					const int x := 1;
