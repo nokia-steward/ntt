@@ -85,6 +85,10 @@ func TestExprs(t *testing.T) {
 		{pass, `match(ptc.alive, false)`},
 		{pass, `x.universal charstring := "FF80"`},
 		{pass, `::E + NS::E`},
+		{pass, `???`},
+		{pass, `-???`},
+		{pass, `"Hello " & ???`},
+		{pass, `???("reason")`},
 	}
 
 	testParse(t, exprs, func(p *parser) { p.parseExprList() })
@@ -182,6 +186,8 @@ func TestValueDecls(t *testing.T) {
 		{pass, `var t := true`},
 		{pass, `var x := 23, y := 10`},
 		{pass, `var r := {1,2,3}`},
+		{pass, `var integer i := ???;`},
+		{pass, `modulepar charstring reason := ???;`},
 	}
 
 	testParse(t, valueDecls, func(p *parser) { p.parseValueDecl() })
@@ -215,6 +221,7 @@ func TestFormalPars(t *testing.T) {
 		{pass, `(out timer y, in template(value) @fuzzy timer x := 1)`},
 		{pass, `(out timer y := -, in value @fuzzy timer x := 1)`},
 		{pass, `(out timer y := -, in value timer x := (1,2,3))`},
+		{pass, `(in integer i := ???)`},
 	}
 	testParse(t, formalPars, func(p *parser) { p.parseFormalPars() })
 }
@@ -306,6 +313,38 @@ func TestStmts(t *testing.T) {
 		{pass, `alt {}`},
 		{pass, `alt { [] receive; [23<foo()] p.timeout { var i x:=23; } [else] {}}`},
 
+		// Init Statements
+		{pass, `if (var integer i := 1; match(i, 2)) {}`},
+		{pass, `if (i := 1; i > 0) {} else if (var x := 2; x > i) {}`},
+		{pass, `while (var integer j := 1; j < 10) {}`},
+		{pass, `while (j := 1; j < 10) {}`},
+		{pass, `select (var integer i := 2; i) { case(1) {} case else {}}`},
+		{pass, `select union (var U v := {f1 := 1}; v) { case(f1) {} }`},
+		{fail, `if (var integer i := 1) {}`},
+		{fail, `while (var integer i := 1;) {}`},
+		{fail, `do {} while (var integer i := 1; i < 10);`},
+
+		// Not Implemented
+		{pass, `???;`},
+		{pass, `???("reason");`},
+		{pass, `???(s);`},
+		{fail, `??;`},
+
+		// NoDefault Modifier
+		{pass, `@nodefault AltSet1();`},
+		{pass, `@nodefault all component.done;`},
+		{pass, `@nodefault ptc.killed;`},
+		{pass, `@nodefault p.receive(MyInt);`},
+		{pass, `@nodefault p.trigger(integer:?) -> value v;`},
+		{pass, `@nodefault p.getcall;`},
+		{pass, `@nodefault p[0].getreply(S:{});`},
+		{pass, `@nodefault p[0].catch;`},
+		{pass, `@nodefault p.check(receive(integer:?) -> value v);`},
+		{pass, `@nodefault t.timeout;`},
+		{pass, `@nodefault any timer.timeout;`},
+		{fail, `@nodefault alt {}`},
+		{fail, `@nodefault var integer x;`},
+
 		// Titan try/catch extension
 		{pass, `@try {} @catch (e) {} @catch(r2) {}`},
 
@@ -343,6 +382,40 @@ func TestStmts(t *testing.T) {
 		{pass, `p.call(S:{}) {[] receive; [else] {}}`},
 	}
 	testParse(t, stmts, func(p *parser) { p.parseStmt() })
+}
+
+func TestStmtFields(t *testing.T) {
+	parseStmt := func(input string) Stmt {
+		p := NewParser([]byte(input))
+		s := p.parseStmt()
+		if err := p.Err(); err != nil {
+			t.Fatalf("Parse(%#q): %v", input, err)
+		}
+		return s
+	}
+
+	if s := parseStmt(`@nodefault p.receive;`).(*ExprStmt); s.NoDefault == nil || s.NoDefault.String() != "@nodefault" {
+		t.Errorf("ExprStmt.NoDefault = %v, want @nodefault", s.NoDefault)
+	}
+	if s := parseStmt(`p.receive;`).(*ExprStmt); s.NoDefault != nil {
+		t.Errorf("ExprStmt.NoDefault = %v, want nil", s.NoDefault)
+	}
+	if s := parseStmt(`???("reason");`).(*ExprStmt); s.Expr.(*CallExpr).Fun.(*ValueLiteral).Tok.Kind() != NOTIMPL {
+		t.Errorf("expected call of ???")
+	}
+
+	if s := parseStmt(`if (var integer i := 1; i > 0) {}`).(*IfStmt); s.Init == nil || s.InitSemi == nil || s.Cond == nil {
+		t.Errorf("IfStmt: Init=%v InitSemi=%v Cond=%v", s.Init, s.InitSemi, s.Cond)
+	}
+	if s := parseStmt(`if (i > 0) {}`).(*IfStmt); s.Init != nil || s.InitSemi != nil {
+		t.Errorf("IfStmt: Init=%v InitSemi=%v, want nil", s.Init, s.InitSemi)
+	}
+	if s := parseStmt(`while (i := 1; i < 10) {}`).(*WhileStmt); s.Init == nil || s.InitSemi == nil || s.Cond == nil {
+		t.Errorf("WhileStmt: Init=%v InitSemi=%v Cond=%v", s.Init, s.InitSemi, s.Cond)
+	}
+	if s := parseStmt(`select union (var U v := {}; v) {}`).(*SelectStmt); s.Init == nil || s.InitSemi == nil || s.Tag == nil || s.Union == nil {
+		t.Errorf("SelectStmt: Init=%v InitSemi=%v Tag=%v", s.Init, s.InitSemi, s.Tag)
+	}
 }
 
 func TestTypeParametrization(t *testing.T) {

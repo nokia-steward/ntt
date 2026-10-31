@@ -2694,6 +2694,9 @@ func (n *ExprStmt) Kind() Kind {
 func (n *ExprStmt) FirstTok() Token {
 	switch {
 
+	case n.NoDefault != nil:
+		return n.NoDefault
+
 	case n.Expr != nil:
 		return n.Expr.FirstTok()
 
@@ -2708,13 +2711,20 @@ func (n *ExprStmt) LastTok() Token {
 	case n.Expr != nil:
 		return n.Expr.LastTok()
 
+	case n.NoDefault != nil:
+		return n.NoDefault
+
 	default:
 		return nil
 	}
 }
 
 func (n *ExprStmt) Children() []Node {
-	ret := make([]Node, 0, 1)
+	ret := make([]Node, 0, 2)
+
+	if n.NoDefault != nil {
+		ret = append(ret, n.NoDefault)
+	}
 
 	if n.Expr != nil {
 		ret = append(ret, n.Expr)
@@ -4069,6 +4079,12 @@ func (n *IfStmt) FirstTok() Token {
 	case n.LParen != nil:
 		return n.LParen
 
+	case n.Init != nil:
+		return n.Init.FirstTok()
+
+	case n.InitSemi != nil:
+		return n.InitSemi
+
 	case n.Cond != nil:
 		return n.Cond.FirstTok()
 
@@ -4107,6 +4123,12 @@ func (n *IfStmt) LastTok() Token {
 	case n.Cond != nil:
 		return n.Cond.LastTok()
 
+	case n.InitSemi != nil:
+		return n.InitSemi
+
+	case n.Init != nil:
+		return n.Init.LastTok()
+
 	case n.LParen != nil:
 		return n.LParen
 
@@ -4119,7 +4141,7 @@ func (n *IfStmt) LastTok() Token {
 }
 
 func (n *IfStmt) Children() []Node {
-	ret := make([]Node, 0, 7)
+	ret := make([]Node, 0, 9)
 
 	if n.Tok != nil {
 		ret = append(ret, n.Tok)
@@ -4127,6 +4149,14 @@ func (n *IfStmt) Children() []Node {
 
 	if n.LParen != nil {
 		ret = append(ret, n.LParen)
+	}
+
+	if n.Init != nil {
+		ret = append(ret, n.Init)
+	}
+
+	if n.InitSemi != nil {
+		ret = append(ret, n.InitSemi)
 	}
 
 	if n.Cond != nil {
@@ -4153,6 +4183,13 @@ func (n *IfStmt) Children() []Node {
 }
 
 func (n *IfStmt) Inspect(f func(Node) bool) {
+
+	if c := n.Init; c != nil {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
 
 	if c := n.Cond; c != nil {
 		if f(c) {
@@ -6921,8 +6958,20 @@ func (n *SelectStmt) FirstTok() Token {
 	case n.Union != nil:
 		return n.Union
 
+	case n.LParen != nil:
+		return n.LParen
+
+	case n.Init != nil:
+		return n.Init.FirstTok()
+
+	case n.InitSemi != nil:
+		return n.InitSemi
+
 	case n.Tag != nil:
 		return n.Tag.FirstTok()
+
+	case n.RParen != nil:
+		return n.RParen
 
 	case n.LBrace != nil:
 		return n.LBrace
@@ -6950,8 +6999,20 @@ func (n *SelectStmt) LastTok() Token {
 	case n.LBrace != nil:
 		return n.LBrace
 
+	case n.RParen != nil:
+		return n.RParen
+
 	case n.Tag != nil:
 		return n.Tag.LastTok()
+
+	case n.InitSemi != nil:
+		return n.InitSemi
+
+	case n.Init != nil:
+		return n.Init.LastTok()
+
+	case n.LParen != nil:
+		return n.LParen
 
 	case n.Union != nil:
 		return n.Union
@@ -6965,7 +7026,7 @@ func (n *SelectStmt) LastTok() Token {
 }
 
 func (n *SelectStmt) Children() []Node {
-	ret := make([]Node, 0, 6)
+	ret := make([]Node, 0, 10)
 
 	if n.Tok != nil {
 		ret = append(ret, n.Tok)
@@ -6975,8 +7036,24 @@ func (n *SelectStmt) Children() []Node {
 		ret = append(ret, n.Union)
 	}
 
+	if n.LParen != nil {
+		ret = append(ret, n.LParen)
+	}
+
+	if n.Init != nil {
+		ret = append(ret, n.Init)
+	}
+
+	if n.InitSemi != nil {
+		ret = append(ret, n.InitSemi)
+	}
+
 	if n.Tag != nil {
 		ret = append(ret, n.Tag)
+	}
+
+	if n.RParen != nil {
+		ret = append(ret, n.RParen)
 	}
 
 	if n.LBrace != nil {
@@ -6995,6 +7072,13 @@ func (n *SelectStmt) Children() []Node {
 }
 
 func (n *SelectStmt) Inspect(f func(Node) bool) {
+
+	if c := n.Init; c != nil {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
 
 	if c := n.Tag; c != nil {
 		if f(c) {
@@ -8260,6 +8344,12 @@ func (n *WhileStmt) FirstTok() Token {
 	case n.LParen != nil:
 		return n.LParen
 
+	case n.Init != nil:
+		return n.Init.FirstTok()
+
+	case n.InitSemi != nil:
+		return n.InitSemi
+
 	case n.Cond != nil:
 		return n.Cond.FirstTok()
 
@@ -8286,6 +8376,12 @@ func (n *WhileStmt) LastTok() Token {
 	case n.Cond != nil:
 		return n.Cond.LastTok()
 
+	case n.InitSemi != nil:
+		return n.InitSemi
+
+	case n.Init != nil:
+		return n.Init.LastTok()
+
 	case n.LParen != nil:
 		return n.LParen
 
@@ -8298,7 +8394,7 @@ func (n *WhileStmt) LastTok() Token {
 }
 
 func (n *WhileStmt) Children() []Node {
-	ret := make([]Node, 0, 5)
+	ret := make([]Node, 0, 7)
 
 	if n.Tok != nil {
 		ret = append(ret, n.Tok)
@@ -8306,6 +8402,14 @@ func (n *WhileStmt) Children() []Node {
 
 	if n.LParen != nil {
 		ret = append(ret, n.LParen)
+	}
+
+	if n.Init != nil {
+		ret = append(ret, n.Init)
+	}
+
+	if n.InitSemi != nil {
+		ret = append(ret, n.InitSemi)
 	}
 
 	if n.Cond != nil {
@@ -8324,6 +8428,13 @@ func (n *WhileStmt) Children() []Node {
 }
 
 func (n *WhileStmt) Inspect(f func(Node) bool) {
+
+	if c := n.Init; c != nil {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
 
 	if c := n.Cond; c != nil {
 		if f(c) {
