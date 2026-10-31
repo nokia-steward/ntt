@@ -248,7 +248,7 @@ function f(@deterministic integer a) return integer {
     Def: (FuncDecl KindTok: "function"
       Name: (Ident "f")
       Params: (FormalPars
-        List: (FormalPar Modif: "@deterministic"
+        List: (FormalPar Deterministic: "@deterministic"
           Type: (Ident "integer")
           Name: (Ident "a")))
       Return: (ReturnSpec Tok: "return"

@@ -803,6 +803,29 @@ type class C {
                 Y: (Ident "x")))))))))
 
 ===
+Class with finally block
+===
+type class C {
+  var integer x;
+} finally { log(x); }
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (ClassTypeDecl TypeTok: "type" KindTok: "class" FinallyTok: "finally"
+      Name: (Ident "C")
+      Defs: (ModuleDef
+        Def: (ValueDecl KindTok: "var"
+          Type: (Ident "integer")
+          Decls: (Declarator
+            Name: (Ident "x"))))
+      Finally: (BlockStmt
+        Stmts: (ExprStmt
+          Expr: (CallExpr
+            Fun: (Ident "log")
+            Args: (ParenExpr
+              List: (Ident "x"))))))))
+
+===
 Function type
 ===
 type function F(in integer x) return integer;

@@ -767,7 +767,9 @@ type (
 		System     *SystemSpec // Optional system-spec
 		LBrace     Token       // Position of "{"
 		Defs       []*ModuleDef
-		RBrace     Token // Position of }"
+		RBrace     Token      // Position of }"
+		FinallyTok Token      // Position of "finally" or nil
+		Finally    *BlockStmt // Finally block or nil
 		With       *WithSpec
 	}
 
@@ -896,6 +898,7 @@ type (
 		FromTok   Token
 		Module    *Ident
 		Language  *LanguageSpec
+		Recursive Token // Position of "recursive" or nil
 		RedirTok  Token
 		Alias     *Ident
 		LBrace    Token
@@ -916,7 +919,7 @@ type (
 	FriendDecl struct {
 		FriendTok Token
 		ModuleTok Token
-		Module    *Ident
+		Modules   []*Ident
 		With      *WithSpec
 	}
 )

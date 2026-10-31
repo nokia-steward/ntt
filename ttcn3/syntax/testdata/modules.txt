@@ -210,6 +210,29 @@ module M {
           List: (Ident "all"))))))
 
 ===
+Recursive import
+===
+module M {
+  import from A recursive all;
+  import from B language "TTCN-3:2018" recursive { type T; }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ImportDecl ImportTok: "import" FromTok: "from" Recursive: "recursive"
+        Module: (Ident "A")
+        List: (DefKindExpr
+          List: (Ident "all"))))
+    Defs: (ModuleDef
+      Def: (ImportDecl ImportTok: "import" FromTok: "from" Recursive: "recursive"
+        Module: (Ident "B")
+        Language: (LanguageSpec Tok: "language" List: "\"TTCN-3:2018\"")
+        List: (DefKindExpr KindTok: "type"
+          List: (Ident "T"))))))
+
+===
 Nested groups
 ===
 module M {
@@ -338,7 +361,22 @@ module M {
     Name: (Ident "M")
     Defs: (ModuleDef
       Def: (FriendDecl FriendTok: "friend" ModuleTok: "module"
-        Module: (Ident "A")))))
+        Modules: (Ident "A")))))
+
+===
+Friend module list
+===
+module M {
+  friend module A, B;
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (FriendDecl FriendTok: "friend" ModuleTok: "module"
+        Modules: (Ident "A")
+        Modules: (Ident "B")))))
 
 ===
 Module parameter with multiple declarators
@@ -870,7 +908,7 @@ module Example language "TTCN-3:2018" {
           List: (Ident "all"))))
     Defs: (ModuleDef
       Def: (FriendDecl FriendTok: "friend" ModuleTok: "module"
-        Module: (Ident "Other")))
+        Modules: (Ident "Other")))
     Defs: (ModuleDef
       Def: (ModuleParameterGroup Tok: "modulepar"
         Decls: (ValueDecl

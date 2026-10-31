@@ -935,6 +935,12 @@ func (n *ClassTypeDecl) FirstTok() Token {
 	case n.RBrace != nil:
 		return n.RBrace
 
+	case n.FinallyTok != nil:
+		return n.FinallyTok
+
+	case n.Finally != nil:
+		return n.Finally.FirstTok()
+
 	case n.With != nil:
 		return n.With.FirstTok()
 
@@ -948,6 +954,12 @@ func (n *ClassTypeDecl) LastTok() Token {
 
 	case n.With != nil:
 		return n.With.LastTok()
+
+	case n.Finally != nil:
+		return n.Finally.LastTok()
+
+	case n.FinallyTok != nil:
+		return n.FinallyTok
 
 	case n.RBrace != nil:
 		return n.RBrace
@@ -991,7 +1003,7 @@ func (n *ClassTypeDecl) LastTok() Token {
 }
 
 func (n *ClassTypeDecl) Children() []Node {
-	ret := make([]Node, 0, 13)
+	ret := make([]Node, 0, 15)
 
 	if n.TypeTok != nil {
 		ret = append(ret, n.TypeTok)
@@ -1041,6 +1053,14 @@ func (n *ClassTypeDecl) Children() []Node {
 		ret = append(ret, n.RBrace)
 	}
 
+	if n.FinallyTok != nil {
+		ret = append(ret, n.FinallyTok)
+	}
+
+	if n.Finally != nil {
+		ret = append(ret, n.Finally)
+	}
+
 	if n.With != nil {
 		ret = append(ret, n.With)
 	}
@@ -1086,6 +1106,13 @@ func (n *ClassTypeDecl) Inspect(f func(Node) bool) {
 	}
 
 	for _, c := range n.Defs {
+		if f(c) {
+			c.Inspect(f)
+		}
+		f(nil)
+	}
+
+	if c := n.Finally; c != nil {
 		if f(c) {
 			c.Inspect(f)
 		}
@@ -3494,8 +3521,8 @@ func (n *FriendDecl) FirstTok() Token {
 	case n.ModuleTok != nil:
 		return n.ModuleTok
 
-	case n.Module != nil:
-		return n.Module.FirstTok()
+	case len(n.Modules) > 0:
+		return n.Modules[0].FirstTok()
 
 	case n.With != nil:
 		return n.With.FirstTok()
@@ -3511,8 +3538,8 @@ func (n *FriendDecl) LastTok() Token {
 	case n.With != nil:
 		return n.With.LastTok()
 
-	case n.Module != nil:
-		return n.Module.LastTok()
+	case len(n.Modules) > 0:
+		return n.Modules[len(n.Modules)-1].LastTok()
 
 	case n.ModuleTok != nil:
 		return n.ModuleTok
@@ -3536,8 +3563,8 @@ func (n *FriendDecl) Children() []Node {
 		ret = append(ret, n.ModuleTok)
 	}
 
-	if n.Module != nil {
-		ret = append(ret, n.Module)
+	for _, c := range n.Modules {
+		ret = append(ret, c)
 	}
 
 	if n.With != nil {
@@ -3549,7 +3576,7 @@ func (n *FriendDecl) Children() []Node {
 
 func (n *FriendDecl) Inspect(f func(Node) bool) {
 
-	if c := n.Module; c != nil {
+	for _, c := range n.Modules {
 		if f(c) {
 			c.Inspect(f)
 		}
@@ -4267,6 +4294,9 @@ func (n *ImportDecl) FirstTok() Token {
 	case n.Language != nil:
 		return n.Language.FirstTok()
 
+	case n.Recursive != nil:
+		return n.Recursive
+
 	case n.RedirTok != nil:
 		return n.RedirTok
 
@@ -4311,6 +4341,9 @@ func (n *ImportDecl) LastTok() Token {
 	case n.RedirTok != nil:
 		return n.RedirTok
 
+	case n.Recursive != nil:
+		return n.Recursive
+
 	case n.Language != nil:
 		return n.Language.LastTok()
 
@@ -4329,7 +4362,7 @@ func (n *ImportDecl) LastTok() Token {
 }
 
 func (n *ImportDecl) Children() []Node {
-	ret := make([]Node, 0, 10)
+	ret := make([]Node, 0, 11)
 
 	if n.ImportTok != nil {
 		ret = append(ret, n.ImportTok)
@@ -4345,6 +4378,10 @@ func (n *ImportDecl) Children() []Node {
 
 	if n.Language != nil {
 		ret = append(ret, n.Language)
+	}
+
+	if n.Recursive != nil {
+		ret = append(ret, n.Recursive)
 	}
 
 	if n.RedirTok != nil {

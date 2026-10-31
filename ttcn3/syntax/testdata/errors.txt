@@ -426,3 +426,34 @@ template RoI t := { 1 # };
           X: (ValueLiteral "1")
           Min: (ErrorNode From: "}" To: "}"))))))
 ERROR 1:25-1:26: expected operand, found }
+||||||| 8f8c2c8e
+
+
+===
+Conflicting template modifiers
+===
+template @lazy @fuzzy integer t := 1;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" Modif: "@lazy" AssignTok: ":="
+      Type: (Ident "integer")
+      Name: (Ident "t")
+      Value: (ValueLiteral "1"))))
+ERROR 1:16-1:22: unexpected modifier @fuzzy
+
+===
+Modifier after deterministic
+===
+function f(@deterministic @lazy integer a) {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar Deterministic: "@deterministic"
+          Type: (Ident "integer")
+          Name: (Ident "a")))
+      Body: (BlockStmt))))
+ERROR 1:27-1:32: unexpected modifier @lazy

@@ -1313,11 +1313,22 @@ func (p *parser) parseTypeOrNestedTypeDef() Expr {
 	return p.parseTypeRef()
 }
 
-func (p *parser) parseDeterministic() Token {
-	if p.tok == MODIF && p.lit(1) == "@deterministic" {
-		return p.consume()
+// parseModifiers parses an optional "@lazy" or "@fuzzy" modifier followed by
+// an optional "@deterministic" modifier.
+func (p *parser) parseModifiers() (modif Token, deterministic Token) {
+	for p.tok == MODIF {
+		tok := p.peek(1)
+		switch {
+		case tok.String() == "@deterministic" && deterministic == nil:
+			deterministic = p.consume()
+		case tok.String() != "@deterministic" && modif == nil && deterministic == nil:
+			modif = p.consume()
+		default:
+			p.error(tok, "unexpected modifier %s", tok.String())
+			p.consume()
+		}
 	}
-	return nil
+	return modif, deterministic
 }
 
 func (p *parser) tryTypeParameters() *ParenExpr {
@@ -1581,6 +1592,10 @@ func (p *parser) parseImport() *ImportDecl {
 		x.Language = p.parseLanguageSpec()
 	}
 
+	if p.tok == IDENT && p.lit(1) == "recursive" {
+		x.Recursive = p.consume()
+	}
+
 	if p.tok == REDIR {
 		x.RedirTok = p.consume()
 		x.Alias = p.parseName()
@@ -1718,12 +1733,16 @@ func (p *parser) parseGroup() *GroupDecl {
 }
 
 func (p *parser) parseFriend() *FriendDecl {
-	return &FriendDecl{
-		FriendTok: p.expect(FRIEND),
-		ModuleTok: p.expect(MODULE),
-		Module:    p.parseIdent(),
-		With:      p.parseWith(),
+	x := new(FriendDecl)
+	x.FriendTok = p.expect(FRIEND)
+	x.ModuleTok = p.expect(MODULE)
+	x.Modules = append(x.Modules, p.parseIdent())
+	for p.tok == COMMA {
+		p.consume()
+		x.Modules = append(x.Modules, p.parseIdent())
 	}
+	x.With = p.parseWith()
+	return x
 }
 
 /*************************************************************************
@@ -2045,6 +2064,10 @@ func (p *parser) parseClassTypeDecl() *ClassTypeDecl {
 		p.expectSemi(x.Defs[len(x.Defs)-1].LastTok())
 	}
 	x.RBrace = p.expect(RBRACE)
+	if p.tok == IDENT && p.lit(1) == "finally" {
+		x.FinallyTok = p.consume()
+		x.Finally = p.parseBlockStmt()
+	}
 	x.With = p.parseWith()
 	return x
 }
@@ -2346,10 +2369,7 @@ func (p *parser) parseTemplateDecl() *TemplateDecl {
 		x.RParen = p.expect(RPAREN)
 	}
 
-	if p.tok == MODIF {
-		x.Modif = p.consume()
-	}
-	x.Deterministic = p.parseDeterministic()
+	x.Modif, x.Deterministic = p.parseModifiers()
 
 	x.Type = p.parseTypeRef()
 	if _, ok := x.Type.(*ErrorNode); ok {
@@ -2425,10 +2445,7 @@ func (p *parser) parseValueDecl() *ValueDecl {
 	if p.tok != TIMER {
 		x.KindTok = p.consume()
 		x.TemplateRestriction = p.parseRestrictionSpec()
-		if p.tok == MODIF {
-			x.Modif = p.consume()
-		}
-		x.Deterministic = p.parseDeterministic()
+		x.Modif, x.Deterministic = p.parseModifiers()
 	}
 	if tok := p.peek(2).Kind(); tok != ASSIGN && tok != IN {
 		x.Type = p.parseTypeOrNestedTypeDef()
@@ -2706,10 +2723,7 @@ func (p *parser) parseFormalPar() *FormalPar {
 	}
 
 	x.TemplateRestriction = p.parseRestrictionSpec()
-	if p.tok == MODIF {
-		x.Modif = p.consume()
-	}
-	x.Deterministic = p.parseDeterministic()
+	x.Modif, x.Deterministic = p.parseModifiers()
 	x.Type = p.parseTypeOrNestedTypeDef()
 	x.Name = p.parseName()
 

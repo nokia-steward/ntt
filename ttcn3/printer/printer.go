@@ -683,6 +683,7 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.FromTok)
 			p.print(n.Module)
 			p.print(n.Language)
+			p.print(n.Recursive)
 			p.print(n.RedirTok)
 			p.print(n.Alias)
 			p.print(n.LBrace, indent)
@@ -708,7 +709,7 @@ func (p *printer) print(values ...interface{}) {
 			}
 			p.print(n.FriendTok)
 			p.print(n.ModuleTok)
-			p.print(n.Module)
+			p.print(n.Modules)
 			p.print(n.With)
 
 		case *syntax.LanguageSpec:
@@ -863,6 +864,13 @@ func (p *printer) print(values ...interface{}) {
 				}
 			}
 		case []syntax.Expr:
+			for i, item := range n {
+				p.print(item)
+				if i < len(n)-1 {
+					p.print(",")
+				}
+			}
+		case []*syntax.Ident:
 			for i, item := range n {
 				p.print(item)
 				if i < len(n)-1 {
