@@ -418,7 +418,7 @@ func lint(cmd *cobra.Command, args []string) error {
 					case *syntax.WithSpec:
 						checkBraces(n.LBrace, n.RBrace)
 					case *syntax.ParenExpr:
-						if n.LParen.Kind() == syntax.LBRACE {
+						if n.LParen != nil && n.LParen.Kind() == syntax.LBRACE {
 							checkBraces(n.LParen, n.RParen)
 						}
 

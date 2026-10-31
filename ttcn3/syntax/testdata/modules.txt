@@ -816,10 +816,8 @@ Missing module name
 module {}
 ---
 (Root
-  Nodes: (Module Tok: "module" RBrace: "EOF"))
+  Nodes: (Module Tok: "module"))
 ERROR 1:8-1:9: expected 'IDENT', found {
-ERROR 1:9-1:10: expected '{', found }
-ERROR 1:10-1:11: expected '}', found EOF
 
 ===
 Missing module body

@@ -706,13 +706,9 @@ function f {}
   Nodes: (ModuleDef
     Def: (FuncDecl KindTok: "function"
       Name: (Ident "f")
-      Params: (FormalPars RParen: "EOF"
-        List: (FormalPar
-          Type: (ErrorNode From: "}" To: "}"))))))
+      Params: (FormalPars)
+      Body: (BlockStmt))))
 ERROR 1:12-1:13: expected '(', found {
-ERROR 1:13-1:14: expected operand, found }
-ERROR 1:13-1:14: expected 'IDENT', found }
-ERROR 1:14-1:15: expected ')', found EOF
 
 ===
 Function unclosed parameter list
@@ -726,9 +722,9 @@ function f(integer a {}
       Params: (FormalPars
         List: (FormalPar
           Type: (Ident "integer")
-          Name: (Ident "a"))))))
+          Name: (Ident "a")))
+      Body: (BlockStmt))))
 ERROR 1:22-1:23: expected ')', found {
-ERROR 1:23-1:24: unexpected token }
 
 ===
 Real-world: Function with runs on and verdict handling

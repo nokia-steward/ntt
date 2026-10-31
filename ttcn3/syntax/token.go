@@ -197,7 +197,9 @@ const (
 )
 
 var tokens = [...]string{
-	ILLEGAL: "ILLEGAL",
+	ILLEGAL:      "ILLEGAL",
+	UNTERMINATED: "UNTERMINATED",
+	MALFORMED:    "MALFORMED",
 
 	EOF:     "EOF",
 	COMMENT: "COMMENT",

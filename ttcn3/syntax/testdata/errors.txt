@@ -127,10 +127,10 @@ x := "abc;
   Nodes: (ExprStmt
     Expr: (BinaryExpr Op: ":="
       X: (Ident "x")
-      Y: (ErrorNode From: "token(2)" To: "token(2)"))))
+      Y: (ErrorNode From: "UNTERMINATED" To: "UNTERMINATED"))))
 ERROR 1:6-1:11: malformed or unterminated token
-ERROR 1:6-1:11: expected operand, found token(2)
-ERROR 1:6-1:11: unexpected token token(2)
+ERROR 1:6-1:11: expected operand, found UNTERMINATED
+ERROR 1:6-1:11: unexpected token UNTERMINATED
 
 ===
 Unterminated block comment
@@ -142,10 +142,10 @@ x := 1; /* comment
     Expr: (BinaryExpr Op: ":="
       X: (Ident "x")
       Y: (ValueLiteral "1")))
-  Nodes: (ErrorNode From: "token(2)" To: "token(2)"))
+  Nodes: (ErrorNode From: "UNTERMINATED" To: "UNTERMINATED"))
 ERROR 1:9-1:19: malformed or unterminated token
-ERROR 1:9-1:19: expected operand, found token(2)
-ERROR 1:9-1:19: unexpected token token(2)
+ERROR 1:9-1:19: expected operand, found UNTERMINATED
+ERROR 1:9-1:19: unexpected token UNTERMINATED
 
 ===
 Invalid character
@@ -279,10 +279,13 @@ x := 1 + module;
       Y: (BinaryExpr Op: "+"
         X: (ValueLiteral "1")
         Y: (ErrorNode From: "module" To: "module"))))
-  Nodes: (Module Tok: "module" LBrace: "EOF" RBrace: "EOF"))
+  Nodes: (Module Tok: "module" RBrace: "EOF"
+    Defs: (ModuleDef
+      Def: (ErrorNode From: ";" To: ";"))))
 ERROR 1:10-1:16: expected operand, found module
 ERROR 1:16-1:17: expected 'IDENT', found ;
-ERROR 1:17-1:18: expected '{', found EOF
+ERROR 1:16-1:17: expected '{', found ;
+ERROR 1:16-1:17: expected module definition, found ;
 ERROR 1:17-1:18: expected '}', found EOF
 
 ===
@@ -295,17 +298,16 @@ alt {
 (Root
   Nodes: (AltStmt Tok: "alt"
     Body: (BlockStmt
-      Stmts: (CommClause RBrack: "p"
+      Stmts: (CommClause
         X: (BinaryExpr Op: ">"
           X: (Ident "x")
           Y: (ValueLiteral "0"))
         Comm: (ExprStmt
           Expr: (SelectorExpr
-            X: (ErrorNode From: "." To: ".")
+            X: (Ident "p")
             Sel: (Ident "receive")))
         Body: (BlockStmt)))))
 ERROR 2:10-2:11: expected ']', found p
-ERROR 2:11-2:12: expected operand, found .
 
 ===
 If missing condition parens
@@ -313,17 +315,17 @@ If missing condition parens
 if x > 0 { y := 1; }
 ---
 (Root
-  Nodes: (IfStmt Tok: "if" LParen: "x"
+  Nodes: (IfStmt Tok: "if"
     Cond: (BinaryExpr Op: ">"
-      X: (ErrorNode From: ">" To: ">")
+      X: (Ident "x")
       Y: (ValueLiteral "0"))
-    Then: (BlockStmt LBrace: "y"
-      Stmts: (ErrorNode From: ":=" To: ";"))))
+    Then: (BlockStmt
+      Stmts: (ExprStmt
+        Expr: (BinaryExpr Op: ":="
+          X: (Ident "y")
+          Y: (ValueLiteral "1"))))))
 ERROR 1:4-1:5: expected '(', found x
-ERROR 1:6-1:7: expected operand, found >
 ERROR 1:10-1:11: expected ')', found {
-ERROR 1:12-1:13: expected '{', found y
-ERROR 1:14-1:16: expected statement, found :=
 
 ===
 Import missing module name
@@ -392,3 +394,101 @@ module M {
     Defs: (ModuleDef
       Def: (ErrorNode From: "123" To: "}"))))
 ERROR 2:3-2:6: expected module definition, found 123
+
+===
+Type definition in function body
+===
+function f() {
+  type integer I;
+  x := 1;
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars)
+      Body: (BlockStmt
+        Stmts: (ErrorNode From: "type" To: ";")
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "x")
+            Y: (ValueLiteral "1")))))))
+ERROR 2:3-2:7: expected statement, found type
+
+===
+Record definition in function body
+===
+function f() {
+  type record R { integer a }
+  x := 1;
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars)
+      Body: (BlockStmt
+        Stmts: (ErrorNode From: "type" To: "x")
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "x")
+            Y: (ValueLiteral "1")))))))
+ERROR 2:3-2:7: expected statement, found type
+
+===
+Misplaced keyword as statement
+===
+function f() {
+  else;
+  x := 1;
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars)
+      Body: (BlockStmt
+        Stmts: (ErrorNode From: "else" To: ";")
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "x")
+            Y: (ValueLiteral "1")))))))
+ERROR 2:3-2:7: expected statement, found else
+
+===
+Function missing name
+===
+function () {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Params: (FormalPars)
+      Body: (BlockStmt))))
+ERROR 1:10-1:11: expected 'IDENT', found (
+
+===
+For loop missing semicolon
+===
+for (i := 0 i < 10; i := i + 1) {}
+---
+(Root
+  Nodes: (ForStmt Tok: "for"
+    Init: (ExprStmt
+      Expr: (BinaryExpr Op: ":="
+        X: (Ident "i")
+        Y: (ValueLiteral "0")))
+    Cond: (BinaryExpr Op: "<"
+      X: (Ident "i")
+      Y: (ValueLiteral "10"))
+    Post: (ExprStmt
+      Expr: (BinaryExpr Op: ":="
+        X: (Ident "i")
+        Y: (BinaryExpr Op: "+"
+          X: (Ident "i")
+          Y: (ValueLiteral "1"))))
+    Body: (BlockStmt)))
+ERROR 1:13-1:14: expected ';', found i

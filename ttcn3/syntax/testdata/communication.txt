@@ -891,6 +891,31 @@ function f() { testcase.stop("failed: ", x); }
               List: (Ident "x"))))))))
 
 ===
+Top-level testcase stop
+===
+testcase.stop;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "testcase")
+      Sel: (Ident "stop"))))
+
+===
+Top-level testcase stop with reason
+===
+testcase.stop("reason");
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (SelectorExpr
+        X: (Ident "testcase")
+        Sel: (Ident "stop"))
+      Args: (ParenExpr
+        List: (ValueLiteral "\"reason\"")))))
+
+===
 Execute with timeout
 ===
 v := execute(tc(1), 5.0);
