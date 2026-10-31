@@ -20,6 +20,7 @@ func TestModules(t *testing.T) {
 	modules := []Test{
 		{pass, `module m {}`},
 		{pass, `module m language "str1", "str2" {}`},
+		{pass, `module m language "str1", "str2", {}`},
 	}
 
 	testParse(t, modules, func(p *parser) { p.parseModule() })
@@ -39,6 +40,7 @@ func TestWithStmts(t *testing.T) {
 		{pass, `variant {"a"}."ruleA";`},
 		{pass, `variant {"a", "b",}."ruleA";`},
 		{pass, `variant (f) {"a", "b"}."ruleA";`},
+		{pass, `variant (type all,) "str";`},
 		{fail, `variant {"a", "b"} "ruleA";`},
 		{fail, `variant {"a", "b"};`},
 		{fail, `variant {}."ruleA";`},
@@ -106,6 +108,10 @@ func TestExprs(t *testing.T) {
 		{pass, `p := pattern ".*" & p & "$"`},
 		{pass, `p := pattern @nocase ".*" & p & "$"`},
 		{pass, `regexp @nocase(x,charstring:"?+(text)?+",0)`},
+		{pass, `regexp @nocase(x,charstring:"?+(text)?+",0,)`},
+		{pass, `{x := 1,}`},
+		{pass, `{a := 1, b := 2,}`},
+		{pass, `{1, 2, 3,}`},
 		{pass, `match(ptc.alive, false)`},
 		{pass, `f(r...)`},
 		{pass, `f({1, 2, 3}...)`},
@@ -135,6 +141,9 @@ func TestFuncDecls(t *testing.T) {
 		{pass, `function f() return record of record {}[3] {}`},
 		{pass, `function f() return template set { integer a } {}`},
 		{pass, `function f(@lazy @deterministic integer p) {}`},
+		{pass, `function f(in integer x, out integer y,) {}`},
+		{pass, `function f(record { integer a, } x,) {}`},
+		{pass, `signature f(integer x, charstring y,);`},
 		{pass, `altstep as1(in integer items...) {}`},
 		{pass, `testcase tc(in verdicttype verdicts...) runs on C {}`},
 		{pass, `function f() runs on A[-] {}`},
@@ -176,6 +185,7 @@ func TestModuleDefs(t *testing.T) {
                         type      all }`},
 		{pass, `import from m all except { group all }`},
 		{pass, `import from m all except { group x,y }`},
+		{pass, `import from m all except { group x,y, }`},
 		{pass, `import from m {
                         template  all;
                         const     all;
@@ -193,6 +203,7 @@ func TestModuleDefs(t *testing.T) {
 		{pass, `public modulepar integer x;`},
 		{pass, `modulepar mpar := 1;`},
 		{pass, `modulepar a := 1, b := "x";`},
+		{pass, `modulepar a := 1, b := "x",;`},
 		{pass, `modulepar record of charstring IDs := {"a", "b"};`},
 		{pass, `modulepar template record { integer a } t := ?;`},
 		{pass, `modulepar { mpar := 1; record of integer r; }`},
@@ -256,6 +267,7 @@ func TestTemplateDecls(t *testing.T) {
 		{pass, `template int x := ?;`},
 		{pass, `template int x modifies y := ?;`},
 		{pass, `template int x modifies y.z := ?;`},
+		{pass, `template int x(int i,) := i;`},
 		{pass, `template int x(int i) := i;`},
 		{pass, `template @lazy int x := ?;`},
 		{pass, `template @lazy int x(int i) := i;`},
@@ -278,6 +290,7 @@ func TestFormalPars(t *testing.T) {
 		{pass, `()`},
 		{pass, `(int y)`},
 		{pass, `(int x, int y)`},
+		{pass, `(int x, int y,)`},
 		{pass, `(in int x, out int y, inout int z)`},
 		{pass, `(in template(value) @fuzzy timer x := 1, out timer y)`},
 		{pass, `(out timer y, in template(value) @fuzzy timer x := 1)`},
@@ -355,6 +368,9 @@ func TestTypes(t *testing.T) {
 		{pass, `type union s {enumerated { e(1) } foo}`},
 		{pass, `type enumerated a {e, e(1), e(1)}`},
 		{pass, `type record r {int a, int b,}`},
+		{pass, `type record r {integer a optional, charstring b,}`},
+		{pass, `type record r {int a (0, 1,), int b,}`},
+		{pass, `type enumerated a {e, e(1, 2,),}`},
 		{pass, `type record r {record { int i, float f, } nr}`},
 
 		// Embedded Fields
@@ -376,6 +392,8 @@ func TestTypes(t *testing.T) {
 		{pass, `type port p message {address a.b[-]}`},
 		{pass, `type port p message {inout all}`},
 		{pass, `type port p message {inout float, a.b[-]}`},
+		{pass, `type port p message {map param (out int i:=1,)}`},
+		{pass, `type port p message {inout integer, charstring,}`},
 		{pass, `type port p message {map param (out int i:=1)}`},
 		{pass, `type port p message {unmap param (out int i:=1)}`},
 		{pass, `type port p procedure {}`},
@@ -551,6 +569,7 @@ func TestTypeParametrization(t *testing.T) {
 		{pass, `type set x<in Comp C := a<integer,boolean>[-]> {}`},
 		{pass, `type component C<in type T> {}`},
 		{pass, `type component D<in type T> extends C<T> {}`},
+		{pass, `type component D<in type T,> extends C<T,> {}`},
 		{pass, `type function f<type T> ()`},
 
 		// Actual Type Parameters

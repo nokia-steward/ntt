@@ -589,7 +589,7 @@ func (p *parser) parse() Node {
  * Expressions
  *************************************************************************/
 
-// ExprList ::= Expr { "," Expr }
+// ExprList ::= Expr { "," Expr } [ "," ]
 func (p *parser) parseExprList() (list []Expr) {
 	if p.trace {
 		defer un(trace(p, "ExprList"))
@@ -598,6 +598,10 @@ func (p *parser) parseExprList() (list []Expr) {
 	list = append(list, p.parseExpr())
 	for p.tok == COMMA {
 		p.consume()
+		switch p.tok {
+		case RPAREN, RBRACK, RBRACE:
+			return list
+		}
 		list = append(list, p.parseExpr())
 	}
 	return list
@@ -1157,6 +1161,10 @@ func (p *parser) parseRefList() []Expr {
 			break
 		}
 		p.consume()
+		switch p.tok {
+		case LBRACE, RBRACE, SEMICOLON:
+			return l
+		}
 	}
 	return l
 }
@@ -1205,6 +1213,9 @@ func (p *parser) tryTypeParameters() *ParenExpr {
 			break
 		}
 		p.consume()
+		if p.tok == GT {
+			break
+		}
 	}
 
 	if p.tok != GT {
@@ -1331,6 +1342,9 @@ func (p *parser) parseLanguageSpec() *LanguageSpec {
 			break
 		}
 		p.consume()
+		if p.tok == LBRACE {
+			break
+		}
 	}
 	return l
 }
@@ -1516,6 +1530,10 @@ func (p *parser) parseImportStmt() *DefKindExpr {
 				break
 			}
 			p.consume()
+			switch p.tok {
+			case RBRACE, SEMICOLON:
+				return x
+			}
 		}
 	case IMPORT:
 		x.KindTok = p.consume()
@@ -1642,6 +1660,9 @@ func (p *parser) parseWithStmt() *WithStmt {
 				break
 			}
 			p.consume()
+			if p.tok == RPAREN {
+				break
+			}
 		}
 		x.RParen = p.expect(RPAREN)
 	}
@@ -2322,6 +2343,10 @@ func (p *parser) parseDeclList() (list []*Declarator) {
 	list = append(list, p.parseDeclarator())
 	for p.tok == COMMA {
 		p.consume()
+		switch p.tok {
+		case RBRACE, SEMICOLON:
+			return list
+		}
 		list = append(list, p.parseDeclarator())
 	}
 	return
