@@ -13,7 +13,6 @@ import (
 	"github.com/nokia/ntt/ttcn3"
 	printer "github.com/nokia/ntt/ttcn3/format"
 	"github.com/nokia/ntt/ttcn3/syntax"
-	syntax2 "github.com/nokia/ntt/ttcn3/v2/syntax"
 	"github.com/spf13/cobra"
 )
 
@@ -52,33 +51,29 @@ var (
 						fatal(err)
 					}
 					w := bufio.NewWriter(os.Stdout)
-					syntax2.Tokenize(b).Inspect(func(n syntax2.Node) bool {
-						if !n.IsValid() || !n.IsToken() {
-							return true
-						}
-
-						if !withTrivia && n.Kind().IsTrivia() {
-							return true
+					root := syntax.Tokenize(b)
+					for tok := root.FirstTok(); tok != nil; tok = tok.NextTok() {
+						kind := tok.Kind()
+						if !withTrivia && (kind == syntax.COMMENT || kind == syntax.PREPROC) {
+							continue
 						}
 
 						if withPosition {
-							fmt.Fprintf(w, "%d	%d	", n.Pos(), n.End())
+							fmt.Fprintf(w, "%d	%d	", tok.Pos(), tok.End())
 						}
 
-						if n.Kind().IsKeyword() {
+						if kind.IsKeyword() {
 							fmt.Fprintf(w, "KEYWORD")
 						} else {
-							fmt.Fprintf(w, strings.ToUpper(n.Kind().String()))
+							fmt.Fprintf(w, strings.ToUpper(kind.String()))
 						}
 
 						if withValue {
-							fmt.Fprintf(w, "	%s", strings.ReplaceAll(n.Text(), "\n", "\\n"))
+							fmt.Fprintf(w, "	%s", strings.ReplaceAll(tok.String(), "\n", "\\n"))
 						}
 
 						fmt.Fprintln(w)
-
-						return true
-					})
+					}
 					w.Flush()
 				default:
 					fatal(fmt.Errorf("format not supported: %s", Format()))
