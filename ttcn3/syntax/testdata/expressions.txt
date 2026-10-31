@@ -1,0 +1,809 @@
+===
+Integer literal
+===
+42
+---
+(Root
+  Nodes: (ValueLiteral "42"))
+
+===
+Unary plus
+===
++42
+---
+(Root
+  Nodes: (UnaryExpr Op: "+"
+    X: (ValueLiteral "42")))
+
+===
+Float with exponent
+===
+1.5e10
+---
+(Root
+  Nodes: (ValueLiteral "1.5e10"))
+
+===
+Infinity
+===
+infinity
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (Ident "infinity")))
+
+===
+Not a number
+===
+not_a_number
+---
+(Root
+  Nodes: (ValueLiteral "not_a_number"))
+
+===
+Bitstring
+===
+'0101'B
+---
+(Root
+  Nodes: (ValueLiteral "'0101'B"))
+
+===
+Hexstring
+===
+'AB12'H
+---
+(Root
+  Nodes: (ValueLiteral "'AB12'H"))
+
+===
+Octetstring
+===
+'FFEE00'O
+---
+(Root
+  Nodes: (ValueLiteral "'FFEE00'O"))
+
+===
+Bitstring with wildcards
+===
+'01?*'B
+---
+(Root
+  Nodes: (ValueLiteral "'01?*'B"))
+
+===
+Charstring with doubled quote
+===
+"say ""hi"""
+---
+(Root
+  Nodes: (ValueLiteral "\"say \"\"hi\"\"\""))
+
+===
+Universal charstring quadruple
+===
+char(0, 0, 0, 65)
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "char")
+      Args: (ParenExpr
+        List: (ValueLiteral "0")
+        List: (ValueLiteral "0")
+        List: (ValueLiteral "0")
+        List: (ValueLiteral "65")))))
+
+===
+Boolean true
+===
+true
+---
+(Root
+  Nodes: (ValueLiteral "true"))
+
+===
+Verdict pass
+===
+pass
+---
+(Root
+  Nodes: (ValueLiteral "pass"))
+
+===
+Omit literal
+===
+omit
+---
+(Root
+  Nodes: (ValueLiteral "omit"))
+
+===
+Null literal
+===
+null
+---
+(Root
+  Nodes: (ValueLiteral "null"))
+
+===
+Or binds looser than xor and and
+===
+a or b xor c and d
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "or"
+      X: (Ident "a")
+      Y: (BinaryExpr Op: "xor"
+        X: (Ident "b")
+        Y: (BinaryExpr Op: "and"
+          X: (Ident "c")
+          Y: (Ident "d"))))))
+
+===
+Not binds looser than comparison
+===
+not a == b
+---
+(Root
+  Nodes: (UnaryExpr Op: "not"
+    X: (BinaryExpr Op: "=="
+      X: (Ident "a")
+      Y: (Ident "b"))))
+
+===
+Not with and
+===
+not a and b
+---
+(Root
+  Nodes: (BinaryExpr Op: "and"
+    X: (UnaryExpr Op: "not"
+      X: (Ident "a"))
+    Y: (Ident "b")))
+
+===
+Equality operator
+===
+a == b
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "=="
+      X: (Ident "a")
+      Y: (Ident "b"))))
+
+===
+Inequality operator
+===
+a != b
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "!="
+      X: (Ident "a")
+      Y: (Ident "b"))))
+
+===
+Comparison binds looser than shift
+===
+a == b << c
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "=="
+      X: (Ident "a")
+      Y: (BinaryExpr Op: "<<"
+        X: (Ident "b")
+        Y: (Ident "c")))))
+
+===
+Comparison chain is left associative
+===
+a < b < c
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "<"
+      X: (BinaryExpr Op: "<"
+        X: (Ident "a")
+        Y: (Ident "b"))
+      Y: (Ident "c"))))
+
+===
+Rotate left
+===
+a <@ 3
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "<@"
+      X: (Ident "a")
+      Y: (ValueLiteral "3"))))
+
+===
+Rotate right
+===
+a @> 3
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "@>"
+      X: (Ident "a")
+      Y: (ValueLiteral "3"))))
+
+===
+Shift binds looser than concatenation
+===
+a << b & c
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "<<"
+      X: (Ident "a")
+      Y: (BinaryExpr Op: "&"
+        X: (Ident "b")
+        Y: (Ident "c")))))
+
+===
+Concatenation is left associative
+===
+a & b & c
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "&"
+      X: (BinaryExpr Op: "&"
+        X: (Ident "a")
+        Y: (Ident "b"))
+      Y: (Ident "c"))))
+
+===
+Concatenation and addition have equal precedence
+===
+a & b + c
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "+"
+      X: (BinaryExpr Op: "&"
+        X: (Ident "a")
+        Y: (Ident "b"))
+      Y: (Ident "c"))))
+
+===
+Addition and subtraction left associative
+===
+a - b + c
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "+"
+      X: (BinaryExpr Op: "-"
+        X: (Ident "a")
+        Y: (Ident "b"))
+      Y: (Ident "c"))))
+
+===
+Division and mod and rem
+===
+a / b mod c rem d
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "rem"
+      X: (BinaryExpr Op: "mod"
+        X: (BinaryExpr Op: "/"
+          X: (Ident "a")
+          Y: (Ident "b"))
+        Y: (Ident "c"))
+      Y: (Ident "d"))))
+
+===
+Bitwise not4b
+===
+not4b a
+---
+(Root
+  Nodes: (UnaryExpr Op: "not4b"
+    X: (Ident "a")))
+
+===
+Bitwise operator chain
+===
+a or4b b xor4b c and4b d
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "or4b"
+      X: (Ident "a")
+      Y: (BinaryExpr Op: "xor4b"
+        X: (Ident "b")
+        Y: (BinaryExpr Op: "and4b"
+          X: (Ident "c")
+          Y: (Ident "d"))))))
+
+===
+Bitwise not4b with addition
+===
+not4b a + b
+---
+(Root
+  Nodes: (UnaryExpr Op: "not4b"
+    X: (BinaryExpr Op: "+"
+      X: (Ident "a")
+      Y: (Ident "b"))))
+
+===
+Unary minus in binary expression
+===
+a - -b
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "-"
+      X: (Ident "a")
+      Y: (UnaryExpr Op: "-"
+        X: (Ident "b")))))
+
+===
+Double unary minus
+===
+- - a
+---
+(Root
+  Nodes: (UnaryExpr Op: "-"
+    X: (UnaryExpr Op: "-"
+      X: (Ident "a"))))
+
+===
+Unary minus with multiplication
+===
+-a * b
+---
+(Root
+  Nodes: (BinaryExpr Op: "*"
+    X: (UnaryExpr Op: "-"
+      X: (Ident "a"))
+    Y: (Ident "b")))
+
+===
+Parenthesized expression
+===
+(a + b) * c
+---
+(Root
+  Nodes: (BinaryExpr Op: "*"
+    X: (ParenExpr
+      List: (BinaryExpr Op: "+"
+        X: (Ident "a")
+        Y: (Ident "b")))
+    Y: (Ident "c")))
+
+===
+Nested parentheses
+===
+((1))
+---
+(Root
+  Nodes: (ParenExpr
+    List: (ParenExpr
+      List: (ValueLiteral "1"))))
+
+===
+Mixed arithmetic precedence
+===
+1 + 2 * 3 - 4 / 2
+---
+(Root
+  Nodes: (BinaryExpr Op: "-"
+    X: (BinaryExpr Op: "+"
+      X: (ValueLiteral "1")
+      Y: (BinaryExpr Op: "*"
+        X: (ValueLiteral "2")
+        Y: (ValueLiteral "3")))
+    Y: (BinaryExpr Op: "/"
+      X: (ValueLiteral "4")
+      Y: (ValueLiteral "2"))))
+
+===
+Mixed logical and relational
+===
+a < b and c > d or e == f
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "or"
+      X: (BinaryExpr Op: "and"
+        X: (BinaryExpr Op: "<"
+          X: (Ident "a")
+          Y: (Ident "b"))
+        Y: (BinaryExpr Op: ">"
+          X: (Ident "c")
+          Y: (Ident "d")))
+      Y: (BinaryExpr Op: "=="
+        X: (Ident "e")
+        Y: (Ident "f")))))
+
+===
+Selector chain
+===
+a.b.c.d
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (SelectorExpr
+        X: (SelectorExpr
+          X: (Ident "a")
+          Sel: (Ident "b"))
+        Sel: (Ident "c"))
+      Sel: (Ident "d"))))
+
+===
+Index chain
+===
+a[0][1]
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (IndexExpr
+      X: (IndexExpr
+        X: (Ident "a")
+        Index: (ValueLiteral "0"))
+      Index: (ValueLiteral "1"))))
+
+===
+Selector and index mix
+===
+a.b[0].c[1]
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (IndexExpr
+      X: (SelectorExpr
+        X: (IndexExpr
+          X: (SelectorExpr
+            X: (Ident "a")
+            Sel: (Ident "b"))
+          Index: (ValueLiteral "0"))
+        Sel: (Ident "c"))
+      Index: (ValueLiteral "1"))))
+
+===
+Call without arguments
+===
+f()
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "f")
+      Args: (ParenExpr))))
+
+===
+Call with mixed arguments
+===
+f(1, b := 2)
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "f")
+      Args: (ParenExpr
+        List: (ValueLiteral "1")
+        List: (BinaryExpr Op: ":="
+          X: (Ident "b")
+          Y: (ValueLiteral "2"))))))
+
+===
+Call with nested calls
+===
+f(g(1), h(2, 3))
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "f")
+      Args: (ParenExpr
+        List: (CallExpr
+          Fun: (Ident "g")
+          Args: (ParenExpr
+            List: (ValueLiteral "1")))
+        List: (CallExpr
+          Fun: (Ident "h")
+          Args: (ParenExpr
+            List: (ValueLiteral "2")
+            List: (ValueLiteral "3")))))))
+
+===
+Call with unused argument
+===
+f(-, 1)
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "f")
+      Args: (ParenExpr
+        List: (ValueLiteral "-")
+        List: (ValueLiteral "1")))))
+
+===
+Call with trailing comma
+===
+f(1, 2,)
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "f")
+      Args: (ParenExpr
+        List: (ValueLiteral "1")
+        List: (ValueLiteral "2")))))
+
+===
+Method call
+===
+a.b.f(1)
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (SelectorExpr
+        X: (SelectorExpr
+          X: (Ident "a")
+          Sel: (Ident "b"))
+        Sel: (Ident "f"))
+      Args: (ParenExpr
+        List: (ValueLiteral "1")))))
+
+===
+Predefined function in comparison
+===
+lengthof(x) > 0 and isbound(y)
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "and"
+      X: (BinaryExpr Op: ">"
+        X: (CallExpr
+          Fun: (Ident "lengthof")
+          Args: (ParenExpr
+            List: (Ident "x")))
+        Y: (ValueLiteral "0"))
+      Y: (CallExpr
+        Fun: (Ident "isbound")
+        Args: (ParenExpr
+          List: (Ident "y"))))))
+
+===
+Any component reference
+===
+any component
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (Ident "any component")))
+
+===
+All timer reference
+===
+all timer
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (Ident "all timer")))
+
+===
+Any from port array
+===
+any port from p
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "from"
+      X: (Ident "any port")
+      Y: (Ident "p"))))
+
+===
+Mtc reference
+===
+mtc
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (Ident "mtc")))
+
+===
+System reference
+===
+system
+---
+(Root
+  Nodes: (Ident "system"))
+
+===
+Range with negative infinity
+===
+(-infinity .. 5)
+---
+(Root
+  Nodes: (ParenExpr
+    List: (BinaryExpr Op: ".."
+      X: (UnaryExpr Op: "-"
+        X: (Ident "infinity"))
+      Y: (ValueLiteral "5"))))
+
+===
+Exclusive range
+===
+(1 .. !10)
+---
+(Root
+  Nodes: (ParenExpr
+    List: (BinaryExpr Op: ".."
+      X: (ValueLiteral "1")
+      Y: (UnaryExpr Op: "!"
+        X: (ValueLiteral "10")))))
+
+===
+Template list
+===
+(1, 2, (5 .. 8))
+---
+(Root
+  Nodes: (ParenExpr
+    List: (ValueLiteral "1")
+    List: (ValueLiteral "2")
+    List: (ParenExpr
+      List: (BinaryExpr Op: ".."
+        X: (ValueLiteral "5")
+        Y: (ValueLiteral "8")))))
+
+===
+Decoded modifier
+===
+@decoded x
+---
+(Root
+  Nodes: (DecodedExpr Tok: "@decoded"
+    X: (Ident "x")))
+
+===
+Decoded with encoding
+===
+@decoded("RAW") x
+---
+(Root
+  Nodes: (DecodedExpr Tok: "@decoded"
+    Params: (ParenExpr
+      List: (ValueLiteral "\"RAW\""))
+    X: (Ident "x")))
+
+===
+Regexp expression
+===
+regexp("abc", "b", 0)
+---
+(Root
+  Nodes: (RegexpExpr Tok: "regexp"
+    X: (ParenExpr
+      List: (ValueLiteral "\"abc\"")
+      List: (ValueLiteral "\"b\"")
+      List: (ValueLiteral "0"))))
+
+===
+Address reference
+===
+address
+---
+(Root
+  Nodes: (Ident "address"))
+
+===
+Real-world: guarded arithmetic
+===
+(lengthof(buf) - offset) mod 8 == 0 and not ispresent(x.opt)
+---
+(Root
+  Nodes: (BinaryExpr Op: "and"
+    X: (BinaryExpr Op: "=="
+      X: (BinaryExpr Op: "mod"
+        X: (ParenExpr
+          List: (BinaryExpr Op: "-"
+            X: (CallExpr
+              Fun: (Ident "lengthof")
+              Args: (ParenExpr
+                List: (Ident "buf")))
+            Y: (Ident "offset")))
+        Y: (ValueLiteral "8"))
+      Y: (ValueLiteral "0"))
+    Y: (UnaryExpr Op: "not"
+      X: (CallExpr
+        Fun: (Ident "ispresent")
+        Args: (ParenExpr
+          List: (SelectorExpr
+            X: (Ident "x")
+            Sel: (Ident "opt")))))))
+
+===
+Real-world: bit manipulation
+===
+(flags and4b '00001111'B) or4b (mask << 4)
+---
+(Root
+  Nodes: (BinaryExpr Op: "or4b"
+    X: (ParenExpr
+      List: (BinaryExpr Op: "and4b"
+        X: (Ident "flags")
+        Y: (ValueLiteral "'00001111'B")))
+    Y: (ParenExpr
+      List: (BinaryExpr Op: "<<"
+        X: (Ident "mask")
+        Y: (ValueLiteral "4")))))
+
+===
+Composite with trailing comma
+===
+x := {1, 2,}
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (CompositeLiteral
+        List: (ValueLiteral "1")
+        List: (ValueLiteral "2")))))
+
+===
+Dynamic modifier block
+===
+x := @dynamic { f() }
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (DynamicExpr Tok: "@dynamic"
+        Body: (BlockStmt
+          Stmts: (ExprStmt
+            Expr: (CallExpr
+              Fun: (Ident "f")
+              Args: (ParenExpr))))))))
+
+===
+Index with unused slot
+===
+a[-]
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (IndexExpr
+      X: (Ident "a")
+      Index: (ValueLiteral "-"))))
+
+===
+Decode operator
+===
+x => integer
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "=>"
+      X: (Ident "x")
+      Y: (Ident "integer"))))
+
+===
+Parameterized reference
+===
+t<integer>
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (ParametrizedIdent
+      Ident: (Ident "t")
+      Params: (ParenExpr LParen: "<" RParen: ">"
+        List: (Ident "integer")))))

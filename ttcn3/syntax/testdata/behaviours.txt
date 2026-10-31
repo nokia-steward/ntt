@@ -1,0 +1,950 @@
+===
+Function empty
+===
+function f() {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars)
+      Body: (BlockStmt))))
+
+===
+Function with parameters
+===
+function f(integer a, charstring b) {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (Ident "integer")
+          Name: (Ident "a"))
+        List: (FormalPar
+          Type: (Ident "charstring")
+          Name: (Ident "b")))
+      Body: (BlockStmt))))
+
+===
+Function parameter directions
+===
+function f(in integer a, out integer b, inout integer c) {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar Direction: "in"
+          Type: (Ident "integer")
+          Name: (Ident "a"))
+        List: (FormalPar Direction: "out"
+          Type: (Ident "integer")
+          Name: (Ident "b"))
+        List: (FormalPar Direction: "inout"
+          Type: (Ident "integer")
+          Name: (Ident "c")))
+      Body: (BlockStmt))))
+
+===
+Function parameter default values
+===
+function f(integer a := 1, in charstring b := "x") {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar AssignTok: ":="
+          Type: (Ident "integer")
+          Name: (Ident "a")
+          Value: (ValueLiteral "1"))
+        List: (FormalPar Direction: "in" AssignTok: ":="
+          Type: (Ident "charstring")
+          Name: (Ident "b")
+          Value: (ValueLiteral "\"x\"")))
+      Body: (BlockStmt))))
+
+===
+Function template parameters
+===
+function f(template integer a, in template charstring b, out template boolean c) {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar
+          TemplateRestriction: (RestrictionSpec TemplateTok: "template")
+          Type: (Ident "integer")
+          Name: (Ident "a"))
+        List: (FormalPar Direction: "in"
+          TemplateRestriction: (RestrictionSpec TemplateTok: "template")
+          Type: (Ident "charstring")
+          Name: (Ident "b"))
+        List: (FormalPar Direction: "out"
+          TemplateRestriction: (RestrictionSpec TemplateTok: "template")
+          Type: (Ident "boolean")
+          Name: (Ident "c")))
+      Body: (BlockStmt))))
+
+===
+Function template parameters with restrictions
+===
+function f(template(value) integer a, template(omit) integer b, template(present) integer c) {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar
+          TemplateRestriction: (RestrictionSpec TemplateTok: "template" Tok: "value")
+          Type: (Ident "integer")
+          Name: (Ident "a"))
+        List: (FormalPar
+          TemplateRestriction: (RestrictionSpec TemplateTok: "template" Tok: "omit")
+          Type: (Ident "integer")
+          Name: (Ident "b"))
+        List: (FormalPar
+          TemplateRestriction: (RestrictionSpec TemplateTok: "template" Tok: "present")
+          Type: (Ident "integer")
+          Name: (Ident "c")))
+      Body: (BlockStmt))))
+
+===
+Function with array and structured parameter types
+===
+function f(record of integer a, MyRec b, integer c[3]) {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (ListSpec KindTok: "record" OfTok: "of"
+            ElemType: (RefSpec
+              X: (Ident "integer")))
+          Name: (Ident "a"))
+        List: (FormalPar
+          Type: (Ident "MyRec")
+          Name: (Ident "b"))
+        List: (FormalPar
+          Type: (Ident "integer")
+          Name: (Ident "c")
+          ArrayDef: (ParenExpr
+            List: (ValueLiteral "3"))))
+      Body: (BlockStmt))))
+
+===
+Function return type
+===
+function f() return integer {
+  return 1;
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars)
+      Return: (ReturnSpec Tok: "return"
+        Type: (Ident "integer"))
+      Body: (BlockStmt
+        Stmts: (ReturnStmt Tok: "return"
+          Result: (ValueLiteral "1"))))))
+
+===
+Function return template
+===
+function f() return template integer {
+  return ?;
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars)
+      Return: (ReturnSpec Tok: "return"
+        Restriction: (RestrictionSpec TemplateTok: "template")
+        Type: (Ident "integer"))
+      Body: (BlockStmt
+        Stmts: (ReturnStmt Tok: "return"
+          Result: (ValueLiteral "?"))))))
+
+===
+Function return template with restriction
+===
+function f() return template(value) integer {
+  return 1;
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars)
+      Return: (ReturnSpec Tok: "return"
+        Restriction: (RestrictionSpec TemplateTok: "template" Tok: "value")
+        Type: (Ident "integer"))
+      Body: (BlockStmt
+        Stmts: (ReturnStmt Tok: "return"
+          Result: (ValueLiteral "1"))))))
+
+===
+Function runs on
+===
+function f() runs on CT {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars)
+      RunsOn: (RunsOnSpec RunsTok: "runs" OnTok: "on"
+        Comp: (Ident "CT"))
+      Body: (BlockStmt))))
+
+===
+Function runs on, mtc and system
+===
+function f() runs on CT mtc MTC_CT system SYS_CT return integer {
+  return 0;
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars)
+      RunsOn: (RunsOnSpec RunsTok: "runs" OnTok: "on"
+        Comp: (Ident "CT"))
+      Mtc: (MtcSpec Tok: "mtc"
+        Comp: (Ident "MTC_CT"))
+      System: (SystemSpec Tok: "system"
+        Comp: (Ident "SYS_CT"))
+      Return: (ReturnSpec Tok: "return"
+        Type: (Ident "integer"))
+      Body: (BlockStmt
+        Stmts: (ReturnStmt Tok: "return"
+          Result: (ValueLiteral "0"))))))
+
+===
+Function deterministic parameter
+===
+function f(@deterministic integer a) return integer {
+  return a;
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar Modif: "@deterministic"
+          Type: (Ident "integer")
+          Name: (Ident "a")))
+      Return: (ReturnSpec Tok: "return"
+        Type: (Ident "integer"))
+      Body: (BlockStmt
+        Stmts: (ReturnStmt Tok: "return"
+          Result: (Ident "a"))))))
+
+===
+Function lazy and fuzzy parameters
+===
+function f(@lazy integer a, template @fuzzy integer b) {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar Modif: "@lazy"
+          Type: (Ident "integer")
+          Name: (Ident "a"))
+        List: (FormalPar Modif: "@fuzzy"
+          TemplateRestriction: (RestrictionSpec TemplateTok: "template")
+          Type: (Ident "integer")
+          Name: (Ident "b")))
+      Body: (BlockStmt))))
+
+===
+Function parameter with multiple modifiers
+===
+public function f(template @fuzzy @deterministic integer a) {}
+---
+(Root
+  Nodes: (ModuleDef Visibility: "public"
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar Modif: "@fuzzy" Deterministic: "@deterministic"
+          TemplateRestriction: (RestrictionSpec TemplateTok: "template")
+          Type: (Ident "integer")
+          Name: (Ident "a")))
+      Body: (BlockStmt))))
+
+===
+Function with attributes
+===
+function f() {} with { extension "prototype(fast)" }
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars)
+      Body: (BlockStmt)
+      With: (WithSpec Tok: "with"
+        List: (WithStmt KindTok: "extension"
+          Value: (ValueLiteral "\"prototype(fast)\""))))))
+
+===
+External function
+===
+external function f(in integer a) return integer;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl External: "external" KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar Direction: "in"
+          Type: (Ident "integer")
+          Name: (Ident "a")))
+      Return: (ReturnSpec Tok: "return"
+        Type: (Ident "integer")))))
+
+===
+External function without return
+===
+external function g();
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl External: "external" KindTok: "function"
+      Name: (Ident "g")
+      Params: (FormalPars))))
+
+===
+External function with attributes
+===
+external function e() with { extension "prototype(convert)" }
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl External: "external" KindTok: "function"
+      Name: (Ident "e")
+      Params: (FormalPars)
+      With: (WithSpec Tok: "with"
+        List: (WithStmt KindTok: "extension"
+          Value: (ValueLiteral "\"prototype(convert)\""))))))
+
+===
+Altstep empty
+===
+altstep a() {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "altstep"
+      Name: (Ident "a")
+      Params: (FormalPars)
+      Body: (BlockStmt))))
+
+===
+Altstep with branches
+===
+altstep a() runs on CT {
+  [] p.receive(1) {}
+  [] t.timeout { setverdict(fail); }
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "altstep"
+      Name: (Ident "a")
+      Params: (FormalPars)
+      RunsOn: (RunsOnSpec RunsTok: "runs" OnTok: "on"
+        Comp: (Ident "CT"))
+      Body: (BlockStmt
+        Stmts: (CommClause
+          Comm: (ExprStmt
+            Expr: (CallExpr
+              Fun: (SelectorExpr
+                X: (Ident "p")
+                Sel: (Ident "receive"))
+              Args: (ParenExpr
+                List: (ValueLiteral "1"))))
+          Body: (BlockStmt))
+        Stmts: (CommClause
+          Comm: (ExprStmt
+            Expr: (SelectorExpr
+              X: (Ident "t")
+              Sel: (Ident "timeout")))
+          Body: (BlockStmt
+            Stmts: (ExprStmt
+              Expr: (CallExpr
+                Fun: (Ident "setverdict")
+                Args: (ParenExpr
+                  List: (ValueLiteral "fail"))))))))))
+
+===
+Altstep with guards and else
+===
+altstep a() runs on CT {
+  [x > 0] p.receive { x := x - 1; }
+  [else] { repeat; }
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "altstep"
+      Name: (Ident "a")
+      Params: (FormalPars)
+      RunsOn: (RunsOnSpec RunsTok: "runs" OnTok: "on"
+        Comp: (Ident "CT"))
+      Body: (BlockStmt
+        Stmts: (CommClause
+          X: (BinaryExpr Op: ">"
+            X: (Ident "x")
+            Y: (ValueLiteral "0"))
+          Comm: (ExprStmt
+            Expr: (SelectorExpr
+              X: (Ident "p")
+              Sel: (Ident "receive")))
+          Body: (BlockStmt
+            Stmts: (ExprStmt
+              Expr: (BinaryExpr Op: ":="
+                X: (Ident "x")
+                Y: (BinaryExpr Op: "-"
+                  X: (Ident "x")
+                  Y: (ValueLiteral "1"))))))
+        Stmts: (CommClause Else: "else"
+          Body: (BlockStmt
+            Stmts: (BranchStmt Tok: "repeat")))))))
+
+===
+Altstep with local definitions
+===
+altstep a() runs on CT {
+  var integer count := 0;
+  timer t := 5.0;
+  [] p.receive(integer:?) -> value count {}
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "altstep"
+      Name: (Ident "a")
+      Params: (FormalPars)
+      RunsOn: (RunsOnSpec RunsTok: "runs" OnTok: "on"
+        Comp: (Ident "CT"))
+      Body: (BlockStmt
+        Stmts: (DeclStmt
+          Decl: (ValueDecl KindTok: "var"
+            Type: (Ident "integer")
+            Decls: (Declarator AssignTok: ":="
+              Name: (Ident "count")
+              Value: (ValueLiteral "0"))))
+        Stmts: (DeclStmt
+          Decl: (ValueDecl
+            Type: (Ident "timer")
+            Decls: (Declarator AssignTok: ":="
+              Name: (Ident "t")
+              Value: (ValueLiteral "5.0"))))
+        Stmts: (CommClause
+          Comm: (ExprStmt
+            Expr: (RedirectExpr Tok: "->" ValueTok: "value"
+              X: (CallExpr
+                Fun: (SelectorExpr
+                  X: (Ident "p")
+                  Sel: (Ident "receive"))
+                Args: (ParenExpr
+                  List: (BinaryExpr Op: ":"
+                    X: (Ident "integer")
+                    Y: (ValueLiteral "?"))))
+              Value: (Ident "count")))
+          Body: (BlockStmt))))))
+
+===
+Testcase empty
+===
+testcase tc() {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "testcase"
+      Name: (Ident "tc")
+      Params: (FormalPars)
+      Body: (BlockStmt))))
+
+===
+Testcase runs on
+===
+testcase tc() runs on CT {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "testcase"
+      Name: (Ident "tc")
+      Params: (FormalPars)
+      RunsOn: (RunsOnSpec RunsTok: "runs" OnTok: "on"
+        Comp: (Ident "CT"))
+      Body: (BlockStmt))))
+
+===
+Signature empty
+===
+signature s();
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SignatureDecl Tok: "signature"
+      Name: (Ident "s")
+      Params: (FormalPars))))
+
+===
+Signature with parameters
+===
+signature s(in integer a, out charstring b, inout boolean c);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SignatureDecl Tok: "signature"
+      Name: (Ident "s")
+      Params: (FormalPars
+        List: (FormalPar Direction: "in"
+          Type: (Ident "integer")
+          Name: (Ident "a"))
+        List: (FormalPar Direction: "out"
+          Type: (Ident "charstring")
+          Name: (Ident "b"))
+        List: (FormalPar Direction: "inout"
+          Type: (Ident "boolean")
+          Name: (Ident "c"))))))
+
+===
+Signature with return
+===
+signature s(integer a) return integer;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SignatureDecl Tok: "signature"
+      Name: (Ident "s")
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (Ident "integer")
+          Name: (Ident "a")))
+      Return: (ReturnSpec Tok: "return"
+        Type: (Ident "integer")))))
+
+===
+Signature noblock
+===
+signature s(integer a) noblock;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SignatureDecl Tok: "signature" NoBlock: "noblock"
+      Name: (Ident "s")
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (Ident "integer")
+          Name: (Ident "a"))))))
+
+===
+Signature with exceptions
+===
+signature s(integer a) exception(integer, charstring);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SignatureDecl Tok: "signature" ExceptionTok: "exception"
+      Name: (Ident "s")
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (Ident "integer")
+          Name: (Ident "a")))
+      Exception: (ParenExpr
+        List: (Ident "integer")
+        List: (Ident "charstring")))))
+
+===
+Signature with return and exception
+===
+signature s(in integer a) return integer exception(MyErr);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SignatureDecl Tok: "signature" ExceptionTok: "exception"
+      Name: (Ident "s")
+      Params: (FormalPars
+        List: (FormalPar Direction: "in"
+          Type: (Ident "integer")
+          Name: (Ident "a")))
+      Return: (ReturnSpec Tok: "return"
+        Type: (Ident "integer"))
+      Exception: (ParenExpr
+        List: (Ident "MyErr")))))
+
+===
+Signature noblock with exception
+===
+signature s() noblock exception(MyErr);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SignatureDecl Tok: "signature" NoBlock: "noblock" ExceptionTok: "exception"
+      Name: (Ident "s")
+      Params: (FormalPars)
+      Exception: (ParenExpr
+        List: (Ident "MyErr")))))
+
+===
+Type-parameterized function
+===
+function f<type T>(T x) return T {
+  return x;
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      TypePars: (FormalPars LParen: "<" RParen: ">"
+        List: (FormalPar
+          Type: (Ident "type")
+          Name: (Ident "T")))
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (Ident "T")
+          Name: (Ident "x")))
+      Return: (ReturnSpec Tok: "return"
+        Type: (Ident "T"))
+      Body: (BlockStmt
+        Stmts: (ReturnStmt Tok: "return"
+          Result: (Ident "x"))))))
+
+===
+Type-parameterized function with multiple parameters
+===
+function f<type T, type U>(T a, U b) {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      TypePars: (FormalPars LParen: "<" RParen: ">"
+        List: (FormalPar
+          Type: (Ident "type")
+          Name: (Ident "T"))
+        List: (FormalPar
+          Type: (Ident "type")
+          Name: (Ident "U")))
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (Ident "T")
+          Name: (Ident "a"))
+        List: (FormalPar
+          Type: (Ident "U")
+          Name: (Ident "b")))
+      Body: (BlockStmt))))
+
+===
+Type-parameterized function with in type
+===
+function f<in type T>(T a) {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      TypePars: (FormalPars LParen: "<" RParen: ">"
+        List: (FormalPar Direction: "in"
+          Type: (Ident "type")
+          Name: (Ident "T")))
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (Ident "T")
+          Name: (Ident "a")))
+      Body: (BlockStmt))))
+
+===
+Type-parameterized signature
+===
+signature s<type T>(T x);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SignatureDecl Tok: "signature"
+      Name: (Ident "s")
+      TypePars: (FormalPars LParen: "<" RParen: ">"
+        List: (FormalPar
+          Type: (Ident "type")
+          Name: (Ident "T")))
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (Ident "T")
+          Name: (Ident "x"))))))
+
+===
+Function missing parameter list
+===
+function f {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars RParen: "EOF"
+        List: (FormalPar
+          Type: (ErrorNode From: "}" To: "}"))))))
+ERROR 1:12-1:13: expected '(', found {
+ERROR 1:13-1:14: expected operand, found }
+ERROR 1:13-1:14: expected 'IDENT', found }
+ERROR 1:14-1:15: expected ')', found EOF
+
+===
+Function unclosed parameter list
+===
+function f(integer a {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (Ident "integer")
+          Name: (Ident "a"))))))
+ERROR 1:22-1:23: expected ')', found {
+ERROR 1:23-1:24: unexpected token }
+
+===
+Real-world: Function with runs on and verdict handling
+===
+function f_send_and_expect(in integer p_value, in float p_timeout := 5.0) runs on CT return boolean {
+  var default v_def := activate(a_default());
+  p.send(p_value);
+  t.start(p_timeout);
+  alt {
+    [] p.receive(integer:p_value) {
+      t.stop;
+      deactivate(v_def);
+      return true;
+    }
+    [] t.timeout {
+      setverdict(fail, "no response");
+      deactivate(v_def);
+      return false;
+    }
+  }
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f_send_and_expect")
+      Params: (FormalPars
+        List: (FormalPar Direction: "in"
+          Type: (Ident "integer")
+          Name: (Ident "p_value"))
+        List: (FormalPar Direction: "in" AssignTok: ":="
+          Type: (Ident "float")
+          Name: (Ident "p_timeout")
+          Value: (ValueLiteral "5.0")))
+      RunsOn: (RunsOnSpec RunsTok: "runs" OnTok: "on"
+        Comp: (Ident "CT"))
+      Return: (ReturnSpec Tok: "return"
+        Type: (Ident "boolean"))
+      Body: (BlockStmt
+        Stmts: (DeclStmt
+          Decl: (ValueDecl KindTok: "var"
+            Type: (Ident "default")
+            Decls: (Declarator AssignTok: ":="
+              Name: (Ident "v_def")
+              Value: (CallExpr
+                Fun: (Ident "activate")
+                Args: (ParenExpr
+                  List: (CallExpr
+                    Fun: (Ident "a_default")
+                    Args: (ParenExpr)))))))
+        Stmts: (ExprStmt
+          Expr: (CallExpr
+            Fun: (SelectorExpr
+              X: (Ident "p")
+              Sel: (Ident "send"))
+            Args: (ParenExpr
+              List: (Ident "p_value"))))
+        Stmts: (ExprStmt
+          Expr: (CallExpr
+            Fun: (SelectorExpr
+              X: (Ident "t")
+              Sel: (Ident "start"))
+            Args: (ParenExpr
+              List: (Ident "p_timeout"))))
+        Stmts: (AltStmt Tok: "alt"
+          Body: (BlockStmt
+            Stmts: (CommClause
+              Comm: (ExprStmt
+                Expr: (CallExpr
+                  Fun: (SelectorExpr
+                    X: (Ident "p")
+                    Sel: (Ident "receive"))
+                  Args: (ParenExpr
+                    List: (BinaryExpr Op: ":"
+                      X: (Ident "integer")
+                      Y: (Ident "p_value")))))
+              Body: (BlockStmt
+                Stmts: (ExprStmt
+                  Expr: (SelectorExpr
+                    X: (Ident "t")
+                    Sel: (Ident "stop")))
+                Stmts: (ExprStmt
+                  Expr: (CallExpr
+                    Fun: (Ident "deactivate")
+                    Args: (ParenExpr
+                      List: (Ident "v_def"))))
+                Stmts: (ReturnStmt Tok: "return"
+                  Result: (ValueLiteral "true"))))
+            Stmts: (CommClause
+              Comm: (ExprStmt
+                Expr: (SelectorExpr
+                  X: (Ident "t")
+                  Sel: (Ident "timeout")))
+              Body: (BlockStmt
+                Stmts: (ExprStmt
+                  Expr: (CallExpr
+                    Fun: (Ident "setverdict")
+                    Args: (ParenExpr
+                      List: (ValueLiteral "fail")
+                      List: (ValueLiteral "\"no response\""))))
+                Stmts: (ExprStmt
+                  Expr: (CallExpr
+                    Fun: (Ident "deactivate")
+                    Args: (ParenExpr
+                      List: (Ident "v_def"))))
+                Stmts: (ReturnStmt Tok: "return"
+                  Result: (ValueLiteral "false"))))))))))
+
+===
+Real-world: Default altstep
+===
+altstep a_default() runs on CT {
+  [] p.receive {
+    setverdict(fail, "unexpected message");
+    stop;
+  }
+  [] any timer.timeout {
+    setverdict(inconc);
+    stop;
+  }
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "altstep"
+      Name: (Ident "a_default")
+      Params: (FormalPars)
+      RunsOn: (RunsOnSpec RunsTok: "runs" OnTok: "on"
+        Comp: (Ident "CT"))
+      Body: (BlockStmt
+        Stmts: (CommClause
+          Comm: (ExprStmt
+            Expr: (SelectorExpr
+              X: (Ident "p")
+              Sel: (Ident "receive")))
+          Body: (BlockStmt
+            Stmts: (ExprStmt
+              Expr: (CallExpr
+                Fun: (Ident "setverdict")
+                Args: (ParenExpr
+                  List: (ValueLiteral "fail")
+                  List: (ValueLiteral "\"unexpected message\""))))
+            Stmts: (ExprStmt
+              Expr: (Ident "stop"))))
+        Stmts: (CommClause
+          Comm: (ExprStmt
+            Expr: (SelectorExpr
+              X: (Ident "any timer")
+              Sel: (Ident "timeout")))
+          Body: (BlockStmt
+            Stmts: (ExprStmt
+              Expr: (CallExpr
+                Fun: (Ident "setverdict")
+                Args: (ParenExpr
+                  List: (ValueLiteral "inconc"))))
+            Stmts: (ExprStmt
+              Expr: (Ident "stop"))))))))
+
+===
+Real-world: Testcase with component creation
+===
+testcase TC_BASIC() runs on MTC_CT system SYS_CT {
+  var PTC_CT v_ptc := PTC_CT.create("ptc") alive;
+  connect(self:p, v_ptc:p);
+  v_ptc.start(f_ptc());
+  all component.done;
+  setverdict(pass);
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "testcase"
+      Name: (Ident "TC_BASIC")
+      Params: (FormalPars)
+      RunsOn: (RunsOnSpec RunsTok: "runs" OnTok: "on"
+        Comp: (Ident "MTC_CT"))
+      System: (SystemSpec Tok: "system"
+        Comp: (Ident "SYS_CT"))
+      Body: (BlockStmt
+        Stmts: (DeclStmt
+          Decl: (ValueDecl KindTok: "var"
+            Type: (Ident "PTC_CT")
+            Decls: (Declarator AssignTok: ":="
+              Name: (Ident "v_ptc")
+              Value: (UnaryExpr Op: "alive"
+                X: (CallExpr
+                  Fun: (SelectorExpr
+                    X: (Ident "PTC_CT")
+                    Sel: (Ident "create"))
+                  Args: (ParenExpr
+                    List: (ValueLiteral "\"ptc\"")))))))
+        Stmts: (ExprStmt
+          Expr: (CallExpr
+            Fun: (Ident "connect")
+            Args: (ParenExpr
+              List: (BinaryExpr Op: ":"
+                X: (Ident "self")
+                Y: (Ident "p"))
+              List: (BinaryExpr Op: ":"
+                X: (Ident "v_ptc")
+                Y: (Ident "p")))))
+        Stmts: (ExprStmt
+          Expr: (CallExpr
+            Fun: (SelectorExpr
+              X: (Ident "v_ptc")
+              Sel: (Ident "start"))
+            Args: (ParenExpr
+              List: (CallExpr
+                Fun: (Ident "f_ptc")
+                Args: (ParenExpr)))))
+        Stmts: (ExprStmt
+          Expr: (SelectorExpr
+            X: (Ident "all component")
+            Sel: (Ident "done")))
+        Stmts: (ExprStmt
+          Expr: (CallExpr
+            Fun: (Ident "setverdict")
+            Args: (ParenExpr
+              List: (ValueLiteral "pass"))))))))

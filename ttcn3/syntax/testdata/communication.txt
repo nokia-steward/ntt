@@ -1,0 +1,1048 @@
+===
+Send
+===
+p.send(m);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (SelectorExpr
+        X: (Ident "p")
+        Sel: (Ident "send"))
+      Args: (ParenExpr
+        List: (Ident "m")))))
+
+===
+Send with to
+===
+p.send(m) to c;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "to"
+      X: (CallExpr
+        Fun: (SelectorExpr
+          X: (Ident "p")
+          Sel: (Ident "send"))
+        Args: (ParenExpr
+          List: (Ident "m")))
+      Y: (Ident "c"))))
+
+===
+Send to multiple addresses
+===
+p.send(m) to (c1, c2);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "to"
+      X: (CallExpr
+        Fun: (SelectorExpr
+          X: (Ident "p")
+          Sel: (Ident "send"))
+        Args: (ParenExpr
+          List: (Ident "m")))
+      Y: (ParenExpr
+        List: (Ident "c1")
+        List: (Ident "c2")))))
+
+===
+Send on port array element
+===
+p[1].send(m);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (SelectorExpr
+        X: (IndexExpr
+          X: (Ident "p")
+          Index: (ValueLiteral "1"))
+        Sel: (Ident "send"))
+      Args: (ParenExpr
+        List: (Ident "m")))))
+
+===
+Receive any message
+===
+p.receive;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "p")
+      Sel: (Ident "receive"))))
+
+===
+Receive with from
+===
+p.receive(t) from c;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "from"
+      X: (CallExpr
+        Fun: (SelectorExpr
+          X: (Ident "p")
+          Sel: (Ident "receive"))
+        Args: (ParenExpr
+          List: (Ident "t")))
+      Y: (Ident "c"))))
+
+===
+Receive with value redirect
+===
+p.receive(t) -> value x;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (RedirectExpr Tok: "->" ValueTok: "value"
+      X: (CallExpr
+        Fun: (SelectorExpr
+          X: (Ident "p")
+          Sel: (Ident "receive"))
+        Args: (ParenExpr
+          List: (Ident "t")))
+      Value: (Ident "x"))))
+
+===
+Receive with value and sender redirect
+===
+p.receive(t) -> value x sender s;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (RedirectExpr Tok: "->" ValueTok: "value" SenderTok: "sender"
+      X: (CallExpr
+        Fun: (SelectorExpr
+          X: (Ident "p")
+          Sel: (Ident "receive"))
+        Args: (ParenExpr
+          List: (Ident "t")))
+      Value: (Ident "x")
+      Sender: (Ident "s"))))
+
+===
+Receive from any port array with index redirect
+===
+any from p.receive(t) -> value x sender s @index i;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (RedirectExpr Tok: "->" ValueTok: "value" SenderTok: "sender" IndexTok: "@index"
+      X: (FromExpr KindTok: "any" FromTok: "from"
+        X: (CallExpr
+          Fun: (SelectorExpr
+            X: (Ident "p")
+            Sel: (Ident "receive"))
+          Args: (ParenExpr
+            List: (Ident "t"))))
+      Value: (Ident "x")
+      Sender: (Ident "s")
+      Index: (Ident "i"))))
+
+===
+Receive with timestamp redirect
+===
+p.receive(t) -> timestamp ts;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (RedirectExpr Tok: "->" TimestampTok: "timestamp"
+      X: (CallExpr
+        Fun: (SelectorExpr
+          X: (Ident "p")
+          Sel: (Ident "receive"))
+        Args: (ParenExpr
+          List: (Ident "t")))
+      Timestamp: (Ident "ts"))))
+
+===
+Receive with field value redirect
+===
+p.receive(t) -> value (a := f1, b := f2);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (RedirectExpr Tok: "->" ValueTok: "value"
+      X: (CallExpr
+        Fun: (SelectorExpr
+          X: (Ident "p")
+          Sel: (Ident "receive"))
+        Args: (ParenExpr
+          List: (Ident "t")))
+      Value: (ParenExpr
+        List: (BinaryExpr Op: ":="
+          X: (Ident "a")
+          Y: (Ident "f1"))
+        List: (BinaryExpr Op: ":="
+          X: (Ident "b")
+          Y: (Ident "f2"))))))
+
+===
+Receive on any port
+===
+any port.receive;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "any port")
+      Sel: (Ident "receive"))))
+
+===
+Receive from any port array
+===
+any from ps.receive(t);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (FromExpr KindTok: "any" FromTok: "from"
+      X: (CallExpr
+        Fun: (SelectorExpr
+          X: (Ident "ps")
+          Sel: (Ident "receive"))
+        Args: (ParenExpr
+          List: (Ident "t"))))))
+
+===
+Trigger
+===
+p.trigger(t) from c -> value x;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (RedirectExpr Tok: "->" ValueTok: "value"
+      X: (BinaryExpr Op: "from"
+        X: (CallExpr
+          Fun: (SelectorExpr
+            X: (Ident "p")
+            Sel: (Ident "trigger"))
+          Args: (ParenExpr
+            List: (Ident "t")))
+        Y: (Ident "c"))
+      Value: (Ident "x"))))
+
+===
+Check any message
+===
+p.check;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "p")
+      Sel: (Ident "check"))))
+
+===
+Check receive
+===
+p.check(receive(t) -> value x);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (SelectorExpr
+        X: (Ident "p")
+        Sel: (Ident "check"))
+      Args: (ParenExpr
+        List: (RedirectExpr Tok: "->" ValueTok: "value"
+          X: (CallExpr
+            Fun: (Ident "receive")
+            Args: (ParenExpr
+              List: (Ident "t")))
+          Value: (Ident "x"))))))
+
+===
+Call nonblocking
+===
+p.call(S:{1}, nowait);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (SelectorExpr
+        X: (Ident "p")
+        Sel: (Ident "call"))
+      Args: (ParenExpr
+        List: (BinaryExpr Op: ":"
+          X: (Ident "S")
+          Y: (CompositeLiteral
+            List: (ValueLiteral "1")))
+        List: (Ident "nowait")))))
+
+===
+Call to component
+===
+p.call(S:{1}, nowait) to c;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "to"
+      X: (CallExpr
+        Fun: (SelectorExpr
+          X: (Ident "p")
+          Sel: (Ident "call"))
+        Args: (ParenExpr
+          List: (BinaryExpr Op: ":"
+            X: (Ident "S")
+            Y: (CompositeLiteral
+              List: (ValueLiteral "1")))
+          List: (Ident "nowait")))
+      Y: (Ident "c"))))
+
+===
+Call with response block
+===
+p.call(S:{1}, 5.0) {
+  [] p.getreply(S:{?}) {}
+  [] p.catch(timeout) {}
+}
+---
+(Root
+  Nodes: (CallStmt
+    Stmt: (ExprStmt
+      Expr: (CallExpr
+        Fun: (SelectorExpr
+          X: (Ident "p")
+          Sel: (Ident "call"))
+        Args: (ParenExpr
+          List: (BinaryExpr Op: ":"
+            X: (Ident "S")
+            Y: (CompositeLiteral
+              List: (ValueLiteral "1")))
+          List: (ValueLiteral "5.0"))))
+    Body: (BlockStmt
+      Stmts: (CommClause
+        Comm: (ExprStmt
+          Expr: (CallExpr
+            Fun: (SelectorExpr
+              X: (Ident "p")
+              Sel: (Ident "getreply"))
+            Args: (ParenExpr
+              List: (BinaryExpr Op: ":"
+                X: (Ident "S")
+                Y: (CompositeLiteral
+                  List: (ValueLiteral "?"))))))
+        Body: (BlockStmt))
+      Stmts: (CommClause
+        Comm: (ExprStmt
+          Expr: (CallExpr
+            Fun: (SelectorExpr
+              X: (Ident "p")
+              Sel: (Ident "catch"))
+            Args: (ParenExpr
+              List: (Ident "timeout"))))
+        Body: (BlockStmt)))))
+
+===
+Getcall with param redirect
+===
+p.getcall(S:{?}) -> param (x, y);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (RedirectExpr Tok: "->" ParamTok: "param"
+      X: (CallExpr
+        Fun: (SelectorExpr
+          X: (Ident "p")
+          Sel: (Ident "getcall"))
+        Args: (ParenExpr
+          List: (BinaryExpr Op: ":"
+            X: (Ident "S")
+            Y: (CompositeLiteral
+              List: (ValueLiteral "?")))))
+      Param: (ParenExpr
+        List: (Ident "x")
+        List: (Ident "y")))))
+
+===
+Reply
+===
+p.reply(S:{1} value 2);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (SelectorExpr
+        X: (Ident "p")
+        Sel: (Ident "reply"))
+      Args: (ParenExpr
+        List: (ValueExpr Tok: "value"
+          X: (BinaryExpr Op: ":"
+            X: (Ident "S")
+            Y: (CompositeLiteral
+              List: (ValueLiteral "1")))
+          Y: (ValueLiteral "2"))))))
+
+===
+Getreply with value
+===
+p.getreply(S:{?} value ?) -> value v;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (RedirectExpr Tok: "->" ValueTok: "value"
+      X: (CallExpr
+        Fun: (SelectorExpr
+          X: (Ident "p")
+          Sel: (Ident "getreply"))
+        Args: (ParenExpr
+          List: (ValueExpr Tok: "value"
+            X: (BinaryExpr Op: ":"
+              X: (Ident "S")
+              Y: (CompositeLiteral
+                List: (ValueLiteral "?")))
+            Y: (ValueLiteral "?"))))
+      Value: (Ident "v"))))
+
+===
+Raise
+===
+p.raise(S, e) to c;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: "to"
+      X: (CallExpr
+        Fun: (SelectorExpr
+          X: (Ident "p")
+          Sel: (Ident "raise"))
+        Args: (ParenExpr
+          List: (Ident "S")
+          List: (Ident "e")))
+      Y: (Ident "c"))))
+
+===
+Catch exception
+===
+p.catch(S, e) -> value x;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (RedirectExpr Tok: "->" ValueTok: "value"
+      X: (CallExpr
+        Fun: (SelectorExpr
+          X: (Ident "p")
+          Sel: (Ident "catch"))
+        Args: (ParenExpr
+          List: (Ident "S")
+          List: (Ident "e")))
+      Value: (Ident "x"))))
+
+===
+Port start stop clear halt
+===
+p.start;
+p.stop;
+p.clear;
+p.halt;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "p")
+      Sel: (Ident "start")))
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "p")
+      Sel: (Ident "stop")))
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "p")
+      Sel: (Ident "clear")))
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "p")
+      Sel: (Ident "halt"))))
+
+===
+Any port checkstate
+===
+any port.checkstate("Mapped");
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (SelectorExpr
+        X: (Ident "any port")
+        Sel: (Ident "checkstate"))
+      Args: (ParenExpr
+        List: (ValueLiteral "\"Mapped\"")))))
+
+===
+Create component
+===
+c := T.create;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "c")
+      Y: (SelectorExpr
+        X: (Ident "T")
+        Sel: (Ident "create")))))
+
+===
+Create alive component
+===
+c := T.create("ptc", "host") alive;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "c")
+      Y: (UnaryExpr Op: "alive"
+        X: (CallExpr
+          Fun: (SelectorExpr
+            X: (Ident "T")
+            Sel: (Ident "create"))
+          Args: (ParenExpr
+            List: (ValueLiteral "\"ptc\"")
+            List: (ValueLiteral "\"host\"")))))))
+
+===
+Connect
+===
+connect(c1:p1, c2:p2);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "connect")
+      Args: (ParenExpr
+        List: (BinaryExpr Op: ":"
+          X: (Ident "c1")
+          Y: (Ident "p1"))
+        List: (BinaryExpr Op: ":"
+          X: (Ident "c2")
+          Y: (Ident "p2"))))))
+
+===
+Connect with self and mtc
+===
+connect(self:p, mtc:q);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "connect")
+      Args: (ParenExpr
+        List: (BinaryExpr Op: ":"
+          X: (Ident "self")
+          Y: (Ident "p"))
+        List: (BinaryExpr Op: ":"
+          X: (Ident "mtc")
+          Y: (Ident "q"))))))
+
+===
+Disconnect all
+===
+disconnect;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (Ident "disconnect")))
+
+===
+Map with param
+===
+map(c:p, system:q) param (cfg);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (ParamExpr Tok: "param"
+      X: (CallExpr
+        Fun: (Ident "map")
+        Args: (ParenExpr
+          List: (BinaryExpr Op: ":"
+            X: (Ident "c")
+            Y: (Ident "p"))
+          List: (BinaryExpr Op: ":"
+            X: (Ident "system")
+            Y: (Ident "q"))))
+      Y: (ParenExpr
+        List: (Ident "cfg")))))
+
+===
+Component start
+===
+c.start(f(1));
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (SelectorExpr
+        X: (Ident "c")
+        Sel: (Ident "start"))
+      Args: (ParenExpr
+        List: (CallExpr
+          Fun: (Ident "f")
+          Args: (ParenExpr
+            List: (ValueLiteral "1")))))))
+
+===
+Component stop and kill
+===
+c.stop;
+c.kill;
+self.stop;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "c")
+      Sel: (Ident "stop")))
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "c")
+      Sel: (Ident "kill")))
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "self")
+      Sel: (Ident "stop"))))
+
+===
+Any component done and killed
+===
+any component.done;
+any component.killed;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "any component")
+      Sel: (Ident "done")))
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "any component")
+      Sel: (Ident "killed"))))
+
+===
+Component done with redirect
+===
+c.done(?) -> value v;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (RedirectExpr Tok: "->" ValueTok: "value"
+      X: (CallExpr
+        Fun: (SelectorExpr
+          X: (Ident "c")
+          Sel: (Ident "done"))
+        Args: (ParenExpr
+          List: (ValueLiteral "?")))
+      Value: (Ident "v"))))
+
+===
+Component running and alive
+===
+b := c.running and c.alive;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "b")
+      Y: (BinaryExpr Op: "and"
+        X: (SelectorExpr
+          X: (Ident "c")
+          Sel: (Ident "running"))
+        Y: (SelectorExpr
+          X: (Ident "c")
+          Sel: (Ident "alive"))))))
+
+===
+Timer start with duration
+===
+t.start(5.0);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (SelectorExpr
+        X: (Ident "t")
+        Sel: (Ident "start"))
+      Args: (ParenExpr
+        List: (ValueLiteral "5.0")))))
+
+===
+Timer stop and read
+===
+t.stop;
+x := t.read;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "t")
+      Sel: (Ident "stop")))
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (SelectorExpr
+        X: (Ident "t")
+        Sel: (Ident "read")))))
+
+===
+Timer timeout
+===
+t.timeout;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "t")
+      Sel: (Ident "timeout"))))
+
+===
+Any timer
+===
+any timer.timeout;
+all timer.stop;
+b := any timer.running;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "any timer")
+      Sel: (Ident "timeout")))
+  Nodes: (ExprStmt
+    Expr: (SelectorExpr
+      X: (Ident "all timer")
+      Sel: (Ident "stop")))
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "b")
+      Y: (SelectorExpr
+        X: (Ident "any timer")
+        Sel: (Ident "running")))))
+
+===
+Alt with guard
+===
+alt {
+  [x > 0] p.receive {}
+}
+---
+(Root
+  Nodes: (AltStmt Tok: "alt"
+    Body: (BlockStmt
+      Stmts: (CommClause
+        X: (BinaryExpr Op: ">"
+          X: (Ident "x")
+          Y: (ValueLiteral "0"))
+        Comm: (ExprStmt
+          Expr: (SelectorExpr
+            X: (Ident "p")
+            Sel: (Ident "receive")))
+        Body: (BlockStmt)))))
+
+===
+Alt with else
+===
+alt {
+  [] p.receive(t) {}
+  [else] { stop; }
+}
+---
+(Root
+  Nodes: (AltStmt Tok: "alt"
+    Body: (BlockStmt
+      Stmts: (CommClause
+        Comm: (ExprStmt
+          Expr: (CallExpr
+            Fun: (SelectorExpr
+              X: (Ident "p")
+              Sel: (Ident "receive"))
+            Args: (ParenExpr
+              List: (Ident "t"))))
+        Body: (BlockStmt))
+      Stmts: (CommClause Else: "else"
+        Body: (BlockStmt
+          Stmts: (ExprStmt
+            Expr: (Ident "stop")))))))
+
+===
+Alt with altstep invocation
+===
+alt {
+  [] as(1);
+}
+---
+(Root
+  Nodes: (AltStmt Tok: "alt"
+    Body: (BlockStmt
+      Stmts: (CommClause
+        Comm: (ExprStmt
+          Expr: (CallExpr
+            Fun: (Ident "as")
+            Args: (ParenExpr
+              List: (ValueLiteral "1"))))))))
+
+===
+Nested alt
+===
+alt {
+  [] p.receive {
+    alt {
+      [] q.receive {}
+    }
+  }
+}
+---
+(Root
+  Nodes: (AltStmt Tok: "alt"
+    Body: (BlockStmt
+      Stmts: (CommClause
+        Comm: (ExprStmt
+          Expr: (SelectorExpr
+            X: (Ident "p")
+            Sel: (Ident "receive")))
+        Body: (BlockStmt
+          Stmts: (AltStmt Tok: "alt"
+            Body: (BlockStmt
+              Stmts: (CommClause
+                Comm: (ExprStmt
+                  Expr: (SelectorExpr
+                    X: (Ident "q")
+                    Sel: (Ident "receive")))
+                Body: (BlockStmt)))))))))
+
+===
+Interleave
+===
+interleave {
+  [] p.receive(a) {}
+  [] q.receive(b) {}
+}
+---
+(Root
+  Nodes: (AltStmt Tok: "interleave"
+    Body: (BlockStmt
+      Stmts: (CommClause
+        Comm: (ExprStmt
+          Expr: (CallExpr
+            Fun: (SelectorExpr
+              X: (Ident "p")
+              Sel: (Ident "receive"))
+            Args: (ParenExpr
+              List: (Ident "a"))))
+        Body: (BlockStmt))
+      Stmts: (CommClause
+        Comm: (ExprStmt
+          Expr: (CallExpr
+            Fun: (SelectorExpr
+              X: (Ident "q")
+              Sel: (Ident "receive"))
+            Args: (ParenExpr
+              List: (Ident "b"))))
+        Body: (BlockStmt)))))
+
+===
+Activate
+===
+d := activate(as(1));
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "d")
+      Y: (CallExpr
+        Fun: (Ident "activate")
+        Args: (ParenExpr
+          List: (CallExpr
+            Fun: (Ident "as")
+            Args: (ParenExpr
+              List: (ValueLiteral "1"))))))))
+
+===
+Deactivate
+===
+deactivate(d);
+deactivate;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "deactivate")
+      Args: (ParenExpr
+        List: (Ident "d"))))
+  Nodes: (ExprStmt
+    Expr: (Ident "deactivate")))
+
+===
+Testcase stop with reason
+===
+function f() { testcase.stop("failed: ", x); }
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars)
+      Body: (BlockStmt
+        Stmts: (ExprStmt
+          Expr: (CallExpr
+            Fun: (SelectorExpr
+              X: (Ident "testcase")
+              Sel: (Ident "stop"))
+            Args: (ParenExpr
+              List: (ValueLiteral "\"failed: \"")
+              List: (Ident "x"))))))))
+
+===
+Execute with timeout
+===
+v := execute(tc(1), 5.0);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "v")
+      Y: (CallExpr
+        Fun: (Ident "execute")
+        Args: (ParenExpr
+          List: (CallExpr
+            Fun: (Ident "tc")
+            Args: (ParenExpr
+              List: (ValueLiteral "1")))
+          List: (ValueLiteral "5.0"))))))
+
+===
+Real-world: PTC behaviour
+===
+function f_ptc() runs on PTC {
+  timer t := 2.0;
+  p.send(Req:{id := 1});
+  t.start;
+  alt {
+    [] p.receive(Resp:?) -> value v { setverdict(pass); }
+    [] t.timeout { setverdict(fail); }
+  }
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f_ptc")
+      Params: (FormalPars)
+      RunsOn: (RunsOnSpec RunsTok: "runs" OnTok: "on"
+        Comp: (Ident "PTC"))
+      Body: (BlockStmt
+        Stmts: (DeclStmt
+          Decl: (ValueDecl
+            Type: (Ident "timer")
+            Decls: (Declarator AssignTok: ":="
+              Name: (Ident "t")
+              Value: (ValueLiteral "2.0"))))
+        Stmts: (ExprStmt
+          Expr: (CallExpr
+            Fun: (SelectorExpr
+              X: (Ident "p")
+              Sel: (Ident "send"))
+            Args: (ParenExpr
+              List: (BinaryExpr Op: ":"
+                X: (Ident "Req")
+                Y: (CompositeLiteral
+                  List: (BinaryExpr Op: ":="
+                    X: (Ident "id")
+                    Y: (ValueLiteral "1")))))))
+        Stmts: (ExprStmt
+          Expr: (SelectorExpr
+            X: (Ident "t")
+            Sel: (Ident "start")))
+        Stmts: (AltStmt Tok: "alt"
+          Body: (BlockStmt
+            Stmts: (CommClause
+              Comm: (ExprStmt
+                Expr: (RedirectExpr Tok: "->" ValueTok: "value"
+                  X: (CallExpr
+                    Fun: (SelectorExpr
+                      X: (Ident "p")
+                      Sel: (Ident "receive"))
+                    Args: (ParenExpr
+                      List: (BinaryExpr Op: ":"
+                        X: (Ident "Resp")
+                        Y: (ValueLiteral "?"))))
+                  Value: (Ident "v")))
+              Body: (BlockStmt
+                Stmts: (ExprStmt
+                  Expr: (CallExpr
+                    Fun: (Ident "setverdict")
+                    Args: (ParenExpr
+                      List: (ValueLiteral "pass"))))))
+            Stmts: (CommClause
+              Comm: (ExprStmt
+                Expr: (SelectorExpr
+                  X: (Ident "t")
+                  Sel: (Ident "timeout")))
+              Body: (BlockStmt
+                Stmts: (ExprStmt
+                  Expr: (CallExpr
+                    Fun: (Ident "setverdict")
+                    Args: (ParenExpr
+                      List: (ValueLiteral "fail"))))))))))))
+
+===
+Real-world: test configuration
+===
+testcase tc() runs on MTC system SYS {
+  var PTC c := PTC.create alive;
+  map(c:p, system:p);
+  c.start(f_ptc());
+  c.done;
+  unmap(c:p, system:p);
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "testcase"
+      Name: (Ident "tc")
+      Params: (FormalPars)
+      RunsOn: (RunsOnSpec RunsTok: "runs" OnTok: "on"
+        Comp: (Ident "MTC"))
+      System: (SystemSpec Tok: "system"
+        Comp: (Ident "SYS"))
+      Body: (BlockStmt
+        Stmts: (DeclStmt
+          Decl: (ValueDecl KindTok: "var"
+            Type: (Ident "PTC")
+            Decls: (Declarator AssignTok: ":="
+              Name: (Ident "c")
+              Value: (UnaryExpr Op: "alive"
+                X: (SelectorExpr
+                  X: (Ident "PTC")
+                  Sel: (Ident "create"))))))
+        Stmts: (ExprStmt
+          Expr: (CallExpr
+            Fun: (Ident "map")
+            Args: (ParenExpr
+              List: (BinaryExpr Op: ":"
+                X: (Ident "c")
+                Y: (Ident "p"))
+              List: (BinaryExpr Op: ":"
+                X: (Ident "system")
+                Y: (Ident "p")))))
+        Stmts: (ExprStmt
+          Expr: (CallExpr
+            Fun: (SelectorExpr
+              X: (Ident "c")
+              Sel: (Ident "start"))
+            Args: (ParenExpr
+              List: (CallExpr
+                Fun: (Ident "f_ptc")
+                Args: (ParenExpr)))))
+        Stmts: (ExprStmt
+          Expr: (SelectorExpr
+            X: (Ident "c")
+            Sel: (Ident "done")))
+        Stmts: (ExprStmt
+          Expr: (CallExpr
+            Fun: (Ident "unmap")
+            Args: (ParenExpr
+              List: (BinaryExpr Op: ":"
+                X: (Ident "c")
+                Y: (Ident "p"))
+              List: (BinaryExpr Op: ":"
+                X: (Ident "system")
+                Y: (Ident "p")))))))))

@@ -1,0 +1,394 @@
+===
+Missing right operand
+===
+x := 1 + ;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (BinaryExpr Op: "+"
+        X: (ValueLiteral "1")
+        Y: (ErrorNode From: ";" To: ";")))))
+ERROR 1:10-1:11: expected operand, found ;
+
+===
+Missing left operand
+===
+x := * 2;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (ValueLiteral "*"))))
+ERROR 1:8-1:9: unexpected token INT
+
+===
+Missing assignment value
+===
+x := ;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (ErrorNode From: ";" To: ";"))))
+ERROR 1:6-1:7: expected operand, found ;
+
+===
+Missing closing paren in call
+===
+f(1, 2;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "f")
+      Args: (ParenExpr
+        List: (ValueLiteral "1")
+        List: (ValueLiteral "2")))))
+ERROR 1:7-1:8: expected ')', found ;
+
+===
+Missing closing paren in expression
+===
+x := (1 + 2;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (ParenExpr
+        List: (BinaryExpr Op: "+"
+          X: (ValueLiteral "1")
+          Y: (ValueLiteral "2"))))))
+ERROR 1:12-1:13: expected ')', found ;
+
+===
+Missing closing bracket in index
+===
+x := a[1;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (IndexExpr
+        X: (Ident "a")
+        Index: (ValueLiteral "1")))))
+ERROR 1:9-1:10: expected ']', found ;
+
+===
+Missing closing brace of module
+===
+module M {
+  const integer c := 1;
+---
+(Root
+  Nodes: (Module Tok: "module" RBrace: "EOF"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "const"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "c")
+          Value: (ValueLiteral "1"))))))
+ERROR 2:24-2:25: expected '}', found EOF
+
+===
+Missing closing brace of function
+===
+module M {
+  function f() {
+    x := 1;
+}
+---
+(Root
+  Nodes: (Module Tok: "module" RBrace: "EOF"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (FuncDecl KindTok: "function"
+        Name: (Ident "f")
+        Params: (FormalPars)
+        Body: (BlockStmt
+          Stmts: (ExprStmt
+            Expr: (BinaryExpr Op: ":="
+              X: (Ident "x")
+              Y: (ValueLiteral "1"))))))))
+ERROR 4:2-4:3: expected '}', found EOF
+
+===
+Unterminated string
+===
+x := "abc;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (ErrorNode From: "token(2)" To: "token(2)"))))
+ERROR 1:6-1:11: malformed or unterminated token
+ERROR 1:6-1:11: expected operand, found token(2)
+ERROR 1:6-1:11: unexpected token token(2)
+
+===
+Unterminated block comment
+===
+x := 1; /* comment
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (ValueLiteral "1")))
+  Nodes: (ErrorNode From: "token(2)" To: "token(2)"))
+ERROR 1:9-1:19: malformed or unterminated token
+ERROR 1:9-1:19: expected operand, found token(2)
+ERROR 1:9-1:19: unexpected token token(2)
+
+===
+Invalid character
+===
+x := 1 $ 2;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (ValueLiteral "1"))))
+ERROR 1:8-1:9: unexpected token ILLEGAL
+
+===
+Garbage between definitions
+===
+module M {
+  const integer a := 1;
+  ) ) )
+  const integer b := 2;
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "const"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "a")
+          Value: (ValueLiteral "1"))))
+    Defs: (ModuleDef
+      Def: (ErrorNode From: ")" To: "const"))
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "const"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "b")
+          Value: (ValueLiteral "2"))))))
+ERROR 3:3-3:4: expected module definition, found )
+
+===
+Stray closing brace at top level
+===
+x := 1;
+}
+y := 2;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (ValueLiteral "1")))
+  Nodes: (ErrorNode From: "}" To: "}"))
+ERROR 2:1-2:2: expected operand, found }
+ERROR 2:1-2:2: unexpected token }
+
+===
+Premature closing brace of module
+===
+module M {
+  }
+  const integer c := 1;
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M"))
+  Nodes: (ModuleDef
+    Def: (ValueDecl KindTok: "const"
+      Type: (Ident "integer")
+      Decls: (Declarator AssignTok: ":="
+        Name: (Ident "c")
+        Value: (ValueLiteral "1"))))
+  Nodes: (ErrorNode From: "}" To: "}"))
+ERROR 4:1-4:2: expected operand, found }
+ERROR 4:1-4:2: unexpected token }
+
+===
+Incomplete var declaration
+===
+var integer
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (ValueDecl KindTok: "var"
+      Type: (Ident "integer")
+      Decls: (Declarator))))
+ERROR 1:12-1:13: expected 'IDENT', found EOF
+
+===
+Incomplete var declaration in block
+===
+function f() {
+  var integer;
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars)
+      Body: (BlockStmt
+        Stmts: (DeclStmt
+          Decl: (ValueDecl KindTok: "var"
+            Type: (Ident "integer")
+            Decls: (Declarator)))))))
+ERROR 2:14-2:15: expected 'IDENT', found ;
+
+===
+Const without value
+===
+const integer c;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (ValueDecl KindTok: "const"
+      Type: (Ident "integer")
+      Decls: (Declarator
+        Name: (Ident "c")))))
+
+===
+Misplaced keyword in expression
+===
+x := 1 + module;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (BinaryExpr Op: "+"
+        X: (ValueLiteral "1")
+        Y: (ErrorNode From: "module" To: "module"))))
+  Nodes: (Module Tok: "module" LBrace: "EOF" RBrace: "EOF"))
+ERROR 1:10-1:16: expected operand, found module
+ERROR 1:16-1:17: expected 'IDENT', found ;
+ERROR 1:17-1:18: expected '{', found EOF
+ERROR 1:17-1:18: expected '}', found EOF
+
+===
+Alt guard missing closing bracket
+===
+alt {
+  [x > 0 p.receive {}
+}
+---
+(Root
+  Nodes: (AltStmt Tok: "alt"
+    Body: (BlockStmt
+      Stmts: (CommClause RBrack: "p"
+        X: (BinaryExpr Op: ">"
+          X: (Ident "x")
+          Y: (ValueLiteral "0"))
+        Comm: (ExprStmt
+          Expr: (SelectorExpr
+            X: (ErrorNode From: "." To: ".")
+            Sel: (Ident "receive")))
+        Body: (BlockStmt)))))
+ERROR 2:10-2:11: expected ']', found p
+ERROR 2:11-2:12: expected operand, found .
+
+===
+If missing condition parens
+===
+if x > 0 { y := 1; }
+---
+(Root
+  Nodes: (IfStmt Tok: "if" LParen: "x"
+    Cond: (BinaryExpr Op: ">"
+      X: (ErrorNode From: ">" To: ">")
+      Y: (ValueLiteral "0"))
+    Then: (BlockStmt LBrace: "y"
+      Stmts: (ErrorNode From: ":=" To: ";"))))
+ERROR 1:4-1:5: expected '(', found x
+ERROR 1:6-1:7: expected operand, found >
+ERROR 1:10-1:11: expected ')', found {
+ERROR 1:12-1:13: expected '{', found y
+ERROR 1:14-1:16: expected statement, found :=
+
+===
+Import missing module name
+===
+module M {
+  import from all;
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ImportDecl ImportTok: "import" FromTok: "from"))))
+ERROR 2:15-2:18: expected 'IDENT', found all
+ERROR 2:18-2:19: expected 'all' or import spec, found ;
+
+===
+Missing closing brace of alt
+===
+function f() {
+  alt {
+    [] p.receive {}
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars)
+      Body: (BlockStmt RBrace: "EOF"
+        Stmts: (AltStmt Tok: "alt"
+          Body: (BlockStmt
+            Stmts: (CommClause
+              Comm: (ExprStmt
+                Expr: (SelectorExpr
+                  X: (Ident "p")
+                  Sel: (Ident "receive")))
+              Body: (BlockStmt))))))))
+ERROR 4:2-4:3: expected '}', found EOF
+
+===
+Extra closing paren
+===
+x := (1 + 2));
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (ParenExpr
+        List: (BinaryExpr Op: "+"
+          X: (ValueLiteral "1")
+          Y: (ValueLiteral "2"))))))
+ERROR 1:13-1:14: unexpected token )
+
+===
+Literal as module definition
+===
+module M {
+  123
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ErrorNode From: "123" To: "}"))))
+ERROR 2:3-2:6: expected module definition, found 123

@@ -1,8 +1,9 @@
 module github.com/nokia/ntt
 
-go 1.18
+go 1.26.2
 
 require (
+	github.com/5nord/goldenfile v0.0.0-20260507121108-52d2910ea576
 	github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d
 	github.com/bmatcuk/doublestar v1.3.4
 	github.com/dustin/go-humanize v1.0.0

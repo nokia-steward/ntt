@@ -1,0 +1,683 @@
+===
+Simple template
+===
+template integer t := 5;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "integer")
+      Name: (Ident "t")
+      Value: (ValueLiteral "5"))))
+
+===
+Template with omit restriction
+===
+template (omit) R t := omit;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" Tok: "omit" AssignTok: ":="
+      Type: (Ident "R")
+      Name: (Ident "t")
+      Value: (ValueLiteral "omit"))))
+
+===
+Lazy template
+===
+template @lazy integer t := f();
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" Modif: "@lazy" AssignTok: ":="
+      Type: (Ident "integer")
+      Name: (Ident "t")
+      Value: (CallExpr
+        Fun: (Ident "f")
+        Args: (ParenExpr)))))
+
+===
+Parameterized template
+===
+template R t(integer a, template charstring b := ?) := { a := a, b := b };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "R")
+      Name: (Ident "t")
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (Ident "integer")
+          Name: (Ident "a"))
+        List: (FormalPar AssignTok: ":="
+          TemplateRestriction: (RestrictionSpec TemplateTok: "template")
+          Type: (Ident "charstring")
+          Name: (Ident "b")
+          Value: (ValueLiteral "?")))
+      Value: (CompositeLiteral
+        List: (BinaryExpr Op: ":="
+          X: (Ident "a")
+          Y: (Ident "a"))
+        List: (BinaryExpr Op: ":="
+          X: (Ident "b")
+          Y: (Ident "b"))))))
+
+===
+Modified template
+===
+template R t2 modifies t1 := { a := 2 };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" ModifiesTok: "modifies" AssignTok: ":="
+      Type: (Ident "R")
+      Name: (Ident "t2")
+      Base: (Ident "t1")
+      Value: (CompositeLiteral
+        List: (BinaryExpr Op: ":="
+          X: (Ident "a")
+          Y: (ValueLiteral "2"))))))
+
+===
+Modified parameterized template
+===
+template R t2(integer x) modifies t1(x) := { b := omit };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" ModifiesTok: "modifies" AssignTok: ":="
+      Type: (Ident "R")
+      Name: (Ident "t2")
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (Ident "integer")
+          Name: (Ident "x")))
+      Base: (CallExpr
+        Fun: (Ident "t1")
+        Args: (ParenExpr
+          List: (Ident "x")))
+      Value: (CompositeLiteral
+        List: (BinaryExpr Op: ":="
+          X: (Ident "b")
+          Y: (ValueLiteral "omit"))))))
+
+===
+Any value
+===
+template integer t := ?;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "integer")
+      Name: (Ident "t")
+      Value: (ValueLiteral "?"))))
+
+===
+Any value or none
+===
+template integer t := *;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "integer")
+      Name: (Ident "t")
+      Value: (ValueLiteral "*"))))
+
+===
+Omit value
+===
+template R t := { a := omit };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "R")
+      Name: (Ident "t")
+      Value: (CompositeLiteral
+        List: (BinaryExpr Op: ":="
+          X: (Ident "a")
+          Y: (ValueLiteral "omit"))))))
+
+===
+Value list
+===
+template integer t := (1, 2, 3);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "integer")
+      Name: (Ident "t")
+      Value: (ParenExpr
+        List: (ValueLiteral "1")
+        List: (ValueLiteral "2")
+        List: (ValueLiteral "3")))))
+
+===
+Complement
+===
+template integer t := complement(1, 2);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "integer")
+      Name: (Ident "t")
+      Value: (CallExpr
+        Fun: (Ident "complement")
+        Args: (ParenExpr
+          List: (ValueLiteral "1")
+          List: (ValueLiteral "2"))))))
+
+===
+Superset and subset
+===
+template S t := { a := superset(1, 2), b := subset(3, 4) };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "S")
+      Name: (Ident "t")
+      Value: (CompositeLiteral
+        List: (BinaryExpr Op: ":="
+          X: (Ident "a")
+          Y: (CallExpr
+            Fun: (Ident "superset")
+            Args: (ParenExpr
+              List: (ValueLiteral "1")
+              List: (ValueLiteral "2"))))
+        List: (BinaryExpr Op: ":="
+          X: (Ident "b")
+          Y: (CallExpr
+            Fun: (Ident "subset")
+            Args: (ParenExpr
+              List: (ValueLiteral "3")
+              List: (ValueLiteral "4"))))))))
+
+===
+Permutation
+===
+template RoI t := { 1, permutation(2, 3), ? };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "RoI")
+      Name: (Ident "t")
+      Value: (CompositeLiteral
+        List: (ValueLiteral "1")
+        List: (CallExpr
+          Fun: (Ident "permutation")
+          Args: (ParenExpr
+            List: (ValueLiteral "2")
+            List: (ValueLiteral "3")))
+        List: (ValueLiteral "?")))))
+
+===
+Range
+===
+template integer t := (1 .. 10);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "integer")
+      Name: (Ident "t")
+      Value: (ParenExpr
+        List: (BinaryExpr Op: ".."
+          X: (ValueLiteral "1")
+          Y: (ValueLiteral "10"))))))
+
+===
+Range with infinity and exclusive bound
+===
+template float t := (!0.0 .. infinity);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "float")
+      Name: (Ident "t")
+      Value: (ParenExpr
+        List: (BinaryExpr Op: ".."
+          X: (UnaryExpr Op: "!"
+            X: (ValueLiteral "0.0"))
+          Y: (Ident "infinity"))))))
+
+===
+Length restriction
+===
+template charstring t := ? length(1 .. 5);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "charstring")
+      Name: (Ident "t")
+      Value: (LengthExpr Len: "length"
+        X: (ValueLiteral "?")
+        Size: (ParenExpr
+          List: (BinaryExpr Op: ".."
+            X: (ValueLiteral "1")
+            Y: (ValueLiteral "5")))))))
+
+===
+Ifpresent
+===
+template R t := { a := 1 ifpresent };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "R")
+      Name: (Ident "t")
+      Value: (CompositeLiteral
+        List: (BinaryExpr Op: ":="
+          X: (Ident "a")
+          Y: (UnaryExpr Op: "ifpresent"
+            X: (ValueLiteral "1")))))))
+
+===
+Pattern
+===
+template charstring t := pattern "ab*c";
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "charstring")
+      Name: (Ident "t")
+      Value: (PatternExpr Tok: "pattern"
+        X: (ValueLiteral "\"ab*c\"")))))
+
+===
+Pattern with nocase
+===
+template charstring t := pattern @nocase "abc";
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "charstring")
+      Name: (Ident "t")
+      Value: (PatternExpr Tok: "pattern" NoCase: "@nocase"
+        X: (ValueLiteral "\"abc\"")))))
+
+===
+Pattern concatenation
+===
+template charstring t := pattern "a" & "b";
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "charstring")
+      Name: (Ident "t")
+      Value: (PatternExpr Tok: "pattern"
+        X: (BinaryExpr Op: "&"
+          X: (ValueLiteral "\"a\"")
+          Y: (ValueLiteral "\"b\""))))))
+
+===
+Decmatch
+===
+template octetstring t := decmatch MyTemplate;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "octetstring")
+      Name: (Ident "t")
+      Value: (DecmatchExpr Tok: "decmatch"
+        X: (Ident "MyTemplate")))))
+
+===
+Decmatch with encoding info
+===
+template octetstring t := decmatch ("UTF-8") MyType: { a := 1 };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "octetstring")
+      Name: (Ident "t")
+      Value: (DecmatchExpr Tok: "decmatch"
+        Params: (ParenExpr
+          List: (ValueLiteral "\"UTF-8\""))
+        X: (BinaryExpr Op: ":"
+          X: (Ident "MyType")
+          Y: (CompositeLiteral
+            List: (BinaryExpr Op: ":="
+              X: (Ident "a")
+              Y: (ValueLiteral "1"))))))))
+
+===
+All from
+===
+template integer t := (all from list);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "integer")
+      Name: (Ident "t")
+      Value: (ParenExpr
+        List: (FromExpr KindTok: "all" FromTok: "from"
+          X: (Ident "list"))))))
+
+===
+Conjunct
+===
+template integer t := conjunct((0 .. 10), complement(5));
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "integer")
+      Name: (Ident "t")
+      Value: (CallExpr
+        Fun: (Ident "conjunct")
+        Args: (ParenExpr
+          List: (ParenExpr
+            List: (BinaryExpr Op: ".."
+              X: (ValueLiteral "0")
+              Y: (ValueLiteral "10")))
+          List: (CallExpr
+            Fun: (Ident "complement")
+            Args: (ParenExpr
+              List: (ValueLiteral "5"))))))))
+
+===
+All from in list
+===
+template RoI t := { all from x, 3 };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "RoI")
+      Name: (Ident "t")
+      Value: (CompositeLiteral
+        List: (FromExpr KindTok: "all" FromTok: "from"
+          X: (Ident "x"))
+        List: (ValueLiteral "3")))))
+
+===
+Pattern with length and ifpresent
+===
+template charstring t := pattern "a" length(3) ifpresent;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "charstring")
+      Name: (Ident "t")
+      Value: (UnaryExpr Op: "ifpresent"
+        X: (LengthExpr Len: "length"
+          X: (PatternExpr Tok: "pattern"
+            X: (ValueLiteral "\"a\""))
+          Size: (ParenExpr
+            List: (ValueLiteral "3")))))))
+
+===
+Record template with field assignments
+===
+template R t := { a := 1, b := "x", c := { d := true } };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "R")
+      Name: (Ident "t")
+      Value: (CompositeLiteral
+        List: (BinaryExpr Op: ":="
+          X: (Ident "a")
+          Y: (ValueLiteral "1"))
+        List: (BinaryExpr Op: ":="
+          X: (Ident "b")
+          Y: (ValueLiteral "\"x\""))
+        List: (BinaryExpr Op: ":="
+          X: (Ident "c")
+          Y: (CompositeLiteral
+            List: (BinaryExpr Op: ":="
+              X: (Ident "d")
+              Y: (ValueLiteral "true"))))))))
+
+===
+Record template value list notation
+===
+template R t := { 1, "x", true };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "R")
+      Name: (Ident "t")
+      Value: (CompositeLiteral
+        List: (ValueLiteral "1")
+        List: (ValueLiteral "\"x\"")
+        List: (ValueLiteral "true")))))
+
+===
+Index assignments
+===
+template RoI t := { [0] := 1, [2] := ? };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "RoI")
+      Name: (Ident "t")
+      Value: (CompositeLiteral
+        List: (BinaryExpr Op: ":="
+          X: (IndexExpr
+            Index: (ValueLiteral "0"))
+          Y: (ValueLiteral "1"))
+        List: (BinaryExpr Op: ":="
+          X: (IndexExpr
+            Index: (ValueLiteral "2"))
+          Y: (ValueLiteral "?"))))))
+
+===
+Not used value
+===
+template R t := { 1, -, 3 };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "R")
+      Name: (Ident "t")
+      Value: (CompositeLiteral
+        List: (ValueLiteral "1")
+        List: (ValueLiteral "-")
+        List: (ValueLiteral "3")))))
+
+===
+Empty composite
+===
+template RoI t := {};
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "RoI")
+      Name: (Ident "t")
+      Value: (CompositeLiteral))))
+
+===
+Nested array template
+===
+template RoRoI t := { { 1, 2 }, { 3, * } };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "RoRoI")
+      Name: (Ident "t")
+      Value: (CompositeLiteral
+        List: (CompositeLiteral
+          List: (ValueLiteral "1")
+          List: (ValueLiteral "2"))
+        List: (CompositeLiteral
+          List: (ValueLiteral "3")
+          List: (ValueLiteral "*"))))))
+
+===
+Inline template
+===
+f(integer: ?);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "f")
+      Args: (ParenExpr
+        List: (BinaryExpr Op: ":"
+          X: (Ident "integer")
+          Y: (ValueLiteral "?"))))))
+
+===
+Inline modified template
+===
+f(modifies t := { a := 1 });
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "f")
+      Args: (ParenExpr
+        List: (ModifiesExpr Tok: "modifies" Assign: ":="
+          X: (Ident "t")
+          Y: (CompositeLiteral
+            List: (BinaryExpr Op: ":="
+              X: (Ident "a")
+              Y: (ValueLiteral "1"))))))))
+
+===
+Inline template with type and modifies
+===
+f(R: modifies t := { a := 1 });
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "f")
+      Args: (ParenExpr
+        List: (BinaryExpr Op: ":"
+          X: (Ident "R")
+          Y: (ModifiesExpr Tok: "modifies" Assign: ":="
+            X: (Ident "t")
+            Y: (CompositeLiteral
+              List: (BinaryExpr Op: ":="
+                X: (Ident "a")
+                Y: (ValueLiteral "1")))))))))
+
+===
+Var template with restriction
+===
+var template (omit) R vt := omit;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (ValueDecl KindTok: "var"
+      TemplateRestriction: (RestrictionSpec TemplateTok: "template" Tok: "omit")
+      Type: (Ident "R")
+      Decls: (Declarator AssignTok: ":="
+        Name: (Ident "vt")
+        Value: (ValueLiteral "omit")))))
+
+===
+Var template multiple declarators
+===
+var template integer v1 := 1, v2 := (1, 2);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (ValueDecl KindTok: "var"
+      TemplateRestriction: (RestrictionSpec TemplateTok: "template")
+      Type: (Ident "integer")
+      Decls: (Declarator AssignTok: ":="
+        Name: (Ident "v1")
+        Value: (ValueLiteral "1"))
+      Decls: (Declarator AssignTok: ":="
+        Name: (Ident "v2")
+        Value: (ParenExpr
+          List: (ValueLiteral "1")
+          List: (ValueLiteral "2"))))))
+
+===
+Real-world: Receive template
+===
+template MsgType mw_msg(template integer p_id := ?) := {
+  id := p_id,
+  payload := pattern "OK*" ifpresent,
+  options := superset(1, 2) length(2 .. 5)
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+      Type: (Ident "MsgType")
+      Name: (Ident "mw_msg")
+      Params: (FormalPars
+        List: (FormalPar AssignTok: ":="
+          TemplateRestriction: (RestrictionSpec TemplateTok: "template")
+          Type: (Ident "integer")
+          Name: (Ident "p_id")
+          Value: (ValueLiteral "?")))
+      Value: (CompositeLiteral
+        List: (BinaryExpr Op: ":="
+          X: (Ident "id")
+          Y: (Ident "p_id"))
+        List: (BinaryExpr Op: ":="
+          X: (Ident "payload")
+          Y: (UnaryExpr Op: "ifpresent"
+            X: (PatternExpr Tok: "pattern"
+              X: (ValueLiteral "\"OK*\""))))
+        List: (BinaryExpr Op: ":="
+          X: (Ident "options")
+          Y: (LengthExpr Len: "length"
+            X: (CallExpr
+              Fun: (Ident "superset")
+              Args: (ParenExpr
+                List: (ValueLiteral "1")
+                List: (ValueLiteral "2")))
+            Size: (ParenExpr
+              List: (BinaryExpr Op: ".."
+                X: (ValueLiteral "2")
+                Y: (ValueLiteral "5")))))))))
+
+===
+Real-world: Modified template with nested fields
+===
+template (value) Header m_header modifies m_base := {
+  version := 2,
+  flags := { [0] := true, [1] := - }
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (TemplateDecl TemplateTok: "template" Tok: "value" ModifiesTok: "modifies" AssignTok: ":="
+      Type: (Ident "Header")
+      Name: (Ident "m_header")
+      Base: (Ident "m_base")
+      Value: (CompositeLiteral
+        List: (BinaryExpr Op: ":="
+          X: (Ident "version")
+          Y: (ValueLiteral "2"))
+        List: (BinaryExpr Op: ":="
+          X: (Ident "flags")
+          Y: (CompositeLiteral
+            List: (BinaryExpr Op: ":="
+              X: (IndexExpr
+                Index: (ValueLiteral "0"))
+              Y: (ValueLiteral "true"))
+            List: (BinaryExpr Op: ":="
+              X: (IndexExpr
+                Index: (ValueLiteral "1"))
+              Y: (ValueLiteral "-"))))))))

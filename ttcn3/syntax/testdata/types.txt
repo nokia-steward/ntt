@@ -1,0 +1,878 @@
+===
+Subtype alias
+===
+type integer MyInt;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (RefSpec
+          X: (Ident "integer"))
+        Name: (Ident "MyInt")))))
+
+===
+Subtype with value list
+===
+type integer Digit (0, 1, 2, 3);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (RefSpec
+          X: (Ident "integer"))
+        Name: (Ident "Digit")
+        ValueConstraint: (ParenExpr
+          List: (ValueLiteral "0")
+          List: (ValueLiteral "1")
+          List: (ValueLiteral "2")
+          List: (ValueLiteral "3"))))))
+
+===
+Subtype with range
+===
+type integer Byte (0 .. 255);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (RefSpec
+          X: (Ident "integer"))
+        Name: (Ident "Byte")
+        ValueConstraint: (ParenExpr
+          List: (BinaryExpr Op: ".."
+            X: (ValueLiteral "0")
+            Y: (ValueLiteral "255")))))))
+
+===
+Subtype with negative infinity
+===
+type float NonPositive (-infinity .. 0.0);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (RefSpec
+          X: (Ident "float"))
+        Name: (Ident "NonPositive")
+        ValueConstraint: (ParenExpr
+          List: (BinaryExpr Op: ".."
+            X: (UnaryExpr Op: "-"
+              X: (Ident "infinity"))
+            Y: (ValueLiteral "0.0")))))))
+
+===
+Subtype with exclusive bounds
+===
+type integer Open (!0 .. !10);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (RefSpec
+          X: (Ident "integer"))
+        Name: (Ident "Open")
+        ValueConstraint: (ParenExpr
+          List: (BinaryExpr Op: ".."
+            X: (UnaryExpr Op: "!"
+              X: (ValueLiteral "0"))
+            Y: (UnaryExpr Op: "!"
+              X: (ValueLiteral "10"))))))))
+
+===
+Subtype with mixed list and range
+===
+type integer Mixed (1, 3 .. 5, 10);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (RefSpec
+          X: (Ident "integer"))
+        Name: (Ident "Mixed")
+        ValueConstraint: (ParenExpr
+          List: (ValueLiteral "1")
+          List: (BinaryExpr Op: ".."
+            X: (ValueLiteral "3")
+            Y: (ValueLiteral "5"))
+          List: (ValueLiteral "10"))))))
+
+===
+Subtype with length restriction
+===
+type charstring Name length(1 .. 32);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (RefSpec
+          X: (Ident "charstring"))
+        Name: (Ident "Name")
+        LengthConstraint: (LengthExpr Len: "length"
+          Size: (ParenExpr
+            List: (BinaryExpr Op: ".."
+              X: (ValueLiteral "1")
+              Y: (ValueLiteral "32"))))))))
+
+===
+Subtype with pattern
+===
+type charstring Ident (pattern "[a-z]#(1,8)");
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (RefSpec
+          X: (Ident "charstring"))
+        Name: (Ident "Ident")
+        ValueConstraint: (ParenExpr
+          List: (PatternExpr Tok: "pattern"
+            X: (ValueLiteral "\"[a-z]#(1,8)\"")))))))
+
+===
+Subtype with universal charstring
+===
+type universal charstring UStr length(0 .. 10);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (RefSpec
+          X: (Ident "universal charstring"))
+        Name: (Ident "UStr")
+        LengthConstraint: (LengthExpr Len: "length"
+          Size: (ParenExpr
+            List: (BinaryExpr Op: ".."
+              X: (ValueLiteral "0")
+              Y: (ValueLiteral "10"))))))))
+
+===
+Subtype with array dimension
+===
+type integer Matrix[2][3];
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (RefSpec
+          X: (Ident "integer"))
+        Name: (Ident "Matrix")
+        ArrayDef: (ParenExpr
+          List: (ValueLiteral "2"))
+        ArrayDef: (ParenExpr
+          List: (ValueLiteral "3"))))))
+
+===
+Subtype of referenced type with module prefix
+===
+type M.T MyT;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (RefSpec
+          X: (SelectorExpr
+            X: (Ident "M")
+            Sel: (Ident "T")))
+        Name: (Ident "MyT")))))
+
+===
+Record type
+===
+type record R {
+  integer a,
+  charstring b optional
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (StructTypeDecl TypeTok: "type" KindTok: "record"
+      Name: (Ident "R")
+      Fields: (Field
+        Type: (RefSpec
+          X: (Ident "integer"))
+        Name: (Ident "a"))
+      Fields: (Field Optional: "optional"
+        Type: (RefSpec
+          X: (Ident "charstring"))
+        Name: (Ident "b")))))
+
+===
+Empty record type
+===
+type record Empty {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (StructTypeDecl TypeTok: "type" KindTok: "record"
+      Name: (Ident "Empty"))))
+
+===
+Set type
+===
+type set S {
+  boolean flag,
+  float f optional
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (StructTypeDecl TypeTok: "type" KindTok: "set"
+      Name: (Ident "S")
+      Fields: (Field
+        Type: (RefSpec
+          X: (Ident "boolean"))
+        Name: (Ident "flag"))
+      Fields: (Field Optional: "optional"
+        Type: (RefSpec
+          X: (Ident "float"))
+        Name: (Ident "f")))))
+
+===
+Record with field constraints
+===
+type record R {
+  integer a (0 .. 10),
+  charstring b length(3),
+  octetstring c[4]
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (StructTypeDecl TypeTok: "type" KindTok: "record"
+      Name: (Ident "R")
+      Fields: (Field
+        Type: (RefSpec
+          X: (Ident "integer"))
+        Name: (Ident "a")
+        ValueConstraint: (ParenExpr
+          List: (BinaryExpr Op: ".."
+            X: (ValueLiteral "0")
+            Y: (ValueLiteral "10"))))
+      Fields: (Field
+        Type: (RefSpec
+          X: (Ident "charstring"))
+        Name: (Ident "b")
+        LengthConstraint: (LengthExpr Len: "length"
+          Size: (ParenExpr
+            List: (ValueLiteral "3"))))
+      Fields: (Field
+        Type: (RefSpec
+          X: (Ident "octetstring"))
+        Name: (Ident "c")
+        ArrayDef: (ParenExpr
+          List: (ValueLiteral "4"))))))
+
+===
+Record with nested anonymous types
+===
+type record R {
+  record {
+    integer x
+  } inner,
+  record of integer list,
+  enumerated { e1, e2 } e optional
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (StructTypeDecl TypeTok: "type" KindTok: "record"
+      Name: (Ident "R")
+      Fields: (Field
+        Type: (StructSpec KindTok: "record"
+          Fields: (Field
+            Type: (RefSpec
+              X: (Ident "integer"))
+            Name: (Ident "x")))
+        Name: (Ident "inner"))
+      Fields: (Field
+        Type: (ListSpec KindTok: "record" OfTok: "of"
+          ElemType: (RefSpec
+            X: (Ident "integer")))
+        Name: (Ident "list"))
+      Fields: (Field Optional: "optional"
+        Type: (EnumSpec Tok: "enumerated"
+          Enums: (Ident "e1")
+          Enums: (Ident "e2"))
+        Name: (Ident "e")))))
+
+===
+Union with default alternative
+===
+type union U {
+  @default integer i,
+  charstring s
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (StructTypeDecl TypeTok: "type" KindTok: "union"
+      Name: (Ident "U")
+      Fields: (Field DefaultTok: "@default"
+        Type: (RefSpec
+          X: (Ident "integer"))
+        Name: (Ident "i"))
+      Fields: (Field
+        Type: (RefSpec
+          X: (Ident "charstring"))
+        Name: (Ident "s")))))
+
+===
+Parameterized record type
+===
+type record Pair<in type T1, in type T2> {
+  T1 first,
+  T2 second
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (StructTypeDecl TypeTok: "type" KindTok: "record"
+      Name: (Ident "Pair")
+      TypePars: (FormalPars LParen: "<" RParen: ">"
+        List: (FormalPar Direction: "in"
+          Type: (Ident "type")
+          Name: (Ident "T1"))
+        List: (FormalPar Direction: "in"
+          Type: (Ident "type")
+          Name: (Ident "T2")))
+      Fields: (Field
+        Type: (RefSpec
+          X: (Ident "T1"))
+        Name: (Ident "first"))
+      Fields: (Field
+        Type: (RefSpec
+          X: (Ident "T2"))
+        Name: (Ident "second")))))
+
+===
+Record of type
+===
+type record of integer IntList;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (ListSpec KindTok: "record" OfTok: "of"
+          ElemType: (RefSpec
+            X: (Ident "integer")))
+        Name: (Ident "IntList")))))
+
+===
+Set of type
+===
+type set of charstring StrSet;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (ListSpec KindTok: "set" OfTok: "of"
+          ElemType: (RefSpec
+            X: (Ident "charstring")))
+        Name: (Ident "StrSet")))))
+
+===
+Record of with length
+===
+type record length(1 .. 10) of integer IntList;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (ListSpec KindTok: "record" OfTok: "of"
+          Length: (LengthExpr Len: "length"
+            Size: (ParenExpr
+              List: (BinaryExpr Op: ".."
+                X: (ValueLiteral "1")
+                Y: (ValueLiteral "10"))))
+          ElemType: (RefSpec
+            X: (Ident "integer")))
+        Name: (Ident "IntList")))))
+
+===
+Record of with subtype constraint
+===
+type record of integer Bytes (0 .. 255);
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (ListSpec KindTok: "record" OfTok: "of"
+          ElemType: (RefSpec
+            X: (Ident "integer")))
+        Name: (Ident "Bytes")
+        ValueConstraint: (ParenExpr
+          List: (BinaryExpr Op: ".."
+            X: (ValueLiteral "0")
+            Y: (ValueLiteral "255")))))))
+
+===
+Nested record of
+===
+type record of record of integer Matrix;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (ListSpec KindTok: "record" OfTok: "of"
+          ElemType: (ListSpec KindTok: "record" OfTok: "of"
+            ElemType: (RefSpec
+              X: (Ident "integer"))))
+        Name: (Ident "Matrix")))))
+
+===
+Record of anonymous record
+===
+type record of record { integer a } RecList;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (ListSpec KindTok: "record" OfTok: "of"
+          ElemType: (StructSpec KindTok: "record"
+            Fields: (Field
+              Type: (RefSpec
+                X: (Ident "integer"))
+              Name: (Ident "a"))))
+        Name: (Ident "RecList")))))
+
+===
+Enumerated type
+===
+type enumerated Color { red, green, blue };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (EnumTypeDecl TypeTok: "type" EnumTok: "enumerated"
+      Name: (Ident "Color")
+      Enums: (Ident "red")
+      Enums: (Ident "green")
+      Enums: (Ident "blue"))))
+
+===
+Enumerated with explicit values
+===
+type enumerated Color { red(1), green(2), blue(10 .. 12) };
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (EnumTypeDecl TypeTok: "type" EnumTok: "enumerated"
+      Name: (Ident "Color")
+      Enums: (CallExpr
+        Fun: (Ident "red")
+        Args: (ParenExpr
+          List: (ValueLiteral "1")))
+      Enums: (CallExpr
+        Fun: (Ident "green")
+        Args: (ParenExpr
+          List: (ValueLiteral "2")))
+      Enums: (CallExpr
+        Fun: (Ident "blue")
+        Args: (ParenExpr
+          List: (BinaryExpr Op: ".."
+            X: (ValueLiteral "10")
+            Y: (ValueLiteral "12")))))))
+
+===
+Map type
+===
+type map from charstring to integer Dict;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (MapTypeDecl TypeTok: "type"
+      Spec: (MapSpec MapTok: "map" FromTok: "from" ToTok: "to"
+        FromType: (RefSpec
+          X: (Ident "charstring"))
+        ToType: (RefSpec
+          X: (Ident "integer")))
+      Name: (Ident "Dict"))))
+
+===
+Map type with nested value type
+===
+type map from integer to record of charstring Lists;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (MapTypeDecl TypeTok: "type"
+      Spec: (MapSpec MapTok: "map" FromTok: "from" ToTok: "to"
+        FromType: (RefSpec
+          X: (Ident "integer"))
+        ToType: (ListSpec KindTok: "record" OfTok: "of"
+          ElemType: (RefSpec
+            X: (Ident "charstring"))))
+      Name: (Ident "Lists"))))
+
+===
+Message port type
+===
+type port P message {
+  in integer;
+  out charstring, float;
+  inout boolean
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (PortTypeDecl TypeTok: "type" PortTok: "port" KindTok: "message"
+      Name: (Ident "P")
+      Attrs: (PortAttribute KindTok: "in"
+        Types: (Ident "integer"))
+      Attrs: (PortAttribute KindTok: "out"
+        Types: (Ident "charstring")
+        Types: (Ident "float"))
+      Attrs: (PortAttribute KindTok: "inout"
+        Types: (Ident "boolean")))))
+
+===
+Procedure port type
+===
+type port P procedure {
+  in S1;
+  out S2;
+  inout S3, S4
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (PortTypeDecl TypeTok: "type" PortTok: "port" KindTok: "procedure"
+      Name: (Ident "P")
+      Attrs: (PortAttribute KindTok: "in"
+        Types: (Ident "S1"))
+      Attrs: (PortAttribute KindTok: "out"
+        Types: (Ident "S2"))
+      Attrs: (PortAttribute KindTok: "inout"
+        Types: (Ident "S3")
+        Types: (Ident "S4")))))
+
+===
+Port type with address
+===
+type port P message {
+  address MyAddr;
+  inout integer
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (PortTypeDecl TypeTok: "type" PortTok: "port" KindTok: "message"
+      Name: (Ident "P")
+      Attrs: (PortAttribute KindTok: "address"
+        Types: (Ident "MyAddr"))
+      Attrs: (PortAttribute KindTok: "inout"
+        Types: (Ident "integer")))))
+
+===
+Port type with map and unmap param
+===
+type port P message {
+  inout integer;
+  map param (in integer p1, charstring p2);
+  unmap param (in integer p1)
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (PortTypeDecl TypeTok: "type" PortTok: "port" KindTok: "message"
+      Name: (Ident "P")
+      Attrs: (PortAttribute KindTok: "inout"
+        Types: (Ident "integer"))
+      Attrs: (PortMapAttribute MapTok: "map" ParamTok: "param"
+        Params: (FormalPars
+          List: (FormalPar Direction: "in"
+            Type: (Ident "integer")
+            Name: (Ident "p1"))
+          List: (FormalPar
+            Type: (Ident "charstring")
+            Name: (Ident "p2"))))
+      Attrs: (PortMapAttribute MapTok: "unmap" ParamTok: "param"
+        Params: (FormalPars
+          List: (FormalPar Direction: "in"
+            Type: (Ident "integer")
+            Name: (Ident "p1")))))))
+
+===
+Port type with realtime
+===
+type port P message realtime {
+  inout integer
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (PortTypeDecl TypeTok: "type" PortTok: "port" KindTok: "message" Realtime: "realtime"
+      Name: (Ident "P")
+      Attrs: (PortAttribute KindTok: "inout"
+        Types: (Ident "integer")))))
+
+===
+Empty component type
+===
+type component C {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (ComponentTypeDecl TypeTok: "type" CompTok: "component"
+      Name: (Ident "C")
+      Body: (BlockStmt))))
+
+===
+Component type with members
+===
+type component C {
+  port P p1, p2;
+  timer t := 1.0;
+  var integer v := 0;
+  const charstring c := "x";
+  var template integer vt := ?;
+  port P parr[3];
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (ComponentTypeDecl TypeTok: "type" CompTok: "component"
+      Name: (Ident "C")
+      Body: (BlockStmt
+        Stmts: (DeclStmt
+          Decl: (ValueDecl KindTok: "port"
+            Type: (Ident "P")
+            Decls: (Declarator
+              Name: (Ident "p1"))
+            Decls: (Declarator
+              Name: (Ident "p2"))))
+        Stmts: (DeclStmt
+          Decl: (ValueDecl
+            Type: (Ident "timer")
+            Decls: (Declarator AssignTok: ":="
+              Name: (Ident "t")
+              Value: (ValueLiteral "1.0"))))
+        Stmts: (DeclStmt
+          Decl: (ValueDecl KindTok: "var"
+            Type: (Ident "integer")
+            Decls: (Declarator AssignTok: ":="
+              Name: (Ident "v")
+              Value: (ValueLiteral "0"))))
+        Stmts: (DeclStmt
+          Decl: (ValueDecl KindTok: "const"
+            Type: (Ident "charstring")
+            Decls: (Declarator AssignTok: ":="
+              Name: (Ident "c")
+              Value: (ValueLiteral "\"x\""))))
+        Stmts: (DeclStmt
+          Decl: (ValueDecl KindTok: "var"
+            TemplateRestriction: (RestrictionSpec TemplateTok: "template")
+            Type: (Ident "integer")
+            Decls: (Declarator AssignTok: ":="
+              Name: (Ident "vt")
+              Value: (ValueLiteral "?"))))
+        Stmts: (DeclStmt
+          Decl: (ValueDecl KindTok: "port"
+            Type: (Ident "P")
+            Decls: (Declarator
+              Name: (Ident "parr")
+              ArrayDef: (ParenExpr
+                List: (ValueLiteral "3")))))))))
+
+===
+Component type extends
+===
+type component C extends A, B {
+  var boolean b;
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (ComponentTypeDecl TypeTok: "type" CompTok: "component" ExtendsTok: "extends"
+      Name: (Ident "C")
+      Extends: (Ident "A")
+      Extends: (Ident "B")
+      Body: (BlockStmt
+        Stmts: (DeclStmt
+          Decl: (ValueDecl KindTok: "var"
+            Type: (Ident "boolean")
+            Decls: (Declarator
+              Name: (Ident "b"))))))))
+
+===
+Class type
+===
+type class C {
+  var integer x;
+  function f() return integer { return x; }
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (ClassTypeDecl TypeTok: "type" KindTok: "class"
+      Name: (Ident "C")
+      Defs: (ModuleDef
+        Def: (ValueDecl KindTok: "var"
+          Type: (Ident "integer")
+          Decls: (Declarator
+            Name: (Ident "x"))))
+      Defs: (ModuleDef
+        Def: (FuncDecl KindTok: "function"
+          Name: (Ident "f")
+          Params: (FormalPars)
+          Return: (ReturnSpec Tok: "return"
+            Type: (Ident "integer"))
+          Body: (BlockStmt
+            Stmts: (ReturnStmt Tok: "return"
+              Result: (Ident "x"))))))))
+
+===
+Class type extends with modifier
+===
+type class @abstract C extends B {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (ClassTypeDecl TypeTok: "type" KindTok: "class" Modif: "@abstract" ExtendsTok: "extends"
+      Name: (Ident "C")
+      Extends: (Ident "B"))))
+
+===
+Final class with runs on
+===
+type class @final C runs on Comp {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (ClassTypeDecl TypeTok: "type" KindTok: "class" Modif: "@final"
+      Name: (Ident "C")
+      RunsOn: (RunsOnSpec RunsTok: "runs" OnTok: "on"
+        Comp: (Ident "Comp")))))
+
+===
+Trait class
+===
+type class @trait T {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (ClassTypeDecl TypeTok: "type" KindTok: "class" Modif: "@trait"
+      Name: (Ident "T"))))
+
+===
+Class with constructor
+===
+type class C {
+  var integer x;
+  create(integer x) { this.x := x; }
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (ClassTypeDecl TypeTok: "type" KindTok: "class"
+      Name: (Ident "C")
+      Defs: (ModuleDef
+        Def: (ValueDecl KindTok: "var"
+          Type: (Ident "integer")
+          Decls: (Declarator
+            Name: (Ident "x"))))
+      Defs: (ModuleDef
+        Def: (ConstructorDecl
+          Name: (Ident "create")
+          Params: (FormalPars
+            List: (FormalPar
+              Type: (Ident "integer")
+              Name: (Ident "x")))
+          Body: (BlockStmt
+            Stmts: (ExprStmt
+              Expr: (BinaryExpr Op: ":="
+                X: (SelectorExpr
+                  X: (Ident "this")
+                  Sel: (Ident "x"))
+                Y: (Ident "x")))))))))
+
+===
+Function type
+===
+type function F(in integer x) return integer;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (BehaviourTypeDecl TypeTok: "type" KindTok: "function"
+      Name: (Ident "F")
+      Params: (FormalPars
+        List: (FormalPar Direction: "in"
+          Type: (Ident "integer")
+          Name: (Ident "x")))
+      Return: (ReturnSpec Tok: "return"
+        Type: (Ident "integer")))))
+
+===
+Function type with runs on self
+===
+type function F() runs on self return integer;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (BehaviourTypeDecl TypeTok: "type" KindTok: "function"
+      Name: (Ident "F")
+      Params: (FormalPars)
+      RunsOn: (RunsOnSpec RunsTok: "runs" OnTok: "on"
+        Comp: (Ident "self"))
+      Return: (ReturnSpec Tok: "return"
+        Type: (Ident "integer")))))
+
+===
+Altstep type
+===
+type altstep A(inout integer x) runs on C;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (BehaviourTypeDecl TypeTok: "type" KindTok: "altstep"
+      Name: (Ident "A")
+      Params: (FormalPars
+        List: (FormalPar Direction: "inout"
+          Type: (Ident "integer")
+          Name: (Ident "x")))
+      RunsOn: (RunsOnSpec RunsTok: "runs" OnTok: "on"
+        Comp: (Ident "C")))))
+
+===
+Testcase type
+===
+type testcase T() runs on C system S;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (BehaviourTypeDecl TypeTok: "type" KindTok: "testcase"
+      Name: (Ident "T")
+      Params: (FormalPars)
+      RunsOn: (RunsOnSpec RunsTok: "runs" OnTok: "on"
+        Comp: (Ident "C"))
+      System: (SystemSpec Tok: "system"
+        Comp: (Ident "S")))))
+
+===
+Address type
+===
+type integer address;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (RefSpec
+          X: (Ident "integer"))
+        Name: (Ident "address")))))

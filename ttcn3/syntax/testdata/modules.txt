@@ -1,0 +1,981 @@
+===
+Empty module
+===
+module M {}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")))
+
+===
+Module with language clause
+===
+module M language "TTCN-3:2018" {}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Language: (LanguageSpec Tok: "language" List: "\"TTCN-3:2018\"")))
+
+===
+Module with multiple language clauses
+===
+module M language "TTCN-3:2018", "TTCN-3:2012" {}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Language: (LanguageSpec Tok: "language" List: "\"TTCN-3:2018\"" List: "\"TTCN-3:2012\"")))
+
+===
+Multiple modules
+===
+module A {}
+module B {}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "A"))
+  Nodes: (Module Tok: "module"
+    Name: (Ident "B")))
+
+===
+Import all
+===
+module M {
+  import from A all;
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ImportDecl ImportTok: "import" FromTok: "from"
+        Module: (Ident "A")
+        List: (DefKindExpr
+          List: (Ident "all"))))))
+
+===
+Import all with language
+===
+module M {
+  import from A language "TTCN-3:2018" all;
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ImportDecl ImportTok: "import" FromTok: "from"
+        Module: (Ident "A")
+        Language: (LanguageSpec Tok: "language" List: "\"TTCN-3:2018\"")
+        List: (DefKindExpr
+          List: (Ident "all"))))))
+
+===
+Import all except
+===
+module M {
+  import from A all except { type T; function f; };
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ImportDecl ImportTok: "import" FromTok: "from"
+        Module: (Ident "A")
+        List: (DefKindExpr
+          List: (ExceptExpr ExceptTok: "except"
+            X: (Ident "all")
+            List: (DefKindExpr KindTok: "type"
+              List: (Ident "T"))
+            List: (DefKindExpr KindTok: "function"
+              List: (Ident "f"))))))))
+
+===
+Import specific definitions
+===
+module M {
+  import from A { type T, U; template t1, t2; }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ImportDecl ImportTok: "import" FromTok: "from"
+        Module: (Ident "A")
+        List: (DefKindExpr KindTok: "type"
+          List: (Ident "T")
+          List: (Ident "U"))
+        List: (DefKindExpr KindTok: "template"
+          List: (Ident "t1")
+          List: (Ident "t2"))))))
+
+===
+Import of every kind
+===
+module M {
+  import from A {
+    group g;
+    type T;
+    template t;
+    const c;
+    testcase tc;
+    altstep as;
+    function f;
+    signature s;
+    modulepar mp;
+    import all;
+  }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ImportDecl ImportTok: "import" FromTok: "from"
+        Module: (Ident "A")
+        List: (DefKindExpr KindTok: "group"
+          List: (Ident "g"))
+        List: (DefKindExpr KindTok: "type"
+          List: (Ident "T"))
+        List: (DefKindExpr KindTok: "template"
+          List: (Ident "t"))
+        List: (DefKindExpr KindTok: "const"
+          List: (Ident "c"))
+        List: (DefKindExpr KindTok: "testcase"
+          List: (Ident "tc"))
+        List: (DefKindExpr KindTok: "altstep"
+          List: (Ident "as"))
+        List: (DefKindExpr KindTok: "function"
+          List: (Ident "f"))
+        List: (DefKindExpr KindTok: "signature"
+          List: (Ident "s"))
+        List: (DefKindExpr KindTok: "modulepar"
+          List: (Ident "mp"))
+        List: (DefKindExpr KindTok: "import"
+          List: (Ident "all"))))))
+
+===
+Import with except in kind
+===
+module M {
+  import from A { type all except T, U; function all except f; }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ImportDecl ImportTok: "import" FromTok: "from"
+        Module: (Ident "A")
+        List: (DefKindExpr KindTok: "type"
+          List: (ExceptExpr ExceptTok: "except"
+            X: (Ident "all")
+            List: (Ident "T")
+            List: (Ident "U")))
+        List: (DefKindExpr KindTok: "function"
+          List: (ExceptExpr ExceptTok: "except"
+            X: (Ident "all")
+            List: (Ident "f")))))))
+
+===
+Import with visibility
+===
+module M {
+  public import from A all;
+  private import from B all;
+  friend import from C all;
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef Visibility: "public"
+      Def: (ImportDecl ImportTok: "import" FromTok: "from"
+        Module: (Ident "A")
+        List: (DefKindExpr
+          List: (Ident "all"))))
+    Defs: (ModuleDef Visibility: "private"
+      Def: (ImportDecl ImportTok: "import" FromTok: "from"
+        Module: (Ident "B")
+        List: (DefKindExpr
+          List: (Ident "all"))))
+    Defs: (ModuleDef Visibility: "friend"
+      Def: (ImportDecl ImportTok: "import" FromTok: "from"
+        Module: (Ident "C")
+        List: (DefKindExpr
+          List: (Ident "all"))))))
+
+===
+Nested groups
+===
+module M {
+  group outer {
+    group inner {
+      type integer I;
+    }
+    const integer c := 1;
+  }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (GroupDecl Tok: "group"
+        Name: (Ident "outer")
+        Defs: (ModuleDef
+          Def: (GroupDecl Tok: "group"
+            Name: (Ident "inner")
+            Defs: (ModuleDef
+              Def: (SubTypeDecl TypeTok: "type"
+                Field: (Field
+                  Type: (RefSpec
+                    X: (Ident "integer"))
+                  Name: (Ident "I"))))))
+        Defs: (ModuleDef
+          Def: (ValueDecl KindTok: "const"
+            Type: (Ident "integer")
+            Decls: (Declarator AssignTok: ":="
+              Name: (Ident "c")
+              Value: (ValueLiteral "1"))))))))
+
+===
+Empty group
+===
+module M {
+  group g {}
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (GroupDecl Tok: "group"
+        Name: (Ident "g")))))
+
+===
+Group with attributes
+===
+module M {
+  group g {
+    type integer I;
+  } with { encode "RAW" }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (GroupDecl Tok: "group"
+        Name: (Ident "g")
+        Defs: (ModuleDef
+          Def: (SubTypeDecl TypeTok: "type"
+            Field: (Field
+              Type: (RefSpec
+                X: (Ident "integer"))
+              Name: (Ident "I"))))
+        With: (WithSpec Tok: "with"
+          List: (WithStmt KindTok: "encode"
+            Value: (ValueLiteral "\"RAW\"")))))))
+
+===
+Visibility modifiers on definitions
+===
+module M {
+  public type integer A;
+  private type integer B;
+  friend type integer C;
+  public const integer c := 1;
+  private function f() {}
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef Visibility: "public"
+      Def: (SubTypeDecl TypeTok: "type"
+        Field: (Field
+          Type: (RefSpec
+            X: (Ident "integer"))
+          Name: (Ident "A"))))
+    Defs: (ModuleDef Visibility: "private"
+      Def: (SubTypeDecl TypeTok: "type"
+        Field: (Field
+          Type: (RefSpec
+            X: (Ident "integer"))
+          Name: (Ident "B"))))
+    Defs: (ModuleDef Visibility: "friend"
+      Def: (SubTypeDecl TypeTok: "type"
+        Field: (Field
+          Type: (RefSpec
+            X: (Ident "integer"))
+          Name: (Ident "C"))))
+    Defs: (ModuleDef Visibility: "public"
+      Def: (ValueDecl KindTok: "const"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "c")
+          Value: (ValueLiteral "1"))))
+    Defs: (ModuleDef Visibility: "private"
+      Def: (FuncDecl KindTok: "function"
+        Name: (Ident "f")
+        Params: (FormalPars)
+        Body: (BlockStmt)))))
+
+===
+Friend module
+===
+module M {
+  friend module A;
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (FriendDecl FriendTok: "friend" ModuleTok: "module"
+        Module: (Ident "A")))))
+
+===
+Module parameter with multiple declarators
+===
+module M {
+  modulepar integer a := 1, b, c := 3;
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "modulepar"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "a")
+          Value: (ValueLiteral "1"))
+        Decls: (Declarator
+          Name: (Ident "b"))
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "c")
+          Value: (ValueLiteral "3"))))))
+
+===
+Module parameter group
+===
+module M {
+  modulepar {
+    integer a := 1;
+    charstring b := "x";
+    boolean c;
+  }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ModuleParameterGroup Tok: "modulepar"
+        Decls: (ValueDecl
+          Type: (Ident "integer")
+          Decls: (Declarator AssignTok: ":="
+            Name: (Ident "a")
+            Value: (ValueLiteral "1")))
+        Decls: (ValueDecl
+          Type: (Ident "charstring")
+          Decls: (Declarator AssignTok: ":="
+            Name: (Ident "b")
+            Value: (ValueLiteral "\"x\"")))
+        Decls: (ValueDecl
+          Type: (Ident "boolean")
+          Decls: (Declarator
+            Name: (Ident "c")))))))
+
+===
+Module parameter with template restriction
+===
+module M {
+  modulepar template integer p := ?;
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "modulepar"
+        TemplateRestriction: (RestrictionSpec TemplateTok: "template")
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "p")
+          Value: (ValueLiteral "?"))))))
+
+===
+With attributes on module
+===
+module M {
+} with { encode "JSON"; variant "x" }
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    With: (WithSpec Tok: "with"
+      List: (WithStmt KindTok: "encode"
+        Value: (ValueLiteral "\"JSON\""))
+      List: (WithStmt KindTok: "variant"
+        Value: (ValueLiteral "\"x\"")))))
+
+===
+With attributes on definition
+===
+module M {
+  type record R { integer a } with { variant "FIELDORDER(msb)" }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (StructTypeDecl TypeTok: "type" KindTok: "record"
+        Name: (Ident "R")
+        Fields: (Field
+          Type: (RefSpec
+            X: (Ident "integer"))
+          Name: (Ident "a"))
+        With: (WithSpec Tok: "with"
+          List: (WithStmt KindTok: "variant"
+            Value: (ValueLiteral "\"FIELDORDER(msb)\"")))))))
+
+===
+With attributes all kinds
+===
+module M {
+  type integer I with {
+    encode "RAW";
+    variant "x";
+    display "y";
+    extension "z";
+    optional "implicit omit";
+  }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (SubTypeDecl TypeTok: "type"
+        Field: (Field
+          Type: (RefSpec
+            X: (Ident "integer"))
+          Name: (Ident "I"))
+        With: (WithSpec Tok: "with"
+          List: (WithStmt KindTok: "encode"
+            Value: (ValueLiteral "\"RAW\""))
+          List: (WithStmt KindTok: "variant"
+            Value: (ValueLiteral "\"x\""))
+          List: (WithStmt KindTok: "display"
+            Value: (ValueLiteral "\"y\""))
+          List: (WithStmt KindTok: "extension"
+            Value: (ValueLiteral "\"z\""))
+          List: (WithStmt KindTok: "optional"
+            Value: (ValueLiteral "\"implicit omit\"")))))))
+
+===
+With attribute override
+===
+module M {
+  type integer I with { encode override "RAW" }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (SubTypeDecl TypeTok: "type"
+        Field: (Field
+          Type: (RefSpec
+            X: (Ident "integer"))
+          Name: (Ident "I"))
+        With: (WithSpec Tok: "with"
+          List: (WithStmt KindTok: "encode" Override: "override"
+            Value: (ValueLiteral "\"RAW\"")))))))
+
+===
+With attribute local
+===
+module M {
+  type integer I with { encode @local "RAW"; variant @local "x" }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (SubTypeDecl TypeTok: "type"
+        Field: (Field
+          Type: (RefSpec
+            X: (Ident "integer"))
+          Name: (Ident "I"))
+        With: (WithSpec Tok: "with"
+          List: (WithStmt KindTok: "encode" Override: "@local"
+            Value: (ValueLiteral "\"RAW\""))
+          List: (WithStmt KindTok: "variant" Override: "@local"
+            Value: (ValueLiteral "\"x\"")))))))
+
+===
+With attribute with qualifiers
+===
+module M {
+  type record R { integer a, integer b } with {
+    variant (a) "x";
+    variant (a, b) "y";
+    encode override (a) "RAW";
+  }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (StructTypeDecl TypeTok: "type" KindTok: "record"
+        Name: (Ident "R")
+        Fields: (Field
+          Type: (RefSpec
+            X: (Ident "integer"))
+          Name: (Ident "a"))
+        Fields: (Field
+          Type: (RefSpec
+            X: (Ident "integer"))
+          Name: (Ident "b"))
+        With: (WithSpec Tok: "with"
+          List: (WithStmt KindTok: "variant"
+            List: (Ident "a")
+            Value: (ValueLiteral "\"x\""))
+          List: (WithStmt KindTok: "variant"
+            List: (Ident "a")
+            List: (Ident "b")
+            Value: (ValueLiteral "\"y\""))
+          List: (WithStmt KindTok: "encode" Override: "override"
+            List: (Ident "a")
+            Value: (ValueLiteral "\"RAW\"")))))))
+
+===
+With attribute qualifier kinds
+===
+module M {
+  type record R { integer a } with {
+    variant (a) "x";
+    variant ([1]) "y";
+    variant (a.b) "z";
+  }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (StructTypeDecl TypeTok: "type" KindTok: "record"
+        Name: (Ident "R")
+        Fields: (Field
+          Type: (RefSpec
+            X: (Ident "integer"))
+          Name: (Ident "a"))
+        With: (WithSpec Tok: "with"
+          List: (WithStmt KindTok: "variant"
+            List: (Ident "a")
+            Value: (ValueLiteral "\"x\""))
+          List: (WithStmt KindTok: "variant"
+            List: (IndexExpr
+              Index: (ValueLiteral "1"))
+            Value: (ValueLiteral "\"y\""))
+          List: (WithStmt KindTok: "variant"
+            List: (SelectorExpr
+              X: (Ident "a")
+              Sel: (Ident "b"))
+            Value: (ValueLiteral "\"z\"")))))))
+
+===
+Control part
+===
+module M {
+  control {
+    log("hello");
+  }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ControlPart
+        Name: (Ident "control")
+        Body: (BlockStmt
+          Stmts: (ExprStmt
+            Expr: (CallExpr
+              Fun: (Ident "log")
+              Args: (ParenExpr
+                List: (ValueLiteral "\"hello\"")))))))))
+
+===
+Control part with attributes
+===
+module M {
+  control {
+    var integer i := 0;
+  } with { extension "x" }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ControlPart
+        Name: (Ident "control")
+        Body: (BlockStmt
+          Stmts: (DeclStmt
+            Decl: (ValueDecl KindTok: "var"
+              Type: (Ident "integer")
+              Decls: (Declarator AssignTok: ":="
+                Name: (Ident "i")
+                Value: (ValueLiteral "0")))))
+        With: (WithSpec Tok: "with"
+          List: (WithStmt KindTok: "extension"
+            Value: (ValueLiteral "\"x\"")))))))
+
+===
+Constants at module level
+===
+module M {
+  const integer c := 1;
+  const integer a := 1, b := 2;
+  const charstring s := "x" & "y";
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "const"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "c")
+          Value: (ValueLiteral "1"))))
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "const"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "a")
+          Value: (ValueLiteral "1"))
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "b")
+          Value: (ValueLiteral "2"))))
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "const"
+        Type: (Ident "charstring")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "s")
+          Value: (BinaryExpr Op: "&"
+            X: (ValueLiteral "\"x\"")
+            Y: (ValueLiteral "\"y\"")))))))
+
+===
+Constant of structured type
+===
+module M {
+  const MyRec r := { a := 1, b := { 2, 3 } };
+  const integer arr[2] := { 1, 2 };
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "const"
+        Type: (Ident "MyRec")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "r")
+          Value: (CompositeLiteral
+            List: (BinaryExpr Op: ":="
+              X: (Ident "a")
+              Y: (ValueLiteral "1"))
+            List: (BinaryExpr Op: ":="
+              X: (Ident "b")
+              Y: (CompositeLiteral
+                List: (ValueLiteral "2")
+                List: (ValueLiteral "3")))))))
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "const"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "arr")
+          ArrayDef: (ParenExpr
+            List: (ValueLiteral "2"))
+          Value: (CompositeLiteral
+            List: (ValueLiteral "1")
+            List: (ValueLiteral "2")))))))
+
+===
+Variables at module level
+===
+module M {
+  var integer v := 1;
+  var integer w;
+  var template integer t := ?;
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "var"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "v")
+          Value: (ValueLiteral "1"))))
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "var"
+        Type: (Ident "integer")
+        Decls: (Declarator
+          Name: (Ident "w"))))
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "var"
+        TemplateRestriction: (RestrictionSpec TemplateTok: "template")
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "t")
+          Value: (ValueLiteral "?"))))))
+
+===
+Module with all kinds of definitions
+===
+module M {
+  type integer I;
+  const I c := 1;
+  template I t := 1;
+  function f() {}
+  altstep a() {}
+  testcase tc() {}
+  signature s();
+  modulepar integer p;
+  control {}
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (SubTypeDecl TypeTok: "type"
+        Field: (Field
+          Type: (RefSpec
+            X: (Ident "integer"))
+          Name: (Ident "I"))))
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "const"
+        Type: (Ident "I")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "c")
+          Value: (ValueLiteral "1"))))
+    Defs: (ModuleDef
+      Def: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+        Type: (Ident "I")
+        Name: (Ident "t")
+        Value: (ValueLiteral "1")))
+    Defs: (ModuleDef
+      Def: (FuncDecl KindTok: "function"
+        Name: (Ident "f")
+        Params: (FormalPars)
+        Body: (BlockStmt)))
+    Defs: (ModuleDef
+      Def: (FuncDecl KindTok: "altstep"
+        Name: (Ident "a")
+        Params: (FormalPars)
+        Body: (BlockStmt)))
+    Defs: (ModuleDef
+      Def: (FuncDecl KindTok: "testcase"
+        Name: (Ident "tc")
+        Params: (FormalPars)
+        Body: (BlockStmt)))
+    Defs: (ModuleDef
+      Def: (SignatureDecl Tok: "signature"
+        Name: (Ident "s")
+        Params: (FormalPars)))
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "modulepar"
+        Type: (Ident "integer")
+        Decls: (Declarator
+          Name: (Ident "p"))))
+    Defs: (ModuleDef
+      Def: (ControlPart
+        Name: (Ident "control")
+        Body: (BlockStmt)))))
+
+===
+Missing module name
+===
+module {}
+---
+(Root
+  Nodes: (Module Tok: "module" RBrace: "EOF"))
+ERROR 1:8-1:9: expected 'IDENT', found {
+ERROR 1:9-1:10: expected '{', found }
+ERROR 1:10-1:11: expected '}', found EOF
+
+===
+Missing module body
+===
+module M
+---
+(Root
+  Nodes: (Module Tok: "module" LBrace: "EOF" RBrace: "EOF"
+    Name: (Ident "M")))
+ERROR 1:9-1:10: expected '{', found EOF
+ERROR 1:9-1:10: expected '}', found EOF
+
+===
+Real-world: Module header with imports and parameters
+===
+module Example language "TTCN-3:2018" {
+  import from Types all;
+  import from Templates { template all; type all; };
+  friend module Other;
+  modulepar {
+    integer PX_Timeout := 5;
+    charstring PX_Host := "localhost";
+  }
+  group Constants {
+    const integer c_max := 10;
+    const float c_pi := 3.14;
+  }
+} with {
+  encode "RAW";
+  variant "FIELDORDER(msb)"
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "Example")
+    Language: (LanguageSpec Tok: "language" List: "\"TTCN-3:2018\"")
+    Defs: (ModuleDef
+      Def: (ImportDecl ImportTok: "import" FromTok: "from"
+        Module: (Ident "Types")
+        List: (DefKindExpr
+          List: (Ident "all"))))
+    Defs: (ModuleDef
+      Def: (ImportDecl ImportTok: "import" FromTok: "from"
+        Module: (Ident "Templates")
+        List: (DefKindExpr KindTok: "template"
+          List: (Ident "all"))
+        List: (DefKindExpr KindTok: "type"
+          List: (Ident "all"))))
+    Defs: (ModuleDef
+      Def: (FriendDecl FriendTok: "friend" ModuleTok: "module"
+        Module: (Ident "Other")))
+    Defs: (ModuleDef
+      Def: (ModuleParameterGroup Tok: "modulepar"
+        Decls: (ValueDecl
+          Type: (Ident "integer")
+          Decls: (Declarator AssignTok: ":="
+            Name: (Ident "PX_Timeout")
+            Value: (ValueLiteral "5")))
+        Decls: (ValueDecl
+          Type: (Ident "charstring")
+          Decls: (Declarator AssignTok: ":="
+            Name: (Ident "PX_Host")
+            Value: (ValueLiteral "\"localhost\"")))))
+    Defs: (ModuleDef
+      Def: (GroupDecl Tok: "group"
+        Name: (Ident "Constants")
+        Defs: (ModuleDef
+          Def: (ValueDecl KindTok: "const"
+            Type: (Ident "integer")
+            Decls: (Declarator AssignTok: ":="
+              Name: (Ident "c_max")
+              Value: (ValueLiteral "10"))))
+        Defs: (ModuleDef
+          Def: (ValueDecl KindTok: "const"
+            Type: (Ident "float")
+            Decls: (Declarator AssignTok: ":="
+              Name: (Ident "c_pi")
+              Value: (ValueLiteral "3.14"))))))
+    With: (WithSpec Tok: "with"
+      List: (WithStmt KindTok: "encode"
+        Value: (ValueLiteral "\"RAW\""))
+      List: (WithStmt KindTok: "variant"
+        Value: (ValueLiteral "\"FIELDORDER(msb)\"")))))
+
+===
+Real-world: Test suite control part
+===
+module Suite {
+  import from Cases all;
+  control {
+    execute(TC_001(), 5.0);
+    execute(TC_002());
+    if (PX_Run) {
+      execute(TC_003());
+    }
+  }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "Suite")
+    Defs: (ModuleDef
+      Def: (ImportDecl ImportTok: "import" FromTok: "from"
+        Module: (Ident "Cases")
+        List: (DefKindExpr
+          List: (Ident "all"))))
+    Defs: (ModuleDef
+      Def: (ControlPart
+        Name: (Ident "control")
+        Body: (BlockStmt
+          Stmts: (ExprStmt
+            Expr: (CallExpr
+              Fun: (Ident "execute")
+              Args: (ParenExpr
+                List: (CallExpr
+                  Fun: (Ident "TC_001")
+                  Args: (ParenExpr))
+                List: (ValueLiteral "5.0"))))
+          Stmts: (ExprStmt
+            Expr: (CallExpr
+              Fun: (Ident "execute")
+              Args: (ParenExpr
+                List: (CallExpr
+                  Fun: (Ident "TC_002")
+                  Args: (ParenExpr)))))
+          Stmts: (IfStmt Tok: "if"
+            Cond: (Ident "PX_Run")
+            Then: (BlockStmt
+              Stmts: (ExprStmt
+                Expr: (CallExpr
+                  Fun: (Ident "execute")
+                  Args: (ParenExpr
+                    List: (CallExpr
+                      Fun: (Ident "TC_003")
+                      Args: (ParenExpr))))))))))))
+
+===
+Definitions without semicolons
+===
+module M {
+  const integer a := 1
+  const integer b := 2
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "const"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "a")
+          Value: (ValueLiteral "1"))))
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "const"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "b")
+          Value: (ValueLiteral "2"))))))

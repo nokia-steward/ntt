@@ -1,0 +1,856 @@
+===
+Assignment
+===
+x := 1;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (ValueLiteral "1"))))
+
+===
+Assignment to indexed field
+===
+x[1].a := 2;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (SelectorExpr
+        X: (IndexExpr
+          X: (Ident "x")
+          Index: (ValueLiteral "1"))
+        Sel: (Ident "a"))
+      Y: (ValueLiteral "2"))))
+
+===
+Pre-increment statement
+===
+{ ++x; }
+---
+(Root
+  Nodes: (BlockStmt
+    Stmts: (ExprStmt
+      Expr: (UnaryExpr Op: "++"
+        X: (Ident "x")))))
+
+===
+Post-increment statement
+===
+x++;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (PostExpr Op: "++"
+      X: (Ident "x"))))
+
+===
+Post-decrement statement
+===
+x--;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (PostExpr Op: "--"
+      X: (Ident "x"))))
+
+===
+Empty block
+===
+{}
+---
+(Root
+  Nodes: (BlockStmt))
+
+===
+Nested blocks
+===
+{ { x := 1; } { y := 2; } }
+---
+(Root
+  Nodes: (BlockStmt
+    Stmts: (BlockStmt
+      Stmts: (ExprStmt
+        Expr: (BinaryExpr Op: ":="
+          X: (Ident "x")
+          Y: (ValueLiteral "1"))))
+    Stmts: (BlockStmt
+      Stmts: (ExprStmt
+        Expr: (BinaryExpr Op: ":="
+          X: (Ident "y")
+          Y: (ValueLiteral "2"))))))
+
+===
+Block without semicolons
+===
+{ x := 1 y := 2 }
+---
+(Root
+  Nodes: (BlockStmt
+    Stmts: (ExprStmt
+      Expr: (BinaryExpr Op: ":="
+        X: (Ident "x")
+        Y: (ValueLiteral "1")))
+    Stmts: (ExprStmt
+      Expr: (BinaryExpr Op: ":="
+        X: (Ident "y")
+        Y: (ValueLiteral "2")))))
+
+===
+Var with module-qualified type
+===
+var M.MyType v := omit;
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (ValueDecl KindTok: "var"
+      Type: (SelectorExpr
+        X: (Ident "M")
+        Sel: (Ident "MyType"))
+      Decls: (Declarator AssignTok: ":="
+        Name: (Ident "v")
+        Value: (ValueLiteral "omit")))))
+
+===
+Timer declaration with multiple declarators
+===
+timer t1, t2 := 2.0;
+---
+(Root
+  Nodes: (DeclStmt
+    Decl: (ValueDecl
+      Type: (Ident "timer")
+      Decls: (Declarator
+        Name: (Ident "t1"))
+      Decls: (Declarator AssignTok: ":="
+        Name: (Ident "t2")
+        Value: (ValueLiteral "2.0")))))
+
+===
+Timer array declaration
+===
+timer t[3];
+---
+(Root
+  Nodes: (DeclStmt
+    Decl: (ValueDecl
+      Type: (Ident "timer")
+      Decls: (Declarator
+        Name: (Ident "t")
+        ArrayDef: (ParenExpr
+          List: (ValueLiteral "3"))))))
+
+===
+Port declaration
+===
+port MyPort p;
+---
+(Root
+  Nodes: (DeclStmt
+    Decl: (ValueDecl KindTok: "port"
+      Type: (Ident "MyPort")
+      Decls: (Declarator
+        Name: (Ident "p")))))
+
+===
+Template declaration in block
+===
+{ template integer t := 1; }
+---
+(Root
+  Nodes: (BlockStmt
+    Stmts: (DeclStmt
+      Decl: (TemplateDecl TemplateTok: "template" AssignTok: ":="
+        Type: (Ident "integer")
+        Name: (Ident "t")
+        Value: (ValueLiteral "1")))))
+
+===
+Declarations inside block
+===
+{ var integer x := 1; const integer c := 2; timer t; port P p; }
+---
+(Root
+  Nodes: (BlockStmt
+    Stmts: (DeclStmt
+      Decl: (ValueDecl KindTok: "var"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "x")
+          Value: (ValueLiteral "1"))))
+    Stmts: (DeclStmt
+      Decl: (ValueDecl KindTok: "const"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "c")
+          Value: (ValueLiteral "2"))))
+    Stmts: (DeclStmt
+      Decl: (ValueDecl
+        Type: (Ident "timer")
+        Decls: (Declarator
+          Name: (Ident "t"))))
+    Stmts: (DeclStmt
+      Decl: (ValueDecl KindTok: "port"
+        Type: (Ident "P")
+        Decls: (Declarator
+          Name: (Ident "p"))))))
+
+===
+If else
+===
+if (a) { x := 1; } else { x := 2; }
+---
+(Root
+  Nodes: (IfStmt Tok: "if" ElseTok: "else"
+    Cond: (Ident "a")
+    Then: (BlockStmt
+      Stmts: (ExprStmt
+        Expr: (BinaryExpr Op: ":="
+          X: (Ident "x")
+          Y: (ValueLiteral "1"))))
+    Else: (BlockStmt
+      Stmts: (ExprStmt
+        Expr: (BinaryExpr Op: ":="
+          X: (Ident "x")
+          Y: (ValueLiteral "2"))))))
+
+===
+If else if else
+===
+if (a) { x := 1; } else if (b) { x := 2; } else { x := 3; }
+---
+(Root
+  Nodes: (IfStmt Tok: "if" ElseTok: "else"
+    Cond: (Ident "a")
+    Then: (BlockStmt
+      Stmts: (ExprStmt
+        Expr: (BinaryExpr Op: ":="
+          X: (Ident "x")
+          Y: (ValueLiteral "1"))))
+    Else: (IfStmt Tok: "if" ElseTok: "else"
+      Cond: (Ident "b")
+      Then: (BlockStmt
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "x")
+            Y: (ValueLiteral "2"))))
+      Else: (BlockStmt
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "x")
+            Y: (ValueLiteral "3")))))))
+
+===
+If with init
+===
+if (var integer i := f(); i > 0) { x := i; }
+---
+(Root
+  Nodes: (IfStmt Tok: "if"
+    Init: (DeclStmt
+      Decl: (ValueDecl KindTok: "var"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "i")
+          Value: (CallExpr
+            Fun: (Ident "f")
+            Args: (ParenExpr)))))
+    Cond: (BinaryExpr Op: ">"
+      X: (Ident "i")
+      Y: (ValueLiteral "0"))
+    Then: (BlockStmt
+      Stmts: (ExprStmt
+        Expr: (BinaryExpr Op: ":="
+          X: (Ident "x")
+          Y: (Ident "i"))))))
+
+===
+If with assignment init
+===
+if (i := f(); i > 0) { x := i; }
+---
+(Root
+  Nodes: (IfStmt Tok: "if"
+    Init: (ExprStmt
+      Expr: (BinaryExpr Op: ":="
+        X: (Ident "i")
+        Y: (CallExpr
+          Fun: (Ident "f")
+          Args: (ParenExpr))))
+    Cond: (BinaryExpr Op: ">"
+      X: (Ident "i")
+      Y: (ValueLiteral "0"))
+    Then: (BlockStmt
+      Stmts: (ExprStmt
+        Expr: (BinaryExpr Op: ":="
+          X: (Ident "x")
+          Y: (Ident "i"))))))
+
+===
+Select case
+===
+select (x) {
+  case (1) { y := 1; }
+  case (2, 3) { y := 2; }
+}
+---
+(Root
+  Nodes: (SelectStmt Tok: "select"
+    Tag: (Ident "x")
+    Body: (CaseClause Tok: "case"
+      Case: (ParenExpr
+        List: (ValueLiteral "1"))
+      Body: (BlockStmt
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "y")
+            Y: (ValueLiteral "1")))))
+    Body: (CaseClause Tok: "case"
+      Case: (ParenExpr
+        List: (ValueLiteral "2")
+        List: (ValueLiteral "3"))
+      Body: (BlockStmt
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "y")
+            Y: (ValueLiteral "2")))))))
+
+===
+Select case else
+===
+select (x) {
+  case (1) { y := 1; }
+  case else { y := 0; }
+}
+---
+(Root
+  Nodes: (SelectStmt Tok: "select"
+    Tag: (Ident "x")
+    Body: (CaseClause Tok: "case"
+      Case: (ParenExpr
+        List: (ValueLiteral "1"))
+      Body: (BlockStmt
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "y")
+            Y: (ValueLiteral "1")))))
+    Body: (CaseClause Tok: "case"
+      Body: (BlockStmt
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "y")
+            Y: (ValueLiteral "0")))))))
+
+===
+Select with template case
+===
+select (x) {
+  case ((1 .. 5)) { y := 1; }
+  case (?) { y := 2; }
+}
+---
+(Root
+  Nodes: (SelectStmt Tok: "select"
+    Tag: (Ident "x")
+    Body: (CaseClause Tok: "case"
+      Case: (ParenExpr
+        List: (ParenExpr
+          List: (BinaryExpr Op: ".."
+            X: (ValueLiteral "1")
+            Y: (ValueLiteral "5"))))
+      Body: (BlockStmt
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "y")
+            Y: (ValueLiteral "1")))))
+    Body: (CaseClause Tok: "case"
+      Case: (ParenExpr
+        List: (ValueLiteral "?"))
+      Body: (BlockStmt
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "y")
+            Y: (ValueLiteral "2")))))))
+
+===
+Select union
+===
+select union (u) {
+  case (a) { x := u.a; }
+  case (b) { x := u.b; }
+}
+---
+(Root
+  Nodes: (SelectStmt Tok: "select" Union: "union"
+    Tag: (Ident "u")
+    Body: (CaseClause Tok: "case"
+      Case: (ParenExpr
+        List: (Ident "a"))
+      Body: (BlockStmt
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "x")
+            Y: (SelectorExpr
+              X: (Ident "u")
+              Sel: (Ident "a"))))))
+    Body: (CaseClause Tok: "case"
+      Case: (ParenExpr
+        List: (Ident "b"))
+      Body: (BlockStmt
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "x")
+            Y: (SelectorExpr
+              X: (Ident "u")
+              Sel: (Ident "b"))))))))
+
+===
+Select with init
+===
+select (var integer i := f(); i) {
+  case (1) { }
+}
+---
+(Root
+  Nodes: (SelectStmt Tok: "select"
+    Init: (DeclStmt
+      Decl: (ValueDecl KindTok: "var"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "i")
+          Value: (CallExpr
+            Fun: (Ident "f")
+            Args: (ParenExpr)))))
+    Tag: (Ident "i")
+    Body: (CaseClause Tok: "case"
+      Case: (ParenExpr
+        List: (ValueLiteral "1"))
+      Body: (BlockStmt))))
+
+===
+Empty select
+===
+select (x) {}
+---
+(Root
+  Nodes: (SelectStmt Tok: "select"
+    Tag: (Ident "x")))
+
+===
+For loop with var init
+===
+for (var integer i := 0; i < 10; i := i + 1) { x := x + i; }
+---
+(Root
+  Nodes: (ForStmt Tok: "for"
+    Init: (DeclStmt
+      Decl: (ValueDecl KindTok: "var"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "i")
+          Value: (ValueLiteral "0"))))
+    Cond: (BinaryExpr Op: "<"
+      X: (Ident "i")
+      Y: (ValueLiteral "10"))
+    Post: (ExprStmt
+      Expr: (BinaryExpr Op: ":="
+        X: (Ident "i")
+        Y: (BinaryExpr Op: "+"
+          X: (Ident "i")
+          Y: (ValueLiteral "1"))))
+    Body: (BlockStmt
+      Stmts: (ExprStmt
+        Expr: (BinaryExpr Op: ":="
+          X: (Ident "x")
+          Y: (BinaryExpr Op: "+"
+            X: (Ident "x")
+            Y: (Ident "i")))))))
+
+===
+For loop with assignment init
+===
+for (i := 0; i < 10; i := i + 1) { f(i); }
+---
+(Root
+  Nodes: (ForStmt Tok: "for"
+    Init: (ExprStmt
+      Expr: (BinaryExpr Op: ":="
+        X: (Ident "i")
+        Y: (ValueLiteral "0")))
+    Cond: (BinaryExpr Op: "<"
+      X: (Ident "i")
+      Y: (ValueLiteral "10"))
+    Post: (ExprStmt
+      Expr: (BinaryExpr Op: ":="
+        X: (Ident "i")
+        Y: (BinaryExpr Op: "+"
+          X: (Ident "i")
+          Y: (ValueLiteral "1"))))
+    Body: (BlockStmt
+      Stmts: (ExprStmt
+        Expr: (CallExpr
+          Fun: (Ident "f")
+          Args: (ParenExpr
+            List: (Ident "i")))))))
+
+===
+For loop with increment
+===
+for (var integer i := 0; i < n; i++) { }
+---
+(Root
+  Nodes: (ForStmt Tok: "for"
+    Init: (DeclStmt
+      Decl: (ValueDecl KindTok: "var"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "i")
+          Value: (ValueLiteral "0"))))
+    Cond: (BinaryExpr Op: "<"
+      X: (Ident "i")
+      Y: (Ident "n"))
+    Post: (ExprStmt
+      Expr: (PostExpr Op: "++"
+        X: (Ident "i")))
+    Body: (BlockStmt)))
+
+===
+For range loop
+===
+for (var integer x in list) { f(x); }
+---
+(Root
+  Nodes: (ForRangeStmt Tok: "for" InTok: "in"
+    Init: (DeclStmt
+      Decl: (ValueDecl KindTok: "var"
+        Type: (Ident "integer")
+        Decls: (Declarator
+          Name: (Ident "x"))))
+    Range: (Ident "list")
+    Body: (BlockStmt
+      Stmts: (ExprStmt
+        Expr: (CallExpr
+          Fun: (Ident "f")
+          Args: (ParenExpr
+            List: (Ident "x")))))))
+
+===
+For range loop without var
+===
+for (x in list) { f(x); }
+---
+(Root
+  Nodes: (ForRangeStmt Tok: "for" InTok: "in"
+    Init: (ExprStmt
+      Expr: (Ident "x"))
+    Range: (Ident "list")
+    Body: (BlockStmt
+      Stmts: (ExprStmt
+        Expr: (CallExpr
+          Fun: (Ident "f")
+          Args: (ParenExpr
+            List: (Ident "x")))))))
+
+===
+While loop
+===
+while (i < 10) { i := i + 1; }
+---
+(Root
+  Nodes: (WhileStmt Tok: "while"
+    Cond: (BinaryExpr Op: "<"
+      X: (Ident "i")
+      Y: (ValueLiteral "10"))
+    Body: (BlockStmt
+      Stmts: (ExprStmt
+        Expr: (BinaryExpr Op: ":="
+          X: (Ident "i")
+          Y: (BinaryExpr Op: "+"
+            X: (Ident "i")
+            Y: (ValueLiteral "1")))))))
+
+===
+While with init
+===
+while (var integer i := 0; i < 10) { }
+---
+(Root
+  Nodes: (WhileStmt Tok: "while"
+    Init: (DeclStmt
+      Decl: (ValueDecl KindTok: "var"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "i")
+          Value: (ValueLiteral "0"))))
+    Cond: (BinaryExpr Op: "<"
+      X: (Ident "i")
+      Y: (ValueLiteral "10"))
+    Body: (BlockStmt)))
+
+===
+Do while loop
+===
+do { i := i + 1; } while (i < 10);
+---
+(Root
+  Nodes: (DoWhileStmt DoTok: "do" WhileTok: "while"
+    Body: (BlockStmt
+      Stmts: (ExprStmt
+        Expr: (BinaryExpr Op: ":="
+          X: (Ident "i")
+          Y: (BinaryExpr Op: "+"
+            X: (Ident "i")
+            Y: (ValueLiteral "1")))))
+    Cond: (BinaryExpr Op: "<"
+      X: (Ident "i")
+      Y: (ValueLiteral "10"))))
+
+===
+Label
+===
+label L1;
+---
+(Root
+  Nodes: (BranchStmt Tok: "label"
+    Label: (Ident "L1")))
+
+===
+Goto
+===
+goto L1;
+---
+(Root
+  Nodes: (BranchStmt Tok: "goto"
+    Label: (Ident "L1")))
+
+===
+Break
+===
+break;
+---
+(Root
+  Nodes: (BranchStmt Tok: "break"))
+
+===
+Continue
+===
+continue;
+---
+(Root
+  Nodes: (BranchStmt Tok: "continue"))
+
+===
+Return without value
+===
+return;
+---
+(Root
+  Nodes: (ReturnStmt Tok: "return"))
+
+===
+Return with value
+===
+return 1;
+---
+(Root
+  Nodes: (ReturnStmt Tok: "return"
+    Result: (ValueLiteral "1")))
+
+===
+Return without semicolon before brace
+===
+{ return }
+---
+(Root
+  Nodes: (BlockStmt
+    Stmts: (ReturnStmt Tok: "return")))
+
+===
+Log statement
+===
+log("x=", x, " y=", y);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "log")
+      Args: (ParenExpr
+        List: (ValueLiteral "\"x=\"")
+        List: (Ident "x")
+        List: (ValueLiteral "\" y=\"")
+        List: (Ident "y")))))
+
+===
+Setverdict with reason
+===
+setverdict(fail, "mismatch");
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "setverdict")
+      Args: (ParenExpr
+        List: (ValueLiteral "fail")
+        List: (ValueLiteral "\"mismatch\"")))))
+
+===
+Getverdict
+===
+v := getverdict;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "v")
+      Y: (Ident "getverdict"))))
+
+===
+Stop statement
+===
+stop;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (Ident "stop")))
+
+===
+Repeat statement
+===
+repeat;
+---
+(Root
+  Nodes: (BranchStmt Tok: "repeat"))
+
+===
+Statements separated by semicolons
+===
+x := 1; y := 2; z := 3;
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (ValueLiteral "1")))
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "y")
+      Y: (ValueLiteral "2")))
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "z")
+      Y: (ValueLiteral "3"))))
+
+===
+Statements without semicolons
+===
+x := 1
+y := 2
+z := 3
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (ValueLiteral "1")))
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "y")
+      Y: (ValueLiteral "2")))
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "z")
+      Y: (ValueLiteral "3"))))
+
+===
+Real-world: function body
+===
+{
+const integer max := 10;
+var integer sum := 0;
+for (var integer i := 1; i <= max; i := i + 1) {
+  if (i mod 2 == 0) { continue; }
+  sum := sum + i;
+}
+return sum;
+}
+---
+(Root
+  Nodes: (BlockStmt
+    Stmts: (DeclStmt
+      Decl: (ValueDecl KindTok: "const"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "max")
+          Value: (ValueLiteral "10"))))
+    Stmts: (DeclStmt
+      Decl: (ValueDecl KindTok: "var"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "sum")
+          Value: (ValueLiteral "0"))))
+    Stmts: (ForStmt Tok: "for"
+      Init: (DeclStmt
+        Decl: (ValueDecl KindTok: "var"
+          Type: (Ident "integer")
+          Decls: (Declarator AssignTok: ":="
+            Name: (Ident "i")
+            Value: (ValueLiteral "1"))))
+      Cond: (BinaryExpr Op: "<="
+        X: (Ident "i")
+        Y: (Ident "max"))
+      Post: (ExprStmt
+        Expr: (BinaryExpr Op: ":="
+          X: (Ident "i")
+          Y: (BinaryExpr Op: "+"
+            X: (Ident "i")
+            Y: (ValueLiteral "1"))))
+      Body: (BlockStmt
+        Stmts: (IfStmt Tok: "if"
+          Cond: (BinaryExpr Op: "=="
+            X: (BinaryExpr Op: "mod"
+              X: (Ident "i")
+              Y: (ValueLiteral "2"))
+            Y: (ValueLiteral "0"))
+          Then: (BlockStmt
+            Stmts: (BranchStmt Tok: "continue")))
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "sum")
+            Y: (BinaryExpr Op: "+"
+              X: (Ident "sum")
+              Y: (Ident "i"))))))
+    Stmts: (ReturnStmt Tok: "return"
+      Result: (Ident "sum"))))
+
+===
+Declaration of var without semicolon in block
+===
+{ var integer x := 1 var integer y }
+---
+(Root
+  Nodes: (BlockStmt
+    Stmts: (DeclStmt
+      Decl: (ValueDecl KindTok: "var"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "x")
+          Value: (ValueLiteral "1"))))
+    Stmts: (DeclStmt
+      Decl: (ValueDecl KindTok: "var"
+        Type: (Ident "integer")
+        Decls: (Declarator
+          Name: (Ident "y"))))))
+
+===
+Return without value followed by statement
+===
+{ return; x := 1; }
+---
+(Root
+  Nodes: (BlockStmt
+    Stmts: (ReturnStmt Tok: "return")
+    Stmts: (ExprStmt
+      Expr: (BinaryExpr Op: ":="
+        X: (Ident "x")
+        Y: (ValueLiteral "1")))))
