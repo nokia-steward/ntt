@@ -15,9 +15,8 @@ import (
 
 var (
 	FormatCommand = &cobra.Command{
-		Hidden: true,
-		Use:    "format",
-		Short:  "format files according to the canonical TTCN-3 style",
+		Use:   "format",
+		Short: "format files according to the canonical TTCN-3 style",
 		Long: `Format files according to the canonical TTCN-3 style.
 
 The format command reads the given source files and formats them according to
@@ -97,7 +96,6 @@ func processFile(path string) error {
 
 	var buf bytes.Buffer
 	p := printer.NewCanonicalPrinter(&buf)
-	p.Indent = -1
 	if spaces > 0 {
 		p.UseSpaces = true
 		p.TabWidth = spaces
