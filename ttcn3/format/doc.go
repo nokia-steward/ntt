@@ -46,7 +46,8 @@
 // A line break inside an object indents the continuation by one level, once
 // for that object. Further breaks in the same object stay at that level.
 // Nested objects each add their own level. The objects are expressions,
-// parameter lists, individual parameters, declarators, and return statements.
+// parameter lists, individual parameters, declarations, declarators, and
+// return statements.
 //
 // {, [, and ( already supply that one level for the object they delimit, so a
 // parenthesized list is not indented again:
@@ -55,17 +56,25 @@
 //		a,
 //		b)
 //
-//	function f(int a,
-//		int b) {}
+// A break between formal parameters aligns the next parameter with the first
+// one, at the output column of the first token after the opening ( or <. The
+// line starts with the indent of the line that holds the delimiter, followed
+// by spaces up to that column. If the first parameter is on a line of its
+// own, later parameters are indented as above instead:
 //
-// A type-parameter list uses < and >, which do not change the level, so a
-// break there is indented as a continuation:
+//	function f(int a,
+//	           int b) {}
+//
+//	signature S(in integer p_in,
+//	            inout integer p_inout,
+//	            out integer p_out);
 //
 //	function f<type T,
-//		type U>() {}
+//	           type U>() {}
 //
 // A broken parameter inside such a list is its own object and adds one more
-// level. A broken expression inside an argument list does the same:
+// level on top of the parenthesis. A broken expression inside an argument
+// list does the same:
 //
 //	function f(in
 //			int
@@ -92,25 +101,69 @@
 //		b *
 //			c
 //
-// A break before the value of a declaration, or before the result of a
-// return, indents that continuation:
+// A break before the value of a var, const, or template declaration, or
+// before the result of a return, indents that continuation:
 //
 //	var int x :=
 //		1
 //
+//	template charstring t :=
+//		"a"
+//
 //	return
 //		1
 //
-// A newline before the { of a function or control body is not a continuation.
-// The brace stays at the header's level, and the brace indents its body:
+// The later declarators of a declaration continue it, once:
+//
+//	var int x := 1,
+//		y := 2,
+//		z := 3
+//
+// A line break before runs on, system, mtc, or a return type clause of a
+// function, testcase, altstep, signature, behaviour type, class, or
+// constructor indents that clause one level. The indent ends with the clause,
+// so the next clause and the { stay at the level of the header. A clause on the
+// line of the header is not indented. A return statement is not a clause:
+//
+//	testcase TC()
+//		runs on C
+//		system S
+//	{
+//		log(1)
+//	}
 //
 //	function f()
+//		return integer
 //	{
-//		var int x := 1
+//		return
+//			1
 //	}
+//
+// A newline before a { is never a continuation. The brace stays at the
+// current level, and the brace indents its body. That holds for the body of a
+// function or control part, the { of a nested record, set, union, or
+// enumerated type, a with attribute list, and a template or variable value:
 //
 //	control
 //	{}
+//
+//	type set
+//	{
+//		int x
+//	} S
+//
+//	const int x := 1
+//	with { extension "a" }
+//
+//	template MessageType t :=
+//	{
+//		field1 := 1
+//	}
+//
+//	var R v :=
+//	{
+//		a := 1
+//	}
 //
 // A newline between statements does not add a level beyond the brackets that
 // enclose them.
@@ -119,9 +172,19 @@
 //
 // Each line of a comment is indented on its own. The first line is placed at
 // the current level, or one space after the previous token when it stays on
-// that token's line. In a multi-line comment, the least-indented non-empty
-// line is aligned to the current level and the other lines keep their
-// relative indent. Empty lines inside the comment stay empty.
+// that token's line. In a multi-line comment, the indentation of the line the
+// comment starts on and of each further non-empty line is measured in
+// columns, a tab advancing to the next multiple of TabWidth. The least of
+// these is aligned to the level of the line the comment starts on, and the
+// other lines keep their relative indent as spaces. A line that starts
+// inside a multi-line literal or comment counts as column 0. Empty lines
+// inside the comment stay empty. Formatting the result again does not change
+// it:
+//
+//	{
+//		x := 25 /* a
+//		           b */
+//	}
 //
 // Comments on consecutive lines are aligned in a column, as are the
 // assignments on those lines:
