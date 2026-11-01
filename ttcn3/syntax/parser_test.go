@@ -293,6 +293,7 @@ func TestFormalPars(t *testing.T) {
 		{pass, `(int x, int y)`},
 		{pass, `(int x, int y,)`},
 		{pass, `(in int x, out int y, inout int z)`},
+		{pass, `(any x, in any y)`},
 		{pass, `(in template(value) @fuzzy timer x := 1, out timer y)`},
 		{pass, `(out timer y, in template(value) @fuzzy timer x := 1)`},
 		{pass, `(out timer y := -, in value @fuzzy timer x := 1)`},

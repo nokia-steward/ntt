@@ -89,18 +89,22 @@ func Parse(src []byte, opts ...ParserOption) (root *Root) {
 			return p.Root
 		}
 	}
+	skip := func(k Kind) bool { return !topLevelTokens[k] && !exprStart[k] }
 	for p.tok != EOF {
-		p.Nodes = append(p.Nodes, p.parse())
-
-		if p.tok != EOF && !topLevelTokens[p.tok] {
-			p.error(p.peek(1), "unexpected token %s", p.tok)
-			break
-		}
-
 		if p.tok == COMMA || p.tok == SEMICOLON {
 			p.consume()
+			continue
+		}
+		if !topLevelTokens[p.tok] && !exprStart[p.tok] {
+			p.Nodes = append(p.Nodes, p.advanceWithError(skip, "unexpected token %s", p.tok))
+			continue
 		}
 
+		tok := p.peek(1)
+		p.Nodes = append(p.Nodes, p.parse())
+		if p.peek(1) == tok || p.tok != EOF && !topLevelTokens[p.tok] {
+			p.Nodes = append(p.Nodes, p.advanceWithError(skip, "unexpected token %s", p.tok))
+		}
 	}
 	return p.Root
 }
@@ -358,9 +362,6 @@ func trace(p *parser, msg string) *parser {
 	return p
 }
 
-// A bailout panic is raised to indicate early termination.
-type bailout struct{}
-
 func (p *parser) error(n Node, msg string, args ...interface{}) {
 	err := Error{Node: n, Msg: fmt.Sprintf(msg, args...)}
 	p.errs = append(p.errs, err)
@@ -440,6 +441,64 @@ func (p *parser) advance(to map[Kind]bool) {
 	}
 }
 
+// advanceWithError reports an error and consumes the current token together
+// with all following tokens for which skip, if not nil, returns true. The
+// returned ErrorNode covers the consumed tokens, so they stay in the tree.
+func (p *parser) advanceWithError(skip func(Kind) bool, msg string, args ...interface{}) *ErrorNode {
+	x := &ErrorNode{From: p.peek(1), To: p.peek(1)}
+	if p.tok != EOF {
+		x.To = p.consume()
+		for skip != nil && p.tok != EOF && skip(p.tok) {
+			x.To = p.consume()
+		}
+	}
+	p.error(x, msg, args...)
+	return x
+}
+
+// parseList parses a comma separated list of items up to, but excluding, the
+// closing token. Items must begin with a token in first. Other tokens are
+// reported and passed to junk as ErrorNode. A token in recovery ends the list
+// early, so the caller can report the missing closing token.
+func parseList[T any](p *parser, what string, close Kind, first, recovery map[Kind]bool, item func() T, junk func(*ErrorNode) T) []T {
+	const (
+		wantItem = iota
+		wantComma
+		skipped
+	)
+	var list []T
+	stop := func(k Kind) bool { return k == COMMA || k == close || first[k] || recovery[k] }
+	state := wantItem
+	for p.tok != close && p.tok != EOF {
+		switch {
+		case p.tok == COMMA && state != wantItem:
+			p.consume()
+			state = wantItem
+		case first[p.tok]:
+			if state == wantComma {
+				p.errorExpected("','")
+			}
+			tok := p.peek(1)
+			list = append(list, item())
+			state = wantComma
+			if p.peek(1) == tok {
+				list = append(list, junk(p.advanceWithError(nil, "expected %s, found %s", what, tok)))
+				state = skipped
+			}
+		case recovery[p.tok]:
+			return list
+		default:
+			want := what
+			if state == wantComma {
+				want = "','"
+			}
+			list = append(list, junk(p.advanceWithError(func(k Kind) bool { return !stop(k) }, "expected %s, found %s", want, p.peek(1))))
+			state = skipped
+		}
+	}
+	return list
+}
+
 var stmtStart = map[Kind]bool{
 	ALT:        true,
 	ALTSTEP:    true,
@@ -514,6 +573,106 @@ var operandStart = map[Kind]bool{
 	TRUE:      true,
 	UNIVERSAL: true,
 	UNMAP:     true,
+}
+
+var moduleDefStart = map[Kind]bool{
+	ALTSTEP:   true,
+	CONST:     true,
+	CONTROL:   true,
+	CREATE:    true,
+	EXTERNAL:  true,
+	FRIEND:    true,
+	FUNCTION:  true,
+	GROUP:     true,
+	IMPORT:    true,
+	MODULE:    true,
+	MODULEPAR: true,
+	PRIVATE:   true,
+	PUBLIC:    true,
+	RBRACE:    true,
+	SEMICOLON: true,
+	SIGNATURE: true,
+	TEMPLATE:  true,
+	TESTCASE:  true,
+	TYPE:      true,
+	VAR:       true,
+}
+
+// skipStmt reports whether k cannot start a statement and may be skipped
+// during error recovery.
+func skipStmt(k Kind) bool {
+	switch k {
+	case IDENT, TESTCASE, ANYKW, ALL, MAP, UNMAP, MTC, INC, DEC, LBRACK, LBRACE, MODIF,
+		INT, FLOAT, STRING, BSTRING, TRUE, FALSE, PASS, FAIL, NONE, INCONC, ERROR, NOTIMPL:
+		return false
+	}
+	return !stmtStart[k]
+}
+
+// skipItem reports whether k may be skipped during error recovery of a
+// semicolon terminated item.
+func skipItem(k Kind) bool {
+	return k != SEMICOLON && k != RBRACE
+}
+
+// listRecovery contains the tokens at which a list is abandoned, because
+// they likely belong to an enclosing construct.
+var listRecovery = union(stmtStart, map[Kind]bool{
+	EXTERNAL: true,
+	LBRACE:   true,
+	RBRACK:   true,
+	RPAREN:   true,
+	WITH:     true,
+})
+
+var typeListRecovery = union(listRecovery, map[Kind]bool{LPAREN: true})
+
+// exprStart contains the tokens which can start an expression.
+var exprStart = map[Kind]bool{
+	ADD: true, EXCL: true, NOT: true, NOT4B: true, SUB: true, INC: true, DEC: true, COLONCOLON: true,
+	ANYKW: true, ALL: true, UNIVERSAL: true,
+	ADDRESS: true, CHARSTRING: true, CLASS: true, MAP: true, MTC: true, SYSTEM: true, TESTCASE: true, TIMER: true, UNMAP: true,
+	IDENT: true, INT: true, ANY: true, NOTIMPL: true, BSTRING: true, ERROR: true, NULL: true, OMIT: true, FAIL: true, FALSE: true, FLOAT: true,
+	INCONC: true, MUL: true, NAN: true, NONE: true, PASS: true, STRING: true, TRUE: true,
+	LPAREN: true, LBRACK: true, LBRACE: true,
+	MODIFIES: true, REGEXP: true, PATTERN: true, DECMATCH: true, MODIF: true, VALUE: true, PRESENT: true,
+}
+
+var formalParStart = map[Kind]bool{
+	IN: true, OUT: true, INOUT: true,
+	TEMPLATE: true, OMIT: true, VALUE: true, PRESENT: true, MODIF: true,
+	RECORD: true, SET: true, UNION: true, ENUMERATED: true, MAP: true,
+	IDENT: true, ADDRESS: true, CHARSTRING: true, UNIVERSAL: true, TIMER: true, ANYKW: true,
+}
+
+var typeFormalParStart = map[Kind]bool{
+	IN: true, TYPE: true, SIGNATURE: true,
+	IDENT: true, ADDRESS: true, CHARSTRING: true, UNIVERSAL: true,
+}
+
+var fieldStart = map[Kind]bool{
+	MODIF:   true,
+	ADDRESS: true, CHARSTRING: true, IDENT: true, NULL: true, UNIVERSAL: true,
+	UNION: true, SET: true, RECORD: true, MAP: true, ENUMERATED: true,
+	FUNCTION: true, ALTSTEP: true, TESTCASE: true,
+}
+
+var enumStart = map[Kind]bool{IDENT: true}
+
+var withQualifierStart = map[Kind]bool{
+	IDENT: true, LBRACK: true,
+	TYPE: true, TEMPLATE: true, CONST: true, ALTSTEP: true, TESTCASE: true,
+	FUNCTION: true, SIGNATURE: true, MODULEPAR: true, GROUP: true,
+}
+
+func union(sets ...map[Kind]bool) map[Kind]bool {
+	m := make(map[Kind]bool)
+	for _, s := range sets {
+		for k, v := range s {
+			m[k] = v
+		}
+	}
+	return m
 }
 
 var topLevelTokens = map[Kind]bool{
@@ -634,6 +793,23 @@ func (p *parser) parseExprList() (list []Expr) {
 		list = append(list, p.parseExpr())
 	}
 	return list
+}
+
+// parseDelimitedExprList parses an ExprList up to the closing token close.
+// An empty list is reported as missing operand, unless allowEmpty is set.
+func (p *parser) parseDelimitedExprList(close Kind, allowEmpty bool) []Expr {
+	if p.trace {
+		defer un(trace(p, "ExprList"))
+	}
+
+	saved := p.noMatchAttr
+	p.noMatchAttr = false
+	defer func() { p.noMatchAttr = saved }()
+
+	if p.tok == close && !allowEmpty {
+		return []Expr{p.parseExpr()}
+	}
+	return parseList(p, "expression", close, exprStart, listRecovery, p.parseExpr, func(x *ErrorNode) Expr { return x })
 }
 
 // Expr ::= BinaryExpr
@@ -949,11 +1125,28 @@ func (p *parser) parseOperand() Expr {
 	case PRESENT:
 		return p.parseCallExpr(p.make_use(p.consume()))
 
-	default:
-		p.errorExpected("operand")
 	}
 
-	return &ErrorNode{From: etok, To: p.peek(1)}
+	p.errorExpected("operand")
+	if p.tok.IsKeyword() || operandRecovery[p.tok] {
+		return &ErrorNode{From: etok, To: etok}
+	}
+	return &ErrorNode{From: etok, To: p.consume()}
+}
+
+// operandRecovery contains the non-keyword tokens which are not consumed by
+// a missing operand, because the enclosing construct might expect them.
+var operandRecovery = map[Kind]bool{
+	EOF:       true,
+	COMMA:     true,
+	SEMICOLON: true,
+	COLON:     true,
+	ASSIGN:    true,
+	REDIR:     true,
+	GT:        true,
+	RPAREN:    true,
+	RBRACK:    true,
+	RBRACE:    true,
 }
 
 func (p *parser) parseRef() Expr {
@@ -978,7 +1171,7 @@ func (p *parser) parseRef() Expr {
 func (p *parser) parseParenExpr() *ParenExpr {
 	return &ParenExpr{
 		LParen: p.expect(LPAREN),
-		List:   p.parseExprList(),
+		List:   p.parseDelimitedExprList(RPAREN, false),
 		RParen: p.expect(RPAREN),
 	}
 }
@@ -990,9 +1183,7 @@ func (p *parser) parseUniversalCharstring() *Ident {
 func (p *parser) parseCompositeLiteral() *CompositeLiteral {
 	c := new(CompositeLiteral)
 	c.LBrace = p.expect(LBRACE)
-	if p.tok != RBRACE {
-		c.List = p.parseExprList()
-	}
+	c.List = p.parseDelimitedExprList(RBRACE, true)
 	c.RBrace = p.expect(RBRACE)
 	return c
 }
@@ -1043,19 +1234,7 @@ func (p *parser) parseCallDecmatch() *DecmatchExpr {
 
 // startsExpr reports whether tok can start an expression or template.
 func startsExpr(tok Kind) bool {
-	switch tok {
-	case ADD, EXCL, NOT, NOT4B, SUB, INC, DEC, COLONCOLON,
-		ANYKW, ALL, UNIVERSAL,
-		ADDRESS, CHARSTRING, CLASS, MAP, MTC, SYSTEM, TESTCASE, TIMER, UNMAP,
-		IDENT,
-		INT, ANY, NOTIMPL, BSTRING, ERROR, NULL, OMIT, FAIL, FALSE, FLOAT,
-		INCONC, MUL, NAN, NONE, PASS, STRING, TRUE,
-		LPAREN, LBRACK, LBRACE,
-		MODIFIES, REGEXP, PATTERN, DECMATCH, MODIF, VALUE, PRESENT:
-		return true
-	default:
-		return false
-	}
+	return exprStart[tok]
 }
 
 // bracketStartsAltGuard reports whether the current '[' begins the next alt
@@ -1189,7 +1368,7 @@ func (p *parser) parseCallExpr(x Expr) *CallExpr {
 			}
 			c.Args.List = []Expr{x}
 		default:
-			c.Args.List = append(c.Args.List, p.parseExprList()...)
+			c.Args.List = p.parseDelimitedExprList(RPAREN, true)
 		}
 	}
 	c.Args.RParen = p.expect(RPAREN)
@@ -1297,7 +1476,7 @@ func (p *parser) parseArrayDefs() []*ParenExpr {
 func (p *parser) parseArrayDef() *ParenExpr {
 	return &ParenExpr{
 		LParen: p.expect(LBRACK),
-		List:   p.parseExprList(),
+		List:   p.parseDelimitedExprList(RBRACK, false),
 		RParen: p.expect(RBRACK),
 	}
 }
@@ -1557,10 +1736,24 @@ func (p *parser) parseModuleDef() *ModuleDef {
 			p.advance(stmtStart)
 			m.Def = &ErrorNode{From: etok, To: p.peek(1)}
 		}
-	default:
+	case SEMICOLON, RBRACE, EOF:
 		p.errorExpected("module definition")
-		p.advance(stmtStart)
-		m.Def = &ErrorNode{From: etok, To: p.peek(1)}
+		m.Def = &ErrorNode{From: etok, To: etok}
+	default:
+		depth := 0
+		if p.tok == LBRACE {
+			depth++
+		}
+		m.Def = p.advanceWithError(func(k Kind) bool {
+			switch k {
+			case LBRACE:
+				depth++
+			case RBRACE:
+				depth--
+				return depth >= 0
+			}
+			return depth > 0 || !moduleDefStart[k]
+		}, "expected module definition, found %s", etok)
 	}
 
 	if m.Def != nil {
@@ -1702,9 +1895,10 @@ func (p *parser) parseImportStmt() *DefKindExpr {
 	case IMPORT:
 		x.KindTok = p.consume()
 		x.List = []Expr{p.make_use(p.expect(ALL))}
-	default:
+	case SEMICOLON, RBRACE, EOF:
 		p.errorExpected("import definition qualifier")
-		p.advance(stmtStart)
+	default:
+		x.List = []Expr{p.advanceWithError(skipItem, "expected import definition qualifier, found %s", p.peek(1))}
 	}
 	return x
 }
@@ -1726,8 +1920,12 @@ func (p *parser) parseExceptStmt() *DefKindExpr {
 		IMPORT, MODULEPAR, SIGNATURE, TEMPLATE,
 		TESTCASE, TYPE:
 		x.KindTok = p.consume()
-	default:
+	case SEMICOLON, RBRACE, EOF:
 		p.errorExpected("definition qualifier")
+		return x
+	default:
+		x.List = []Expr{p.advanceWithError(skipItem, "expected definition qualifier, found %s", p.peek(1))}
+		return x
 	}
 
 	if p.tok == ALL {
@@ -1761,10 +1959,14 @@ func (p *parser) parseFriend() *FriendDecl {
 	x := new(FriendDecl)
 	x.FriendTok = p.expect(FRIEND)
 	x.ModuleTok = p.expect(MODULE)
-	x.Modules = append(x.Modules, p.parseIdent())
-	for p.tok == COMMA {
+	for {
+		if id := p.parseIdent(); id != nil {
+			x.Modules = append(x.Modules, id)
+		}
+		if p.tok != COMMA {
+			break
+		}
 		p.consume()
-		x.Modules = append(x.Modules, p.parseIdent())
 	}
 	x.With = p.parseWith()
 	return x
@@ -1805,9 +2007,12 @@ func (p *parser) parseWithStmt() *WithStmt {
 		STEPSIZE,
 		OVERRIDE:
 		x.KindTok = p.consume()
-	default:
+	case SEMICOLON, RBRACE, EOF:
 		p.errorExpected("with-attribute")
-		p.advance(stmtStart)
+		return x
+	default:
+		x.Value = p.advanceWithError(skipItem, "expected with-attribute, found %s", p.peek(1))
+		return x
 	}
 
 	switch p.tok {
@@ -1822,16 +2027,8 @@ func (p *parser) parseWithStmt() *WithStmt {
 
 	if p.tok == LPAREN {
 		x.LParen = p.consume()
-		for {
-			x.List = append(x.List, p.parseWithQualifier())
-			if p.tok != COMMA {
-				break
-			}
-			p.consume()
-			if p.tok == RPAREN {
-				break
-			}
-		}
+		x.List = parseList(p, "with-qualifier", RPAREN, withQualifierStart, listRecovery, p.parseWithQualifier,
+			func(x *ErrorNode) Expr { return x })
 		x.RParen = p.expect(RPAREN)
 	}
 
@@ -1909,7 +2106,6 @@ func (p *parser) parseWithQualifier() Expr {
  *************************************************************************/
 
 func (p *parser) parseTypeDecl() Decl {
-	etok := p.peek(1)
 	switch p.peek(2).Kind() {
 	case IDENT, ADDRESS, CHARSTRING, NULL, UNIVERSAL:
 		return p.parseSubTypeDecl()
@@ -1934,9 +2130,7 @@ func (p *parser) parseTypeDecl() Decl {
 	case FUNCTION, ALTSTEP, TESTCASE:
 		return p.parseBehaviourTypeDecl()
 	default:
-		p.errorExpected("type definition")
-		p.advance(stmtStart)
-		return &ErrorNode{From: etok, To: p.peek(1)}
+		return p.advanceWithError(func(k Kind) bool { return !stmtStart[k] }, "expected type definition, found %s", p.peek(2))
 	}
 }
 
@@ -1994,10 +2188,11 @@ func (p *parser) parsePortAttribute() Node {
 			ParamTok: p.expect(PARAM),
 			Params:   p.parseFormalPars(),
 		}
-	default:
+	case SEMICOLON, RBRACE, EOF:
 		p.errorExpected("port attribute")
-		p.advance(stmtStart)
-		return &ErrorNode{From: etok, To: p.peek(1)}
+		return &ErrorNode{From: etok, To: etok}
+	default:
+		return p.advanceWithError(skipItem, "expected port attribute, found %s", etok)
 	}
 }
 
@@ -2041,13 +2236,7 @@ func (p *parser) parseStructTypeDecl() *StructTypeDecl {
 		x.TypePars = p.parseTypeFormalPars()
 	}
 	x.LBrace = p.expect(LBRACE)
-	for p.tok != RBRACE && p.tok != EOF {
-		x.Fields = append(x.Fields, p.parseField(true))
-		if p.tok != COMMA {
-			break
-		}
-		p.consume()
-	}
+	x.Fields = p.parseFieldList()
 	x.RBrace = p.expect(RBRACE)
 	x.With = p.parseWith()
 	return x
@@ -2133,13 +2322,7 @@ func (p *parser) parseEnumTypeDecl() *EnumTypeDecl {
 		x.TypePars = p.parseTypeFormalPars()
 	}
 	x.LBrace = p.expect(LBRACE)
-	for p.tok != RBRACE && p.tok != EOF {
-		x.Enums = append(x.Enums, p.parseEnum())
-		if p.tok != COMMA {
-			break
-		}
-		p.consume()
-	}
+	x.Enums = parseList(p, "enumerated value", RBRACE, enumStart, listRecovery, p.parseEnum, func(x *ErrorNode) Expr { return x })
 	x.RBrace = p.expect(RBRACE)
 	x.With = p.parseWith()
 	return x
@@ -2219,6 +2402,12 @@ func (p *parser) parseSubTypeDecl() *SubTypeDecl {
 	return x
 }
 
+func (p *parser) parseFieldList() []*Field {
+	return parseList(p, "field", RBRACE, fieldStart, listRecovery,
+		func() *Field { return p.parseField(true) },
+		func(x *ErrorNode) *Field { return &Field{Type: x} })
+}
+
 func (p *parser) parseField(allowEmbedded bool) *Field {
 	if p.trace {
 		defer un(trace(p, "Field"))
@@ -2292,13 +2481,7 @@ func (p *parser) parseStructSpec() *StructSpec {
 	x := new(StructSpec)
 	x.KindTok = p.consume()
 	x.LBrace = p.expect(LBRACE)
-	for p.tok != RBRACE && p.tok != EOF {
-		x.Fields = append(x.Fields, p.parseField(true))
-		if p.tok != COMMA {
-			break
-		}
-		p.consume()
-	}
+	x.Fields = p.parseFieldList()
 	x.RBrace = p.expect(RBRACE)
 	return x
 }
@@ -2323,13 +2506,7 @@ func (p *parser) parseEnumSpec() *EnumSpec {
 	x := new(EnumSpec)
 	x.Tok = p.consume()
 	x.LBrace = p.expect(LBRACE)
-	for p.tok != RBRACE && p.tok != EOF {
-		x.Enums = append(x.Enums, p.parseEnum())
-		if p.tok != COMMA {
-			break
-		}
-		p.consume()
-	}
+	x.Enums = parseList(p, "enumerated value", RBRACE, enumStart, listRecovery, p.parseEnum, func(x *ErrorNode) Expr { return x })
 	x.RBrace = p.expect(RBRACE)
 	return x
 }
@@ -2724,13 +2901,8 @@ func (p *parser) parseFormalPars() *FormalPars {
 	if x.LParen == nil {
 		return x
 	}
-	for p.tok != RPAREN {
-		x.List = append(x.List, p.parseFormalPar())
-		if p.tok != COMMA {
-			break
-		}
-		p.consume()
-	}
+	x.List = parseList(p, "formal parameter", RPAREN, formalParStart, listRecovery, p.parseFormalPar,
+		func(x *ErrorNode) *FormalPar { return &FormalPar{Type: x} })
 	x.RParen = p.expect(RPAREN)
 	return x
 }
@@ -2774,13 +2946,8 @@ func (p *parser) parseTypeFormalPars() *FormalPars {
 	}
 	x := new(FormalPars)
 	x.LParen = p.expect(LT)
-	for p.tok != GT {
-		x.List = append(x.List, p.parseTypeFormalPar())
-		if p.tok != COMMA {
-			break
-		}
-		p.consume()
-	}
+	x.List = parseList(p, "formal type parameter", GT, typeFormalParStart, typeListRecovery, p.parseTypeFormalPar,
+		func(x *ErrorNode) *FormalPar { return &FormalPar{Type: x} })
 	x.RParen = p.expect(GT)
 	return x
 }
@@ -2930,14 +3097,14 @@ func (p *parser) parseStmt() Stmt {
 		}
 		fallthrough
 	default:
-		p.errorExpected("statement")
 		switch p.tok {
 		case TYPE, FUNCTION, ALTSTEP, SIGNATURE, IMPORT, MODULEPAR, GROUP, FRIEND, EXTERNAL, CONTROL, PRIVATE, PUBLIC:
+			p.errorExpected("statement")
 			p.parseModuleDef()
 		case SEMICOLON, RBRACE, EOF:
+			p.errorExpected("statement")
 		default:
-			p.consume()
-			p.advance(stmtStart)
+			return p.advanceWithError(skipStmt, "expected statement, found %s", etok)
 		}
 		return &ErrorNode{From: etok, To: p.peek(1)}
 	}

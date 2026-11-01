@@ -21,7 +21,8 @@ x := * 2;
   Nodes: (ExprStmt
     Expr: (BinaryExpr Op: ":="
       X: (Ident "x")
-      Y: (ValueLiteral "*"))))
+      Y: (ValueLiteral "*")))
+  Nodes: (ErrorNode From: "2" To: "2"))
 ERROR 1:8-1:9: unexpected token INT
 
 ===
@@ -130,7 +131,6 @@ x := "abc;
       Y: (ErrorNode From: "UNTERMINATED" To: "UNTERMINATED"))))
 ERROR 1:6-1:11: malformed or unterminated token
 ERROR 1:6-1:11: expected operand, found UNTERMINATED
-ERROR 1:6-1:11: unexpected token UNTERMINATED
 
 ===
 Unterminated block comment
@@ -144,7 +144,6 @@ x := 1; /* comment
       Y: (ValueLiteral "1")))
   Nodes: (ErrorNode From: "UNTERMINATED" To: "UNTERMINATED"))
 ERROR 1:9-1:19: malformed or unterminated token
-ERROR 1:9-1:19: expected operand, found UNTERMINATED
 ERROR 1:9-1:19: unexpected token UNTERMINATED
 
 ===
@@ -156,7 +155,9 @@ x := 1 $ 2;
   Nodes: (ExprStmt
     Expr: (BinaryExpr Op: ":="
       X: (Ident "x")
-      Y: (ValueLiteral "1"))))
+      Y: (ValueLiteral "1")))
+  Nodes: (ErrorNode From: "ILLEGAL" To: "ILLEGAL")
+  Nodes: (ValueLiteral "2"))
 ERROR 1:8-1:9: unexpected token ILLEGAL
 
 ===
@@ -178,14 +179,14 @@ module M {
           Name: (Ident "a")
           Value: (ValueLiteral "1"))))
     Defs: (ModuleDef
-      Def: (ErrorNode From: ")" To: "const"))
+      Def: (ErrorNode From: ")" To: ")"))
     Defs: (ModuleDef
       Def: (ValueDecl KindTok: "const"
         Type: (Ident "integer")
         Decls: (Declarator AssignTok: ":="
           Name: (Ident "b")
           Value: (ValueLiteral "2"))))))
-ERROR 3:3-3:4: expected module definition, found )
+ERROR 3:3-3:8: expected module definition, found )
 
 ===
 Stray closing brace at top level
@@ -199,8 +200,11 @@ y := 2;
     Expr: (BinaryExpr Op: ":="
       X: (Ident "x")
       Y: (ValueLiteral "1")))
-  Nodes: (ErrorNode From: "}" To: "}"))
-ERROR 2:1-2:2: expected operand, found }
+  Nodes: (ErrorNode From: "}" To: "}")
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "y")
+      Y: (ValueLiteral "2"))))
 ERROR 2:1-2:2: unexpected token }
 
 ===
@@ -221,7 +225,6 @@ module M {
         Name: (Ident "c")
         Value: (ValueLiteral "1"))))
   Nodes: (ErrorNode From: "}" To: "}"))
-ERROR 4:1-4:2: expected operand, found }
 ERROR 4:1-4:2: unexpected token }
 
 ===
@@ -378,7 +381,8 @@ x := (1 + 2));
       Y: (ParenExpr
         List: (BinaryExpr Op: "+"
           X: (ValueLiteral "1")
-          Y: (ValueLiteral "2"))))))
+          Y: (ValueLiteral "2")))))
+  Nodes: (ErrorNode From: ")" To: ")"))
 ERROR 1:13-1:14: unexpected token )
 
 ===
@@ -392,7 +396,7 @@ module M {
   Nodes: (Module Tok: "module"
     Name: (Ident "M")
     Defs: (ModuleDef
-      Def: (ErrorNode From: "123" To: "}"))))
+      Def: (ErrorNode From: "123" To: "123"))))
 ERROR 2:3-2:6: expected module definition, found 123
 
 ===
@@ -451,7 +455,7 @@ function f() {
       Name: (Ident "f")
       Params: (FormalPars)
       Body: (BlockStmt
-        Stmts: (ErrorNode From: "else" To: ";")
+        Stmts: (ErrorNode From: "else" To: "else")
         Stmts: (ExprStmt
           Expr: (BinaryExpr Op: ":="
             X: (Ident "x")
@@ -554,3 +558,360 @@ function f(@deterministic @lazy integer a) {}
           Name: (Ident "a")))
       Body: (BlockStmt))))
 ERROR 1:27-1:32: unexpected modifier @lazy
+
+===
+Garbage in formal parameters
+===
+function f(integer x, 123, integer y) {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (Ident "integer")
+          Name: (Ident "x"))
+        List: (FormalPar
+          Type: (ErrorNode From: "123" To: "123"))
+        List: (FormalPar
+          Type: (Ident "integer")
+          Name: (Ident "y")))
+      Body: (BlockStmt))))
+ERROR 1:23-1:26: expected formal parameter, found 123
+
+===
+Missing comma between formal parameters
+===
+function f(integer x integer y) {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (Ident "integer")
+          Name: (Ident "x"))
+        List: (FormalPar
+          Type: (Ident "integer")
+          Name: (Ident "y")))
+      Body: (BlockStmt))))
+ERROR 1:22-1:29: expected ',', found integer
+
+===
+Junk after formal parameter
+===
+function f(integer x $ %, integer y) {}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (Ident "integer")
+          Name: (Ident "x"))
+        List: (FormalPar
+          Type: (ErrorNode From: "ILLEGAL" To: "ILLEGAL"))
+        List: (FormalPar
+          Type: (Ident "integer")
+          Name: (Ident "y")))
+      Body: (BlockStmt))))
+ERROR 1:22-1:25: expected ',', found ILLEGAL
+
+===
+Unclosed formal parameters
+===
+function f(integer x {
+  x := 1;
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars
+        List: (FormalPar
+          Type: (Ident "integer")
+          Name: (Ident "x")))
+      Body: (BlockStmt
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "x")
+            Y: (ValueLiteral "1")))))))
+ERROR 1:22-1:23: expected ')', found {
+
+===
+Garbage in formal type parameters
+===
+type record R<in type T, 1, in type U> { T a }
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (StructTypeDecl TypeTok: "type" KindTok: "record"
+      Name: (Ident "R")
+      TypePars: (FormalPars LParen: "<" RParen: ">"
+        List: (FormalPar Direction: "in"
+          Type: (Ident "type")
+          Name: (Ident "T"))
+        List: (FormalPar
+          Type: (ErrorNode From: "1" To: "1"))
+        List: (FormalPar Direction: "in"
+          Type: (Ident "type")
+          Name: (Ident "U")))
+      Fields: (Field
+        Type: (RefSpec
+          X: (Ident "T"))
+        Name: (Ident "a")))))
+ERROR 1:26-1:27: expected formal type parameter, found 1
+
+===
+Bad struct field
+===
+type record R { integer a, 123, integer b }
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (StructTypeDecl TypeTok: "type" KindTok: "record"
+      Name: (Ident "R")
+      Fields: (Field
+        Type: (RefSpec
+          X: (Ident "integer"))
+        Name: (Ident "a"))
+      Fields: (Field
+        Type: (ErrorNode From: "123" To: "123"))
+      Fields: (Field
+        Type: (RefSpec
+          X: (Ident "integer"))
+        Name: (Ident "b")))))
+ERROR 1:28-1:31: expected field, found 123
+
+===
+Missing comma between struct fields
+===
+type union U { integer a charstring b }
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (StructTypeDecl TypeTok: "type" KindTok: "union"
+      Name: (Ident "U")
+      Fields: (Field
+        Type: (RefSpec
+          X: (Ident "integer"))
+        Name: (Ident "a"))
+      Fields: (Field
+        Type: (RefSpec
+          X: (Ident "charstring"))
+        Name: (Ident "b")))))
+ERROR 1:26-1:36: expected ',', found charstring
+
+===
+Bad enumerated value
+===
+type enumerated E { a, 1, b }
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (EnumTypeDecl TypeTok: "type" EnumTok: "enumerated"
+      Name: (Ident "E")
+      Enums: (Ident "a")
+      Enums: (ErrorNode From: "1" To: "1")
+      Enums: (Ident "b"))))
+ERROR 1:24-1:25: expected enumerated value, found 1
+
+===
+Garbage in argument list
+===
+f(1, $, 2);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "f")
+      Args: (ParenExpr
+        List: (ValueLiteral "1")
+        List: (ErrorNode From: "ILLEGAL" To: "ILLEGAL")
+        List: (ValueLiteral "2")))))
+ERROR 1:6-1:7: expected expression, found ILLEGAL
+
+===
+Missing comma in argument list
+===
+f(1 2);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "f")
+      Args: (ParenExpr
+        List: (ValueLiteral "1")
+        List: (ValueLiteral "2")))))
+ERROR 1:5-1:6: expected ',', found 2
+
+===
+Empty argument
+===
+f(1, , 2);
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (CallExpr
+      Fun: (Ident "f")
+      Args: (ParenExpr
+        List: (ValueLiteral "1")
+        List: (ErrorNode From: "," To: ",")
+        List: (ValueLiteral "2")))))
+ERROR 1:6-1:7: expected expression, found ,
+
+===
+Garbage in composite literal
+===
+x := { a := 1, / b := 2 };
+---
+(Root
+  Nodes: (ExprStmt
+    Expr: (BinaryExpr Op: ":="
+      X: (Ident "x")
+      Y: (CompositeLiteral
+        List: (BinaryExpr Op: ":="
+          X: (Ident "a")
+          Y: (ValueLiteral "1"))
+        List: (ErrorNode From: "/" To: "/")
+        List: (BinaryExpr Op: ":="
+          X: (Ident "b")
+          Y: (ValueLiteral "2"))))))
+ERROR 1:16-1:17: expected expression, found /
+
+===
+Garbage in with qualifiers
+===
+type integer I with { encode (123, type all) "x" }
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (SubTypeDecl TypeTok: "type"
+      Field: (Field
+        Type: (RefSpec
+          X: (Ident "integer"))
+        Name: (Ident "I"))
+      With: (WithSpec Tok: "with"
+        List: (WithStmt KindTok: "encode"
+          List: (ErrorNode From: "123" To: "123")
+          List: (DefKindExpr KindTok: "type"
+            List: (Ident "all"))
+          Value: (ValueLiteral "\"x\""))))))
+ERROR 1:31-1:34: expected with-qualifier, found 123
+
+===
+Statement keyword between module definitions
+===
+module M {
+  const integer a := 1;
+  if (true) {}
+  const integer b := 2;
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "const"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "a")
+          Value: (ValueLiteral "1"))))
+    Defs: (ModuleDef
+      Def: (ErrorNode From: "if" To: "}"))
+    Defs: (ModuleDef
+      Def: (ValueDecl KindTok: "const"
+        Type: (Ident "integer")
+        Decls: (Declarator AssignTok: ":="
+          Name: (Ident "b")
+          Value: (ValueLiteral "2"))))))
+ERROR 3:3-3:15: expected module definition, found if
+
+===
+Stray token between statements
+===
+function f() {
+  x := 1;
+  )
+  y := 2;
+}
+---
+(Root
+  Nodes: (ModuleDef
+    Def: (FuncDecl KindTok: "function"
+      Name: (Ident "f")
+      Params: (FormalPars)
+      Body: (BlockStmt
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "x")
+            Y: (ValueLiteral "1")))
+        Stmts: (ErrorNode From: ")" To: ")")
+        Stmts: (ExprStmt
+          Expr: (BinaryExpr Op: ":="
+            X: (Ident "y")
+            Y: (ValueLiteral "2")))))))
+ERROR 3:3-3:4: expected statement, found )
+
+===
+Stray token at top level before module
+===
+) ]
+module M {}
+---
+(Root
+  Nodes: (ErrorNode From: ")" To: "]")
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")))
+ERROR 1:1-1:4: unexpected token )
+
+===
+Stray token between modules
+===
+module A {}
+]
+module B {}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "A"))
+  Nodes: (ErrorNode From: "]" To: "]")
+  Nodes: (Module Tok: "module"
+    Name: (Ident "B")))
+ERROR 2:1-2:2: unexpected token ]
+
+===
+Stray keyword in import list
+===
+module M {
+  import from N { var x; type T }
+}
+---
+(Root
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")
+    Defs: (ModuleDef
+      Def: (ImportDecl ImportTok: "import" FromTok: "from"
+        Module: (Ident "N")
+        List: (DefKindExpr
+          List: (ErrorNode From: "var" To: "x"))
+        List: (DefKindExpr KindTok: "type"
+          List: (Ident "T"))))))
+ERROR 2:19-2:24: expected import definition qualifier, found var
+
+===
+Stray token before top-level expression
+===
+) 1;
+module M {}
+---
+(Root
+  Nodes: (ErrorNode From: ")" To: ")")
+  Nodes: (ValueLiteral "1")
+  Nodes: (Module Tok: "module"
+    Name: (Ident "M")))
+ERROR 1:1-1:2: unexpected token )
