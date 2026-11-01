@@ -179,8 +179,7 @@ ntt                 main binary with sub-commands (list, build, run, lint, ...)
 │   ├── scanner     tokenizer
 │   ├── token       token types
 │   ├── printer     obsolete pretty printer
-│   ├── doc         documentation tags package
-│   └── v2 	    new TTCN-3 syntax package (WIP)
+│   └── doc         documentation tags package
 │
 ├── internal
 │   ├── compdb      compilation database types (compile_commands.json)
