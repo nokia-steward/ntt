@@ -5,6 +5,7 @@ import (
 	"reflect"
 	"sort"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -151,7 +152,7 @@ func tlAnnotate(v tl.Value, td *runtime.TypeDesc, env runtime.Scope, depth int) 
 				}
 			}
 		}
-		v.Elems = elems
+		v.Elems = tlDeclarationOrder(elems, td.Struct)
 	case td.IsList && (v.Kind == "record_of" || v.Kind == "set_of"):
 		if et := elemTypeDesc(td, home); et != nil {
 			elems := make([]tl.Value, len(v.Elems))
@@ -162,6 +163,26 @@ func tlAnnotate(v tl.Value, td *runtime.TypeDesc, env runtime.Scope, depth int) 
 		}
 	}
 	return v
+}
+
+// tlDeclarationOrder is the fields elems of a record or set of type st in
+// the order st declares them, which a value made without its type, as a
+// codec decodes it, need not have; elems as they are when one of them is
+// not a field of st.
+func tlDeclarationOrder(elems []tl.Value, st *syntax.StructTypeDecl) []tl.Value {
+	at := map[string]int{}
+	for i, f := range st.Fields {
+		if f != nil && f.Name != nil {
+			at[f.Name.String()] = i
+		}
+	}
+	for _, e := range elems {
+		if _, ok := at[e.Name]; !ok {
+			return elems
+		}
+	}
+	sort.SliceStable(elems, func(i, j int) bool { return at[elems[i].Name] < at[elems[j].Name] })
+	return elems
 }
 
 // tlPartsOf is the values of exprs, objs, as the Parts of an event, each
@@ -1161,16 +1182,32 @@ func tlPortStatus(exec *runtime.TestcaseExec, port string) string {
 	return tl.PortStarted
 }
 
-// tlEncode logs an encvalue (tliEncode): the value and what it was
-// encoded to. The executor's encoder does not fail, and which codec it
-// used is not known to it, so neither is given.
-func tlEncode(exec *runtime.TestcaseExec, n syntax.Node, val, res runtime.Object) {
+// tlEncode logs an encvalue (tliEncode): the value, of its declared type,
+// and what it was encoded to. The executor's encoder does not fail, and
+// which codec it used is not known to it, so neither is given.
+func tlEncode(exec *runtime.TestcaseExec, n *syntax.CallExpr, val, res runtime.Object, env runtime.Scope) {
 	defer tlRecover(exec)
 	msg, ok := runtime.TLEncoded(res)
 	if !ok {
 		return
 	}
-	tlEmit(exec, n, "tliEncode", tlArg("val", runtime.TLValue(val).AsValue()), tlArg("msg", msg))
+	td := lvalueTypeDesc(n.Args.List[0], env)
+	tlEmitWith(exec, n, "tliEncode", func(e *tl.Event) { e.Codec = tlCodecAttrs(td) },
+		tlArg("val", tlTyped(val, td, env).AsValue()), tlArg("msg", msg))
+}
+
+// tlCodecAttrs is the encode, variant and extension attributes of type
+// td, for a writer that shows them.
+func tlCodecAttrs(td *runtime.TypeDesc) []string {
+	if td == nil {
+		return nil
+	}
+	var out []string
+	for _, kind := range []string{"encode", "variant", "extension"} {
+		vals, _ := td.Lookup(kind)
+		out = append(out, strings.Join(vals, ", "))
+	}
+	return out
 }
 
 // tlDecode logs a decvalue (tliDecode): the encoded value it was given
@@ -1193,7 +1230,9 @@ func tlDecode(exec *runtime.TestcaseExec, n *syntax.CallExpr, enc, res runtime.O
 			val = v
 		}
 	}
-	tlEmit(exec, n, "tliDecode", tlArg("msg", msg), tlArg("val", runtime.TLValue(val).AsValue()))
+	td := lvalueTypeDesc(n.Args.List[1], env)
+	tlEmitWith(exec, n, "tliDecode", func(e *tl.Event) { e.Codec = tlCodecAttrs(td) },
+		tlArg("msg", msg), tlArg("val", tlTyped(val, td, env).AsValue()))
 }
 
 // tlRnd logs an rnd (tliRnd): the number drawn and the seed it was given,

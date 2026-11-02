@@ -137,7 +137,7 @@ value cannot hold a line break, which `char(...)` writes, but can hold a
 | `ulog` `uact` | log, action | its values |
 | `matc` | match | value, template, mismatch if any |
 | `vach` | variable assigned or declared with a value | type, name, value: of the field or element assigned |
-| `enco` `deco` | encvalue, decvalue | type, codec |
+| `enco` `deco` | encvalue, decvalue | type, its `encode`, `variant` and `extension` attributes |
 | `TSTP` | testcase.stop | reason |
 
 Events with no line of their own — an alt round that matched nothing, the

@@ -241,10 +241,11 @@ func (lw *LinesWriter) lines(e *Event, n *Node) []string {
 			mismatch = "value:" + val("expr") + "~" + val("tmpl")
 		}
 		return one("matc", val("expr"), val("tmpl"), mismatch)
-	case "tliEncode":
-		return one("enco", lineTypeName(arg("val")), plain(arg("codec")), "", "")
-	case "tliDecode":
-		return one("deco", lineTypeName(arg("val")), plain(arg("codec")), "", "")
+	case "tliEncode", "tliDecode":
+		// The type, and its encode, variant and extension attributes.
+		attrs := append(append([]string{}, e.Codec...), "", "", "")[:3]
+		code := map[string]string{"tliEncode": "enco", "tliDecode": "deco"}[op]
+		return one(code, lineTypeName(arg("val")), attrs[0], attrs[1], attrs[2])
 
 	// Components.
 	case "tliCCreate":

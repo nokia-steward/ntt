@@ -11511,7 +11511,7 @@ func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 		return v
 	}
 	if lexec := tlExec(env); lexec != nil {
-		defer func() { tlEncode(lexec, n, v, res) }()
+		defer func() { tlEncode(lexec, n, v, res, env) }()
 	}
 	// A value of a JSON-encoded type is encoded as JSON (ES 201 873-11).
 	if t, ok := jsonEncodedTypeOf(fn, n.Args.List[0], n, env); ok {

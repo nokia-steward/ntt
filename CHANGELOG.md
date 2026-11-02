@@ -112,7 +112,9 @@ single functional test doubles as a performance probe. See
   message's arrival logged as its sender (`?` for what a test port hands
   in), with its value, sender and time; messages sent and received of their
   declared types, or of the one type the port's `in` list gives a value of
-  their structure; a receive's outcome with the message it took; a module
+  their structure, a record's fields in the order its type declares them;
+  an encode or decode with its type's encode, variant and extension
+  attributes; a receive's outcome with the message it took; a module
   parameter the first time a testcase reads it; a backtrace before a
   setverdict to inconc or fail. Against the expected logs of such a
   runtime's own regression suite, a third of the runs give identical logs;

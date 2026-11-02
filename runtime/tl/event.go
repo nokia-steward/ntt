@@ -31,11 +31,13 @@ type Event struct {
 	// (tliCStart); Member tells that the variable or timer an event names
 	// is a member of the component it runs on, not local to a behaviour.
 	// Path, for a tliVar, is what in the variable was assigned, `.f[1]`,
-	// with its value in Parts.
+	// with its value in Parts. Codec, for a tliEncode or tliDecode, is the
+	// encode, variant and extension attributes of the value's type.
 	Parts  []Value
 	Site   Pos
 	Member bool
 	Path   string
+	Codec  []string
 }
 
 // Pos is a position in a source file; the zero Pos is none.
