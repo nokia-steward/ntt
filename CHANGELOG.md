@@ -21,6 +21,23 @@ single functional test doubles as a performance probe. See
 
 ### Added
 
+- **`ntt run` builds and runs a suite, printing its line log** — `ntt run
+  [ <path>... ] [ -- <test id>... ]`, also `ntt run2`, takes the command
+  line of the suite runners its structured line log comes from: it runs
+  the test ids given, or every control part, or every testcase when the
+  suite declares none, or the testcases the baskets `-r/--regex`,
+  `-x/--exclude`, `-R/--tags-regex`, `-X/--tags-exclude` and
+  `NTT_LIST_BASKETS` select. Every event goes to `-o/--output FILE`;
+  `-a/--activate`, `-d/--deactivate` (an event-id regular expression,
+  `Module:pattern` for one module), `-A/--activate-all` and
+  `-D/--deactivate-all` choose those on the console, colored by
+  `--format auto|plain|color`. A testcase ending in fail or error fails
+  the run (exit 1), and so does one whose `@verdict` tag (`// @verdict:
+  error`, or a module's `@verdict pass accept, ttcn3verdict:<v>` or `pass
+  reject`) expects another verdict, after a `VMIS` error line. The Go and
+  C++ backends run with `ntt run --target go|cpp FILE`, as `ntt run FILE`
+  did before.
+
 - **Structured test logging, as the TTCN-3 standard defines it** — `ntt exec
   --log FILE` records every TTCN-3 operation of a run as an event of the
   TCI-TL logging interface (ETSI ES 201 873-6, clause 7.3.4.1): messages
@@ -105,8 +122,10 @@ single functional test doubles as a performance probe. See
   four-letter event codes (`tcst`, `ptsd`, `ptrx`, `setv`, `tcfi`, …), the
   fields and the compact notation of values of a structured line log long
   used by TTCN-3 runtimes, so that scripts and viewers made for that log
-  read this one: identities `MTC`, `SYSTEM`, a PTC's name, `ntt` for the
-  test system; behaviours entered at their call site with their in
+  read this one: identities `MTC`, `SYSTEM`, a PTC's name, and for the
+  test system the runtime's own, unique to the process (`ntt-` and 16
+  random characters, or `NTT_RUNTIME_ID`), so that logs of runtimes run in
+  parallel or streamed to one place tell whose a testcase is; behaviours entered at their call site with their in
   parameters and left with their out parameters and result; ports,
   variables and timers named after their component or behaviour; a
   message's arrival logged as its sender (`?` for what a test port hands

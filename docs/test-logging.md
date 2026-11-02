@@ -52,12 +52,13 @@ the test specification performs the operation (file and line).
 one per line, its fields separated by `|` — to read in a pager, and to
 split with `awk` or `cut`. The layout and the event codes are those of a
 structured line log long used by TTCN-3 runtimes, so the scripts and
-viewers that read such logs read these too:
+viewers that read such logs read these too. `ntt run` prints this log on
+the console as it runs a suite, and `ntt run -o FILE` writes it whole:
 
 ```
 timestamp|event|identity=file:line|field|field...
-20261008T092651.367348|tcst|ntt|T.tc|5.0
-20261008T092651.367348|cocr|ntt|MTC|once
+20261008T092651.367348|tcst|ntt-dr5mrfx4reatdhr3|T.tc|5.0
+20261008T092651.367348|cocr|ntt-dr5mrfx4reatdhr3|MTC|once
 20261008T092651.367348|cost|MTC=T.ttcn3:10|T.tc
 20261008T092651.367348|tcen|MTC|T.tc()
 20261008T092651.367348|cocr|MTC=T.ttcn3:11|echo|once
@@ -69,7 +70,7 @@ timestamp|event|identity=file:line|field|field...
 20261008T092651.867348|setv|MTC=T.ttcn3:16|none|pass|"done"
 20261008T092651.867348|tclv|MTC|T.tc()
 20261008T092651.867348|cofi|MTC|pass
-20261008T092651.867348|tcfi|ntt|T.tc|pass
+20261008T092651.867348|tcfi|ntt-dr5mrfx4reatdhr3|T.tc|pass
 ```
 
 The timestamp is local time, to the microsecond. The event is a
@@ -77,8 +78,13 @@ four-letter code, in lower case; an upper-case code is an error, followed
 by `->` and what it means (`TSTP->Test stopped by the testcase.stop
 operation`). The identity is the component that produced the event — `MTC`,
 `SYSTEM`, a PTC by its name, `$` and its number for one created without a
-name, `ntt` for the test system, which runs the control part and starts and
-ends the testcases — with the source file and line when there is one. A
+name, the runtime for the test system, which runs the control part and
+starts and ends the testcases — with the source file and line when there is
+one. The runtime's identity is unique to the process: `ntt-` and 16
+characters of 80 random bits, the same for every testcase it runs, so that
+the logs of runtimes running side by side, or streaming to one place, tell
+whose a testcase is; `NTT_RUNTIME_ID` sets it instead, for a controller
+that names its runtimes. A
 function, altstep or testcase is entered and left at the line it is called
 from, a PTC's behaviour starts at the line it is declared.
 

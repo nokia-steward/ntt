@@ -98,13 +98,13 @@ This is the recommended way to iterate while you're writing tests:
 start-up is fast, you don't need a working build chain, and the
 error messages come straight from the interpreter.
 
-### 3b. `ntt run` (Go backend)
+### 3b. `ntt run --target go` (Go backend)
 
 ```sh
-ntt run Hello.ttcn3
+ntt run --target go Hello.ttcn3
 ```
 
-`ntt run` lowers your test to the SSA-ish IR and emits Go that gets
+`ntt run --target go` lowers your test to the SSA-ish IR and emits Go that gets
 compiled and executed. The first run costs a Go compile; subsequent
 runs are cached. Prefer this when you care about steady-state
 throughput rather than start-up latency, or when you want to embed
@@ -125,6 +125,29 @@ suite "Hello": pass (1 cases, build 273ms, run 2ms)
 If you change `add(2, 3) == 5` to `add(2, 3) == 6` and re-run, you'll
 get a failing verdict and a non-zero exit status - exactly what a CI
 pipeline needs.
+
+### 3c. `ntt run` (build and run the suite)
+
+```sh
+ntt run                              # every control part, or every testcase
+ntt run --regex TC_Add               # the testcases a basket selects
+ntt run -- Hello.TC_Add Hello.control
+ntt run -o run.lines -D -a 'tcfi|setv'
+```
+
+`ntt run` builds the suite and runs it on the interpreter, printing the
+structured line log of its events on the console (see
+[test-logging.md](test-logging.md#lines)): every control part, or every
+testcase when there is none; the baskets of `--regex`, `--exclude`,
+`--tags-regex`, `--tags-exclude` and `NTT_LIST_BASKETS` run the
+testcases they match. `--output FILE` keeps every event; `--activate`,
+`--deactivate` (an event-id regular expression, `Module:pattern` for one
+module), `--activate-all` and `--deactivate-all` choose those on the
+console, which `--format auto|plain|color` colors. A testcase ending in
+fail or error fails the run, as does one whose `// @verdict: <verdict>`
+tag, or its module's `@verdict pass accept, ttcn3verdict:<verdict>`,
+expects another verdict - then a `VMIS` error line says so. `ntt run2`
+is the same command.
 
 ## 4. Format the code
 

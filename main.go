@@ -213,6 +213,9 @@ func fatal(err error) {
 		}
 		os.Exit(waitStatus.ExitStatus())
 	}
-	fmt.Fprintln(os.Stderr, err.Error())
+	// A command whose output has said why it failed exits with no message.
+	if msg := err.Error(); msg != "" {
+		fmt.Fprintln(os.Stderr, msg)
+	}
 	os.Exit(1)
 }

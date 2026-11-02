@@ -124,8 +124,11 @@ The short version, for the impatient:
 	# 2. interpret-and-run a testcase straight from source
 	ntt exec Hello.control
 
-	# 3. compile-and-run via the Go backend (heavier, faster)
-	ntt run Hello.control
+	# 3. build and run the suite, printing its structured line log
+	ntt run Hello.ttcn3
+
+	# 3b. compile-and-run via the Go backend (heavier, faster)
+	ntt run --target go Hello.ttcn3
 
 	# 4. score yourself against the ETSI conformance suite
 	ntt conformance testdata/ttcn3-conformance-tests/ATS/
@@ -183,7 +186,7 @@ ones for the ntt-Titan toolchain are:
 | ------------------ | ------------------------------------------------------------------------- |
 | `ntt check`        | type-check a TTCN-3 module / suite (no execution)                         |
 | `ntt compile`      | the sources as JSON for other tools; `--target` lowers a file to Go or C++ |
-| `ntt run`          | compile-and-run via the Go backend                                        |
+| `ntt run`          | build and run a suite, its line log on the console; `--target go` via the Go backend |
 | `ntt exec`         | interpret-and-run via the tree-walker (no codegen step)                   |
 | `ntt explorer`     | emit the test-explorer JSON consumed by the VS Code extension             |
 | `ntt mctr` / `hc`  | master / host-controller pair for distributed execution                   |
@@ -252,7 +255,7 @@ the closest `[EXECUTE]` entries.
 After migration, `ntt build` invokes the Makefile / CMake generator so
 the resulting project is buildable both ways:
 
-- `ntt run` / `ntt exec` use the Go backend or the interpreter
+- `ntt run --target go` / `ntt exec` use the Go backend or the interpreter
   directly (no C++ toolchain needed).
 - `ntt build && make` (or `cmake --build`) produces a Titan-compatible
   binary you can drop into your existing CI.
@@ -276,7 +279,7 @@ The full feature matrix between Titan and ntt is in
 | `runtime/{explorer,dap}/`| VS Code test-explorer + debugger adapter                         |
 | `builtins/`              | TTCN-3 predefined functions (sizeof, lengthof, encvalue, ...)    |
 | `ir/`                    | SSA-style intermediate representation                            |
-| `backend/golang/`        | Go code generator (used by `ntt run`)                            |
+| `backend/golang/`        | Go code generator (used by `ntt run --target go`)                |
 | `backend/cpp/`           | C++ code generator (clean-room, no Titan code)                   |
 | `build/`                 | Makefile / CMake generators (`ntt makefilegen`, `cfgvalidate`)   |
 | `cmake/`                 | `NTTTitan.cmake` module for downstream consumers                 |
@@ -304,7 +307,7 @@ gate, and documentation entry.
 | M4 Single-process executor         | shipped  | `ntt exec`, `.cfg`, reports                                    |
 | M5 Distributed executor + ports    | shipped  | `ntt mctr` / `ntt hc`, test-port API                           |
 | M6 Build tooling                   | shipped  | `ntt {migrate,makefilegen,cfgvalidate,build}`                  |
-| M7 MIR + Go backend                | shipped  | SSA IR, `ntt run`                                              |
+| M7 MIR + Go backend                | shipped  | SSA IR, `ntt run --target go`                                  |
 | M8 C++ backend + runtime mirror    | shipped  | `backend/cpp`, `runtime/cpp` (clean-room)                      |
 | M9 Adoption (IDE + docs)           | shipped  | explorer, DAP, dashboards                                      |
 

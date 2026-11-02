@@ -2,6 +2,8 @@ package tl_test
 
 import (
 	"bytes"
+	"os"
+	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -13,7 +15,7 @@ import (
 func linesOf(t *testing.T, events ...*tl.Event) []string {
 	t.Helper()
 	var b bytes.Buffer
-	w := tl.NewLinesWriter(&b).In(time.UTC)
+	w := tl.NewLinesWriter(&b).In(time.UTC).As("ntt")
 	for _, e := range events {
 		w.Log(e)
 	}
@@ -270,4 +272,35 @@ func TestLinesWriterCodecs(t *testing.T) {
 		`20261008T072418.794614|enco|MTC=D.ttcn3:7|D.Truth|||`,
 		`20261008T072418.794614|deco|MTC=D.ttcn3:11|D.Truth|JSON||`,
 	)
+}
+
+// TestRuntimeID: the test system is logged as a runtime of its own, the
+// same for the process's every testcase and unlike another process's.
+func TestRuntimeID(t *testing.T) {
+	id := tl.RuntimeID()
+	if id != tl.RuntimeID() {
+		t.Fatal("RuntimeID changes")
+	}
+	if os.Getenv("NTT_RUNTIME_ID") == "" && os.Getenv("K3_RUNTIME_ID") == "" {
+		if !regexp.MustCompile(`^ntt-[a-z2-7]{16}$`).MatchString(id) {
+			t.Fatalf("RuntimeID = %q", id)
+		}
+	}
+	var b bytes.Buffer
+	w := tl.NewLinesWriter(&b).In(time.UTC)
+	w.Log(&tl.Event{Op: "tliTcStart", Ts: ts, C: mtc, Args: []tl.Arg{{Name: "tcId", Val: tl.TestcaseID("T", "tc")}}})
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if want := "|tcst|" + id + "|T.tc|"; !strings.Contains(b.String(), want) {
+		t.Fatalf("got %q, want %q in it", b.String(), want)
+	}
+	// What would end a field, or split identity from place, is replaced.
+	var c bytes.Buffer
+	w = tl.NewLinesWriter(&c).In(time.UTC).As("a|b=c d->e")
+	w.Log(&tl.Event{Op: "tliTcStart", Ts: ts, C: mtc, Args: []tl.Arg{{Name: "tcId", Val: tl.TestcaseID("T", "tc")}}})
+	_ = w.Close()
+	if !strings.Contains(c.String(), "|tcst|a_b_c_d__e|T.tc|") {
+		t.Fatalf("got %q", c.String())
+	}
 }

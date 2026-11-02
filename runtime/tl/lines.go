@@ -42,6 +42,8 @@ type LinesWriter struct {
 	err    error
 	closed bool
 	loc    *time.Location
+	// system is the identity of the test system's events (RuntimeID).
+	system string
 
 	verdicts map[string]string // per component, its verdict so far
 	names    map[string]string // per component id, its name
@@ -71,11 +73,20 @@ type queued struct {
 // NewLinesWriter starts a log of lines, its timestamps in local time.
 func NewLinesWriter(w io.Writer) *LinesWriter {
 	return &LinesWriter{
-		w: bufio.NewWriter(w), loc: time.Local,
+		w: bufio.NewWriter(w), loc: time.Local, system: RuntimeID(),
 		verdicts: map[string]string{}, names: map[string]string{}, states: map[string]string{},
 		frames: map[string][]frame{}, timers: map[string]int64{}, queues: map[string][]queued{},
 		sent: map[string]string{}, modpars: map[string]bool{},
 	}
+}
+
+// As sets the identity the test system's events are of, RuntimeID by
+// default.
+func (lw *LinesWriter) As(id string) *LinesWriter {
+	lw.mu.Lock()
+	defer lw.mu.Unlock()
+	lw.system = fieldSafe(id)
+	return lw
 }
 
 // In sets the time zone the timestamps are written in.
@@ -131,10 +142,10 @@ func (lw *LinesWriter) lines(e *Event, n *Node) []string {
 	has := func(name string) bool { return n.Kid(name) != nil }
 	who := lw.identity(e.C)
 	here := lw.place(who, e.Src, e.Line)
-	if who == "ntt" {
+	if who == lw.system {
 		// The test system's own events have no place in the source but
 		// those of the behaviours it runs.
-		here = "ntt"
+		here = lw.system
 	}
 	line := func(id, at string, fields ...string) string {
 		head := id
@@ -168,23 +179,23 @@ func (lw *LinesWriter) lines(e *Event, n *Node) []string {
 		// A testcase starts afresh: its components, ports and timers
 		// are its own, its component ids too. The control part
 		// running it is still where it was.
-		control := lw.frames["ntt"]
+		control := lw.frames[lw.system]
 		lw.verdicts, lw.names, lw.states = map[string]string{}, map[string]string{}, map[string]string{}
-		lw.frames, lw.timers, lw.queues, lw.sent = map[string][]frame{"ntt": control}, map[string]int64{}, map[string][]queued{}, map[string]string{}
+		lw.frames, lw.timers, lw.queues, lw.sent = map[string][]frame{lw.system: control}, map[string]int64{}, map[string][]queued{}, map[string]string{}
 		lw.modpars = map[string]bool{}
 		lw.tcStart = e.Ts
 		lw.verdicts["MTC"] = "none"
 		lw.states["MTC"] = "running"
 		tc := testcaseName(n)
 		return []string{
-			line("tcst", "ntt", tc, guard),
-			line("cocr", "ntt", "MTC", "once"),
+			line("tcst", lw.system, tc, guard),
+			line("cocr", lw.system, "MTC", "once"),
 			line("cost", lw.place("MTC", e.Src, e.Line), tc),
 		}
 	case "tliTcTerminated":
 		v := plain(arg("verdict"))
 		lw.states["MTC"] = "stopped"
-		return []string{line("cofi", "MTC", v), line("tcfi", "ntt", testcaseName(n), v)}
+		return []string{line("cofi", "MTC", v), line("tcfi", lw.system, testcaseName(n), v)}
 	case "tliTcStop":
 		return one("TSTP", plain(arg("reason")))
 	case "tliSEnter", "tliSLeave":
@@ -204,7 +215,7 @@ func (lw *LinesWriter) lines(e *Event, n *Node) []string {
 			return nil
 		}
 		lw.modpars[name] = true
-		return []string{line("mpar", "ntt", name, val("val"))}
+		return []string{line("mpar", lw.system, name, val("val"))}
 	case "tliSetVerdict":
 		prev := lw.verdicts[who]
 		if prev == "" {
@@ -434,7 +445,7 @@ func (lw *LinesWriter) behaviour(e *Event, n *Node, who, here string, line func(
 		} else {
 			lw.pop(who)
 		}
-		return []string{line(pick(enter, "cpen", "cplv"), "ntt", name+"()")}
+		return []string{line(pick(enter, "cpen", "cplv"), lw.system, name+"()")}
 	}
 	call := name + "(" + lw.params(n.Kid("tciPars"), enter) + ")"
 	if kind == "testcase" {
@@ -520,7 +531,7 @@ func (lw *LinesWriter) detected(e *Event, n *Node, item string) []string {
 	lw.queues[at] = append(lw.queues[at], queued{item: item})
 	who, here := sender, lw.sent[sender]
 	if who == "" {
-		who, here = "ntt", "ntt"
+		who, here = lw.system, lw.system
 	}
 	if here == "" {
 		here = who
@@ -618,7 +629,7 @@ func (lw *LinesWriter) since(us int64) string {
 // its number for one without, ntt for the test system.
 func (lw *LinesWriter) identity(c ComponentID) string {
 	if c.Null || c.Name == "" && c.ID == "" || c.ID == "control" {
-		return "ntt"
+		return lw.system
 	}
 	return lw.compName(c.ID, c.Name)
 }
