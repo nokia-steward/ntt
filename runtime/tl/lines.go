@@ -245,7 +245,15 @@ func (lw *LinesWriter) lines(e *Event, n *Node) []string {
 		// The type, and its encode, variant and extension attributes.
 		attrs := append(append([]string{}, e.Codec...), "", "", "")[:3]
 		code := map[string]string{"tliEncode": "enco", "tliDecode": "deco"}[op]
-		return one(code, lineTypeName(arg("val")), attrs[0], attrs[1], attrs[2])
+		typ := lineTypeName(arg("val"))
+		if len(e.Parts) == 1 && e.Parts[0].Type != "" {
+			// What was decoded into is of a type, its value not known.
+			typ = e.Parts[0].Type
+			if m := e.Parts[0].Module; m != "" {
+				typ = m + "." + typ
+			}
+		}
+		return one(code, typ, attrs[0], attrs[1], attrs[2])
 
 	// Components.
 	case "tliCCreate":

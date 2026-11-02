@@ -1231,8 +1231,15 @@ func tlDecode(exec *runtime.TestcaseExec, n *syntax.CallExpr, enc, res runtime.O
 		}
 	}
 	td := lvalueTypeDesc(n.Args.List[1], env)
-	tlEmitWith(exec, n, "tliDecode", func(e *tl.Event) { e.Codec = tlCodecAttrs(td) },
-		tlArg("msg", msg), tlArg("val", tlTyped(val, td, env).AsValue()))
+	typed := tlTyped(val, td, env)
+	var parts []tl.Value
+	if val == runtime.Undefined {
+		// A variable's field or element decoded into is not read back:
+		// its value is not known, its type is, for a writer that shows it.
+		typed, parts = runtime.TLValue(val), []tl.Value{{Type: typed.Type, Module: typed.Module}}
+	}
+	tlEmitWith(exec, n, "tliDecode", func(e *tl.Event) { e.Codec, e.Parts = tlCodecAttrs(td), parts },
+		tlArg("msg", msg), tlArg("val", typed.AsValue()))
 }
 
 // tlRnd logs an rnd (tliRnd): the number drawn and the seed it was given,

@@ -251,7 +251,8 @@ func TestLinesWriterMismatchAndComponentNamedSystem(t *testing.T) {
 }
 
 // TestLinesWriterCodecs: an encode or decode names the value's type and
-// the type's encode, variant and extension attributes.
+// the type's encode, variant and extension attributes, a field decoded
+// into of its type though its value is not known.
 func TestLinesWriterCodecs(t *testing.T) {
 	val := tl.Value{Kind: "record", Type: "Truth", Module: "D", Elems: []tl.Value{{Name: "status", Kind: "integer", Text: "200"}}}
 	got := linesOf(t,
@@ -261,8 +262,12 @@ func TestLinesWriterCodecs(t *testing.T) {
 		&tl.Event{Op: "tliEncode", Ts: ts, Src: "D.ttcn3", Line: 7, C: mtc, Args: []tl.Arg{
 			{Name: "val", Val: val.AsValue()}, {Name: "msg", Val: tl.Message("")}}},
 	)
-	wantLines(t, got,
+	field := linesOf(t, &tl.Event{Op: "tliDecode", Ts: ts, Src: "D.ttcn3", Line: 11, C: mtc, Args: []tl.Arg{
+		{Name: "msg", Val: tl.Message("")}, {Name: "val", Val: tl.Value{Kind: "charstring", Null: true}.AsValue()}},
+		Codec: []string{"JSON", "", ""}, Parts: []tl.Value{{Type: "Truth", Module: "D"}}})
+	wantLines(t, append(got, field...),
 		`20261008T072418.794614|deco|MTC=D.ttcn3:9|D.Truth|JSON||`,
 		`20261008T072418.794614|enco|MTC=D.ttcn3:7|D.Truth|||`,
+		`20261008T072418.794614|deco|MTC=D.ttcn3:11|D.Truth|JSON||`,
 	)
 }
