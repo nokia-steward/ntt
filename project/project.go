@@ -166,8 +166,8 @@ type TestConfig struct {
 	Test string `json:",omitempty"`
 
 	// Description is an optional human-readable label for this test
-	// configuration (variant). It mirrors the "description" field used by
-	// k3 in .parameters execute entries.
+	// configuration (variant). It mirrors the "description" field of
+	// .parameters execute entries.
 	Description string `json:",omitempty"`
 
 	// Presets is a list of preset configurations to be used to execute

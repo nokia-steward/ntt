@@ -45,16 +45,16 @@ func TestEnvSimple(t *testing.T) {
 	assert.Equal(t, "23.5", env.Getenv("NTT_FNORD"))
 }
 
-func TestEnvK3(t *testing.T) {
+func TestEnvLegacyPrefix(t *testing.T) {
 	clearEnv()
 	os.Setenv("K3FNORD", "23.5")
 	assert.Equal(t, "23.5", env.Getenv("NTTFNORD"))
 }
 
-// Test that NTT prefix is replaced with K3 prefix.
+// Test that NTT prefix is replaced with the legacy prefix.
 //
-// When, for example, asking for NTT_CACHE, we should also look for any
-// K3_CACHE variables of legacy systems.
+// When, for example, asking for NTT_CACHE, we should also look for the
+// variable of the legacy prefix legacy systems set.
 func TestPrefixReplaceNTT(t *testing.T) {
 	clearEnv()
 	setContent("ntt.env", `K3_FNORD="var2"`)
@@ -63,8 +63,8 @@ func TestPrefixReplaceNTT(t *testing.T) {
 	assert.Equal(t, "var2", env.Getenv("K3_FNORD"))
 }
 
-// Verify that K3 prefix is _not_ replaced with NTT prefix.
-func TestPrefixKeepK3(t *testing.T) {
+// Verify that the legacy prefix is _not_ replaced with NTT prefix.
+func TestPrefixKeepLegacy(t *testing.T) {
 	clearEnv()
 	setContent("ntt.env", `NTT_FNORD="var1"`)
 	env.LoadFiles("ntt.env")
@@ -82,25 +82,25 @@ func TestPrefixHasBoth(t *testing.T) {
 	assert.Equal(t, "var2", env.Getenv("K3_FNORD"))
 }
 
-// Verify that ntt.env is loaded before k3.env
-func TestEnvK3BeforeNTT(t *testing.T) {
+// Verify that ntt.env is loaded before the legacy environment file
+func TestEnvLegacyFileBeforeNTT(t *testing.T) {
 	clearEnv()
 	setContent("ntt.env", `NTT_FNORD="fromNTT"`)
-	setContent("k3.env", `NTT_FNORD="fromK3"
-	K3_FNORD="fromK3"`)
+	setContent("k3.env", `NTT_FNORD="fromLegacy"
+	K3_FNORD="fromLegacy"`)
 	env.LoadFiles()
 	assert.Equal(t, "fromNTT", env.Getenv("NTT_FNORD"))
-	assert.Equal(t, "fromK3", env.Getenv("K3_FNORD"))
+	assert.Equal(t, "fromLegacy", env.Getenv("K3_FNORD"))
 }
 
-// Verify that ntt.env is loaded before k3.env, like before, but with difference prefixes
-func TestEnvK3BeforeNTTWithSubstitution(t *testing.T) {
+// Verify that ntt.env is loaded before the legacy environment file, like before, but with difference prefixes
+func TestEnvLegacyFileBeforeNTTWithSubstitution(t *testing.T) {
 	clearEnv()
 	setContent("ntt.env", `K3_FNORD="fromNTT"`)
-	setContent("k3.env", `NTT_FNORD="fromK3"
-	K3_FNORD="fromK3"`)
+	setContent("k3.env", `NTT_FNORD="fromLegacy"
+	K3_FNORD="fromLegacy"`)
 	env.LoadFiles()
-	assert.Equal(t, "fromK3", env.Getenv("NTT_FNORD"))
+	assert.Equal(t, "fromLegacy", env.Getenv("NTT_FNORD"))
 	assert.Equal(t, "fromNTT", env.Getenv("K3_FNORD"))
 }
 

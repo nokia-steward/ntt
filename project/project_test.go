@@ -84,15 +84,15 @@ func TestAutomaticEnv(t *testing.T) {
 	})
 
 	t.Run("K3_NAME", func(t *testing.T) {
-		os.Setenv("K3_NAME", "k3")
+		os.Setenv("K3_NAME", "legacy")
 		defer os.Unsetenv("K3_NAME")
 		c := &Config{}
 		assert.Nil(t, AutomaticEnv()(c))
-		assert.Equal(t, "k3", c.Name)
+		assert.Equal(t, "legacy", c.Name)
 	})
 
 	t.Run("NTT_NAME/K3_NAME", func(t *testing.T) {
-		os.Setenv("K3_NAME", "k3")
+		os.Setenv("K3_NAME", "legacy")
 		os.Setenv("NTT_NAME", "ntt")
 		defer os.Unsetenv("K3_NAME")
 		defer os.Unsetenv("NTT_NAME")
@@ -332,7 +332,7 @@ func TestParametersMergeRules(t *testing.T) {
 }
 
 func TestParametersDescription(t *testing.T) {
-  // A "description" field (as used by k3 in .paramters execute entries)
+  // A "description" field (as used in .parameters execute entries)
   // must be accepted by the strict YAML parser and preserved
   p := NewParameters(t, `
   execute:

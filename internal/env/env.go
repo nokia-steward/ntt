@@ -110,14 +110,14 @@ func (env Env) Expand() error {
 }
 
 // EnvironMap returns the current process's environment as a string-map.
-// It also replaces K3-prefixes with NTT-prefixes.
+// It also replaces legacy prefixes with NTT-prefixes.
 func EnvironMap() Env {
 	env := make(Env)
 	for _, kv := range os.Environ() {
 		kv := strings.SplitN(kv, "=", 2)
 		k, v := kv[0], kv[1]
 
-		// Nokia uses environment variables with K3-Prefix all over the place.
+		// Environments still use variables of the legacy prefix.
 		if strings.HasPrefix(k, "K3_") {
 			k = strings.Replace(k, "K3_", "NTT_", 1)
 			v = Getenv(k)
@@ -128,14 +128,14 @@ func EnvironMap() Env {
 }
 
 // Environ returns the current process's environment as a string-slice of the form key=value.
-// It also replaces K3-prefixes with NTT-prefixes.
+// It also replaces legacy prefixes with NTT-prefixes.
 func Environ() []string {
 	return EnvironMap().Slice()
 }
 
 var Files = []string{"ntt.env", "k3.env"}
 
-// LoadFiles environment files ntt.env and k3.env
+// LoadFiles environment files (Files)
 func LoadFiles(files ...string) {
 	for k, v := range ParseFiles(files...) {
 		if _, ok := os.LookupEnv(k); !ok {
@@ -144,7 +144,7 @@ func LoadFiles(files ...string) {
 	}
 }
 
-// ParseFiles environment files ntt.env and k3.env
+// ParseFiles environment files (Files)
 func ParseFiles(files ...string) Env {
 	if len(files) == 0 {
 		files = Files
@@ -175,7 +175,7 @@ func ParseFiles(files ...string) Env {
 }
 
 // Lookup key in process environment. Is key begins with "NTT_" also lookup key
-// with "K3_" prefix.
+// with the legacy prefix.
 func Getenv(key string) string {
 	if env, ok := LookupEnv(key); ok {
 		return env

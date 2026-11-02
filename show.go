@@ -134,7 +134,7 @@ func printJSON(report *ConfigReport, keys []string) error {
 func printShellScript(report *ConfigReport, keys []string) error {
 	const shellTemplate = `# This is a generated output of ntt show. Args: {{ .Args }}
 
-# k3-hook calls the K3 test hook (if defined) with action passed by $1.
+# k3-hook calls the test hook (if defined) with action passed by $1.
 function k3-hook()
 {
     if [ -n "$K3_HOOKS_FILE" ]; then
@@ -184,7 +184,7 @@ false
 		return fmt.Errorf("command line option --sh does not accept additional command line arguments")
 	}
 
-	t := template.Must(template.New("k3-sh-setup").Parse(shellTemplate))
+	t := template.Must(template.New("sh-setup").Parse(shellTemplate))
 	if err := t.Execute(os.Stdout, report); err != nil {
 		fmt.Printf(`
 # ERROR: Internal template did not compile: %s

@@ -122,8 +122,9 @@ func HasCExtension(file string) bool {
 	return withExtension(".c", ".cc", ".cxx", ".cpp")(file)
 }
 
-// FindK3EnvInCurrPath returns the path of the directory containing k3.env
-func FindK3EnvInCurrPath(dir string) string {
+// FindEnvFileInCurrPath returns the path of the directory containing an
+// environment file
+func FindEnvFileInCurrPath(dir string) string {
 	path := dir
 	for !IsFsRoot(path) {
 		for _, file := range []string{"k3.env", "ntt.env"} {
