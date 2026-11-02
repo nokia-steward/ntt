@@ -133,7 +133,7 @@ func TestMarkdownHoverForPortDefFromUsage(t *testing.T) {
 			"```\n" +
 			"_possible map / connect statements_\n" +
 			" - - -\n" +
-			"[/TestMarkdownHoverForPortDefFromUsage.ttcn3:9](file:///TestMarkdownHoverForPortDefFromUsage.ttcn3#L9)  \n"
+			"[" + filepath.FromSlash("/TestMarkdownHoverForPortDefFromUsage.ttcn3") + ":9](file:///TestMarkdownHoverForPortDefFromUsage.ttcn3#L9)  \n"
 
 	assert.Equal(t, expected, actual.Contents.Value)
 }
