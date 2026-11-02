@@ -2,15 +2,16 @@
 
 Source: ETSI TR 104 081 V5.1.1 (2025) "Methods for Testing and
 Specification (MTS); Guide for the Migration to TTCN-3 V5;
-Release #" — `~/Downloads/MTS-104081v5.1.1v001.docx`.
+Release #".
 
 This is a working memo, not a normative reference. It captures
 the V4 → V5.1.1 changes that affect what we should accept,
 reject, or warn about in `ntt` going forward, and what to expect
 when the ETSI conformance suite is re-generated against V5.
 
-Contact at ETSI: **Matthias Simon** (Nokia delegate). Reach out
-via Teams for clarifications on individual items.
+The standard is drafted in the working space of the ETSI MTS task
+forces, <https://labs.etsi.org/rep/mts/ttcn3/standard>; change requests
+and the other TTCN-3 resources are linked from <https://ttcn3.dev>.
 
 ## Documents
 

@@ -198,7 +198,7 @@ Run `ntt <subcommand> --help` for the full flag list.
 # Conformance
 
 `ntt conformance` runs the
-[ETSI TTCN-3 conformance tests](https://forge.etsi.org/rep/ttcn3/ttcn3-conformance-tests)
+[ETSI TTCN-3 conformance tests](https://forge.etsi.org/rep/mts/ttcn3-conformance-tests)
 through the interpreter and compares each file's actual verdict
 (`pass` / `fail` / `error` / `parse-error` / ...) against the
 `@verdict` annotation in the test header. The pass-rate is the
@@ -332,6 +332,18 @@ build automation environment, running millions of TTCN-3 tests per day.
 But **ntt** is still in development and not all features have the same good
 test coverage. We recommend verifying ntt functionality before using it in your
 automation environment.
+
+## TTCN-3 resources
+
+- [ttcn3.dev](https://ttcn3.dev) links what there is for working with
+  TTCN-3: the official TTCN-3 home with the standard documents, the
+  mailing list, the change-request tracker for the standard, and more.
+- [MTS / TTCN-3 / Standard](https://labs.etsi.org/rep/mts/ttcn3/standard)
+  is the working space of the ETSI MTS task forces that maintain the
+  TTCN-3 standard.
+- [ETSI TTCN-3 conformance tests](https://forge.etsi.org/rep/mts/ttcn3-conformance-tests),
+  of which [testdata/ttcn3-conformance-tests](testdata/ttcn3-conformance-tests)
+  is a copy.
 
 ## License
 
