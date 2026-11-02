@@ -21,11 +21,19 @@ func TestScopes(t *testing.T) {
 		{`type record of record { int x } R`, []string{}},
 		{`signature S<type T>(int x) return A exception(B)`, []string{"T", "x"}},
 		{`type union U<type T>{ int x }`, []string{"T", "x"}},
+		{`type record R { int, M.T, P<int> optional, record {} }`, []string{"int", "T", "P"}},
+		{`type union U { int, @default boolean }`, []string{"int", "boolean"}},
+		{`function f(@lazy @deterministic int x, record of int y...) {}`, []string{"x", "y"}},
 		{`type enumerated E<type T>{ E1, E2 }`, []string{"T", "E1", "E2"}},
 		{`type function F<type T>(int p) runs on C return X`, []string{"T", "p"}},
 		{`type port P<type T}> message { inout T; map param(int p)}`, []string{"T"}},
 		{`type component C<type T> extends D {var T x}`, []string{"T", "x"}},
 		{`for (var int i;true;i:=i+1) {var int x}`, []string{"i"}},
+		{`if (var int i := 1; i > 0) {var int x}`, []string{"i"}},
+		{`if (i := 1; i > 0) {var int x}`, []string{}},
+		{`while (var int i := 1; i < 10) {var int x}`, []string{"i"}},
+		{`select (var int i := 1; i) { case (1) {var int x} }`, []string{"i"}},
+		{`select union (var U u := {}; u) { case (a) {var int x} }`, []string{"u"}},
 		{`
 			module M {
 				import from foo all;
@@ -36,6 +44,7 @@ func TestScopes(t *testing.T) {
 				control {};
 				type enumerated E<type T> {E1}
 			}`, []string{"foo", "x", "control", "E", "E1"}},
+		{`module M { import from foo -> bar all; }`, []string{"bar"}},
 	}
 
 	for _, tt := range tests {

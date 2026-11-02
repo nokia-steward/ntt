@@ -82,6 +82,8 @@ func TestIfStmt(t *testing.T) {
 		{"if (1 > 2) { 10 }", nil},
 		{"if (1 > 2) { 10 } else { 20 }", 20},
 		{"if (1 < 2) { 10 } else { 20 }", 10},
+		{"if (var integer i := 1; i < 2) { i }", 1},
+		{"var integer i; if (i := 3; i > 2) { i } else { 20 }", 3},
 	}
 
 	for _, tt := range tests {
@@ -137,6 +139,10 @@ func TestErrors(t *testing.T) {
 		{"x", "identifier not found: x"},
 		{"break", "break or continue statements not allowed outside loops"},
 		{"continue", "break or continue statements not allowed outside loops"},
+		{"???", "not implemented"},
+		{`???("reason")`, "not implemented"},
+		{"var integer i := ???", "not implemented"},
+		{"if (var integer i := ???; true) {}", "not implemented"},
 	}
 
 	for _, tt := range tests {
@@ -177,6 +183,11 @@ func TestFunc(t *testing.T) {
 		{"function f(integer x) { return x }; f(6)", 6},
 		{"function add(integer x, integer y) { return x+y }; add(1,2)", 3},
 		{"function add(integer x, integer y) { return x+y }; add(1,add(2,4))", 7},
+		{"function f(integer x...) { return lengthof(x) }; f()", 0},
+		{"function f(integer x...) { return lengthof(x) }; f(1, 2, 3)", 3},
+		{"function f(integer x, integer y...) { return x+y[1] }; f(1, 2, 3)", 4},
+		{"function f(integer x...) { return lengthof(x) }; f({1, 2}...)", 2},
+		{"function f(integer x, integer y...) { return x+y[0] }; f(1, {5}...)", 6},
 	}
 
 	for _, tt := range tests {
@@ -214,6 +225,8 @@ func TestLoop(t *testing.T) {
 		{"var integer x := 7; for (var integer i := 0; i< 3; i:= i + 1) {continue; x:=i}; x", 7},
 		{"var integer x := 9; do { continue } while(false); x", 9},
 		{"var integer i; for ( i:= 0; true; i := i + 1) {break}; i", 0},
+		{"var integer x; while (var integer i := 0; i < 3) {i := i + 1; x := i}; x", 3},
+		{"var integer i; while (i := 5; i < 7) {i := i + 1}; i", 7},
 	}
 	for _, tt := range tests {
 		val := testEval(t, tt.input)

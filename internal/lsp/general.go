@@ -12,12 +12,8 @@ import (
 	errors "golang.org/x/xerrors"
 )
 
-type PlainTextHover struct {
-	mapOrConnectRefs string
-}
-type MarkdownHover struct {
-	mapOrConnectLinks string
-}
+type PlainTextHover struct{}
+type MarkdownHover struct{}
 
 // VersionKey is the context key of the ntt version the server reports
 // to its client.

@@ -182,7 +182,7 @@ ones for the ntt-Titan toolchain are:
 | Command            | What it does                                                              |
 | ------------------ | ------------------------------------------------------------------------- |
 | `ntt check`        | type-check a TTCN-3 module / suite (no execution)                         |
-| `ntt compile`      | lower TTCN-3 to the SSA-ish IR, emit Go or C++                            |
+| `ntt compile`      | the sources as JSON for other tools; `--target` lowers a file to Go or C++ |
 | `ntt run`          | compile-and-run via the Go backend                                        |
 | `ntt exec`         | interpret-and-run via the tree-walker (no codegen step)                   |
 | `ntt explorer`     | emit the test-explorer JSON consumed by the VS Code extension             |

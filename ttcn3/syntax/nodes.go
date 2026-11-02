@@ -268,7 +268,7 @@ type (
 		X  Expr
 	}
 
-	// A postfix expresseion (i++, i--)
+	// A postfix expresseion (i++, i--) or an actual variadic parameter (x...)
 	PostExpr struct {
 		X  Expr
 		Op Token
@@ -315,6 +315,18 @@ type (
 		X    Expr       // Preceding expression
 		Len  Token      // Position of "length" keyword
 		Size *ParenExpr // Size expression
+	}
+
+	// A RepetitionExpr represents a repetition matching mechanism, e.g.
+	// "x #(1, 3)" or "x #2".
+	RepetitionExpr struct {
+		X      Expr  // Repeated template
+		Hash   Token // Position of "#"
+		LParen Token // Position of "(" or nil
+		Min    Expr  // Minimum count or nil
+		Comma  Token // Position of "," or nil
+		Max    Expr  // Maximum count or nil
+		RParen Token // Position of ")" or nil
 	}
 
 	// A RedirectExpr represents various redirect expressions
@@ -437,6 +449,7 @@ func (x *SelectorExpr) exprNode()      {}
 func (x *IndexExpr) exprNode()         {}
 func (x *CallExpr) exprNode()          {}
 func (x *LengthExpr) exprNode()        {}
+func (x *RepetitionExpr) exprNode()    {}
 func (x *RedirectExpr) exprNode()      {}
 func (x *ValueExpr) exprNode()         {}
 func (x *ParamExpr) exprNode()         {}
@@ -467,7 +480,7 @@ type (
 	// An ExprStmt represents a expression used as statement, like an
 	// assignment or function call.
 	ExprStmt struct {
-		NoDefault Token // "@nodefault" before a receiving operation, or nil
+		NoDefault Token // Position of "@nodefault" or nil
 		Expr      Expr
 	}
 
@@ -529,11 +542,13 @@ type (
 
 	// A WhilStmt represents a "while" statement.
 	WhileStmt struct {
-		Tok    Token      // Position of "while"
-		LParen Token      // Position of "("
-		Cond   Expr       // Conditional expression
-		RParen Token      // Position of ")"
-		Body   *BlockStmt // Loop-body
+		Tok      Token      // Position of "while"
+		LParen   Token      // Position of "("
+		Init     Stmt       // Init statement or nil
+		InitSemi Token      // Position of ";" or nil
+		Cond     Expr       // Conditional expression
+		RParen   Token      // Position of ")"
+		Body     *BlockStmt // Loop-body
 	}
 
 	// A DoWhileStmt represents a do-while statement.
@@ -548,24 +563,30 @@ type (
 
 	// A IfStmt represents a conditional statement.
 	IfStmt struct {
-		Tok     Token // Position of "if"
-		LParen  Token
-		Cond    Expr // Conditional expression
-		RParen  Token
-		Then    *BlockStmt // True branch
-		ElseTok Token      // Position of "else" or nil
-		Else    Stmt       // Else branch
+		Tok      Token // Position of "if"
+		LParen   Token
+		Init     Stmt  // Init statement or nil
+		InitSemi Token // Position of ";" or nil
+		Cond     Expr  // Conditional expression
+		RParen   Token
+		Then     *BlockStmt // True branch
+		ElseTok  Token      // Position of "else" or nil
+		Else     Stmt       // Else branch
 	}
 
 	// A SelectStmt represents a select statements.
 	SelectStmt struct {
-		Tok    Token         // Position of "select"
-		Union  Token         // Position of "union" or nil
-		Class  Token         // Position of "class" or nil
-		Tag    *ParenExpr    // Tag expression
-		LBrace Token         // Position of "{"
-		Body   []*CaseClause // List of case clauses
-		RBrace Token         // Position of "}"
+		Tok      Token         // Position of "select"
+		Union    Token         // Position of "union" or nil
+		Class    Token         // Position of "class" or nil
+		LParen   Token         // Position of "("
+		Init     Stmt          // Init statement or nil
+		InitSemi Token         // Position of ";" or nil
+		Tag      Expr          // Tag expression
+		RParen   Token         // Position of ")"
+		LBrace   Token         // Position of "{"
+		Body     []*CaseClause // List of case clauses
+		RBrace   Token         // Position of "}"
 	}
 
 	// A CaseClause represents a case clause.
@@ -614,7 +635,7 @@ type (
 	Field struct {
 		DefaultTok       Token        // Position of "@default" or nil
 		Type             TypeSpec     // Type
-		Name             *Ident       // Name
+		Name             *Ident       // Name or nil for embedded fields
 		ArrayDef         []*ParenExpr // Array definitions
 		TypePars         *FormalPars
 		ValueConstraint  *ParenExpr  // Value constraint or nil
@@ -679,12 +700,37 @@ func (x *MapSpec) typeSpecNode()       {}
 func (x *EnumSpec) typeSpecNode()      {}
 func (x *BehaviourSpec) typeSpecNode() {}
 
-// A nested type definition is also the type of a declaration
-// (TypeOrNestedTypeDef): `var record of integer v`.
+// Nested type definitions may be used where a type reference is expected.
 func (x *StructSpec) exprNode() {}
 func (x *ListSpec) exprNode()   {}
 func (x *MapSpec) exprNode()    {}
 func (x *EnumSpec) exprNode()   {}
+
+// EmbeddedName returns the implicit name of an embedded field, which is the
+// unqualified name of its type reference. EmbeddedName returns nil for
+// regular fields.
+func (x *Field) EmbeddedName() *Ident {
+	if x.Name != nil {
+		return nil
+	}
+	ref, ok := x.Type.(*RefSpec)
+	if !ok {
+		return nil
+	}
+	e := ref.X
+	for {
+		switch n := e.(type) {
+		case *SelectorExpr:
+			e = n.Sel
+		case *ParametrizedIdent:
+			e = n.Ident
+		case *Ident:
+			return n
+		default:
+			return nil
+		}
+	}
+}
 
 type (
 	// A ValueDecl represents a value declaration.
@@ -692,7 +738,8 @@ type (
 		KindTok             Token // VAR, CONST, TIMER, PORT, TEMPLATE, MODULEPAR
 		TemplateRestriction *RestrictionSpec
 		Modif               Token // "@lazy", "@fuzzy" or nil
-		Type                Expr
+		Deterministic       Token // Position of "@deterministic" or nil
+		Type                Expr  // Type reference, nested type definition or nil
 		Decls               []*Declarator
 		With                *WithSpec
 	}
@@ -707,16 +754,17 @@ type (
 
 	TemplateDecl struct {
 		*RestrictionSpec
-		Modif       Token // "@lazy", "@fuzzy" or nil
-		Type        Expr
-		Name        *Ident
-		TypePars    *FormalPars
-		Params      *FormalPars
-		ModifiesTok Token
-		Base        Expr
-		AssignTok   Token
-		Value       Expr
-		With        *WithSpec
+		Modif         Token // "@lazy", "@fuzzy" or nil
+		Deterministic Token // Position of "@deterministic" or nil
+		Type          Expr
+		Name          *Ident
+		TypePars      *FormalPars
+		Params        *FormalPars
+		ModifiesTok   Token
+		Base          Expr
+		AssignTok     Token
+		Value         Expr
+		With          *WithSpec
 	}
 
 	// A ModuleParameterGroup represents a deprecated module parameter list
@@ -819,7 +867,7 @@ type (
 		Defs        []*ModuleDef
 		RBrace      Token      // Position of }"
 		FinallyTok  Token      // Position of "finally" or nil
-		Finally     *BlockStmt // Destructor body or nil
+		Finally     *BlockStmt // Finally block or nil
 		With        *WithSpec
 	}
 
@@ -958,6 +1006,9 @@ type (
 		FromTok   Token
 		Module    *Ident
 		Language  *LanguageSpec
+		Recursive Token // Position of "recursive" or nil
+		RedirTok  Token
+		Alias     *Ident
 		LBrace    Token
 		List      []*DefKindExpr
 		RBrace    Token
@@ -976,7 +1027,7 @@ type (
 	FriendDecl struct {
 		FriendTok Token
 		ModuleTok Token
-		Module    *Ident
+		Modules   []*Ident
 		With      *WithSpec
 	}
 )
@@ -1017,7 +1068,8 @@ type (
 		Tok         Token
 		Restriction *RestrictionSpec
 		Modif       Token
-		Type        Expr
+		Type        Expr         // Type reference or nested type definition
+		ArrayDef    []*ParenExpr // Array definitions of nested type definitions
 	}
 
 	FormalPars struct {
@@ -1030,10 +1082,11 @@ type (
 		Direction           Token
 		TemplateRestriction *RestrictionSpec
 		Modif               Token
-		Modif2              Token
-		Type                Expr
+		Deterministic       Token // Position of "@deterministic" or nil
+		Type                Expr  // Type reference or nested type definition
 		Name                *Ident
 		ArrayDef            []*ParenExpr
+		Variadic            Token // Position of "..." or nil
 		AssignTok           Token
 		Value               Expr
 	}

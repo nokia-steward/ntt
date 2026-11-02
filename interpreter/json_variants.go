@@ -196,12 +196,12 @@ func jsonVariantsOf(td *runtime.TypeDesc, fields []*syntax.Field) (own jsonVaria
 	names := map[string]string{}
 	twice := map[string]bool{}
 	for _, f := range fields {
-		if f != nil && f.Name != nil {
-			low := strings.ToLower(f.Name.String())
+		if f != nil && fieldName(f) != "" {
+			low := strings.ToLower(fieldName(f))
 			if _, seen := names[low]; seen {
 				twice[low] = true
 			}
-			names[low] = f.Name.String()
+			names[low] = fieldName(f)
 		}
 	}
 	self := strings.ToLower(td.Name)
@@ -257,9 +257,21 @@ func jsonVariantsOf(td *runtime.TypeDesc, fields []*syntax.Field) (own jsonVaria
 	return own, byField, true
 }
 
+// fieldName is the name of field f: its own, or for an embedded field
+// the name of its type (ETSI 6.2.1.4).
+func fieldName(f *syntax.Field) string {
+	if f.Name != nil {
+		return f.Name.String()
+	}
+	if id := f.EmbeddedName(); id != nil {
+		return id.String()
+	}
+	return ""
+}
+
 // jsonName is the name of field f's member in its object or union.
 func (s jsonShape) jsonName(f *syntax.Field) string {
-	name := f.Name.String()
+	name := fieldName(f)
 	if fv := s.fv[name]; fv != nil {
 		if fv.hasNameAs {
 			return fv.nameAs
@@ -278,7 +290,7 @@ func (s jsonShape) jsonName(f *syntax.Field) string {
 // member.
 func (s jsonShape) fieldOfMember(member string) (*syntax.Field, jsonType) {
 	for _, f := range s.fields {
-		if f != nil && f.Name != nil && s.jsonName(f) == member {
+		if f != nil && fieldName(f) != "" && s.jsonName(f) == member {
 			return f, s.fieldType(f)
 		}
 	}
@@ -410,7 +422,7 @@ func jsonDefault(text string, t jsonType, env runtime.Scope) (runtime.Object, er
 			if l, ok := v.(*runtime.List); ok && len(l.FieldNames) == 0 && len(l.Elements) <= len(shape.fields) {
 				rec := runtime.NewRecord()
 				for i, f := range shape.fields {
-					name := f.Name.String()
+					name := fieldName(f)
 					rec.Order = append(rec.Order, name)
 					if i < len(l.Elements) {
 						rec.Fields[name] = l.Elements[i]

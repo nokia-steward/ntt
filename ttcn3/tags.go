@@ -23,7 +23,9 @@ func (tree *Tree) Tags() []syntax.Node {
 			return false
 
 		case *syntax.Field:
-			t = append(t, n)
+			if syntax.Name(n) != "" {
+				t = append(t, n)
+			}
 			return true
 
 		case *syntax.PortTypeDecl:

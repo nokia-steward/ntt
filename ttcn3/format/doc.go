@@ -1,219 +1,201 @@
+// Package format implements pretty printers for TTCN-3 source code.
+//
+// [CanonicalPrinter] adjusts whitespace and indentation only. It does not
+// rewrite tokens, reorder declarations, or insert line breaks. Breaks that
+// are already present are kept and indented. [Fprint] returns a syntax error,
+// and writes nothing, when src does not parse.
+//
+// # Whitespace
+//
+// At most one space is kept between two tokens on the same line. Tabs and
+// other horizontal whitespace in that gap become that single space. Tokens
+// that were already adjacent stay adjacent, except for the comma and
+// assignment rules below. Leading space before the first token and trailing
+// space after the last token are removed.
+//
+// A line break between tokens is kept. More than one blank line collapses to
+// one. \r\n, \v, and \f become \n. A lone \r is not a line break; it becomes a
+// space. When the input contains any token, the result ends with a single
+// newline. Empty input stays empty.
+//
+// A comma is always followed by one space (1,2 becomes 1, 2). That space is
+// dropped when the next token is on the next line. := is always surrounded by
+// single spaces (x:=1 becomes x := 1). No other operator gains spaces.
+//
+// # Indentation
+//
+// Each indent level is a tab. [CanonicalPrinter.TabWidth] defaults to 8.
+// [CanonicalPrinter.UseSpaces] uses that many spaces per level instead.
+// [CanonicalPrinter.Indent] is the base level added after every line break.
+// It does not indent the first line, because leading space is removed.
+//
+// After {, [, or (, the level increases by one. Before }, ], or ), it
+// decreases by one. The closing bracket stays on the line where it was
+// written; the new level applies to following lines. Nested brackets stack:
+//
+//	{
+//		[
+//			(
+//				1, 2
+//			)
+//		] p.receive
+//	}
+//
+// # Broken lines
+//
+// A line break inside an object indents the continuation by one level, once
+// for that object. Further breaks in the same object stay at that level.
+// Nested objects each add their own level. The objects are expressions,
+// parameter lists, individual parameters, declarations, declarators, and
+// return statements.
+//
+// {, [, and ( already supply that one level for the object they delimit, so a
+// parenthesized list is not indented again:
+//
+//	f(
+//		a,
+//		b)
+//
+// A break between formal parameters aligns the next parameter with the first
+// one, at the output column of the first token after the opening ( or <. The
+// line starts with the indent of the line that holds the delimiter, followed
+// by spaces up to that column. If the first parameter is on a line of its
+// own, later parameters are indented as above instead:
+//
+//	function f(int a,
+//	           int b) {}
+//
+//	signature S(in integer p_in,
+//	            inout integer p_inout,
+//	            out integer p_out);
+//
+//	function f<type T,
+//	           type U>() {}
+//
+// A broken parameter inside such a list is its own object and adds one more
+// level on top of the parenthesis. A broken expression inside an argument
+// list does the same:
+//
+//	function f(in
+//			int
+//			x) {}
+//
+//	f(a +
+//			b,
+//		c)
+//
+// A chain of one operator is a nest of binary expressions, and the
+// continuations line up:
+//
+//	var int x := a +
+//		b +
+//		c
+//
+//	var int x := a.
+//		b.
+//		c
+//
+// A broken higher-precedence subexpression is indented one level further:
+//
+//	var int x := a +
+//		b *
+//			c
+//
+// A break before the value of a var, const, or template declaration, or
+// before the result of a return, indents that continuation:
+//
+//	var int x :=
+//		1
+//
+//	template charstring t :=
+//		"a"
+//
+//	return
+//		1
+//
+// The later declarators of a declaration continue it, once:
+//
+//	var int x := 1,
+//		y := 2,
+//		z := 3
+//
+// A line break before runs on, system, mtc, or a return type clause of a
+// function, testcase, altstep, signature, behaviour type, class, or
+// constructor indents that clause one level. The indent ends with the clause,
+// so the next clause and the { stay at the level of the header. A clause on the
+// line of the header is not indented. A return statement is not a clause:
+//
+//	testcase TC()
+//		runs on C
+//		system S
+//	{
+//		log(1)
+//	}
+//
+//	function f()
+//		return integer
+//	{
+//		return
+//			1
+//	}
+//
+// A newline before a { is never a continuation. The brace stays at the
+// current level, and the brace indents its body. That holds for the body of a
+// function or control part, the { of a nested record, set, union, or
+// enumerated type, a with attribute list, and a template or variable value:
+//
+//	control
+//	{}
+//
+//	type set
+//	{
+//		int x
+//	} S
+//
+//	const int x := 1
+//	with { extension "a" }
+//
+//	template MessageType t :=
+//	{
+//		field1 := 1
+//	}
+//
+//	var R v :=
+//	{
+//		a := 1
+//	}
+//
+// A newline between statements does not add a level beyond the brackets that
+// enclose them.
+//
+// # Comments
+//
+// Each line of a comment is indented on its own. The first line is placed at
+// the current level, or one space after the previous token when it stays on
+// that token's line. In a multi-line comment, the indentation of the line the
+// comment starts on and of each further non-empty line is measured in
+// columns, a tab advancing to the next multiple of TabWidth. The least of
+// these is aligned to the level of the line the comment starts on, and the
+// other lines keep their relative indent as spaces. A line that starts
+// inside a multi-line literal or comment counts as column 0. Empty lines
+// inside the comment stay empty. Formatting the result again does not change
+// it:
+//
+//	{
+//		x := 25 /* a
+//		           b */
+//	}
+//
+// Comments on consecutive lines are aligned in a column, as are the
+// assignments on those lines:
+//
+//	p := {
+//		x := 1,   // a
+//		x2 := 123 /* b */
+//	}
+//
+// # Literals
+//
+// Newlines and tabs inside a literal are preserved. Whitespace anywhere else
+// is normalized by the rules above.
 package format
-
-import (
-	"io"
-	"strings"
-)
-
-// This file implements a small Wadler/Lindig-style pretty-printing
-// combinator library. It exists primarily for the wrapping printer
-// that reflows over-long parameter lists and composite literals. The
-// combinators are intentionally minimal: Text, Line, Nest, Group,
-// Concat and HardLine, with the SoftLine / HardLine / Group / Nest
-// vocabulary that pretty-printers in this lineage typically expose.
-
-// Doc is the abstract document type that combinators build.
-type Doc interface {
-	docNode()
-}
-
-type (
-	textDoc     struct{ s string }
-	lineDoc     struct{ alt string } // alt is what appears when the group fits
-	hardLineDoc struct{}
-	nestDoc     struct {
-		indent int
-		d      Doc
-	}
-	groupDoc  struct{ d Doc }
-	concatDoc struct{ ds []Doc }
-)
-
-func (textDoc) docNode()     {}
-func (lineDoc) docNode()     {}
-func (hardLineDoc) docNode() {}
-func (nestDoc) docNode()     {}
-func (groupDoc) docNode()    {}
-func (concatDoc) docNode()   {}
-
-// Text is a literal piece of text with no wrapping behaviour.
-func Text(s string) Doc { return textDoc{s} }
-
-// SoftLine prints a single space when the enclosing group fits on a line,
-// or a newline otherwise.
-func SoftLine() Doc { return lineDoc{alt: " "} }
-
-// SoftLineEmpty prints nothing when the enclosing group fits, or a
-// newline otherwise. Useful between an opening bracket and its first
-// element.
-func SoftLineEmpty() Doc { return lineDoc{alt: ""} }
-
-// HardLine forces a line break and resets the current column to the
-// outer indentation.
-func HardLine() Doc { return hardLineDoc{} }
-
-// Nest increases the indentation for any line breaks produced inside d.
-func Nest(indent int, d Doc) Doc { return nestDoc{indent: indent, d: d} }
-
-// Group marks d as a candidate for fitting on a single line. The
-// renderer will collapse soft lines inside d when the entire group
-// fits within the configured PrintWidth.
-func Group(d Doc) Doc { return groupDoc{d} }
-
-// Concat joins several Docs into one.
-func Concat(ds ...Doc) Doc { return concatDoc{ds: ds} }
-
-// Join inserts sep between every consecutive pair of ds.
-func Join(sep Doc, ds []Doc) Doc {
-	if len(ds) == 0 {
-		return Concat()
-	}
-	out := make([]Doc, 0, 2*len(ds)-1)
-	for i, d := range ds {
-		if i > 0 {
-			out = append(out, sep)
-		}
-		out = append(out, d)
-	}
-	return Concat(out...)
-}
-
-// Render writes d to w using the given options. The algorithm is the
-// "linear-time, lazy" variant described by Lindig, which is what
-// clang-format and Prettier are also based on.
-func Render(w io.Writer, d Doc, opts Options) error {
-	if opts.PrintWidth <= 0 {
-		opts.PrintWidth = 100
-	}
-	if opts.TabWidth <= 0 {
-		opts.TabWidth = 4
-	}
-	r := renderer{
-		w:    w,
-		opts: opts,
-	}
-	r.render(d, 0, modeBreak)
-	return r.err
-}
-
-// renderMode tells the renderer how to interpret soft lines inside
-// the current group.
-type renderMode int
-
-const (
-	modeFlat  renderMode = iota // soft lines render as their alt string
-	modeBreak                   // soft lines render as a real line break
-)
-
-type renderer struct {
-	w    io.Writer
-	opts Options
-	col  int
-	err  error
-}
-
-func (r *renderer) render(d Doc, indent int, mode renderMode) {
-	if r.err != nil {
-		return
-	}
-	switch x := d.(type) {
-	case textDoc:
-		r.writeString(x.s)
-	case lineDoc:
-		if mode == modeFlat {
-			r.writeString(x.alt)
-		} else {
-			r.newline(indent)
-		}
-	case hardLineDoc:
-		r.newline(indent)
-	case nestDoc:
-		r.render(x.d, indent+x.indent, mode)
-	case groupDoc:
-		if r.fits(x.d, indent, r.opts.PrintWidth-r.col) {
-			r.render(x.d, indent, modeFlat)
-		} else {
-			r.render(x.d, indent, modeBreak)
-		}
-	case concatDoc:
-		for _, c := range x.ds {
-			r.render(c, indent, mode)
-		}
-	}
-}
-
-// fits returns true if d can be rendered in flat mode without exceeding
-// the remaining width on the current line.
-func (r *renderer) fits(d Doc, indent, remaining int) bool {
-	if remaining < 0 {
-		return false
-	}
-	return fitsRec(d, indent, remaining) >= 0
-}
-
-func fitsRec(d Doc, indent, remaining int) int {
-	if remaining < 0 {
-		return -1
-	}
-	switch x := d.(type) {
-	case textDoc:
-		return remaining - len(x.s)
-	case lineDoc:
-		return remaining - len(x.alt)
-	case hardLineDoc:
-		return -1
-	case nestDoc:
-		return fitsRec(x.d, indent+x.indent, remaining)
-	case groupDoc:
-		return fitsRec(x.d, indent, remaining)
-	case concatDoc:
-		for _, c := range x.ds {
-			remaining = fitsRec(c, indent, remaining)
-			if remaining < 0 {
-				return -1
-			}
-		}
-		return remaining
-	}
-	return remaining
-}
-
-func (r *renderer) writeString(s string) {
-	if r.err != nil || s == "" {
-		return
-	}
-	if _, err := io.WriteString(r.w, s); err != nil {
-		r.err = err
-		return
-	}
-	// Naive column tracking: treat tabs as TabWidth, count characters
-	// otherwise. Good enough for ASCII source.
-	if strings.IndexByte(s, '\n') >= 0 {
-		idx := strings.LastIndexByte(s, '\n')
-		r.col = len(s) - idx - 1
-	} else {
-		r.col += len(s)
-	}
-}
-
-func (r *renderer) newline(indent int) {
-	if r.err != nil {
-		return
-	}
-	indentStr := r.indentString(indent)
-	if _, err := io.WriteString(r.w, "\n"+indentStr); err != nil {
-		r.err = err
-		return
-	}
-	r.col = indent
-}
-
-func (r *renderer) indentString(indent int) string {
-	if r.opts.UseSpaces {
-		return strings.Repeat(" ", indent)
-	}
-	// Round indentation down to whole tabs and pad with spaces.
-	tabs := indent / r.opts.TabWidth
-	rem := indent % r.opts.TabWidth
-	return strings.Repeat("\t", tabs) + strings.Repeat(" ", rem)
-}

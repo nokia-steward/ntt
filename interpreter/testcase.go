@@ -948,15 +948,15 @@ func executeCallFor(stmt syntax.Stmt, tcName string) (*syntax.CallExpr, bool) {
 	case *syntax.DeclStmt:
 		own = append(own, s.Decl)
 	case *syntax.IfStmt:
-		own = append(own, s.Cond)
+		own = append(own, s.Init, s.Cond)
 	case *syntax.WhileStmt:
-		own = append(own, s.Cond)
+		own = append(own, s.Init, s.Cond)
 	case *syntax.DoWhileStmt:
 		own = append(own, s.Cond)
 	case *syntax.ForStmt:
 		own = append(own, s.Init, s.Cond, s.Post)
 	case *syntax.SelectStmt:
-		own = append(own, s.Tag)
+		own = append(own, s.Init, s.Tag)
 	case *syntax.ReturnStmt:
 		own = append(own, s.Result)
 	}

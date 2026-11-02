@@ -277,9 +277,12 @@ func checkOneCall(ce *syntax.CallExpr, id *syntax.Ident, params *syntax.FormalPa
 	var diags []Diagnostic
 	formals := params.List
 	actuals := ce.Args.List
+	// A variadic last formal takes all actuals from its position on, or
+	// none (ETSI 5.4.3).
+	variadic := len(formals) > 0 && formals[len(formals)-1] != nil && formals[len(formals)-1].Variadic != nil
 
 	// Arity: too many actuals.
-	if len(actuals) > len(formals) {
+	if len(actuals) > len(formals) && !variadic {
 		diags = append(diags, Diagnostic{
 			Code:     "too-many-actual-parameters",
 			Severity: SeverityError,
@@ -325,7 +328,7 @@ func checkOneCall(ce *syntax.CallExpr, id *syntax.Ident, params *syntax.FormalPa
 			if f.Direction != nil {
 				dir = f.Direction.String()
 			}
-			if f.Value == nil && dir != "out" {
+			if f.Value == nil && dir != "out" && f.Variadic == nil {
 				required = i + 1
 			}
 		}
@@ -363,10 +366,15 @@ func checkOneCall(ce *syntax.CallExpr, id *syntax.Ident, params *syntax.FormalPa
 			a = be.Y
 		}
 		if formal == nil {
-			if i >= len(formals) {
+			switch {
+			case i < len(formals):
+				formal = formals[i]
+			case variadic:
+				formal = formals[len(formals)-1]
+			}
+			if formal == nil {
 				break
 			}
-			formal = formals[i]
 		}
 		if formal == nil {
 			continue
@@ -377,7 +385,8 @@ func checkOneCall(ce *syntax.CallExpr, id *syntax.Ident, params *syntax.FormalPa
 		}
 		if isDashDefault(a) {
 			if formalDir != "out" && formalDir != "inout" {
-				if formal.Value == nil {
+				// A variadic formal takes `-` for no actuals.
+				if formal.Value == nil && formal.Variadic == nil {
 					diags = append(diags, Diagnostic{
 						Code:     "dash-without-default",
 						Severity: SeverityError,

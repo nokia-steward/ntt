@@ -70,8 +70,8 @@ func TestFindVisibleModules(t *testing.T) {
 		db := ttcn3.DB{}
 		db.Index("file1.ttcn3", "file2.ttcn3", "file3.ttcn3")
 
-		db.Modules["M2"]["file3.ttcn3"] = true // false positiv entry
-		db.Names["E"]["file3.ttcn3"] = true    // false positiv entry
+		db.Modules["M2"]["file3.ttcn3"] = true // false positive entry
+		db.Names["E"]["file3.ttcn3"] = true    // false positive entry
 
 		expected := []string{"M2:file1.ttcn3", "M1:file1.ttcn3", "M1:file2.ttcn3"}
 		actual := importedDefs(&db, "E", "M1")

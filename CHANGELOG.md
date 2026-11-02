@@ -198,6 +198,26 @@ single functional test doubles as a performance probe. See
 
 ### Changed
 
+- **The parser is master's, with what the engine added to it** — master's
+  error-resilient parser of 2026-11-01 (template repetition, `implies`,
+  `except`, variadic parameters, `@deterministic`, embedded fields, nested
+  types, init statements, import aliases, related encodings) now parses
+  for the engine too, keeping what the engine needs beside it: `objid`
+  values, `-> verdict`, the `raise` statement, exception, `catch` and
+  `finally` clauses of behaviours, constructor super-calls, external
+  classes, `select class`, ports and timers in classes. The engine binds a
+  variadic parameter to the record of the remaining actuals (its default
+  for none or `-`, the record itself in assignment notation), gives a
+  variable an `if`, `while` or `select` header declares its own scope,
+  takes an embedded field for a field named by its type (the fields of
+  the embedded type are not reached through the embedding one yet), and
+  rejects a variadic parameter not last, not the only one or not `in`, an
+  assignment-notation actual expanded with `...`, a field an embedded
+  field's type has, a type-less declaration of `?`, `*` or `omit`, and a
+  reference to a lazy or fuzzy entity in a restricted context (16.1.4 m).
+  ntt matches 4984 conformance tests, 96.91% (4957 before). `ntt compile`
+  writes the sources as JSON for other tools as master's does, and with
+  `--target go|cpp|ir` lowers a file through the IR as before.
 - **The ETSI conformance suite is upstream's of 2024-03-28** (`fdc17d2c`;
   it was `99ac02bc` of 2022-09-07): 5164 files, 216 more. ntt matches
   4916, 95.59% (4803 of 4948 before, 97.52%). It gives every test the two

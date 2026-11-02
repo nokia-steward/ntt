@@ -385,7 +385,10 @@ func lint(cmd *cobra.Command, args []string) error {
 						}
 						checkNaming(n, nameRules)
 						for _, f := range n.Fields {
-							checkNaming(f, fieldRules)
+							// Embedded fields are named after their type.
+							if f.Name != nil {
+								checkNaming(f, fieldRules)
+							}
 						}
 					case *syntax.EnumTypeDecl:
 						checkBraces(n.LBrace, n.RBrace)
@@ -415,7 +418,7 @@ func lint(cmd *cobra.Command, args []string) error {
 					case *syntax.WithSpec:
 						checkBraces(n.LBrace, n.RBrace)
 					case *syntax.ParenExpr:
-						if n.LParen.Kind() == syntax.LBRACE {
+						if n.LParen != nil && n.LParen.Kind() == syntax.LBRACE {
 							checkBraces(n.LParen, n.RParen)
 						}
 

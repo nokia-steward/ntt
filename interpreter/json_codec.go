@@ -152,7 +152,7 @@ func jsonTypeOf(t jsonType, env runtime.Scope) (jsonShape, bool) {
 				// field's name).
 				members := map[string]bool{}
 				for _, f := range shape.fields {
-					if f == nil || f.Name == nil {
+					if f == nil || fieldName(f) == "" {
 						continue
 					}
 					if m := shape.jsonName(f); members[m] {
@@ -184,7 +184,7 @@ func jsonTypeOf(t jsonType, env runtime.Scope) (jsonShape, bool) {
 // field returns the type of the struct field named name.
 func (s jsonShape) field(name string) (*syntax.Field, jsonType) {
 	for _, f := range s.fields {
-		if f != nil && f.Name != nil && f.Name.String() == name {
+		if f != nil && fieldName(f) == name {
 			return f, s.fieldType(f)
 		}
 	}
@@ -192,7 +192,7 @@ func (s jsonShape) field(name string) (*syntax.Field, jsonType) {
 }
 
 func (s jsonShape) fieldType(f *syntax.Field) jsonType {
-	fv := s.fv[f.Name.String()]
+	fv := s.fv[fieldName(f)]
 	if len(f.ArrayDef) > 0 {
 		// `integer a[3]` in a record: a list of the field's type.
 		return jsonType{spec: &syntax.ListSpec{ElemType: f.Type}, scope: s.scope, fv: fv}
@@ -292,7 +292,7 @@ func writeJSON(b *bytes.Buffer, v runtime.Object, t jsonType, env runtime.Scope)
 			// A record value given positionally.
 			m := make(map[string]runtime.Object, len(x.Elements))
 			for i, e := range x.Elements {
-				m[shape.fields[i].Name.String()] = e
+				m[fieldName(shape.fields[i])] = e
 			}
 			return writeJSONObject(b, m, nil, shape, true, env)
 		}
@@ -330,8 +330,8 @@ func writeJSONObject(b *bytes.Buffer, m map[string]runtime.Object, order []strin
 	known = known && len(shape.fields) > 0
 	if known {
 		for _, f := range shape.fields {
-			if f != nil && f.Name != nil {
-				names = append(names, f.Name.String())
+			if f != nil && fieldName(f) != "" {
+				names = append(names, fieldName(f))
 			}
 		}
 	} else if order != nil {
@@ -522,10 +522,10 @@ func fromJSONValue(x interface{}, t jsonType, env runtime.Scope) (runtime.Object
 		}
 		rec := runtime.NewRecord()
 		for _, f := range shape.fields {
-			if f == nil || f.Name == nil {
+			if f == nil || fieldName(f) == "" {
 				continue
 			}
-			name := f.Name.String()
+			name := fieldName(f)
 			rec.Order = append(rec.Order, name)
 			ft := shape.fieldType(f)
 			jv, present := m[shape.jsonName(f)]
@@ -557,7 +557,7 @@ func fromJSONValue(x interface{}, t jsonType, env runtime.Scope) (runtime.Object
 		// (B.3.10).
 		if eff.asValue {
 			for _, f := range shape.fields {
-				if f == nil || f.Name == nil {
+				if f == nil || fieldName(f) == "" {
 					continue
 				}
 				fv, err := fromJSONValue(x, shape.fieldType(f), env)
@@ -566,7 +566,7 @@ func fromJSONValue(x interface{}, t jsonType, env runtime.Scope) (runtime.Object
 				}
 				if err == nil {
 					rec := runtime.NewRecord()
-					rec.Fields[f.Name.String()] = fv
+					rec.Fields[fieldName(f)] = fv
 					return rec, nil
 				}
 			}
@@ -586,7 +586,7 @@ func fromJSONValue(x interface{}, t jsonType, env runtime.Scope) (runtime.Object
 				return nil, fmt.Errorf("%s: %w", k, err)
 			}
 			rec := runtime.NewRecord()
-			rec.Fields[f.Name.String()] = fv
+			rec.Fields[fieldName(f)] = fv
 			return rec, nil
 		}
 	case "list":

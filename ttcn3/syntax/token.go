@@ -53,11 +53,13 @@ const (
 	REDIR      // ->
 	DECODE     // =>
 	ANY        // ?
+	NOTIMPL    // ???
 	EXCL       // !
 	RANGE      // ..
 	ELIPSIS    // ...
 	ASSIGN     // :=
 	COLONCOLON // ::
+	HASH       // #
 
 	EQ // ==
 	NE // !=
@@ -131,6 +133,7 @@ const (
 	GROUP
 	IF
 	IFPRESENT
+	IMPLIES
 	IMPORT
 	IN
 	INCONC
@@ -196,7 +199,9 @@ const (
 )
 
 var tokens = [...]string{
-	ILLEGAL: "ILLEGAL",
+	ILLEGAL:      "ILLEGAL",
+	UNTERMINATED: "UNTERMINATED",
+	MALFORMED:    "MALFORMED",
 
 	EOF:     "EOF",
 	COMMENT: "COMMENT",
@@ -225,12 +230,14 @@ var tokens = [...]string{
 	REDIR:   "->",
 	DECODE:  "=>",
 	ANY:     "?",
+	NOTIMPL: "???",
 	EXCL:    "!",
 	RANGE:   "..",
 	ELIPSIS: "...",
 
 	ASSIGN:     ":=",
 	COLONCOLON: "::",
+	HASH:       "#",
 	EQ:         "==",
 	NE:         "!=",
 	LT:         "<",
@@ -299,6 +306,7 @@ var tokens = [...]string{
 	GROUP:      "group",
 	IF:         "if",
 	IFPRESENT:  "ifpresent",
+	IMPLIES:    "implies",
 	IMPORT:     "import",
 	IN:         "in",
 	INCONC:     "inconc",
@@ -395,9 +403,9 @@ func (tok Kind) Precedence() int {
 	switch tok {
 	case ASSIGN:
 		return 1
-	case COLON:
+	case IMPLIES, EXCEPT:
 		return 2
-	case DECODE:
+	case COLON:
 		return 3
 	case RANGE:
 		return 4

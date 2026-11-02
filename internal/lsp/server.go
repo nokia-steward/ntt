@@ -14,7 +14,6 @@ import (
 
 	"github.com/acarl005/stripansi"
 	"github.com/nokia/ntt/internal/env"
-	"github.com/nokia/ntt/internal/fs"
 	"github.com/nokia/ntt/internal/log"
 	"github.com/nokia/ntt/internal/lsp/jsonrpc2"
 	"github.com/nokia/ntt/internal/lsp/protocol"
@@ -24,8 +23,7 @@ import (
 
 func NewServer(stream jsonrpc2.Stream) *Server {
 	return &Server{
-		conn:  jsonrpc2.NewConn(stream),
-		files: make(map[*fs.File]bool),
+		conn: jsonrpc2.NewConn(stream),
 		// Default-on for the features that used to live behind
 		// `ttcn3.experimental.*.enabled`. Users can still opt out
 		// via the new `ttcn3.<feature>.enabled` keys (see
@@ -33,7 +31,7 @@ func NewServer(stream jsonrpc2.Stream) *Server {
 		serverConfig: Config{
 			DiagnosticsEnabled:    true,
 			FormatEnabled:         true,
-			SemantikTokensEnabled: true,
+			SemanticTokensEnabled: true,
 			InlayHintEnabled:      true,
 		},
 	}
@@ -76,10 +74,8 @@ func (s serverState) String() string {
 }
 
 type HoverContentProvider interface {
-	Print(sign string, comment string, posRef string) protocol.MarkupContent
+	Print(sign string, comment string, posRef string, mapOrConnect []protocol.Location) protocol.MarkupContent
 	LinkForNode(def *ttcn3.Node) string
-	GatherMapOrConnectLinks(fileName string, line uint32, uri protocol.DocumentURI)
-	Reset()
 }
 type ClientCapability struct {
 	HoverContent            HoverContentProvider
@@ -91,7 +87,7 @@ type ClientCapability struct {
 type Config struct {
 	DiagnosticsEnabled    bool
 	FormatEnabled         bool
-	SemantikTokensEnabled bool
+	SemanticTokensEnabled bool
 	InlayHintEnabled      bool
 
 	// FormatPrintWidth is the soft right margin used by the wrapping
@@ -112,9 +108,6 @@ type Server struct {
 	pendingFolders []protocol.WorkspaceFolder
 
 	Suites
-
-	filesMu sync.Mutex
-	files   map[*fs.File]bool
 
 	diagsMu sync.Mutex
 	diags   map[string][]protocol.Diagnostic

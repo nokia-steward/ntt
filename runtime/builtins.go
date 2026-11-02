@@ -71,23 +71,26 @@ func parseFunction(name string) (string, *syntax.FormalPars, error) {
 
 func checkArgs(pars *syntax.FormalPars, args ...Object) error {
 	// Allow too few args as long as every missing formal parameter has
-	// an `:=` default in its declaration, and allow too many args
-	// silently (TTCN-3 doesn't have varargs but the conformance suite
-	// hits cases where the same name has multiple arities, e.g.
-	// `rnd()` vs `rnd(seed)`).
-	if len(args) < len(pars.List) {
-		for i := len(args); i < len(pars.List); i++ {
-			if pars.List[i].Value == nil {
-				return ErrInvalidArgCount
-			}
+	// an `:=` default in its declaration or is the variadic one, and
+	// allow too many args silently (the conformance suite hits cases
+	// where the same name has multiple arities, e.g. `rnd()` vs
+	// `rnd(seed)`); a variadic last parameter takes all that remain.
+	n := len(pars.List)
+	variadic := n > 0 && pars.List[n-1].Variadic != nil
+	for i := len(args); i < n; i++ {
+		if pars.List[i].Value == nil && !(variadic && i == n-1) {
+			return ErrInvalidArgCount
 		}
 	}
-	n := len(pars.List)
-	if len(args) < n {
-		n = len(args)
-	}
-	for i := 0; i < n; i++ {
-		if err := checkArg(pars.List[i], args[i]); err != nil {
+	for i := range args {
+		if i >= n && !variadic {
+			break
+		}
+		par := pars.List[n-1]
+		if i < n {
+			par = pars.List[i]
+		}
+		if err := checkArg(par, args[i]); err != nil {
 			return err
 		}
 	}

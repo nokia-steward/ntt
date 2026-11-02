@@ -11,7 +11,7 @@ type Span struct {
 }
 
 // String returns the string representation of the text span.
-func (s *Span) String() string {
+func (s Span) String() string {
 	ret := fmt.Sprint(s.Begin.String())
 	if name := s.Filename; name != "" {
 		ret = fmt.Sprintf("%s:", s.Filename) + ret

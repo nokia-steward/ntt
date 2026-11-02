@@ -319,7 +319,15 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 	case *syntax.SelectStmt:
 		// `select { case (x) {...} case else {...} }` is TTCN-3's
 		// switch. Pick the first matching case, falling back to the
-		// `else` branch.
+		// `else` branch. A variable its header declares is its own.
+		if n.Init != nil {
+			if _, decl := n.Init.(*syntax.DeclStmt); decl {
+				env = runtime.NewEnv(env)
+			}
+			if val := eval(n.Init, env); runtime.IsError(val) {
+				return val
+			}
+		}
 		return evalSelectStmt(n, env)
 
 	case *syntax.FromExpr:
@@ -559,6 +567,11 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 
 	case *syntax.UnaryExpr:
 		return evalUnary(n, env)
+
+	case *syntax.PostExpr:
+		if n.Op.Kind() == syntax.ELIPSIS {
+			return eval(n.X, env)
+		}
 
 	case *syntax.BinaryExpr:
 		return evalBinary(n, env)
@@ -1254,6 +1267,18 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return eval(n.Expr, env)
 
 	case *syntax.IfStmt:
+		// A variable the condition's header declares is the
+		// statement's own, as a for loop's.
+		if n.Init != nil {
+			if _, decl := n.Init.(*syntax.DeclStmt); decl {
+				env = runtime.NewEnv(env)
+			}
+			val := eval(n.Init, env)
+			if runtime.IsError(val) {
+				return val
+			}
+		}
+
 		b, err := evalBoolExpr(n.Cond, env)
 		if runtime.IsError(err) {
 			return err
@@ -1708,6 +1733,16 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			return args[0]
 		}
 
+		if i := len(n.Args.List) - 1; i >= 0 {
+			if x, ok := n.Args.List[i].(*syntax.PostExpr); ok && x.Op.Kind() == syntax.ELIPSIS {
+				l, ok := args[i].(*runtime.List)
+				if !ok {
+					return runtime.Errorf("cannot expand %s", args[i].Type())
+				}
+				args = append(args[:i], l.Elements...)
+			}
+		}
+
 		// `rnd(...)` reads / seeds the testcase-local random
 		// stream so parallel jobs don't race on math/rand's global
 		// state (Sem_050401_top_level_025/026 depend on this).
@@ -1776,6 +1811,16 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return apply(f, args)
 
 	case *syntax.WhileStmt:
+		if n.Init != nil {
+			if _, decl := n.Init.(*syntax.DeclStmt); decl {
+				env = runtime.NewEnv(env)
+			}
+			val := eval(n.Init, env)
+			if runtime.IsError(val) {
+				return val
+			}
+		}
+
 		for {
 			if r := loopStopped(env); r != nil {
 				return r
@@ -2296,6 +2341,9 @@ func evalLiteral(n *syntax.ValueLiteral, env runtime.Scope) runtime.Object {
 		return runtime.Undefined
 	case syntax.NAN:
 		return runtime.Float(math.NaN())
+	case syntax.NOTIMPL:
+		return runtime.Errorf("not implemented")
+
 	}
 	return runtime.Errorf("unknown literal kind %q (%s)", n.Tok.Kind(), n.Tok.String())
 }
@@ -6158,11 +6206,11 @@ func coerceToStruct(val runtime.Object, td *runtime.TypeDesc, env runtime.Scope)
 	}
 	names := make([]string, 0, len(fields))
 	for _, f := range fields {
-		if f == nil || f.Name == nil {
+		if f == nil || fieldName(f) == "" {
 			names = append(names, "")
 			continue
 		}
-		names = append(names, f.Name.String())
+		names = append(names, fieldName(f))
 	}
 	// What changes goes into a new value: the given one may be another's
 	// — shared (runtime.Share), or a constant other components read.
@@ -6224,10 +6272,10 @@ func implicitOmitRecord(st *syntax.StructTypeDecl) *runtime.Record {
 	}
 	rec.Order = structFieldNames(st)
 	for _, f := range st.Fields {
-		if f == nil || f.Name == nil || f.Optional == nil {
+		if f == nil || fieldName(f) == "" || f.Optional == nil {
 			continue
 		}
-		rec.Fields[f.Name.String()] = runtime.Omit
+		rec.Fields[fieldName(f)] = runtime.Omit
 	}
 	return rec
 }
@@ -6275,7 +6323,7 @@ func lvalueTypeDesc(lx syntax.Expr, env runtime.Scope) *runtime.TypeDesc {
 			return nil
 		}
 		for _, f := range parent.Struct.Fields {
-			if f != nil && f.Name != nil && f.Name.String() == name {
+			if f != nil && fieldName(f) == name {
 				if td := fieldStructTypeDesc(f, env); td != nil {
 					return td
 				}
@@ -6817,10 +6865,10 @@ func coerceRecordFields(rec *runtime.Record, td *runtime.TypeDesc, env runtime.S
 		ownIt()
 	}
 	for _, f := range td.Struct.Fields {
-		if f == nil || f.Name == nil {
+		if f == nil || fieldName(f) == "" {
 			continue
 		}
-		name := f.Name.String()
+		name := fieldName(f)
 		cur, ok := rec.Fields[name]
 		if !ok {
 			continue
@@ -6844,10 +6892,10 @@ func coerceRecordFields(rec *runtime.Record, td *runtime.TypeDesc, env runtime.S
 func inOrder(rec *runtime.Record, st *syntax.StructTypeDecl) bool {
 	i := 0
 	for _, f := range st.Fields {
-		if f == nil || f.Name == nil {
+		if f == nil || fieldName(f) == "" {
 			continue
 		}
-		if i >= len(rec.Order) || rec.Order[i] != f.Name.String() {
+		if i >= len(rec.Order) || rec.Order[i] != fieldName(f) {
 			return false
 		}
 		i++
@@ -6861,7 +6909,7 @@ func structFieldNames(st *syntax.StructTypeDecl) []string {
 	names := make([]string, 0, len(st.Fields))
 	for _, f := range st.Fields {
 		if f != nil && f.Name != nil {
-			names = append(names, f.Name.String())
+			names = append(names, fieldName(f))
 		}
 	}
 	return names
@@ -6897,7 +6945,7 @@ func coerceToUnionDefault(val runtime.Object, td *runtime.TypeDesc, env runtime.
 			return val
 		}
 		rec := runtime.NewRecord()
-		rec.Fields[f.Name.String()] = val
+		rec.Fields[fieldName(f)] = val
 		return rec
 	}
 	return val
@@ -6984,7 +7032,7 @@ func evalStructComposite(cl *syntax.CompositeLiteral, st *syntax.StructTypeDecl,
 	var fieldNames []string
 	for _, f := range st.Fields {
 		if f != nil && f.Name != nil {
-			fieldNames = append(fieldNames, f.Name.String())
+			fieldNames = append(fieldNames, fieldName(f))
 		}
 	}
 	elems := make([]runtime.Object, len(fieldNames))
@@ -7203,7 +7251,7 @@ func isOptionalStructField(td *runtime.TypeDesc, field string) bool {
 		return false
 	}
 	for _, f := range st.Fields {
-		if f == nil || f.Name == nil || f.Name.String() != field {
+		if f == nil || fieldName(f) != field {
 			continue
 		}
 		return f.Optional != nil
@@ -7218,7 +7266,7 @@ func structFieldTypeName(st *syntax.StructTypeDecl, field string) string {
 		return ""
 	}
 	for _, f := range st.Fields {
-		if f != nil && f.Name != nil && f.Name.String() == field {
+		if f != nil && fieldName(f) == field {
 			return fieldTypeName(f)
 		}
 	}
@@ -7913,6 +7961,12 @@ func applyFunctionWithCallSite(fn *runtime.Function, args []runtime.Object, call
 			continue
 		}
 		if v, ok := byName[param.Name.String()]; ok {
+			// A variadic parameter in assignment notation is given
+			// its record (ETSI 5.4.3): the actuals are its elements.
+			if l, isList := v.(*runtime.List); isList && param.Variadic != nil {
+				reordered = append(reordered[:i], l.Elements...)
+				break
+			}
 			reordered[i] = v
 			continue
 		}
@@ -8103,6 +8157,26 @@ func bindFunctionParams(fn *runtime.Function, args []runtime.Object) *runtime.En
 		for i, param := range fn.Params.List {
 			if param == nil || param.Name == nil {
 				continue
+			}
+			if param.Variadic != nil {
+				// A variadic parameter is the record of the actual
+				// parameters from its position on, its default when
+				// there are none or `-` (ETSI 5.4.3).
+				var rest []runtime.Object
+				if i < len(args) {
+					rest = args[i:]
+				}
+				if len(rest) == 1 && rest[0] == nil {
+					rest = nil
+				}
+				if len(rest) == 0 && param.Value != nil {
+					if v := eval(param.Value, fenv); !runtime.IsError(v) && v != nil {
+						fenv.Set(param.Name.String(), runtime.Share(v))
+						break
+					}
+				}
+				fenv.Set(param.Name.String(), runtime.NewRecordOf(rest...))
+				break
 			}
 			modif := ""
 			if param.Modif != nil && param.Modif.Kind() != syntax.ILLEGAL {
@@ -8599,10 +8673,10 @@ func structDeclFieldNames(st *syntax.StructTypeDecl) []string {
 	}
 	names := make([]string, 0, len(st.Fields))
 	for _, f := range st.Fields {
-		if f == nil || f.Name == nil {
+		if f == nil || fieldName(f) == "" {
 			return nil
 		}
-		names = append(names, f.Name.String())
+		names = append(names, fieldName(f))
 	}
 	return names
 }
@@ -10758,10 +10832,11 @@ func evalAnyPortOp(op string, n *syntax.CallExpr, env runtime.Scope) runtime.Obj
 	// No port produced a hit: pre-populate any `-> sender v`
 	// redirect found in the call's arguments with the latest
 	// PTC ref so fixtures whose PTC body was skipped still see
-	// `v_src == v_ptc`.
+	// `v_src == v_ptc`; not one of an operation with a from
+	// clause, whose sender it names (`from c -> sender v`).
 	if n != nil && n.Args != nil {
 		for _, a := range n.Args.List {
-			if r, ok := a.(*syntax.RedirectExpr); ok {
+			if r, ok := a.(*syntax.RedirectExpr); ok && !hasFromClause(r.X) {
 				prePopulateRedirectExpr(r, exec, env)
 			}
 		}
@@ -11905,13 +11980,13 @@ func expandAnyValueBase(base runtime.Object, typ syntax.Expr, env runtime.Scope)
 	}
 	rec := runtime.NewRecord()
 	for _, f := range st.Fields {
-		if f == nil || f.Name == nil {
+		if f == nil || fieldName(f) == "" {
 			return base
 		}
 		if f.Optional != nil {
-			rec.Set(f.Name.String(), runtime.AnyOrNone)
+			rec.Set(fieldName(f), runtime.AnyOrNone)
 		} else {
-			rec.Set(f.Name.String(), runtime.Any)
+			rec.Set(fieldName(f), runtime.Any)
 		}
 	}
 	return rec
@@ -15595,7 +15670,7 @@ func structValueFits(v runtime.Object, decl *syntax.StructTypeDecl) bool {
 	declared := map[string]bool{}
 	for _, f := range decl.Fields {
 		if f != nil && f.Name != nil {
-			declared[f.Name.String()] = true
+			declared[fieldName(f)] = true
 		}
 	}
 	switch x := v.(type) {
@@ -15777,7 +15852,7 @@ func materialiseJSONDefaultFields(head runtime.Object, td *runtime.TypeDesc, env
 			IndexOffset: v.IndexOffset,
 		}
 		for i, f := range td.Struct.Fields {
-			if f == nil || f.Name == nil || f.Optional == nil {
+			if f == nil || fieldName(f) == "" || f.Optional == nil {
 				continue
 			}
 			if i < len(out.Elements) && out.Elements[i] != runtime.Omit && out.Elements[i] != runtime.Undefined {
@@ -15800,10 +15875,10 @@ func materialiseJSONDefaultFields(head runtime.Object, td *runtime.TypeDesc, env
 			out.Set(k, v.Fields[k])
 		}
 		for _, f := range td.Struct.Fields {
-			if f == nil || f.Name == nil || f.Optional == nil {
+			if f == nil || fieldName(f) == "" || f.Optional == nil {
 				continue
 			}
-			name := f.Name.String()
+			name := fieldName(f)
 			if cur, ok := out.Fields[name]; ok && cur != runtime.Omit && cur != runtime.Undefined {
 				continue
 			}
@@ -15817,10 +15892,10 @@ func materialiseJSONDefaultFields(head runtime.Object, td *runtime.TypeDesc, env
 }
 
 func jsonDefaultValueForField(td *runtime.TypeDesc, f *syntax.Field, env runtime.Scope) (runtime.Object, bool) {
-	if td == nil || f == nil || f.Name == nil {
+	if td == nil || f == nil || fieldName(f) == "" {
 		return nil, false
 	}
-	key := strings.ToLower(f.Name.String()) + ".variant"
+	key := strings.ToLower(fieldName(f)) + ".variant"
 	variants, ok := td.Lookup(key)
 	if (!ok || len(variants) == 0) && td.OwnAttrs != nil && !td.OwnLocal[key] {
 		variants, ok = td.OwnAttrs[key]
@@ -16067,6 +16142,13 @@ func isComponentArrayWait(e syntax.Expr) bool {
 		return true
 	}
 	return false
+}
+
+// hasFromClause reports whether e is an operation with a from clause,
+// `from c` alone included.
+func hasFromClause(e syntax.Expr) bool {
+	b, ok := e.(*syntax.BinaryExpr)
+	return ok && b.Op != nil && b.Op.Kind() == syntax.FROM
 }
 
 // isReceivingOp reports whether e is a receiving operation on a port:

@@ -31,13 +31,8 @@ func testDocumentSymbol(t *testing.T, text string) []Symbol {
 		return s
 	}
 
-	for _, l := range lsp.NewAllDefinitionSymbolsFromCurrentModule(tree) {
-		ds, ok := l.(protocol.DocumentSymbol)
-		if !ok {
-			t.Fatalf("unexpected type %T", l)
-		}
+	for _, ds := range lsp.DocumentSymbols(tree) {
 		ret = append(ret, makeSymbol(ds))
-
 	}
 	return ret
 }

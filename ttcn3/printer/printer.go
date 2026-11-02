@@ -99,6 +99,13 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.Op)
 			p.print(n.X)
 
+		case *syntax.PostExpr:
+			if n == nil {
+				return
+			}
+			p.print(n.X)
+			p.print(n.Op)
+
 		case *syntax.BinaryExpr:
 			if n == nil {
 				return
@@ -146,6 +153,18 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.X)
 			p.print(n.Len)
 			p.print(n.Size)
+
+		case *syntax.RepetitionExpr:
+			if n == nil {
+				return
+			}
+			p.print(n.X)
+			p.print(n.Hash)
+			p.print(n.LParen)
+			p.print(n.Min)
+			p.print(n.Comma)
+			p.print(n.Max)
+			p.print(n.RParen)
 
 		case *syntax.RedirectExpr:
 			if n == nil {
@@ -265,6 +284,7 @@ func (p *printer) print(values ...interface{}) {
 			if n == nil {
 				return
 			}
+			p.print(n.NoDefault)
 			p.print(n.Expr)
 
 		case *syntax.BranchStmt:
@@ -286,6 +306,7 @@ func (p *printer) print(values ...interface{}) {
 				return
 			}
 			p.print(n.Tok)
+			p.print(n.NoDefault)
 			p.print(n.Body)
 
 		case *syntax.CallStmt:
@@ -326,7 +347,11 @@ func (p *printer) print(values ...interface{}) {
 				return
 			}
 			p.print(n.Tok)
+			p.print(n.LParen)
+			p.print(n.Init)
+			p.print(n.InitSemi)
 			p.print(n.Cond)
+			p.print(n.RParen)
 			p.print(n.Body)
 
 		case *syntax.DoWhileStmt:
@@ -343,7 +368,11 @@ func (p *printer) print(values ...interface{}) {
 				return
 			}
 			p.print(n.Tok)
+			p.print(n.LParen)
+			p.print(n.Init)
+			p.print(n.InitSemi)
 			p.print(n.Cond)
+			p.print(n.RParen)
 			p.print(n.Then)
 			p.print(n.ElseTok)
 			p.print(n.Else)
@@ -354,7 +383,11 @@ func (p *printer) print(values ...interface{}) {
 			}
 			p.print(n.Tok)
 			p.print(n.Union)
+			p.print(n.LParen)
+			p.print(n.Init)
+			p.print(n.InitSemi)
 			p.print(n.Tag)
+			p.print(n.RParen)
 			p.print(n.LBrace, indent)
 			p.print(n.Body)
 			p.print(unindent, n.RBrace)
@@ -451,6 +484,7 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.KindTok)
 			p.print(n.TemplateRestriction)
 			p.print(n.Modif)
+			p.print(n.Deterministic)
 			p.print(n.Type)
 			p.print(n.Decls)
 			p.print(n.With)
@@ -468,8 +502,9 @@ func (p *printer) print(values ...interface{}) {
 			if n == nil {
 				return
 			}
-			p.print(&n.RestrictionSpec)
+			p.print(n.RestrictionSpec)
 			p.print(n.Modif)
+			p.print(n.Deterministic)
 			p.print(n.Type)
 			p.print(n.Name)
 			p.print(n.TypePars)
@@ -657,6 +692,9 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.FromTok)
 			p.print(n.Module)
 			p.print(n.Language)
+			p.print(n.Recursive)
+			p.print(n.RedirTok)
+			p.print(n.Alias)
 			p.print(n.LBrace, indent)
 			p.print(n.List)
 			p.print(unindent, n.RBrace)
@@ -680,7 +718,7 @@ func (p *printer) print(values ...interface{}) {
 			}
 			p.print(n.FriendTok)
 			p.print(n.ModuleTok)
-			p.print(n.Module)
+			p.print(n.Modules)
 			p.print(n.With)
 
 		case *syntax.LanguageSpec:
@@ -729,6 +767,7 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.Restriction)
 			p.print(n.Modif)
 			p.print(n.Type)
+			p.print(n.ArrayDef)
 
 		case *syntax.FormalPars:
 			if n == nil {
@@ -745,9 +784,11 @@ func (p *printer) print(values ...interface{}) {
 			p.print(n.Direction)
 			p.print(n.TemplateRestriction)
 			p.print(n.Modif)
+			p.print(n.Deterministic)
 			p.print(n.Type)
 			p.print(n.Name)
 			p.print(n.ArrayDef)
+			p.print(n.Variadic)
 			p.print(n.AssignTok)
 			p.print(n.Value)
 
@@ -832,6 +873,13 @@ func (p *printer) print(values ...interface{}) {
 				}
 			}
 		case []syntax.Expr:
+			for i, item := range n {
+				p.print(item)
+				if i < len(n)-1 {
+					p.print(",")
+				}
+			}
+		case []*syntax.Ident:
 			for i, item := range n {
 				p.print(item)
 				if i < len(n)-1 {

@@ -120,6 +120,7 @@ func collectComponentVars(mod *syntax.Module) map[string]bool {
 // 16.1.4 violation pattern. It is invoked by Analyzer.Analyze.
 func (a *Analyzer) checkSideEffectInRestrictedContext(mod *syntax.Module) []Diagnostic {
 	compVars := collectComponentVars(mod)
+	lazyMembers := collectLazyOrFuzzyMembers(mod)
 	// Pass 1: collect every function declared in the module and the
 	// set of forbidden selector names that appear inside its body. We
 	// also track which function calls each function body makes, so we
@@ -178,6 +179,24 @@ func (a *Analyzer) checkSideEffectInRestrictedContext(mod *syntax.Module) []Diag
 		}
 		if fn.Body != nil && bodyDeclaresFuzzy(fn.Body) {
 			info.direct["fuzzy-local-decl"] = true
+		}
+		// Rule 16.1.4 (m): referencing lazy or fuzzy variables,
+		// parameters or templates not declared deterministic.
+		if fn.Body != nil {
+			names := map[string]bool{}
+			for k := range lazyMembers {
+				names[k] = true
+			}
+			if fn.Params != nil {
+				for _, p := range fn.Params.List {
+					if p != nil && p.Name != nil && lazyOrFuzzy(p.Modif, p.Deterministic) {
+						names[p.Name.String()] = true
+					}
+				}
+			}
+			if referencesAny(fn.Body, names) {
+				info.direct["lazy-or-fuzzy-reference"] = true
+			}
 		}
 		funcs[name] = info
 	}
@@ -474,6 +493,84 @@ func isPortCommCall(ce *syntax.CallExpr) bool {
 		return false
 	}
 	return restrictedReceiveSels[sid.String()]
+}
+
+// lazyOrFuzzy reports whether a declaration with the modifiers modif and
+// deterministic is lazy or fuzzy and not declared deterministic.
+func lazyOrFuzzy(modif, deterministic syntax.Token) bool {
+	if modif == nil || deterministic != nil {
+		return false
+	}
+	switch modif.String() {
+	case "@lazy", "@fuzzy":
+		return true
+	}
+	return false
+}
+
+// collectLazyOrFuzzyMembers returns the names of the component members
+// and module definitions of mod, variables and templates, that are lazy
+// or fuzzy and not declared deterministic (rule 16.1.4 m).
+func collectLazyOrFuzzyMembers(mod *syntax.Module) map[string]bool {
+	out := map[string]bool{}
+	add := func(d syntax.Node) {
+		switch x := d.(type) {
+		case *syntax.ValueDecl:
+			if lazyOrFuzzy(x.Modif, x.Deterministic) {
+				for _, dec := range x.Decls {
+					if dec != nil && dec.Name != nil && dec.Name.Tok != nil {
+						out[dec.Name.String()] = true
+					}
+				}
+			}
+		case *syntax.TemplateDecl:
+			if x.Name != nil && lazyOrFuzzy(x.Modif, x.Deterministic) {
+				out[x.Name.String()] = true
+			}
+		}
+	}
+	for _, d := range mod.Defs {
+		if d == nil {
+			continue
+		}
+		add(d.Def)
+		ct, ok := d.Def.(*syntax.ComponentTypeDecl)
+		if !ok || ct.Body == nil {
+			continue
+		}
+		for _, st := range ct.Body.Stmts {
+			if ds, ok := st.(*syntax.DeclStmt); ok {
+				add(ds.Decl)
+			}
+		}
+	}
+	return out
+}
+
+// referencesAny reports whether body refers to one of names, other than
+// by declaring it.
+func referencesAny(body syntax.Node, names map[string]bool) bool {
+	if len(names) == 0 {
+		return false
+	}
+	declared := map[*syntax.Ident]bool{}
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		if d, ok := n.(*syntax.Declarator); ok && d.Name != nil {
+			declared[d.Name] = true
+		}
+		return n != nil
+	})
+	found := false
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		if n == nil || found {
+			return false
+		}
+		if id, ok := n.(*syntax.Ident); ok && id.Tok != nil && !declared[id] && names[id.String()] {
+			found = true
+		}
+		return true
+	})
+	return found
 }
 
 // hasFuzzyFormalPar reports whether any formal parameter is marked

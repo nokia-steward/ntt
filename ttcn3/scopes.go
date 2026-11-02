@@ -1,7 +1,6 @@
 package ttcn3
 
 import (
-
 	"github.com/nokia/ntt/internal/log"
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
@@ -39,7 +38,7 @@ func (scp *Scope) Insert(n syntax.Node, id *syntax.Ident) {
 	}
 }
 
-// Lookup returns a list of defintions for the given identifier.
+// Lookup returns a list of definitions for the given identifier.
 // Lookup may be called with nil as receiver.
 func (scp *Scope) Lookup(name string) []*Node {
 	if scp == nil {
@@ -54,7 +53,7 @@ func (scp *Scope) Lookup(name string) []*Node {
 	return defs
 }
 
-// NewScope builts and populares a new scope from the given syntax node.
+// NewScope builds and populates a new scope from the given syntax node.
 // NewScope returns nil if no valid scope could be built.
 func NewScope(n syntax.Node, tree *Tree) *Scope {
 	tree.scopesMu.Lock()
@@ -140,8 +139,15 @@ func NewScope(n syntax.Node, tree *Tree) *Scope {
 		scp.add(n.Init)
 
 	case *syntax.IfStmt:
+		scp.add(n.Init)
 		scp.add(n.Then)
 		scp.add(n.Else)
+
+	case *syntax.WhileStmt:
+		scp.add(n.Init)
+
+	case *syntax.SelectStmt:
+		scp.add(n.Init)
 
 	case *syntax.StructSpec:
 		for _, n := range n.Fields {
@@ -259,7 +265,11 @@ func (scp *Scope) add(n syntax.Node) {
 		}
 
 	case *syntax.Field:
-		scp.Insert(n, n.Name)
+		if id := n.EmbeddedName(); id != nil {
+			scp.Insert(n, id)
+		} else {
+			scp.Insert(n, n.Name)
+		}
 
 	case *syntax.Module:
 		scp.Insert(n, n.Name)
@@ -268,7 +278,12 @@ func (scp *Scope) add(n syntax.Node) {
 		scp.Insert(n, n.Name)
 
 	case *syntax.ImportDecl:
-		scp.Insert(n, n.Module)
+		// A renamed module is only visible by its new name.
+		if n.Alias != nil {
+			scp.Insert(n, n.Alias)
+		} else {
+			scp.Insert(n, n.Module)
+		}
 
 	case *syntax.GroupDecl:
 		// GroupDecl are not added to the scope, but their members are.

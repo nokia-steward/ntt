@@ -7,6 +7,22 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+func TestFieldName(t *testing.T) {
+	root := syntax.Parse([]byte(`type record R { integer a, integer, M.T, P<integer> optional, record {} }`))
+	if err := root.Err(); err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	root.Inspect(func(n syntax.Node) bool {
+		if f, ok := n.(*syntax.Field); ok {
+			names = append(names, syntax.Name(f))
+			return false
+		}
+		return true
+	})
+	assert.Equal(t, []string{"a", "integer", "T", "P", ""}, names)
+}
+
 func TestDoc(t *testing.T) {
 	t.Parallel()
 
@@ -70,4 +86,9 @@ func TestDoc(t *testing.T) {
 		want := "foo bar\n"
 		assert.Equal(t, want, testDoc(t, input))
 	})
+}
+
+func TestErrorString(t *testing.T) {
+	root := syntax.Parse([]byte(`x := ;`))
+	assert.EqualError(t, root.Err(), "1 error occurred:\n\t* 1:6-1:7: expected operand, found ;\n\n")
 }

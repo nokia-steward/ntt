@@ -74,6 +74,10 @@ func (s *Scanner) Scan() (Kind, int, int) {
 		typ = CONCAT
 	case ch == '?':
 		typ = ANY
+		if next == '?' && s.pos+1 < len(s.src) && s.src[s.pos+1] == '?' {
+			s.pos += 2
+			typ = NOTIMPL
+		}
 	case ch == '(':
 		typ = LPAREN
 	case ch == '[':
@@ -190,8 +194,11 @@ func (s *Scanner) Scan() (Kind, int, int) {
 	case ch == '\'':
 		typ = s.scanBitstring()
 	case ch == '#':
-		s.scanLine()
-		typ = PREPROC
+		typ = HASH
+		if isAlpha(next) || next == '!' {
+			s.scanLine()
+			typ = PREPROC
+		}
 	case ch == '"':
 		typ = s.scanString()
 	default:

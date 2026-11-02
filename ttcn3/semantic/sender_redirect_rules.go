@@ -145,12 +145,14 @@ func walkFuncForSenderRedirects(
 	connectedPorts := collectConnectedPortNames(fn.Body)
 	var diags []Diagnostic
 	syntax.Inspect(fn.Body, func(n syntax.Node) bool {
-		// Look for the two redirect shapes that the parser
-		// produces for `<receive> [from C:?] -> sender X`:
+		// Look for the redirect shapes of `<receive> [from C:?]
+		// -> sender X`:
 		//
 		//   - bare:    RedirectExpr.Sender = X
-		//   - from-C:  BinaryExpr{Op=from, Y=BinaryExpr{Op=:,
-		//                X=Ident("C"), Y=RedirectExpr.Sender=X}}
+		//   - from-C:  RedirectExpr{X=BinaryExpr{Op=from, Y=C:?},
+		//                Sender=X}, or BinaryExpr{Op=from,
+		//                Y=BinaryExpr{Op=:, X=Ident("C"),
+		//                Y=RedirectExpr.Sender=X}}
 		//
 		// The from-clause path is detected by walking up from
 		// the RedirectExpr; we cheat by recognising the
@@ -174,6 +176,19 @@ func walkFuncForSenderRedirects(
 			return false
 		case *syntax.RedirectExpr:
 			if be == nil || be.Sender == nil {
+				return true
+			}
+			// `<receive> from C:? -> sender X` is also a redirect of
+			// the operation with its from-clause: RedirectExpr{X:
+			// BinaryExpr{Op=from, Y=C:?}, Sender=X}.
+			if fb, ok := be.X.(*syntax.BinaryExpr); ok && fb.Op != nil && fb.Op.Kind() == syntax.FROM {
+				expected := fromClauseComponent(fb.Y)
+				if expected == "" || !components[expected] {
+					return true
+				}
+				if d := senderMismatchDiag(be, expected, "from-clause", varTypes, primAliases, components, false); d != nil {
+					diags = append(diags, *d)
+				}
 				return true
 			}
 			op := redirectOpName(be.X)

@@ -62,7 +62,6 @@ linters:
       - internal/lsp/xcontext
       - internal/memoize
       - internal/session/flock
-      - ttcn3/v2/syntax/internal/gen
       - ttcn3/syntax/internal/gen
       - ttcn3/printer
       - third_party$

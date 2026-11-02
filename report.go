@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -632,7 +631,7 @@ func (r Run) ReasonFiles() ([]File, error) {
 
 	var files []File
 	for _, p := range paths {
-		b, err := ioutil.ReadFile(p)
+		b, err := os.ReadFile(p)
 		if err != nil {
 			return nil, err
 		}

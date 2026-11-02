@@ -146,7 +146,7 @@ func tlAnnotate(v tl.Value, td *runtime.TypeDesc, env runtime.Scope, depth int) 
 		for i, e := range v.Elems {
 			elems[i] = e
 			for _, f := range td.Struct.Fields {
-				if f != nil && f.Name != nil && f.Name.String() == e.Name {
+				if f != nil && fieldName(f) == e.Name {
 					elems[i] = tlAnnotate(e, fieldTypeDesc(f, home), home, depth+1)
 					break
 				}
@@ -173,7 +173,7 @@ func tlDeclarationOrder(elems []tl.Value, st *syntax.StructTypeDecl) []tl.Value 
 	at := map[string]int{}
 	for i, f := range st.Fields {
 		if f != nil && f.Name != nil {
-			at[f.Name.String()] = i
+			at[fieldName(f)] = i
 		}
 	}
 	for _, e := range elems {
@@ -702,7 +702,7 @@ func tlOfType(v tl.Value, td *runtime.TypeDesc, env runtime.Scope) bool {
 		for _, e := range v.Elems {
 			declared := false
 			for _, f := range td.Struct.Fields {
-				if f != nil && f.Name != nil && f.Name.String() == e.Name {
+				if f != nil && fieldName(f) == e.Name {
 					declared = true
 					break
 				}

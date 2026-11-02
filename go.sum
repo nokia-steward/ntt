@@ -1,3 +1,5 @@
+github.com/5nord/goldenfile v0.0.0-20260507121108-52d2910ea576 h1:1Ep4hWMpZYxt80EkFOpzdbLwKLELOQ/whtMoWrfJoZE=
+github.com/5nord/goldenfile v0.0.0-20260507121108-52d2910ea576/go.mod h1:Z8mbHWFC8173DTBEoMg6wo0AxhN/RPmEE4ZerpRMVy8=
 github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d h1:licZJFw2RwpHMqeKTCYkitsPqHNxTmd4SNR5r94FGM8=
 github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d/go.mod h1:asat636LX7Bqt5lYEZ27JNDcqxfjdBQuJ/MM4CN/Lzo=
 github.com/bmatcuk/doublestar v1.3.4 h1:gPypJ5xD31uhX6Tf54sDPUOBXTqKH4c9aPY66CyQrS0=

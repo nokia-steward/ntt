@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/nokia/ntt/runtime"
 )
@@ -75,16 +76,27 @@ func listExpandedLen(v runtime.Object) int {
 	return count
 }
 
+// legacyRnd is the stream Rnd draws from, seeded by an rnd(seed).
+var legacyRnd struct {
+	sync.Mutex
+	r *rand.Rand
+}
+
 // Rnd is the legacy entrypoint used by old tests; the interpreter
 // hands the active testcase exec via RndWithScope when available so
 // parallel runs don't race on math/rand's global state.
 func Rnd(args ...runtime.Object) runtime.Object {
+	legacyRnd.Lock()
+	defer legacyRnd.Unlock()
 	if len(args) > 0 {
 		if seed, ok := args[0].(runtime.Float); ok {
-			rand.Seed(int64(math.Float64bits(float64(seed))))
+			legacyRnd.r = rand.New(rand.NewSource(int64(math.Float64bits(float64(seed)))))
 		}
 	}
-	return runtime.Float(rand.Float64())
+	if legacyRnd.r == nil {
+		return runtime.Float(rand.Float64())
+	}
+	return runtime.Float(legacyRnd.r.Float64())
 }
 
 // RndWithScope wires rnd to the per-testcase Rnd / SeedRnd so each

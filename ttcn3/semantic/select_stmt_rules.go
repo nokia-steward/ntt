@@ -148,14 +148,13 @@ func caseLiteralKey(e syntax.Expr) string {
 func checkSelectUnion(ss *syntax.SelectStmt, unions map[string][]string, declKinds map[string]typeKind, varTypes, paramTypes map[string]string) []Diagnostic {
 	var diags []Diagnostic
 
-	// Header type resolution: the tag is a parenthesised
-	// expression containing a single value. We pull the inner
-	// ident, look it up in var / param scope, and check the
-	// declared type is in `unions`.
+	// Header type resolution: the tag is the expression in the
+	// header's parentheses. We pull the ident, look it up in var /
+	// param scope, and check the declared type is in `unions`.
 	headerName := ""
 	headerType := ""
-	if ss.Tag != nil && len(ss.Tag.List) == 1 {
-		if id, ok := ss.Tag.List[0].(*syntax.Ident); ok && id != nil && id.Tok != nil {
+	if ss.Tag != nil {
+		if id, ok := ss.Tag.(*syntax.Ident); ok && id != nil && id.Tok != nil {
 			headerName = id.String()
 			if t, ok := varTypes[headerName]; ok {
 				headerType = t

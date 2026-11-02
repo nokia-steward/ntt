@@ -63,12 +63,7 @@ func (s *Server) rename(ctx context.Context, params *protocol.RenameParams) (*pr
 
 	line := int(params.Position.Line) + 1
 	col := int(params.Position.Character) + 1
-	id, ok := tree.IdentifierAt(line, col).(*syntax.Ident)
-	if !ok || id == nil {
-		return nil, nil
-	}
-
-	locs := NewSymbolReferences(&s.db, id, file)
+	locs := FindReferences(&s.db, tree, line, col, true)
 	if len(locs) == 0 {
 		return nil, nil
 	}

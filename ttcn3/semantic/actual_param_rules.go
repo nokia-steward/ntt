@@ -1001,11 +1001,15 @@ func paramsToSigs(list []*syntax.FormalPar) []formalSig {
 				sig.restriction = rs.Tok.String()
 			}
 		}
-		if p.Modif != nil {
+		// `@lazy` or `@fuzzy`, then `@deterministic`; or this alone.
+		switch {
+		case p.Modif != nil:
 			sig.modif = p.Modif.String()
-		}
-		if p.Modif2 != nil {
-			sig.modif2 = p.Modif2.String()
+			if p.Deterministic != nil {
+				sig.modif2 = p.Deterministic.String()
+			}
+		case p.Deterministic != nil:
+			sig.modif = p.Deterministic.String()
 		}
 		if p.Direction != nil {
 			sig.dir = p.Direction.String()

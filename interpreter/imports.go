@@ -242,7 +242,9 @@ func (x *moduleDefIndex) get(mod *syntax.Module) map[string]moduleDef {
 		x.friends = map[string]bool{}
 		for _, d := range mod.Defs {
 			if f, ok := d.Def.(*syntax.FriendDecl); ok {
-				x.friends[syntax.Name(f.Module)] = true
+				for _, m := range f.Modules {
+					x.friends[syntax.Name(m)] = true
+				}
 			}
 		}
 	})
