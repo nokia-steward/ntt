@@ -1,0 +1,39 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:6.2.15.3, ignored unmapping AnyElementsOrNone from a map
+ ** @verdict  pass accept, ttcn3verdict:pass
+ ***************************************************/
+
+// The following requirement is tested:
+// The unmap statement may be also used to remove the AnyElementsOrNone matching symbol from
+// a map template variable. In this case, the second parameter of the statement shall be
+// an asterisk literal. If the template variable does not contain the AnyElementsOrNone
+// matching symbol, the operation has no effect.
+
+module Sem_06021503_unmapping_keys_004 {
+	type map from charstring to charstring TMap;
+	type component C {}
+
+	testcase TC_Sem_06021503_unmapping_keys_004() runs on C {
+		var template TMap v_map := {
+            ["first_name"] := ?,
+            ["surname"] := "Doe"
+        }
+        var TMap v_val := {
+            ["first_name"] := "John",
+            ["surname"] := "Doe"
+        }
+        unmap(v_map, *); // ignored as the referenced template doesn't contain AnyElementsOrNone
+
+        if (match(v_val, v_map)) {
+		    setverdict(pass);
+        } else {
+            setverdict(fail);
+        }
+	}
+
+	control {
+		execute(TC_Sem_06021503_unmapping_keys_004());
+	}
+}

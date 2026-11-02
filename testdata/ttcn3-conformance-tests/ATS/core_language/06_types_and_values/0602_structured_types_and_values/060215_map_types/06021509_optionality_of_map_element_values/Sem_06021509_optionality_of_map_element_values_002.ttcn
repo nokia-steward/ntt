@@ -1,0 +1,29 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:6.2.15.9, Using * inside map templates
+ ** @verdict  pass accept, ttcn3verdict:pass
+ ***************************************************/
+
+// The following requirement is tested:
+// Value fields associated with keys of map templates might contain matching symbols including
+// symbols for optional fields such as omit, * or ifpresent.
+
+module Sem_06021509_optionality_of_map_element_values_002 {
+	type map from charstring to charstring TMap;
+	type component C {}
+
+	testcase TC_Sem_06021509_optionality_of_map_element_values_002() runs on C {
+		var template TMap v_map := {
+            ["first_name"] := "John",
+            ["surname"] := "Doe",
+            ["city"] := *
+        }
+        log(v_map);
+		setverdict(pass);
+	}
+
+	control {
+		execute(TC_Sem_06021509_optionality_of_map_element_values_002());
+	}
+}

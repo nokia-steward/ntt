@@ -1,0 +1,37 @@
+/*****************************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.8.2, Ensure that referenced mandatory fields of template(present) base templates are not allowed to implicite restrict to template(value)
+ ** @verdict  pass reject
+ *****************************************************************/
+
+/*
+ * Reference mandatory field of a record of a template with present restriction.
+ * (see Table 13C: Implicit restrictions)
+ *
+ */
+
+module NegSem_150802_ImplicitRestrictions_014 {
+
+type component GeneralComp { }
+
+type record ExampleType {
+	integer a,
+	boolean b optional
+}
+
+template(present) ExampleType examplePresent := {1, ?};
+
+testcase TC_NegSem_150802_ImplicitRestrictions_014() runs on GeneralComp {
+
+	var template (value) integer v_value_a :=  examplePresent.a; //Not allowed
+
+	setverdict(fail);
+}
+
+control{
+	execute(TC_NegSem_150802_ImplicitRestrictions_014());
+}
+
+
+}

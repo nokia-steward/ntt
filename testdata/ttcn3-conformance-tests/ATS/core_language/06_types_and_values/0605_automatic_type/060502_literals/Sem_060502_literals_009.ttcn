@@ -1,0 +1,22 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for boolean literals.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060502_literals_009 {
+
+type component GeneralComp {}
+
+// inout parameters require strong typing and can be used to type verification.
+function verifyType(inout boolean b) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_060502_literals_009() runs on GeneralComp {
+	{ var v := true; verifyType(v) }
+	{ var v := false; verifyType(v) }
+}
+
+control {
+	execute(TC_Sem_060502_literals_009());
+}
+
+}

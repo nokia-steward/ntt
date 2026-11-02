@@ -1,0 +1,19 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for activate.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060506_return_values_009 {
+
+type component GeneralComp {}
+
+altstep as() {}
+
+testcase TC_Sem_060506_return_values_009() runs on GeneralComp {
+	var v := activate(as());
+	deactivate(v);
+}
+
+control {
+	execute(TC_Sem_060506_return_values_009());
+}
+
+}

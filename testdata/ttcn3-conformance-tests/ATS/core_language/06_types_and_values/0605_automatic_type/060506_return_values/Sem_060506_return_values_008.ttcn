@@ -1,0 +1,21 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for patterns.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060506_return_values_008 {
+
+type component GeneralComp {}
+
+function verifyType(inout template charstring cs) {
+	setpass(pass)
+}
+
+testcase TC_Sem_060506_return_values_008() runs on GeneralComp {
+	var v := pattern "a*";
+	verifyType(v)
+}
+
+control {
+	execute(TC_Sem_060506_return_values_008());
+}
+
+}

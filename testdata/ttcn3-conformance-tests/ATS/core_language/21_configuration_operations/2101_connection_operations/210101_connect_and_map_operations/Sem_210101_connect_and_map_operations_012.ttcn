@@ -2,7 +2,7 @@
  ** @author   STF 451 (updated by STF 521)
  ** @version  0.0.1
  ** @purpose  1:21.1.1, Ensure that IUT can map ports with empty outlist-PORT1 and inlist-PORT2
- ** @verdict  pass accept, ttcn3verdict:pass
+ ** @verdict  pass reject
  ***************************************************/
 // NOTE: the test shall pass as empty set (in this case outlist-PORT1 and inlist-PORT2) is always a subset
 // of another set (in this case outlist-PORT2 and inlist-PORT1). For that reason, the test was changed

@@ -1,0 +1,25 @@
+/***************************************************
+ ** @author   STF 423
+ ** @version  0.0.1
+ ** @purpose  1:19.1.2, Ensure that the IUT properly evaluates shorthand assignment statements
+ ** @verdict  pass  reject
+ ***************************************************/
+module NegSem_190102_shorthand_increment {
+
+type component GeneralComp {
+}
+
+testcase TC_NegSem_190102_shorthand_increment () runs on GeneralComp system GeneralComp {
+ var float v_f;
+
+ v_f++;	//ahorthand assignment of non-integer variable
+
+}
+
+control{
+
+    execute(TC_NegSem_190102_shorthand_increment());
+
+}
+
+}

@@ -2,7 +2,7 @@
  ** @author   STF 487
  ** @version  0.0.1
  ** @purpose  1:6.2.4, constant as user-assigned enumerated values
- ** @verdict  pass reject
+ ** @verdict  pass accept, noexecution
  ***************************************************/
 
 // The following requirement is tested:

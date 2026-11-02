@@ -8,7 +8,7 @@
 
 module NegSem_1400_procedure_signatures_003 {
 
-    signature p_Sig1_001(in integer p_par1, out integer p_par2, inout integer p_par3) return port // Not allowed: only data types are allowed
+    signature p_Sig1_001(in integer p_par1, out integer p_par2, inout integer p_par3) return default // Not allowed: only data types are allowed
 	exception (charstring);  //execption is a string
 
 
@@ -47,7 +47,7 @@ module NegSem_1400_procedure_signatures_003 {
 		}
 }
 
-	testcase TC_NegSem_1400_procedure_signatures_003() runs on GeneralComp system GeneralComp {
+	testcase TC_Sem_1400_procedure_signatures_001() runs on GeneralComp system GeneralComp {
 
 		var GeneralComp server := GeneralComp.create("RemoteProcedure Service");
 	   var GeneralComp client := GeneralComp.create("RemoteProcedure Client");
@@ -73,7 +73,7 @@ module NegSem_1400_procedure_signatures_003 {
    }
 
     control{
-        execute(TC_NegSem_1400_procedure_signatures_003());
+        execute(TC_Sem_1400_procedure_signatures_001());
     }
 
 }

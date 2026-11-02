@@ -1,0 +1,20 @@
+// @author   TTF T023
+// @purpose  1:16.1.0, Ensure functions accept nested return types.
+// @verdict  pass accept
+module Sem_1601_toplevel_004 {
+
+type component GeneralComp {}
+
+function f() returns record of record {}[3] {
+	setverdict(pass);
+}
+
+testcase TC_Sem_1601_toplevel_004() runs on GeneralComp {
+	f();
+}
+
+control {
+	execute(TC_Sem_1601_toplevel_004());
+}
+
+}

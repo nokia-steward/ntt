@@ -1,0 +1,29 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:6.2.15.9, Using omit not allowed in map field values
+ ** @verdict  pass reject
+ ***************************************************/
+
+// The following requirement is tested:
+// In map values, both keys and value fields associated with them are mandatory. The omit
+// symbol shall not be assigned to a map key or value field.
+
+module NegSem_06021509_optionality_of_map_element_values_001 {
+	type map from charstring to charstring TMap;
+	type component C {}
+
+	testcase TC_NegSem_06021509_optionality_of_map_element_values_001() runs on C {
+        var TMap v_val := {
+            ["first_name"] := "John",
+            ["surname"] := "Doe",
+			["city"] := omit
+        }
+		log(v_val);
+		setverdict(pass);
+	}
+
+	control {
+		execute(TC_NegSem_06021509_optionality_of_map_element_values_001());
+	}
+}

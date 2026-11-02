@@ -1,0 +1,54 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:20.5.0, all defaults in suspended state
+ ** @verdict  pass reject
+ ***************************************************/
+
+// The following requirement is tested:
+// An unsuccessful default execution will also be indicated if the list of defaults is
+// empty or if it contains only suspended defaults.
+
+module NegSem_200501_the_default_mechanism_002 {
+
+	type port P message {
+		inout integer;
+	}
+
+	type component GeneralComp {
+		port P p;
+	}
+
+	altstep a() runs on GeneralComp {
+		[] p.receive(integer:?) {
+			log ("in altstep a");
+            setverdict(pass);
+		}
+	}
+
+    altstep b() runs on GeneralComp {
+		[] p.receive(integer:?) {
+            log ("in altstep b");
+			setverdict(pass);
+		}
+	}
+
+	testcase TC_NegSem_200501_the_default_mechanism_002() runs on GeneralComp system GeneralComp {
+		connect(self:p, self:p);
+        var default v_defaultB := activate(b());
+        var default v_defaultA := activate(a());
+		p.send(integer:5);
+        deactivate(v_defaultA);
+        deactivate(v_defaultB);
+		alt {
+			[] p.receive(integer:0) { // not expected
+				setverdict(fail);
+			}
+		} // as no default is active and the only option not matching, an error should occur
+        setverdict(pass);
+	}
+
+	control{
+		execute(TC_NegSem_200501_the_default_mechanism_002());
+	}
+}

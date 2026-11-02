@@ -1,0 +1,23 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for templates.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060504_references_005 {
+
+type component GeneralComp {}
+
+template integer t_int := ?
+
+testcase TC_Sem_060504_references_005() runs on GeneralComp {
+	var template v := t_int;
+	if (match(1, v)) {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+}
+
+control {
+	execute(TC_Sem_060504_references_005());
+}
+
+}

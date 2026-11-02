@@ -1,0 +1,31 @@
+/***************************************************
+ ** @author   STF 409
+ ** @version  0.0.1
+ ** @purpose  1:6.3.2.1, Reject assignment of other enumerated types since they are only compatible to synonym types
+ ** @verdict  pass accept, ttcn3verdict:pass
+ ***************************************************/
+
+module NegSem_060302_structured_types_001 {
+
+	type enumerated EnumeratedType {e_black, e_white};
+	type enumerated EnumeratedRedefinition {e_black, e_white};
+
+
+
+type component GeneralComp {
+}
+
+testcase TC_NegSem_060302_structured_types_001() runs on GeneralComp {
+
+    var EnumeratedType v_enum1:=e_black;
+    var EnumeratedRedefinition v_enum2;
+
+    v_enum2:=v_enum1; // compatible enumeration
+	setverdict(pass);
+}
+
+control{
+    execute(TC_NegSem_060302_structured_types_001());
+}
+
+}

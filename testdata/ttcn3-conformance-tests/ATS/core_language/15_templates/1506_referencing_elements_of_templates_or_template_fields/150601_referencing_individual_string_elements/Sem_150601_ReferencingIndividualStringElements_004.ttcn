@@ -1,0 +1,29 @@
+/*****************************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.6.1, Ensure that the referencing of individual string elements inside templates or template fields is allowed on the right hand side.
+ ** @verdict  pass accept
+ *****************************************************************/
+
+module Sem_150601_ReferencingIndividualStringElements_004 {
+
+type component GeneralComp { }
+
+testcase TC_Sem_150601_ReferencingIndividualStringElements_004() runs on GeneralComp {
+	var template octetstring v_oct1 := '0123456789ABCDEF'O;
+    var template octetstring v_oct2;
+
+    v_oct2 := v_oct1[1]; // v_oct2 will be equal to '23'O after the assignment
+
+    if (v_oct2.value == '23'O) {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+    }
+}
+
+control{
+    execute(TC_Sem_150601_ReferencingIndividualStringElements_004());
+}
+
+}
