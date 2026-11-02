@@ -56,3 +56,125 @@ func TestExecuteInAConditionsHeader(t *testing.T) {
 		t.Fatalf("verdict = %s (%s), %v; want pass", v, reason, err)
 	}
 }
+
+// TestLoggedDefaultsAndEmptyReceives: an altstep run as a default is
+// entered as a default, and a receive that finds its queue empty is logged
+// as an event the TCI-TL log leaves out, with its port.
+func TestLoggedDefaultsAndEmptyReceives(t *testing.T) {
+	rec, _ := runLogged(t, `module M {
+		type port P message { inout charstring }
+		type component C { port P p; timer t := 0.2; }
+		altstep guard() runs on C { [] t.timeout { setverdict(pass); } }
+		testcase tc() runs on C {
+			var default d := activate(guard());
+			t.start;
+			alt { [] p.receive("hello") { setverdict(fail); } }
+			deactivate(d);
+		}
+	}`, clocks[0].opts)
+	defaults, empty := 0, 0
+	for _, e := range rec.Events {
+		if e.Op == "tliSEnter" && e.Default {
+			defaults++
+		}
+		if e.Op == "tliMReceiveEmpty" {
+			empty++
+			if !e.Aside {
+				t.Errorf("empty receive not aside")
+			}
+		}
+	}
+	if defaults == 0 || empty == 0 {
+		t.Fatalf("default entries %d, empty receives %d", defaults, empty)
+	}
+}
+
+// TestLoggedEmptyReceivesOfAnyPort: `any port` that finds all its queues
+// empty is logged once, as of any port, not for each; a template of a
+// predefined type names it.
+func TestLoggedEmptyReceivesOfAnyPort(t *testing.T) {
+	rec, _ := runLogged(t, `module M {
+		type port P message { inout charstring }
+		type component C { port P p1; port P p2; timer t := 0.1; }
+		testcase tc() runs on C {
+			t.start;
+			alt { [] any port.receive(charstring:?) { setverdict(fail); } [] t.timeout { setverdict(pass); } }
+		}
+	}`, clocks[0].opts)
+	var anyPort, perPort int
+	for _, e := range rec.Events {
+		if e.Op != "tliMReceiveEmpty" {
+			continue
+		}
+		if e.Path != "(any)" {
+			perPort++
+			continue
+		}
+		anyPort++
+		if len(e.Parts) != 1 || e.Parts[0].Type != "charstring" {
+			t.Errorf("type of the template: %v", e.Parts)
+		}
+	}
+	if anyPort == 0 || perPort != 0 {
+		t.Fatalf("any port %d, per port %d", anyPort, perPort)
+	}
+}
+
+// TestLoggingAnEmptyReceiveChangesNothing: the template of a receive whose
+// queue is empty is evaluated for the log only when that does nothing a
+// test could tell: a function it calls does not run.
+func TestLoggingAnEmptyReceiveChangesNothing(t *testing.T) {
+	rec, _ := runLogged(t, `module M {
+		type port P message { inout charstring }
+		type component C { port P p; var integer n := 0; timer t := 0.1; }
+		function g() runs on C return charstring { n := n + 1; return "x"; }
+		testcase tc() runs on C {
+			t.start;
+			alt {
+				[] p.receive(g()) { setverdict(fail); }
+				[] t.timeout { if (n == 0) { setverdict(pass); } else { setverdict(fail, "logging ran g"); } }
+			}
+		}
+	}`, clocks[0].opts)
+	found := false
+	for _, e := range rec.Events {
+		found = found || e.Op == "tliMReceiveEmpty"
+	}
+	if !found {
+		t.Fatal("no empty receive logged")
+	}
+}
+
+// TestLoggedInterleavesAndAnyPortRedirects: an interleave is entered and
+// left, events TCI-TL has none for; `any port` with a redirect is logged as
+// of any port when its queues are empty.
+func TestLoggedInterleavesAndAnyPortRedirects(t *testing.T) {
+	rec, _ := runLogged(t, `module M {
+		type port P message { inout charstring }
+		type component C { port P p1; port P p2; timer t := 0.1; }
+		altstep dflt() runs on C { [] t.timeout { setverdict(pass); } }
+		testcase tc() runs on C {
+			var charstring v;
+			t.start;
+			alt { [] any port.receive(charstring:?) -> value v { setverdict(fail); } [] t.timeout {} }
+			var default d := activate(dflt());
+			t.start;
+			interleave { [] p1.receive("never") {} }
+		}
+	}`, clocks[0].opts)
+	got := map[string]int{}
+	for _, e := range rec.Events {
+		switch {
+		case e.Op == "tliIEnter" || e.Op == "tliILeave":
+			if !e.Aside {
+				t.Errorf("%s not aside", e.Op)
+			}
+			got[e.Op]++
+		case e.Op == "tliMReceiveEmpty" && e.Path == "(any)":
+			got["any"]++
+		}
+	}
+	if got["tliIEnter"] != 1 || got["tliILeave"] != 1 || got["any"] == 0 {
+		t.Fatalf("logged %v", got)
+	}
+}

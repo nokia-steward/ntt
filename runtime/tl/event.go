@@ -31,13 +31,21 @@ type Event struct {
 	// (tliCStart); Member tells that the variable or timer an event names
 	// is a member of the component it runs on, not local to a behaviour.
 	// Path, for a tliVar, is what in the variable was assigned, `.f[1]`,
-	// with its value in Parts. Codec, for a tliEncode or tliDecode, is the
+	// with its value in Parts; for a tliMReceiveEmpty of `any port`,
+	// "(any)". Codec, for a tliEncode or tliDecode, is the
 	// encode, variant and extension attributes of the value's type.
-	Parts  []Value
-	Site   Pos
-	Member bool
-	Path   string
-	Codec  []string
+	// Default, for a tliSEnter of an altstep, tells it runs as an activated
+	// default. Aside marks an event TCI-TL has no operation for, which its
+	// writers leave out: tliMReceiveEmpty, a receiving operation that found
+	// its port's queue empty; tliIEnter and tliILeave, an interleave's
+	// entry and leaving.
+	Parts   []Value
+	Site    Pos
+	Member  bool
+	Path    string
+	Codec   []string
+	Default bool
+	Aside   bool
 }
 
 // Pos is a position in a source file; the zero Pos is none.
@@ -63,6 +71,11 @@ type Logger interface {
 // at most once, every parameter the schema requires must be present, and
 // no two may be alternatives of one choice.
 func (e *Event) Validate() error {
+	if e.Aside {
+		// An event TCI-TL has no operation for, which its writers
+		// leave out.
+		return nil
+	}
 	fields, ok := Schema[e.Op]
 	if !ok {
 		return fmt.Errorf("tl: unknown operation %q", e.Op)
@@ -115,7 +128,16 @@ func (e *Event) node() *Node {
 	// name / id / type attributes.
 	n.Attrs = append(n.Attrs, Attr{"name", e.C.Name}, Attr{"id", e.C.ID}, Attr{"type", e.C.Type})
 	n.Kids = append(n.Kids, text(NSEvents, "am", e.Am))
-	for _, f := range Schema[e.Op] {
+	fields, known := Schema[e.Op]
+	if !known {
+		// An event TCI-TL has no operation for (Aside): its parameters as
+		// given.
+		for _, a := range e.Args {
+			n.Kids = append(n.Kids, a.Val.in(NSEvents, a.Name))
+		}
+		return n
+	}
+	for _, f := range fields {
 		for _, a := range e.Args {
 			if a.Name == f.Name {
 				n.Kids = append(n.Kids, a.Val.in(NSEvents, f.Name))

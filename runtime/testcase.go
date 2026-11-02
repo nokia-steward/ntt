@@ -53,6 +53,12 @@ type TestcaseExec struct {
 	// tlSites is, per component, where the behaviour it is about to enter
 	// was called or started from (SetTLCallSite).
 	tlSites map[int64]tl.Pos
+	// tlDefaults is, per component, whether the altstep it enters next runs
+	// as a default (MarkTLDefault).
+	tlDefaults map[int64]bool
+	// tlAnyPort is, per component, whether it scans its ports for an `any
+	// port` operation (SetTLAnyPort).
+	tlAnyPort map[int64]bool
 	// tlMsgType is a message arriving at a component's port as the log
 	// shows it, of its type (SetTLMessageTyper).
 	tlMsgType func(comp *ComponentRef, port string, o Object) tl.Value

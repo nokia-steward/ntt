@@ -21,6 +21,15 @@ single functional test doubles as a performance probe. See
 
 ### Added
 
+- **The line log follows the event catalogue of the format** — a receive,
+  trigger or check that finds its queue empty is a `ptre` (one `(any)` for
+  `any port` and all its queues), with the template's type, a predefined
+  one's too, evaluated for the log only when that runs no function; an
+  interleave enters and leaves as `ilen` and `illv`; an altstep run as an
+  activated default enters and leaves as `dten` and `dtlv` at the alt or
+  interleave that invokes it; map and unmap name the component's port
+  before the system's. `ptre`, `ilen` and `illv` have no TCI-TL operation,
+  and the XML and JSON Lines logs leave them out.
 - **`ntt run` builds and runs a suite, printing its line log** — `ntt run
   [ <path>... ] [ -- <test id>... ]`, also `ntt run2`, takes the command
   line of the suite runners its structured line log comes from: it runs
@@ -333,6 +342,12 @@ single functional test doubles as a performance probe. See
   mark; the `--regress` gate is the ratchet.
 
 ### Fixed
+
+- **A behaviour's entry and leaving are logged together** — an alt that
+  waits and scans again leaves out what it repeats; it could leave out an
+  altstep's entry and log its leaving, so the line log placed what followed
+  in the wrong behaviour. A leaving is now logged when its entry was, and
+  not when it was not.
 
 - **A control part's own statements are in the test log**: its `log`,
   `action`, assignments, timers and the functions it calls were not

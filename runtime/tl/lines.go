@@ -53,6 +53,7 @@ type LinesWriter struct {
 	queues   map[string][]queued // per port, the messages detected in it
 	sent     map[string]string   // per component, where it last sent
 	modpars  map[string]bool     // the module parameters logged
+	alts     map[string][]string // per component, where the alts it is in are
 	guard    string              // the duration execute() gave the testcase starting
 	execAt   string              // where execute() was called
 	tcStart  int64               // when the testcase started (µs)
@@ -63,6 +64,8 @@ type LinesWriter struct {
 // parameters it was entered with, and where it was called from.
 type frame struct {
 	scope, leaf, params, at string
+	// def is set for an altstep run as an activated default.
+	def bool
 }
 
 // queued is a message in a port's queue, as a receive matching it shows it.
@@ -76,7 +79,7 @@ func NewLinesWriter(w io.Writer) *LinesWriter {
 		w: bufio.NewWriter(w), loc: time.Local, system: RuntimeID(),
 		verdicts: map[string]string{}, names: map[string]string{}, states: map[string]string{},
 		frames: map[string][]frame{}, timers: map[string]int64{}, queues: map[string][]queued{},
-		sent: map[string]string{}, modpars: map[string]bool{},
+		sent: map[string]string{}, modpars: map[string]bool{}, alts: map[string][]string{},
 	}
 }
 
@@ -182,6 +185,7 @@ func (lw *LinesWriter) lines(e *Event, n *Node) []string {
 		control := lw.frames[lw.system]
 		lw.verdicts, lw.names, lw.states = map[string]string{}, map[string]string{}, map[string]string{}
 		lw.frames, lw.timers, lw.queues, lw.sent = map[string][]frame{lw.system: control}, map[string]int64{}, map[string][]queued{}, map[string]string{}
+		lw.alts = map[string][]string{}
 		lw.modpars = map[string]bool{}
 		lw.tcStart = e.Ts
 		lw.verdicts["MTC"] = "none"
@@ -323,9 +327,13 @@ func (lw *LinesWriter) lines(e *Event, n *Node) []string {
 	case "tliPDisconnect":
 		return one("ptdi", lw.portRef(arg("port1")), lw.portRef(arg("port2")))
 	case "tliPMap", "tliPMapParam":
-		return one("ptmp", lw.portRef(arg("port1")), lw.portRef(arg("port2")), "")
+		// The component's port, then the system's, whichever way round
+		// the map names them.
+		comp, sys := componentFirst(lw.portRef(arg("port1")), lw.portRef(arg("port2")))
+		return one("ptmp", comp, sys, "")
 	case "tliPUnmap", "tliPUnmapParam":
-		return one("ptun", lw.portRef(arg("port1")), lw.portRef(arg("port2")))
+		comp, sys := componentFirst(lw.portRef(arg("port1")), lw.portRef(arg("port2")))
+		return one("ptun", comp, sys)
 	case "tliPClear":
 		p := lw.portRef(arg("port"))
 		delete(lw.queues, p)
@@ -336,6 +344,14 @@ func (lw *LinesWriter) lines(e *Event, n *Node) []string {
 		return one("ptsp", lw.portRef(arg("port")))
 	case "tliPHalt":
 		return one("ptha", lw.portRef(arg("port")))
+	case "tliMReceiveEmpty":
+		// A receiving operation that found the queue empty, or `any
+		// port` the queues of all ports.
+		port := lw.portRef(arg("at"))
+		if e.Path == "(any)" {
+			port = e.Path
+		}
+		return one("ptre", port, lw.description(e, arg("msgTmpl"), nil, false))
 	}
 
 	// Communication, by the family of the operation.
@@ -416,10 +432,14 @@ func (lw *LinesWriter) lines(e *Event, n *Node) []string {
 		return one("tmto", timer, outcome)
 
 	// Alternatives and defaults.
-	case "tliAEnter":
-		return one("alen")
-	case "tliALeave":
-		return one("allv")
+	case "tliAEnter", "tliIEnter":
+		lw.alts[who] = append(lw.alts[who], srcLine(e.Src, e.Line))
+		return one(pick(op == "tliAEnter", "alen", "ilen"))
+	case "tliALeave", "tliILeave":
+		if as := lw.alts[who]; len(as) > 0 {
+			lw.alts[who] = as[:len(as)-1]
+		}
+		return one(pick(op == "tliALeave", "allv", "illv"))
 	case "tliARepeat":
 		return one("alrp")
 	case "tliAWait":
@@ -471,9 +491,24 @@ func (lw *LinesWriter) behaviour(e *Event, n *Node, who, here string, line func(
 		if at == "" {
 			at = srcLine(e.Src, e.Line)
 		}
-		lw.push(who, frame{scope: name, leaf: leaf(name), params: lw.params(n.Kid("tciPars"), true), at: at})
+		def := e.Default && strings.Contains(kind, "altstep")
+		if def {
+			// An altstep run as an activated default: at the alt that
+			// invokes it, its parameters those of its activation.
+			id = "dten"
+			if as := lw.alts[who]; len(as) > 0 && as[len(as)-1] != "" {
+				at = as[len(as)-1]
+			}
+			call = name + "(...)"
+		}
+		lw.push(who, frame{scope: name, leaf: leaf(name), params: lw.params(n.Kid("tciPars"), true), at: at, def: def})
 	} else {
-		at = lw.pop(who).at
+		f := lw.pop(who)
+		at = f.at
+		if f.def {
+			id = "dtlv"
+			call = name + "(...)"
+		}
 		if rv := n.Kid("returnValue"); rv != nil {
 			call += "->" + lw.lineValue(rv)
 		}
@@ -483,6 +518,15 @@ func (lw *LinesWriter) behaviour(e *Event, n *Node, who, here string, line func(
 		place += "=" + at
 	}
 	return []string{line(id, place, call)}
+}
+
+// componentFirst is the ports of a map or unmap, a and b, as the log has
+// them: the component's port first, the system's second.
+func componentFirst(a, b string) (string, string) {
+	if strings.HasPrefix(a, "SYSTEM.") && !strings.HasPrefix(b, "SYSTEM.") {
+		return b, a
+	}
+	return a, b
 }
 
 func (lw *LinesWriter) push(who string, f frame) {

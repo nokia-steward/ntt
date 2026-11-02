@@ -4101,6 +4101,9 @@ func evalPortReceiveBare(n syntax.Node, port string, env runtime.Scope, consume 
 				return true
 			}
 		}
+		if exec.TestLogger() != nil {
+			tlReceiveEmpty(exec, env, n, nil, "")
+		}
 		return false
 	}
 	// ETSI 20.2 alt snapshot boundary (real-clock concurrent path only; -1
@@ -4109,6 +4112,9 @@ func evalPortReceiveBare(n syntax.Node, port string, env runtime.Scope, consume 
 	limit := altReceiveLimit(exec, port)
 	head, ok := peek(port, limit)
 	if !ok {
+		if exec.TestLogger() != nil {
+			tlReceiveEmpty(exec, env, n, nil, port)
+		}
 		return false
 	}
 	if consume {

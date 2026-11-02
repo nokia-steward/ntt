@@ -83,3 +83,44 @@ func TestTLValueNotation(t *testing.T) {
 		t.Errorf("a pattern of non-ASCII characters is a %s", p.Kind)
 	}
 }
+
+// TestTLScanRepeatsPairsEntryAndLeaving: a scan after waiting leaves out
+// what it repeats, and a behaviour's leaving with its entry: logged when
+// the entry was, even after the scan, and not when the entry was not.
+func TestTLScanRepeatsPairsEntryAndLeaving(t *testing.T) {
+	exec := runtime.NewTestcaseExec("M.tc")
+	enter := &tl.Event{Op: "tliSEnter", Args: []tl.Arg{{Name: "name", Val: tl.QualifiedName("M", "guard")}}}
+	leave := &tl.Event{Op: "tliSLeave", Args: []tl.Arg{{Name: "name", Val: tl.QualifiedName("M", "guard")}}}
+	setv := &tl.Event{Op: "tliSetVerdict", Args: []tl.Arg{{Name: "verdict", Val: tl.String("pass")}}}
+
+	exec.TLScanBegin(1, false)
+	if exec.TLScanRepeats(1, enter) || exec.TLScanRepeats(1, leave) {
+		t.Fatal("the first scan repeats nothing")
+	}
+	exec.TLScanEnd(1)
+
+	// The scan after waiting enters the default again: neither its entry
+	// nor its leaving is logged, what it does anew is.
+	exec.TLScanBegin(1, true)
+	if !exec.TLScanRepeats(1, enter) {
+		t.Fatal("repeated entry logged")
+	}
+	if exec.TLScanRepeats(1, setv) {
+		t.Fatal("a new operation inside not logged")
+	}
+	exec.TLScanEnd(1)
+	if !exec.TLScanRepeats(1, leave) {
+		t.Fatal("leaving logged without its entry")
+	}
+
+	// An entry logged in a scan is left logged after it.
+	exec.TLAltBump(1)
+	exec.TLScanBegin(1, true)
+	if exec.TLScanRepeats(1, enter) {
+		t.Fatal("entry of a new alt round taken for a repeat")
+	}
+	exec.TLScanEnd(1)
+	if exec.TLScanRepeats(1, leave) {
+		t.Fatal("leaving of a logged entry left out")
+	}
+}

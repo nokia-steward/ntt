@@ -57,10 +57,13 @@ func runLogged(t *testing.T, src string, opts interpreter.TestcaseOptions) (*tl.
 
 // perComponent splits a log into each component's own sequence of
 // operations, the order that is fixed by the test regardless of how the
-// components interleave.
+// components interleave. Events TCI-TL has no operation for are not in it.
 func perComponent(rec *tl.Recorder) map[string][]string {
 	out := map[string][]string{}
 	for _, e := range rec.Events {
+		if e.Aside {
+			continue
+		}
 		out[e.C.Name] = append(out[e.C.Name], e.Op)
 	}
 	return out

@@ -10803,6 +10803,15 @@ func evalAnyPortOp(op string, n *syntax.CallExpr, env runtime.Scope) runtime.Obj
 	if exec == nil {
 		return runtime.Undefined
 	}
+	// The log has the queues of the ports scanned, empty, as one.
+	logEmpty := exec.TestLogger() != nil && (op == "receive" || op == "trigger" || op == "check")
+	if logEmpty {
+		comp := currentCompID(exec)
+		exec.SetTLAnyPort(comp, true)
+		defer func() {
+			exec.SetTLAnyPort(comp, false)
+		}()
+	}
 	// `any port` is any of this component's own ports (ETSI 22.5), by
 	// bare name: the receiving operations qualify it themselves.
 	for _, port := range exec.CurrentComponentPortNames() {
@@ -10828,6 +10837,9 @@ func evalAnyPortOp(op string, n *syntax.CallExpr, env runtime.Scope) runtime.Obj
 		if res != runtime.Undefined {
 			return res
 		}
+	}
+	if logEmpty && anyPortQueuesEmpty(exec) {
+		tlReceiveEmpty(exec, env, n, n, "")
 	}
 	// No port produced a hit: pre-populate any `-> sender v`
 	// redirect found in the call's arguments with the latest
@@ -12199,7 +12211,15 @@ func runDefaults(env runtime.Scope) (runtime.Object, bool) {
 		// for this eval, flips the flag when a real guard match fires a
 		// branch. The verdict-change test below is kept as a superset.
 		defaultBranchArm()
+		var tlComp int64
+		if exec != nil && runtime.TLActive() {
+			tlComp = currentCompID(exec)
+			exec.MarkTLDefault(tlComp, true)
+		}
 		res := eval(ast.n, d.Env)
+		if exec != nil && runtime.TLActive() {
+			exec.MarkTLDefault(tlComp, false)
+		}
 		// A repeat in the default's branch re-evaluates the alt that
 		// invoked it (ETSI 20.5.2).
 		if res == runtime.Repeat {
@@ -15137,11 +15157,20 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 		// (passing the already-qualified PortNames() key would double-
 		// qualify and never match). Only this component's ports are
 		// considered, per TTCN-3 22.5.
+		logEmpty := exec.TestLogger() != nil && commOpKind(info) == runtime.MsgMessage
+		if logEmpty {
+			comp := currentCompID(exec)
+			exec.SetTLAnyPort(comp, true)
+			defer exec.SetTLAnyPort(comp, false)
+		}
 		for _, p := range exec.CurrentComponentPortNames() {
 			res := evalPortReceiveInfo(p, info, env, consume)
 			if !isUndefinedResult(res) {
 				return res
 			}
+		}
+		if logEmpty && anyPortQueuesEmpty(exec) {
+			tlReceiveEmpty(exec, env, info.call, info.call, "")
 		}
 		if !altCtx.active() && exec.CurrentComponent() != nil {
 			return &runtime.ReturnValue{Value: runtime.Undefined}
@@ -15199,6 +15228,9 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 			// gates re-acceptance (Sem_220303_ReplyOperation_001).
 			if !deterministicSchedulerEnabled(env) {
 				prePopulateRedirectExpr(info.redirect, exec, env)
+			}
+			if exec.TestLogger() != nil && kind == runtime.MsgMessage && !checkAny {
+				tlReceiveEmpty(exec, env, info.call, info.call, port)
 			}
 			if !altCtx.active() && exec.CurrentComponent() != nil {
 				return &runtime.ReturnValue{Value: runtime.Undefined}
@@ -16142,6 +16174,19 @@ func isComponentArrayWait(e syntax.Expr) bool {
 		return true
 	}
 	return false
+}
+
+// anyPortQueuesEmpty reports whether every port of the current component
+// has nothing queued that its alt round may see, for the log of an `any
+// port` operation.
+func anyPortQueuesEmpty(exec *runtime.TestcaseExec) bool {
+	for _, p := range exec.CurrentComponentPortNames() {
+		key := exec.PortKey(p)
+		if _, ok := exec.PeekHeadLimited(key, altReceiveLimit(exec, key)); ok {
+			return false
+		}
+	}
+	return true
 }
 
 // hasFromClause reports whether e is an operation with a from clause,

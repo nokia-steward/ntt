@@ -108,6 +108,10 @@ func (t *TestcaseExec) TLAltBump(comp int64) {
 type tlScan struct {
 	active, again bool
 	seen          map[string]bool
+	// frames is, per behaviour the component entered since its first scan
+	// and has not left, whether its entry went unlogged as a repeat: its
+	// leaving is not logged then either, and is when its entry was.
+	frames []bool
 }
 
 // TLScanBegin begins a guard scan of component comp's alt; again is set
@@ -138,26 +142,39 @@ func (t *TestcaseExec) TLScanEnd(comp int64) {
 
 // TLScanRepeats reports whether e, logged by component comp during a guard
 // scan after waiting, repeats an operation logged in the same alt round,
-// and records it.
+// and records it. A behaviour's leaving repeats when its entry did, so the
+// log never has the one without the other.
 func (t *TestcaseExec) TLScanRepeats(comp int64, e *tl.Event) bool {
 	t.tlMu.Lock()
+	defer t.tlMu.Unlock()
 	s := t.tlScans[comp]
-	active := s != nil && s.active
-	t.tlMu.Unlock()
-	if !active {
+	if s == nil {
 		return false
 	}
-	key := e.Key()
-	t.tlMu.Lock()
-	defer t.tlMu.Unlock()
-	if s.seen == nil {
-		s.seen = map[string]bool{}
+	// A behaviour's leaving goes as its entry went, scan or not.
+	if e.Op == "tliSLeave" {
+		if n := len(s.frames); n > 0 {
+			rep := s.frames[n-1]
+			s.frames = s.frames[:n-1]
+			return rep
+		}
 	}
-	if s.seen[key] {
-		return s.again
+	rep := false
+	if s.active {
+		key := e.Key()
+		if s.seen == nil {
+			s.seen = map[string]bool{}
+		}
+		if s.seen[key] {
+			rep = s.again
+		} else {
+			s.seen[key] = true
+		}
 	}
-	s.seen[key] = true
-	return false
+	if e.Op == "tliSEnter" {
+		s.frames = append(s.frames, rep)
+	}
+	return rep
 }
 
 // TLTime is the timestamp of an event logged now, in microseconds since
@@ -239,6 +256,54 @@ func (t *TestcaseExec) SetTLCallSite(comp int64, at tl.Pos) {
 		t.tlSites = map[int64]tl.Pos{}
 	}
 	t.tlSites[comp] = at
+}
+
+// MarkTLDefault records that the altstep component comp enters next runs as
+// an activated default, for the event of its entry (TakeTLDefault).
+func (t *TestcaseExec) MarkTLDefault(comp int64, on bool) {
+	t.tlMu.Lock()
+	defer t.tlMu.Unlock()
+	if t.tlDefaults == nil {
+		t.tlDefaults = map[int64]bool{}
+	}
+	if on {
+		t.tlDefaults[comp] = true
+	} else {
+		delete(t.tlDefaults, comp)
+	}
+}
+
+// SetTLAnyPort records that component comp scans its ports for an `any
+// port` operation, whose empty queues the log has as one (TLAnyPort).
+func (t *TestcaseExec) SetTLAnyPort(comp int64, on bool) {
+	t.tlMu.Lock()
+	defer t.tlMu.Unlock()
+	if t.tlAnyPort == nil {
+		t.tlAnyPort = map[int64]bool{}
+	}
+	if on {
+		t.tlAnyPort[comp] = true
+	} else {
+		delete(t.tlAnyPort, comp)
+	}
+}
+
+// TLAnyPort reports whether component comp scans its ports for an `any
+// port` operation (SetTLAnyPort).
+func (t *TestcaseExec) TLAnyPort(comp int64) bool {
+	t.tlMu.Lock()
+	defer t.tlMu.Unlock()
+	return t.tlAnyPort[comp]
+}
+
+// TakeTLDefault reports and forgets whether MarkTLDefault marked the
+// altstep component comp enters next.
+func (t *TestcaseExec) TakeTLDefault(comp int64) bool {
+	t.tlMu.Lock()
+	defer t.tlMu.Unlock()
+	on := t.tlDefaults[comp]
+	delete(t.tlDefaults, comp)
+	return on
 }
 
 // TakeTLCallSite returns and forgets the call site SetTLCallSite recorded

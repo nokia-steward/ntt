@@ -578,8 +578,14 @@ func tlReceive(exec *runtime.TestcaseExec, env runtime.Scope, call syntax.Node, 
 	// template is declared with; a template of no declared type, `?`,
 	// matches the message as of its type.
 	var td *runtime.TypeDesc
+	// prefix is the predefined type `T: template` names, which has no
+	// type descriptor.
+	var prefix string
 	if ce, ok := call.(*syntax.CallExpr); ok && ce.Args != nil && len(ce.Args.List) > 0 {
 		td = lvalueTypeDesc(ce.Args.List[0], env)
+		if b, ok := ce.Args.List[0].(*syntax.BinaryExpr); ok && td == nil && b.Op != nil && b.Op.Kind() == syntax.COLON {
+			prefix = syntax.Name(b.X)
+		}
 	}
 	if td == nil && ev != "mismatch" {
 		td = portMessageTypeDesc(env, exec.CurrentComponent(), exec.TLPort(self, port).Name, head.Payload)
@@ -635,16 +641,108 @@ func tlReceive(exec *runtime.TestcaseExec, env runtime.Scope, call syntax.Node, 
 		// Locate the check itself, not the call standing in for it.
 		call = orig.(syntax.Node)
 	}
-	if td == nil || checkAny {
+	if td == nil && prefix == "" || checkAny {
 		tlEmit(exec, call, op, args...)
 		return
 	}
 	// The template's type, which a `?` of it does not show.
-	typed := tl.Value{Type: td.Name, Module: moduleNameFromEnv(env)}
-	if td.Home != nil {
-		typed.Module = moduleNameFromEnv(td.Home)
+	typed := tl.Value{Type: prefix}
+	if td != nil {
+		typed = tl.Value{Type: td.Name, Module: moduleNameFromEnv(env)}
+		if td.Home != nil {
+			typed.Module = moduleNameFromEnv(td.Home)
+		}
 	}
 	tlEmitWith(exec, call, op, func(e *tl.Event) { e.Parts = []tl.Value{typed} }, args...)
+}
+
+// tlReceiveEmpty logs that a receiving operation found its port's queue
+// empty (tliMReceiveEmpty, an event TCI-TL has none for): the port and
+// the template, evaluated for the log alone when that can do nothing a
+// test could tell (tlInert) and logged as `?` otherwise, or when it fails
+// to evaluate. port "" is `any port`, logged once for all the ports it
+// scans (SetTLAnyPort), not for each.
+func tlReceiveEmpty(exec *runtime.TestcaseExec, env runtime.Scope, n syntax.Node, call *syntax.CallExpr, port string) {
+	defer tlRecover(exec)
+	if n == nil || reflect.ValueOf(n).IsNil() {
+		return
+	}
+	self := currentCompID(exec)
+	if port != "" && exec.TLAnyPort(self) {
+		return
+	}
+	var tmpl runtime.Object
+	var td *runtime.TypeDesc
+	typed := tl.Value{}
+	if call != nil && call.Args != nil && len(call.Args.List) > 0 && call.Args.List[0] != nil {
+		first := call.Args.List[0]
+		td = lvalueTypeDesc(first, env)
+		if b, ok := first.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.COLON {
+			// `T: template`: of type T, a predefined type's too.
+			if td == nil {
+				td = lookupTypeDesc(syntax.Name(b.X), env)
+			}
+			if td == nil {
+				typed.Type = syntax.Name(b.X)
+			}
+			first = b.Y
+		}
+		tmpl = runtime.Any
+		if tlInert(first, env) {
+			if v := eval(first, env); v != nil && !runtime.IsError(v) {
+				tmpl = v
+			}
+		}
+	}
+	if td != nil {
+		typed = tl.Value{Type: td.Name, Module: moduleNameFromEnv(env)}
+		if td.Home != nil {
+			typed.Module = moduleNameFromEnv(td.Home)
+		}
+	}
+	var args []tl.Arg
+	if port != "" {
+		args = append(args, tlArg("at", exec.TLPort(self, port).Content()))
+	}
+	if tmpl != nil {
+		args = append(args, tlArg("msgTmpl", tlTyped(tmpl, td, env).AsTemplate()))
+	}
+	tlEmitWith(exec, n, "tliMReceiveEmpty", func(e *tl.Event) {
+		e.Aside = true
+		if typed.Type != "" {
+			e.Parts = []tl.Value{typed}
+		}
+		if port == "" {
+			e.Path = "(any)"
+		}
+	}, args...)
+}
+
+// tlInert reports whether evaluating x does nothing a test could tell: it
+// calls no function or template, and reads no @lazy or @fuzzy value, whose
+// first reading is its evaluation.
+func tlInert(x syntax.Expr, env runtime.Scope) bool {
+	inert := true
+	syntax.Inspect(x, func(n syntax.Node) bool {
+		if !inert {
+			return false
+		}
+		switch n := n.(type) {
+		case *syntax.CallExpr:
+			inert = false
+		case *syntax.Ident:
+			if v, ok := env.Get(n.String()); ok {
+				if _, lazy := v.(*runtime.LazyThunk); lazy {
+					inert = false
+				}
+				if _, fn := v.(*runtime.Function); fn {
+					inert = false
+				}
+			}
+		}
+		return inert
+	})
+	return inert
 }
 
 // portMessageTypeDesc is the type of message o arriving at the port named
@@ -1112,8 +1210,10 @@ func tlScope(exec *runtime.TestcaseExec, n syntax.Node, op, module, name, kind s
 		tlEmit(exec, n, op, args...)
 		return
 	}
-	site := exec.TakeTLCallSite(currentCompID(exec))
-	tlEmitWith(exec, n, op, func(e *tl.Event) { e.Site = site }, args...)
+	comp := currentCompID(exec)
+	site := exec.TakeTLCallSite(comp)
+	def := strings.Contains(kind, "altstep") && exec.TakeTLDefault(comp)
+	tlEmitWith(exec, n, op, func(e *tl.Event) { e.Site, e.Default = site, def }, args...)
 }
 
 // tlCompStatus is a component's state as TCI-TL's ComponentStatusType

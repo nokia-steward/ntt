@@ -304,3 +304,70 @@ func TestRuntimeID(t *testing.T) {
 		t.Fatalf("got %q", c.String())
 	}
 }
+
+// TestLinesWriterAlignsWithTheEventCatalogue: a map names the component's
+// port before the system's, whichever way round the operation has them; a
+// receive on an empty queue is a ptre; an altstep run as a default enters
+// and leaves as dten and dtlv.
+func TestLinesWriterAlignsWithTheEventCatalogue(t *testing.T) {
+	sys := tl.PortID{Comp: tl.ComponentID{Name: "system", ID: "system"}, Name: "p", Index: -1}.Content()
+	own := tl.PortID{Comp: mtc, Name: "p", Index: -1}.Content()
+	got := linesOf(t,
+		&tl.Event{Op: "tliTcStart", Ts: ts, C: mtc, Args: []tl.Arg{{Name: "tcId", Val: tl.TestcaseID("T", "tc")}}},
+		&tl.Event{Op: "tliPMap", Ts: ts, Src: "T.ttcn3", Line: 5, C: mtc, Args: []tl.Arg{{Name: "port1", Val: sys}, {Name: "port2", Val: own}}},
+		&tl.Event{Op: "tliAEnter", Ts: ts, Src: "T.ttcn3", Line: 7, C: mtc},
+		&tl.Event{Op: "tliMReceiveEmpty", Ts: ts, Src: "T.ttcn3", Line: 7, C: mtc, Aside: true, Args: []tl.Arg{
+			{Name: "at", Val: own}, {Name: "msgTmpl", Val: tl.Value{Kind: "charstring", Text: "hello"}.AsTemplate()}}},
+		&tl.Event{Op: "tliSEnter", Ts: ts, Src: "T.ttcn3", Line: 3, C: mtc, Default: true, Args: []tl.Arg{
+			{Name: "name", Val: tl.QualifiedName("T", "guard")}, {Name: "kind", Val: tl.String("altstep")}}},
+		&tl.Event{Op: "tliSLeave", Ts: ts, Src: "T.ttcn3", Line: 3, C: mtc, Args: []tl.Arg{
+			{Name: "name", Val: tl.QualifiedName("T", "guard")}, {Name: "kind", Val: tl.String("altstep")}}},
+		&tl.Event{Op: "tliALeave", Ts: ts, Src: "T.ttcn3", Line: 7, C: mtc},
+		&tl.Event{Op: "tliPUnmap", Ts: ts, Src: "T.ttcn3", Line: 9, C: mtc, Args: []tl.Arg{{Name: "port1", Val: sys}, {Name: "port2", Val: own}}},
+	)
+	// A default enters and leaves at the alt that invokes it, its
+	// parameters those of its activation.
+	wantLines(t, got[3:],
+		`20261008T072418.794614|ptmp|MTC=T.ttcn3:5|MTC.p|SYSTEM.p|`,
+		`20261008T072418.794614|alen|MTC=T.ttcn3:7`,
+		`20261008T072418.794614|ptre|MTC=T.ttcn3:7|MTC.p|value=charstring:"hello"`,
+		`20261008T072418.794614|dten|MTC=T.ttcn3:7|T.guard(...)`,
+		`20261008T072418.794614|dtlv|MTC=T.ttcn3:7|T.guard(...)`,
+		`20261008T072418.794614|allv|MTC=T.ttcn3:7`,
+		`20261008T072418.794614|ptun|MTC=T.ttcn3:9|MTC.p|SYSTEM.p`,
+	)
+	// The TCI-TL log has no operation for an empty receive, and leaves it
+	// out.
+	var b bytes.Buffer
+	w := tl.NewXMLWriter(&b)
+	w.Log(&tl.Event{Op: "tliMReceiveEmpty", Ts: ts, C: mtc, Aside: true, Args: []tl.Arg{{Name: "at", Val: own}}})
+	_ = w.Close()
+	if strings.Contains(b.String(), "ReceiveEmpty") {
+		t.Fatalf("XML has the aside event:\n%s", b.String())
+	}
+	if err := (&tl.Event{Op: "tliMReceiveEmpty", Aside: true}).Validate(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestLinesWriterInterleaves: an interleave enters and leaves as ilen and
+// illv, and a default its scan invokes is at it.
+func TestLinesWriterInterleaves(t *testing.T) {
+	got := linesOf(t,
+		&tl.Event{Op: "tliTcStart", Ts: ts, C: mtc, Args: []tl.Arg{{Name: "tcId", Val: tl.TestcaseID("T", "tc")}}},
+		&tl.Event{Op: "tliAEnter", Ts: ts, Src: "T.ttcn3", Line: 8, C: mtc},
+		&tl.Event{Op: "tliIEnter", Ts: ts, Src: "T.ttcn3", Line: 9, C: mtc, Aside: true},
+		&tl.Event{Op: "tliSEnter", Ts: ts, Src: "T.ttcn3", Line: 3, C: mtc, Default: true, Args: []tl.Arg{
+			{Name: "name", Val: tl.QualifiedName("T", "guard")}, {Name: "kind", Val: tl.String("altstep")}}},
+		&tl.Event{Op: "tliSLeave", Ts: ts, Src: "T.ttcn3", Line: 3, C: mtc, Args: []tl.Arg{
+			{Name: "name", Val: tl.QualifiedName("T", "guard")}, {Name: "kind", Val: tl.String("altstep")}}},
+		&tl.Event{Op: "tliILeave", Ts: ts, Src: "T.ttcn3", Line: 9, C: mtc, Aside: true},
+	)
+	wantLines(t, got[3:],
+		`20261008T072418.794614|alen|MTC=T.ttcn3:8`,
+		`20261008T072418.794614|ilen|MTC=T.ttcn3:9`,
+		`20261008T072418.794614|dten|MTC=T.ttcn3:9|T.guard(...)`,
+		`20261008T072418.794614|dtlv|MTC=T.ttcn3:9|T.guard(...)`,
+		`20261008T072418.794614|illv|MTC=T.ttcn3:9`,
+	)
+}

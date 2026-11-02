@@ -59,6 +59,9 @@ func (lw *Writer) header() *Node {
 
 // Log writes e. Events are written in the order Log is called.
 func (lw *Writer) Log(e *Event) {
+	if e.Aside {
+		return
+	}
 	n := e.node()
 	lw.mu.Lock()
 	defer lw.mu.Unlock()

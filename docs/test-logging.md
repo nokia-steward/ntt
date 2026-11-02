@@ -122,16 +122,19 @@ value cannot hold a line break, which `char(...)` writes, but can hold a
 | `fnen` `fnlv` | function enter, leave | function(parameters)[->result] |
 | `fxen` `fxlv` | external function enter, leave | function(parameters)[->result] |
 | `asen` `aslv` | altstep enter, leave | altstep(parameters) |
+| `dten` `dtlv` | an activated default entered, left, at the alt that invokes it | altstep(...) |
+| `ilen` `illv` | interleave entered, left | |
 | `cocr` `cost` | component created, started | component, alive/once; behaviour |
 | `cofi` | component finished | verdict |
 | `cosp` `coki` | component stopped, killed | component |
 | `codo` `cokd` | done, killed evaluated | component, ready/wait/never |
 | `coru` `coal` | running, alive evaluated | component, running/stopped, alive/killed |
-| `ptcn` `ptdi` `ptmp` `ptun` | connect, disconnect, map, unmap | port, port (map: and its parameters) |
+| `ptcn` `ptdi` `ptmp` `ptun` | connect, disconnect, map, unmap | port, port — for map and unmap the component's, then the system's (map: and its parameters) |
 | `ptst` `ptsp` `ptha` `ptcl` | port start, stop, halt, clear | port |
 | `ptsd` | send, call, reply, raise | port, to, type or call/reply/exception, value |
 | `ptqu` | arrived in a port's queue, logged as its sender (`?` for what a test port hands in) | port, `message(value=T:v,sender=T:C(state),timestamp=s)`, the sender `:null` from a test port |
 | `ptrx` `ptck` | receive (getcall, getreply, catch), check evaluated | port, `value=T:template`, `ready(match=...)+consume` / `+check` or `never(mismatch=value:v~t)` |
+| `ptre` | receive, trigger or check evaluated on an empty queue | port, or `(any)` for `any port` and all its queues, `value=T:template` (`?` for a template that calls a function, which the log does not evaluate) |
 | `tmst` `tmsp` | timer start, stop | timer, duration in seconds (`1.0s`) |
 | `tmto` `tmrd` `tmru` | timeout, read, running evaluated | timer, `ready`/`wait(expiry)`/`never(inactive)`, elapsed, true/false |
 | `alen` `allv` `alrp` | alt enter, leave, repeat | |
@@ -160,10 +163,13 @@ is of its declared type, or of the one type its port's `in` list gives a
 value of its structure); a component's state in a message's sender is the
 one ntt last logged for it, and its type is named without its module; a
 module parameter is logged the first time a testcase reads it, not each one
-before every testcase; an altstep invoked as a default is logged as an
-altstep (`asen`, `aslv`); and ntt computes floats in double precision, so a
-computed float can differ in its last digits from one computed in more
-precision.
+before every testcase; a send on a port that is stopped or connected to
+nothing is the error the standard makes it, not a message discarded
+(`ptds`); and ntt computes floats in double precision, so a computed float
+can differ in its last digits from one computed in more precision.
+
+`ptre`, `ilen` and `illv` have no TCI-TL operation: the XML and JSON Lines
+logs leave them out.
 
 ## What is logged
 

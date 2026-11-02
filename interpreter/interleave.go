@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/nokia/ntt/runtime"
+	"github.com/nokia/ntt/runtime/tl"
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
@@ -137,6 +138,12 @@ func (br *ilBranch) giveUp() {
 func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) (result runtime.Object) {
 	if n.Body == nil {
 		return nil
+	}
+	// Its entry and leaving, events TCI-TL has none for.
+	if lexec := tlExec(env); lexec != nil && lexec.TestLogger() != nil {
+		aside := func(e *tl.Event) { e.Aside = true }
+		tlEmitWith(lexec, n, "tliIEnter", aside)
+		defer tlEmitWith(lexec, n, "tliILeave", aside)
 	}
 	var clauses []*syntax.CommClause
 	for _, s := range n.Body.Stmts {
