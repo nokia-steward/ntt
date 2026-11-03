@@ -19,9 +19,11 @@ const (
 )
 
 // V5Language is the language identifier that writes a module in V5:
-// `module M language "TTCN-3:2026" { ... }`. The release defines none yet;
-// this one is provisional.
-const V5Language = "TTCN-3:2026"
+// `module M language "TTCN-3:5" { ... }`. The release defines none yet.
+// It names the major version, not a year: the identifiers of years are
+// V4's, whose releases take a year other than their own (V4.17.1, of 2025,
+// is "TTCN-3:2023"), so any year could yet name a V4 one.
+const V5Language = "TTCN-3:5"
 
 // DefaultLanguage is the language of a module whose language clause names
 // no TTCN-3 edition: a project's (its manifest's `language`, or

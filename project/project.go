@@ -88,9 +88,8 @@ type Manifest struct {
 	Imports []string
 
 	// Language is the language of the modules whose language clause
-	// names no TTCN-3 edition, "TTCN-3:2026" for the next major release
-	// of the core language (provisional, see syntax.V5Language). Default:
-	// ES 201 873-1 V4.
+	// names no TTCN-3 edition, "TTCN-3:5" (syntax.V5Language) for the
+	// next major release of the core language. Default: ES 201 873-1 V4.
 	Language string `json:"language"`
 
 	// BeforeBuild is a list of shell commands to be executed before

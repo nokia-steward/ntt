@@ -22,8 +22,9 @@ single functional test doubles as a performance probe. See
 ### Added
 
 - **A module can be written in the next major release of the core
-  language (V5)** — by its language clause, `language "TTCN-3:2026"`
-  (provisional: the release defines none yet), or for the modules whose
+  language (V5)** — by its language clause, `language "TTCN-3:5"`
+  (the release defines none yet; this one names the major version, as a
+  year could yet name a V4 release), or for the modules whose
   clause names no TTCN-3 edition by the project's `language` (or
   `NTT_LANGUAGE`). V4 stays the default, and a suite can mix both. A V5
   module takes enumerators of integer expressions and ranges open to
@@ -33,7 +34,9 @@ single functional test doubles as a performance probe. See
   types written alone, and a label a definition hides are errors. Its
   `sizeof` counts a list's elements, uninitialised ones included; its
   `default` and `verdicttype` variables start `null` and `none`; and
-  implicit omit completes a modified template's modification. See
+  implicit omit completes a modified template's modification. A range
+  loop iterating into a variable declared outside it takes no
+  uninitialised element. See
   [docs/v5-migration-notes.md](docs/v5-migration-notes.md).
 - **The line log follows the event catalogue of the format** — a receive,
   trigger or check that finds its queue empty is a `ptre` (one `(any)` for

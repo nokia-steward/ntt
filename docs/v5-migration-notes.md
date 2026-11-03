@@ -43,18 +43,21 @@ says so, or when the project makes V5 the default for the modules whose
 clause names no TTCN-3 edition:
 
 ```ttcn3
-module M language "TTCN-3:2026" { ... }
+module M language "TTCN-3:5" { ... }
 ```
 
 ```yaml
 # package.yml
-language: "TTCN-3:2026"
+language: "TTCN-3:5"
 ```
 
-or `NTT_LANGUAGE=TTCN-3:2026` in the environment. The release defines no
-language identifier yet; `"TTCN-3:2026"` is provisional and kept in one
-place, `syntax.V5Language`. A clause naming another TTCN-3 edition
-(`"TTCN-3:2018 Object-Oriented"`) keeps a module V4 whatever the default.
+or `NTT_LANGUAGE=TTCN-3:5` in the environment. The release defines no
+language identifier yet; ntt's, kept in one place, `syntax.V5Language`,
+names the major version rather than a year. The identifiers of years are
+V4's, and its releases take a year other than their own (V4.17.1, of 2025,
+is `"TTCN-3:2023"`), so any year could yet name a V4 release. A clause
+naming another TTCN-3 edition (`"TTCN-3:2018 Object-Oriented"`) keeps a
+module V4 whatever the default.
 
 What a V5 module reads differently today, after the draft of the core
 language in the task forces' working space (`src/`) and their meeting
@@ -81,16 +84,28 @@ decisions:
   the optional fields it does not mention are set to omit, but for those
   it gives `-` (Berlin, 2026). In V4 a field the modification does not
   mention is the base's (15.5 b).
+- **A range-based loop** whose iteration variable is declared outside it
+  iterates a range of which every element is initialised (Berlin, 2026):
+  the analyzer tells a `-` in a literal range, the interpreter any
+  uninitialised element, an error. In V4 the variable is unbound in that
+  iteration (19.4.2). A variable the header declares may still take one.
+  The whole range is checked before the first iteration, and an element
+  is looked at, not its fields.
 
 The analyzer and the interpreter ask the module (`Module.Edition`), so a
 suite can mix V4 and V5 modules.
 
-Not yet: `???` (not implemented), the
-restriction of a range loop over a predeclared variable, local templates
-with parameters (the task forces' own experiment still uses one), the
-enum-label checks inside groups and of imported types, and a field of an
-implicit-omit template that refers to an explicit-omit one, which is set
-to omit (27.7 says it is not).
+`???` (the draft's grammar, "Other literals") stands for what is not
+implemented yet: it is accepted wherever an expression is, of any type,
+and evaluating it is an error. ntt reads it so in modules of either
+edition.
+
+Not yet: local templates with parameters (the task forces' own
+experiment still uses one), templates in a range loop (left out at
+Budapest, 2025, without a rule yet), the enum-label checks inside groups
+and of imported types, and a field of an implicit-omit template that
+refers to an explicit-omit one, which is set to omit (27.7 says it is
+not).
 
 ## Core-language changes that affect ntt's semantic checks
 

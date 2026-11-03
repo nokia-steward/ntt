@@ -5132,7 +5132,9 @@ func mapKeysOrValues(m *runtime.Map, keys bool) *runtime.List {
 // the iteration variable as by `var T x := e` or `x := e` (19.1.1), so
 // it takes the variable's type, an uninitialised one leaving it unbound.
 // A variable the header declares is a new one in every iteration,
-// scoped to the block; one declared outside keeps the last element.
+// scoped to the block; one declared outside keeps the last element. In
+// V5, a range iterated into a variable declared outside has every
+// element initialised (Berlin, 2026).
 func evalForRange(n *syntax.ForRangeStmt, env runtime.Scope) runtime.Object {
 	rng := eval(n.Range, env)
 	if runtime.IsError(rng) {
@@ -5175,6 +5177,15 @@ func evalForRange(n *syntax.ForRangeStmt, env runtime.Scope) runtime.Object {
 		ref = x.Expr
 	default:
 		return runtime.Errorf("for loop has no iteration variable")
+	}
+	// The whole range is checked before the first iteration, element by
+	// element; an element's own fields are not looked into.
+	if decl == nil && moduleEdition(env) == syntax.V5 {
+		for i, e := range elems {
+			if e == nil || e == runtime.Undefined {
+				return runtime.Errorf("element %d of the range of a loop whose iteration variable is declared outside it is uninitialised", i)
+			}
+		}
 	}
 
 	for _, e := range elems {

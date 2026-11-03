@@ -11,7 +11,11 @@ func TestModuleEdition(t *testing.T) {
 	}{
 		{`module M {}`, "", V4},
 		{`module M {}`, V5Language, V5},
-		{`module M language "TTCN-3:2026" {}`, "", V5},
+		{`module M language "TTCN-3:5" {}`, "", V5},
+		{`module M language "TTCN-3:2026" {}`, V5Language, V4},
+		{`module M language "TTCN-3:5 Object-Oriented" {}`, "", V5},
+		{`module M language "TTCN-3:50" {}`, V5Language, V4},
+		{`module M language "TTCN-3:5.1" {}`, V5Language, V4},
 		{`module M language "TTCN-3:2018 Object-Oriented" {}`, V5Language, V4},
 		{`module M language "XSD" {}`, V5Language, V5},
 		{`module M language "XSD" {}`, "", V4},

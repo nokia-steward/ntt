@@ -3,6 +3,10 @@ package interpreter_test
 import (
 	"strings"
 	"testing"
+
+	"github.com/nokia/ntt/interpreter"
+	"github.com/nokia/ntt/runtime"
+	"github.com/nokia/ntt/ttcn3"
 )
 
 // v4v5 runs a testcase once in a module of each edition: in V4 its body
@@ -19,7 +23,7 @@ func v4v5(t *testing.T, decls, v4, v5 string) {
 		}`}, " ")
 	}
 	t.Run("V4", func(t *testing.T) { runPass(t, "M.tc", src("", v4)) })
-	t.Run("V5", func(t *testing.T) { runPass(t, "M.tc", src(`language "TTCN-3:2026"`, v5)) })
+	t.Run("V5", func(t *testing.T) { runPass(t, "M.tc", src(`language "TTCN-3:5"`, v5)) })
 }
 
 // The size of a V5 list is the number of its elements, uninitialised ones
@@ -43,7 +47,7 @@ func TestEdition_InitialValues(t *testing.T) {
 // Enumerators of V5 take integer expressions, constants included, and
 // ranges open to infinity; one without integers gets the lowest unused.
 func TestEdition_EnumeratorIntegers(t *testing.T) {
-	runPass(t, "M.tc", `module M language "TTCN-3:2026" {
+	runPass(t, "M.tc", `module M language "TTCN-3:5" {
 		type component C {}
 		const integer K := 5;
 		type enumerated E { A, B(1..9, 10+1), D, F(-10..0) }
@@ -74,7 +78,7 @@ func TestImplicitOmit_Templates(t *testing.T) {
 
 // A component's variables take V5's initial values as a behaviour's do.
 func TestEdition_ComponentVariablesInitialValues(t *testing.T) {
-	runPass(t, "M.tc", `module M language "TTCN-3:2026" {
+	runPass(t, "M.tc", `module M language "TTCN-3:5" {
 		type component C { var verdicttype cv; var default cd; }
 		testcase tc() runs on C {
 			if (cv == none and cd == null) { setverdict(pass); } else { setverdict(fail); }
@@ -95,5 +99,82 @@ func TestEnumInitialiserNamingNoIntegerOfItsLabel(t *testing.T) {
 	}`)
 	if v != "error" {
 		t.Fatalf("verdict = %s (%s), want error", v, reason)
+	}
+}
+
+// A V5 loop whose iteration variable is declared outside it iterates a
+// range of initialised elements (Berlin, 2026); V4 iterates an
+// uninitialised one too, and the variable is unbound in that iteration.
+// A variable the header declares takes one in either edition.
+func TestEdition_RangeLoopIntoOutsideVariable(t *testing.T) {
+	decls := `type record of charstring RoC;
+		function f_out(RoC r) return integer {
+			var integer n := 0; var charstring e;
+			for (e in r) { if (isbound(e)) { n := n + 1 } }
+			return n;
+		}
+		function f_header(RoC r) return integer {
+			var integer n := 0;
+			for (var charstring e in r) { if (isbound(e)) { n := n + 1 } }
+			return n;
+		}`
+	v4v5(t, decls,
+		`f_out({"a", -, "c"}) == 2 and f_header({"a", -, "c"}) == 2`,
+		`f_out({"a", "b", "c"}) == 3 and f_header({"a", -, "c"}) == 2`)
+
+	loop := func(lang string) string {
+		return `module M ` + lang + ` {
+			type component C {}
+			type record of charstring RoC;
+			testcase tc() runs on C {
+				var RoC r := {"a", -, "c"}; var charstring e;
+				for (e in r) {}
+				setverdict(pass);
+			}
+		}`
+	}
+	runPass(t, "M.tc", loop(""))
+	v, reason := runStrict(t, "M.tc", loop(`language "TTCN-3:5"`))
+	if v != "error" || !strings.Contains(reason, "declared outside it is uninitialised") {
+		t.Fatalf("verdict = %s (%s), want error for the uninitialised element", v, reason)
+	}
+}
+
+// The rule is the edition of the module the loop is written in, not the
+// testcase's: a V5 function's loop fails called from a V4 testcase, and a
+// V4 function's loop runs called from a V5 one.
+func TestEdition_RangeLoopFollowsItsModule(t *testing.T) {
+	lib := func(lang string) string {
+		return `module L ` + lang + ` {
+			type record of charstring RoC;
+			function f(RoC r) return integer {
+				var integer n := 0; var charstring e;
+				for (e in r) { n := n + 1 }
+				return n;
+			}
+		}`
+	}
+	main := func(lang string) string {
+		return `module M ` + lang + ` {
+			import from L all;
+			type component C {}
+			testcase tc() runs on C {
+				if (f({"a", -, "c"}) == 3) { setverdict(pass) } else { setverdict(fail) }
+			}
+		}`
+	}
+	run := func(libLang, mainLang string) (runtime.Verdict, string) {
+		v, reason, err := interpreter.RunTestcaseWith(
+			[]*ttcn3.Tree{parse(t, lib(libLang)), parse(t, main(mainLang))}, "M.tc", interpreter.TestcaseOptions{})
+		if err != nil {
+			t.Fatalf("RunTestcaseWith: %v", err)
+		}
+		return v, reason
+	}
+	if v, reason := run(`language "TTCN-3:5"`, ""); v != "error" || !strings.Contains(reason, "declared outside it is uninitialised") {
+		t.Errorf("V5 function, V4 testcase: verdict = %s (%s), want error", v, reason)
+	}
+	if v, reason := run("", `language "TTCN-3:5"`); v != runtime.PassVerdict {
+		t.Errorf("V4 function, V5 testcase: verdict = %s (%s), want pass", v, reason)
 	}
 }
