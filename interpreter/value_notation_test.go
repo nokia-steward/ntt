@@ -134,3 +134,48 @@ func TestConcat_FixedLengthWildcardSpansItsUnits(t *testing.T) {
 		}
 	}`)
 }
+
+// A value assigned whole replaces the target: what it leaves
+// uninitialised is uninitialised there too (ETSI 19.1, EXAMPLE 3). Only a
+// notation keeps what it does not mention.
+func TestAssignment_WholeValueReplacesTarget(t *testing.T) {
+	runPass(t, "M.tc", `module M {
+		type component C {}
+		type record R { integer f1, integer f2 }
+		type record of integer RoI;
+		testcase tc() runs on C {
+			var R r := { f1 := 1, f2 := 2 };
+			var R s;
+			s.f1 := 11;
+			r := s;
+			var RoI l := { 1, 2, 3 };
+			var RoI m := { 9, - };
+			l := m;
+			if (r.f1 == 11 and not isbound(r.f2) and lengthof(l) == 1 and not isbound(l[1])) { setverdict(pass); }
+			else { setverdict(fail, r, l); }
+		}
+	}`)
+}
+
+// A notation assigned to a field or an element merges into what is there,
+// whether the record is held by name or positionally (ETSI 6.2, 6.2.3.2).
+func TestAssignmentNotation_MergesIntoFieldsAndElements(t *testing.T) {
+	runPass(t, "M.tc", `module M {
+		type component C {}
+		type record R { integer f1, integer f2, integer f3 }
+		type record Q { R r, integer g }
+		type record of R RR;
+		testcase tc() runs on C {
+			var R a := { 1, 2, 3 };
+			a := { f2 := 9 };
+			var R b := { f1 := 1, f2 := 2, f3 := 3 };
+			b := { 5, -, - };
+			var Q q := { r := { 1, 2, 3 }, g := 4 };
+			q.r := { f2 := 9 };
+			var RR rr := { { 1, 2, 3 }, { 4, 5, 6 } };
+			rr[1] := { -, 9, - };
+			if (a == { 1, 9, 3 } and b == { 5, 2, 3 } and q == { { 1, 9, 3 }, 4 } and rr[1] == { 4, 9, 6 }) { setverdict(pass); }
+			else { setverdict(fail, a, b, q, rr); }
+		}
+	}`)
+}

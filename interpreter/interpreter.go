@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -577,6 +578,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return evalBinary(n, env)
 
 	case *syntax.SelectorExpr:
+		if isTestcaseStop(n) {
+			return evalTestcaseStop(n, nil, env)
+		}
 		// Bare procedure receive ops (no parentheses) used as a
 		// statement: `p.getcall`, `p[i].getreply`, `p.catch`
 		// (TTCN-3 22.3). Resolve the port name syntactically and
@@ -1367,6 +1371,13 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		if lit, ok := n.Fun.(*syntax.ValueLiteral); ok && lit.Tok != nil &&
 			lit.Tok.Kind() == syntax.OMIT && n.Args != nil && len(n.Args.List) == 1 {
 			return eval(n.Args.List[0], env)
+		}
+		if isTestcaseStop(n.Fun) {
+			var args []syntax.Expr
+			if n.Args != nil {
+				args = n.Args.List
+			}
+			return evalTestcaseStop(n, args, env)
 		}
 		// TTCN-3 has a small handful of operations that look like
 		// builtins but need to mutate the active TestcaseExec held in
@@ -3096,7 +3107,8 @@ func evalIntBinary(x runtime.Int, y runtime.Int, op syntax.Kind, env runtime.Sco
 		if y.Sign() == 0 {
 			return runtime.Errorf("division by zero")
 		}
-		return runtime.Int{Int: new(big.Int).Div(x.Int, y.Int)}
+		// Integer division truncates towards zero (7.1.1): -5/2 is -2.
+		return runtime.Int{Int: new(big.Int).Quo(x.Int, y.Int)}
 
 	case syntax.REM:
 		if y.Sign() == 0 {
@@ -3834,6 +3846,95 @@ func listToRecord(l *runtime.List, ref *runtime.Record) runtime.Object {
 	return r
 }
 
+// isNotation reports whether an assigned expression is written in value
+// list or assignment notation, `{...}` or `T:{...}`: only those leave
+// what they do not mention as it was (ETSI 6.2).
+func isNotation(e syntax.Expr) bool {
+	for {
+		p, ok := e.(*syntax.ParenExpr)
+		if !ok || len(p.List) != 1 {
+			break
+		}
+		e = p.List[0]
+	}
+	if b, ok := e.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.COLON {
+		e = b.Y
+	}
+	_, ok := e.(*syntax.CompositeLiteral)
+	return ok
+}
+
+// hasCall reports whether evaluating x may call a function.
+func hasCall(x syntax.Expr) bool {
+	found := false
+	syntax.Inspect(x, func(n syntax.Node) bool {
+		if _, ok := n.(*syntax.CallExpr); ok {
+			found = true
+		}
+		return !found
+	})
+	return found
+}
+
+// mergeNotation merges a value written in value list or assignment
+// notation into the value the target holds (ETSI 6.2): what the notation
+// does not mention, or mentions with `-`, keeps its value. A record is
+// held either by name or positionally; the two merge either way round.
+func mergeNotation(existing, fresh runtime.Object, lhs syntax.Expr, env runtime.Scope) (runtime.Object, bool) {
+	existing = forceThunk(existing)
+	if merged, ok := mergeIndexedReassignment(existing, fresh); ok {
+		// What the notation names takes its shape, as a whole value does.
+		return coerceToType(merged, lvalueTypeDesc(lhs, env), env), true
+	}
+	if merged, ok := mergeFieldReassignment(existing, fresh, lhs, env); ok {
+		return merged, true
+	}
+	if st := structDeclOf(lvalueTypeDesc(lhs, env)); st != nil && st.KindTok.Kind() == syntax.UNION {
+		return nil, false
+	}
+	switch old := existing.(type) {
+	case *runtime.Record:
+		// A value list over a record held by name.
+		next, ok := fresh.(*runtime.List)
+		if !ok || len(next.FieldNames) != len(next.Elements) {
+			return nil, false
+		}
+		out := runtime.NewRecord()
+		for _, name := range old.Names() {
+			out.Set(name, old.Fields[name])
+		}
+		for i, name := range next.FieldNames {
+			if e := next.Elements[i]; e != runtime.Undefined {
+				out.Set(name, e)
+			}
+		}
+		return out, true
+	case *runtime.List:
+		// Assignment notation over a record held positionally.
+		next, ok := fresh.(*runtime.Record)
+		if !ok || len(old.FieldNames) == 0 {
+			return nil, false
+		}
+		out := runtime.Unshare(runtime.Share(old)).(*runtime.List)
+		for _, name := range next.Names() {
+			i := slices.Index(old.FieldNames, name)
+			if i < 0 || i >= len(out.Elements) {
+				return nil, false
+			}
+			if e := next.Fields[name]; e != runtime.Undefined {
+				out.Elements[i] = e
+			}
+		}
+		return out, true
+	}
+	return nil, false
+}
+
+// isOutParam reports whether p is an out parameter.
+func isOutParam(p *syntax.FormalPar) bool {
+	return p != nil && p.Direction != nil && strings.EqualFold(p.Direction.String(), "out")
+}
+
 // mergeIndexedReassignment implements the partial-update semantics of
 // `v := { [i] := x, ... }` for a previously initialised list. The
 // fresh value (`new`) must be a Map keyed by integers and the
@@ -4291,6 +4392,17 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 		}
 	}
 
+	// A notation assigned to a field or an element merges into what is
+	// there as one assigned to a variable does. The target is read first
+	// only when that cannot run anything: no call in its path.
+	if _, isIdent := lhs.(*syntax.Ident); !isIdent && isNotation(rhs) && !hasCall(lhs) {
+		if existing := eval(lhs, env); existing != nil && !runtime.IsError(existing) && existing != runtime.Undefined && existing != runtime.Omit {
+			if merged, ok := mergeNotation(existing, val, lhs, env); ok {
+				val = merged
+			}
+		}
+	}
+
 	switch l := lhs.(type) {
 	case *syntax.Ident:
 		if existing, ok := env.Get(l.String()); ok {
@@ -4300,16 +4412,14 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 			// isn't explicitly mentioned. We achieve that by
 			// merging the new value into the existing list
 			// instead of overwriting it wholesale.
-			if merged, ok := mergeIndexedReassignment(existing, val); ok {
-				// What the notation names takes its shape, as a
-				// whole value does.
-				val = coerceToType(merged, lvalueTypeDesc(l, env), env)
-			}
-			// The same holds for assignment notation over named
-			// fields (ETSI 6.2): an unmentioned field keeps the
-			// value it already had.
-			if merged, ok := mergeFieldReassignment(existing, val, l, env); ok {
-				val = merged
+			//
+			// Only a notation merges: a value assigned whole replaces
+			// the old one, its uninitialised fields and elements
+			// included (ETSI 19.1).
+			if isNotation(rhs) {
+				if merged, ok := mergeNotation(existing, val, l, env); ok {
+					val = merged
+				}
 			}
 			// If the name lives in an enclosing scope (e.g. a
 			// component-instance variable read by a `runs on`
@@ -4361,7 +4471,7 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 		// `v[idx[0]][idx[1]]...[idx[N-1]]`. Walk to the
 		// penultimate container and overwrite its slot.
 		if il, ok := idx.(*runtime.List); ok && il != nil && allInts(il) {
-			multiIndexStore(container, il.Elements, val)
+			multiIndexStore(container, il.Elements, val, isNotation(rhs))
 			return nil
 		}
 		// `m[key] := v` with a non-integer key targets a `map from K to
@@ -4606,7 +4716,7 @@ func evalSlot(lx syntax.Expr, env runtime.Scope) (runtime.Object, func(runtime.O
 				// lists (6.2.7); any other index is for the indexing to
 				// answer — an error, most likely.
 				if il, ok := idx.(*runtime.List); ok && allInts(il) {
-					return indexValueOf(parent, idx, env), func(v runtime.Object) { multiIndexStore(parent, il.Elements, v) }
+					return indexValueOf(parent, idx, env), func(v runtime.Object) { multiIndexStore(parent, il.Elements, v, false) }
 				}
 				return indexValueOf(parent, idx, env), nil
 			}
@@ -4721,7 +4831,7 @@ func putElement(c, idx, v runtime.Object) {
 			}
 		case *runtime.List:
 			if allInts(i) {
-				multiIndexStore(c, i.Elements, v)
+				multiIndexStore(c, i.Elements, v, false)
 			}
 		}
 	case *runtime.Map:
@@ -6465,10 +6575,25 @@ func paramTypeDesc(env runtime.Scope, name string) *runtime.TypeDesc {
 }
 
 // formalTypeDesc is the type of a formal parameter: its declared type, or
-// an array of it (`R p[2]`).
+// an array of it (`R p[2]`). A variadic parameter is a record of what it
+// declares (ETSI 5.4.3); of `integer a[3]...`, a record of arrays, whose
+// element type no descriptor here tells.
 func formalTypeDesc(p *syntax.FormalPar, env runtime.Scope) *runtime.TypeDesc {
 	if p == nil || p.Type == nil {
 		return nil
+	}
+	if p.Variadic != nil {
+		return inlineTypeDesc(p, -1, func() *runtime.TypeDesc {
+			td := &runtime.TypeDesc{IsList: true, Home: moduleHome(env)}
+			if len(p.ArrayDef) == 0 {
+				spec, ok := p.Type.(syntax.TypeSpec)
+				if !ok {
+					spec = &syntax.RefSpec{X: p.Type}
+				}
+				td.Spec = spec
+			}
+			return td
+		})
 	}
 	if len(p.ArrayDef) > 0 {
 		return inlineTypeDesc(p, len(p.ArrayDef), func() *runtime.TypeDesc {
@@ -7305,7 +7430,9 @@ func applyFunction(fn *runtime.Function, args []runtime.Object) (runtime.Object,
 // auto-grown with empty record-ofs so the deepest write lands in a
 // real cell. No-op if any non-final slot resolves to a non-List
 // value (matches our general "soft-skip on type mismatch" policy).
-func multiIndexStore(c runtime.Object, idx []runtime.Object, val runtime.Object) {
+// notation tells that val was written as a value list, whose `-`
+// keep what was there (isNotation).
+func multiIndexStore(c runtime.Object, idx []runtime.Object, val runtime.Object, notation bool) {
 	if len(idx) == 0 || c == nil {
 		return
 	}
@@ -7327,8 +7454,10 @@ func multiIndexStore(c runtime.Object, idx []runtime.Object, val runtime.Object)
 			// new value into the element currently at the target slot
 			// before overwriting. Non-dash values fall through to a
 			// plain overwrite (merge returns ok=false).
-			if merged, ok := mergeIndexedReassignment(cur.Elements[i], val); ok {
-				val = merged
+			if notation {
+				if merged, ok := mergeIndexedReassignment(cur.Elements[i], val); ok {
+					val = merged
+				}
 			}
 			cur.Elements[i] = val
 			return
@@ -8169,14 +8298,22 @@ func bindFunctionParams(fn *runtime.Function, args []runtime.Object) *runtime.En
 				if len(rest) == 1 && rest[0] == nil {
 					rest = nil
 				}
+				td := formalTypeDesc(param, fenv)
 				if len(rest) == 0 && param.Value != nil {
 					if v := eval(param.Value, fenv); !runtime.IsError(v) && v != nil {
-						fenv.Set(param.Name.String(), runtime.Share(v))
+						fenv.Set(param.Name.String(), runtime.Share(coerceToType(v, td, fenv)))
 						break
 					}
 				}
-				fenv.Set(param.Name.String(), runtime.NewRecordOf(rest...))
+				fenv.Set(param.Name.String(), coerceToType(runtime.NewRecordOf(rest...), td, fenv))
 				break
+			}
+			// An out parameter does not take the content of its actual:
+			// it is uninitialised when the function is entered (ETSI
+			// 3.1, out parameterization, NOTE 3).
+			if isOutParam(param) {
+				fenv.Set(param.Name.String(), runtime.Undefined)
+				continue
 			}
 			modif := ""
 			if param.Modif != nil && param.Modif.Kind() != syntax.ILLEGAL {
@@ -8595,6 +8732,11 @@ func writebackInoutParamsWithSnapshot(fn *runtime.Function, callArgs []syntax.Ex
 		}
 		val, ok := fenv.Get(param.Name.String())
 		if !ok || val == nil {
+			continue
+		}
+		// An out parameter nothing was assigned to leaves its actual
+		// as it was (ETSI 5.4.2).
+		if dir == "out" && val == runtime.Undefined {
 			continue
 		}
 		var snap runtime.Object

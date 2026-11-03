@@ -343,6 +343,27 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **Integer division truncates towards zero** — `-5/2` is `-2` (ETSI
+  ES 201 873-1 7.1.1); it was rounded down to `-3`.
+- **An out parameter is uninitialised when the function is entered**, and
+  an actual the function assigned nothing to keeps its value (3.1, 5.4.2);
+  the formal held the actual's value, and an unassigned one was written
+  back. Testcases bind their out parameters uninitialised too.
+- **A value assigned whole replaces its target** — what it leaves
+  uninitialised becomes uninitialised there (19.1, EXAMPLE 3); only a
+  value list or assignment notation keeps what it does not mention, now
+  also when assigned to a field or an element, and whether the record was
+  written by name or positionally.
+- **`testcase.stop` stops the entire testcase** with the verdict error,
+  from any component, its arguments the reason (21.2.1): it was an unknown
+  identifier whose error happened to give the verdict, and the MTC went on
+  when a PTC stopped. The line log writes it as `TSTP`.
+- **A variadic parameter is a record of its declared type** (5.4.3): value
+  list actuals take the record's field names, and `lengthof` of an
+  `integer a[3]...` parameter is the number of arrays passed.
+- **`lengthof` counts `* length(n)` in a list template as n elements**
+  (C.2.1), in a permutation too.
+
 - **A behaviour's entry and leaving are logged together** — an alt that
   waits and scans again leaves out what it repeats; it could leave out an
   altstep's entry and log its leaving, so the line log placed what followed

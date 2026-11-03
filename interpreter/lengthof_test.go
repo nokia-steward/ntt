@@ -84,3 +84,18 @@ func TestLengthofOfAnImportedSynonym(t *testing.T) {
 		}
 	}
 }
+
+// `* length(n)` inside a list template stands for n elements, in a
+// permutation too (ETSI C.2.1, 15.11).
+func TestLengthofCountsAnyElementsOrNoneOfFixedLength(t *testing.T) {
+	runPass(t, "M.tc", `module M {
+		type component C {}
+		type record of integer RoI;
+		testcase tc() runs on C {
+			template RoI t1 := { ?, ?, * length(2) };
+			template RoI t2 := { 1, permutation(2, * length(2)) };
+			if (lengthof(t1) == 4 and lengthof(t2) == 4) { setverdict(pass); }
+			else { setverdict(fail, lengthof(t1), lengthof(t2)); }
+		}
+	}`)
+}

@@ -49,6 +49,24 @@ func Lengthof(args ...runtime.Object) runtime.Object {
 	return runtime.Errorf("%s types have no length", args[0].Type())
 }
 
+// listElementsLen is how many elements of a list the template elements
+// stand for: `*` for none lengthof can tell, `* length(n)` for n (ETSI
+// 15.11), any other for one.
+func listElementsLen(elems []runtime.Object) int {
+	n := 0
+	for _, e := range elems {
+		if e == runtime.AnyOrNone {
+			continue
+		}
+		if lr, ok := e.(*runtime.LengthRestricted); ok && lr.Inner == runtime.AnyOrNone && lr.Min == lr.Max {
+			n += lr.Min
+			continue
+		}
+		n++
+	}
+	return n
+}
+
 // listExpandedLen returns the lengthof-visible size of a template,
 // expanding permutation(...) groups inline (they contribute their
 // element count, not 1) and ignoring `*` (AnyOrNone) which has a
@@ -64,14 +82,11 @@ func listExpandedLen(v runtime.Object) int {
 	}
 	count := 0
 	for _, e := range l.Elements {
-		if e == runtime.AnyOrNone {
-			continue
-		}
 		if inner, ok := e.(*runtime.List); ok && inner.ListType == runtime.PERMUTATION {
-			count += len(inner.Elements)
+			count += listElementsLen(inner.Elements)
 			continue
 		}
-		count++
+		count += listElementsLen([]runtime.Object{e})
 	}
 	return count
 }

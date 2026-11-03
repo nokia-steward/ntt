@@ -637,6 +637,12 @@ func bindTestcaseParamsWithValues(env runtime.Scope, tc *syntax.FuncDecl, args [
 		}
 		var val runtime.Object = runtime.Undefined
 		used := false
+		// An out parameter is uninitialised on entry (ETSI 3.1).
+		if isOutParam(fp) {
+			env.Set(fp.Name.String(), val)
+			recordDeclaredType(env, fp.Name.String(), fp.Type)
+			continue
+		}
 		if i < len(args) && args[i] != nil {
 			val = args[i]
 			used = true
@@ -669,6 +675,11 @@ func bindTestcaseParamsWithArgs(env runtime.Scope, tc *syntax.FuncDecl, args []s
 		isTemplate := fp.TemplateRestriction != nil
 		var val runtime.Object = runtime.Undefined
 		used := false
+		if isOutParam(fp) {
+			env.Set(fp.Name.String(), val)
+			recordDeclaredType(env, fp.Name.String(), fp.Type)
+			continue
+		}
 		if i < len(args) && args[i] != nil {
 			if isDashExpr(args[i]) {
 				// `-` means "use the default" - leave used
@@ -1245,6 +1256,51 @@ func evalSetverdict(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 		cur.MergeVerdict(verdict)
 	}
 	return nil
+}
+
+// isTestcaseStop reports whether e names the testcase stop operation,
+// `testcase.stop` (ETSI ES 201 873-1 21.2.1).
+func isTestcaseStop(e syntax.Expr) bool {
+	sel, ok := e.(*syntax.SelectorExpr)
+	if !ok {
+		return false
+	}
+	x, ok := sel.X.(*syntax.Ident)
+	return ok && x.Tok != nil && x.Tok.Kind() == syntax.TESTCASE && syntax.Name(sel.Sel) == "stop"
+}
+
+// evalTestcaseStop stops the entire testcase at once with the verdict
+// error (ETSI ES 201 873-1 21.2.1), from whichever component runs it. Its
+// arguments are the reason, written as log writes its items (19.11).
+func evalTestcaseStop(n syntax.Node, argExprs []syntax.Expr, env runtime.Scope) runtime.Object {
+	exec := runtime.FindTestcaseExec(env)
+	if exec == nil {
+		return runtime.Errorf("testcase.stop outside a testcase")
+	}
+	var reason strings.Builder
+	for _, a := range evalExprList(argExprs, env) {
+		if runtime.IsError(a) {
+			return a
+		}
+		if s, ok := a.(*runtime.String); ok && s != nil {
+			reason.WriteString(string(s.Value))
+			continue
+		}
+		reason.WriteString(a.Inspect())
+	}
+	exec.SetVerdict(runtime.ErrorVerdict, reason.String())
+	if cur := exec.CurrentComponent(); cur != nil {
+		cur.MergeVerdict(runtime.ErrorVerdict)
+	}
+	if lexec := tlExec(env); lexec != nil {
+		var targs []tl.Arg
+		if reason.Len() > 0 {
+			targs = append(targs, tlArg("reason", tl.String(reason.String())))
+		}
+		tlEmit(lexec, n, "tliTcStop", targs...)
+	}
+	exec.Stop()
+	return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
 }
 
 // evalGetverdict returns the local verdict of the component running it
