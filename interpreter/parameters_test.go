@@ -46,3 +46,20 @@ func TestIntegerDivision_TruncatesTowardsZero(t *testing.T) {
 		}
 	}`)
 }
+
+// A unary minus makes a new integer: the operand, a constant here, keeps
+// its value however often it is negated (ETSI 7.1.1).
+func TestUnaryMinusLeavesItsOperand(t *testing.T) {
+	runPass(t, "M.tc", `module M {
+		type component C {}
+		const integer K := 2;
+		testcase tc() runs on C {
+			var integer y := -K;
+			var integer z := -K;
+			var integer v := 5;
+			var integer w := -v;
+			if (K == 2 and y == -2 and z == -2 and v == 5 and w == -5) { setverdict(pass); }
+			else { setverdict(fail, K, y, z, v, w); }
+		}
+	}`)
+}

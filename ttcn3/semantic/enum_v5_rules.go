@@ -9,8 +9,8 @@
 //   - an enumerated value has exactly one integer: `Label(n)` names one of
 //     the label's, and a label of several integers has to name one;
 //   - a label is visible wherever its type is and nothing hides it: no
-//     definition of the module, nor a local one of a behaviour that uses
-//     the type, has its name;
+//     definition of the module, nor a local one in scope where a variable
+//     or constant of the type is declared, has its name;
 //   - a label written alone takes the type it is the label of, unless it
 //     is the label of several types.
 //
@@ -21,7 +21,9 @@ package semantic
 import (
 	"fmt"
 	"math"
+	"slices"
 	"sort"
+	"strings"
 
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
@@ -99,32 +101,34 @@ func (a *Analyzer) checkEnumV5Rules(mod *syntax.Module) []Diagnostic {
 	// template's formal, a member. A name that does is no label where it
 	// is written alone.
 	values := map[string]bool{}
-	// The variables declared of one of the module's enumerated types, by
-	// name; one declared of several, or of another type too, is not.
+	// The variables and parameters declared of one of the module's
+	// enumerated types, by name; one declared of several, or of another
+	// type too, anywhere in the module, is not.
 	varTypes := map[string]string{}
+	declare := func(name string, typ syntax.Expr) {
+		values[name] = true
+		t := identName(typ)
+		if _, ok := types[t]; !ok {
+			t = ""
+		}
+		if prev, seen := varTypes[name]; seen && prev != t {
+			t = ""
+		}
+		varTypes[name] = t
+	}
 	syntax.Inspect(mod, func(n syntax.Node) bool {
 		switch x := n.(type) {
 		case *syntax.EnumTypeDecl:
 			return false
 		case *syntax.FormalPar:
 			if x.Name != nil {
-				values[x.Name.String()] = true
+				declare(x.Name.String(), x.Type)
 			}
 		case *syntax.ValueDecl:
-			t := identName(x.Type)
-			if _, ok := types[t]; !ok {
-				t = ""
-			}
 			for _, dec := range x.Decls {
-				if dec == nil || dec.Name == nil {
-					continue
+				if dec != nil && dec.Name != nil {
+					declare(dec.Name.String(), x.Type)
 				}
-				name := dec.Name.String()
-				values[name] = true
-				if prev, seen := varTypes[name]; seen && prev != t {
-					t = ""
-				}
-				varTypes[name] = t
 			}
 		}
 		return true
@@ -190,10 +194,28 @@ func (a *Analyzer) checkEnumV5Rules(mod *syntax.Module) []Diagnostic {
 		})
 		return true
 	}
+	// The types of which both x and y are labels.
+	commonTypes := func(x, y string) []string {
+		var ts []string
+		for _, t := range labelTypes[x] {
+			if slices.Contains(labelTypes[y], t) {
+				ts = append(ts, t)
+			}
+		}
+		return ts
+	}
 	syntax.Inspect(mod, func(n syntax.Node) bool {
 		switch x := n.(type) {
 		case *syntax.EnumTypeDecl:
 			return false
+		case *syntax.ExprStmt:
+			// An assignment statement; a field's or a named parameter's
+			// `:=` in a notation or an argument list is none.
+			if be, ok := x.Expr.(*syntax.BinaryExpr); ok && be.Op != nil && be.Op.Kind() == syntax.ASSIGN {
+				if id, ok := be.X.(*syntax.Ident); ok {
+					checkValue(be.Y, varTypes[id.String()])
+				}
+			}
 		case *syntax.ValueDecl:
 			t := identName(x.Type)
 			for _, dec := range x.Decls {
@@ -211,15 +233,13 @@ func (a *Analyzer) checkEnumV5Rules(mod *syntax.Module) []Diagnostic {
 				break
 			}
 			switch x.Op.Kind() {
-			case syntax.ASSIGN:
-				if id, ok := x.X.(*syntax.Ident); ok {
-					checkValue(x.Y, varTypes[id.String()])
-				}
 			case syntax.EQ, syntax.NE, syntax.LT, syntax.LE, syntax.GT, syntax.GE:
-				_, lx := isLabel(x.X)
-				_, ly := isLabel(x.Y)
-				if lx && ly && !ambiguousLabel(x.X) {
-					ambiguousLabel(x.Y)
+				// Two labels compared take the type they are both labels
+				// of; it is ambiguous when they are of several together.
+				nx, lx := isLabel(x.X)
+				ny, ly := isLabel(x.Y)
+				if lx && ly && !values[nx] && !values[ny] && len(commonTypes(nx, ny)) > 1 {
+					ambiguousLabel(x.X)
 				}
 			}
 		}
@@ -317,7 +337,7 @@ func unusedInt(n int64, used []intRange) (int64, bool) {
 // literals, `infinity` an open bound, stands for.
 func literalIntRange(x syntax.Expr) (intRange, bool) {
 	if n, ok := signedIntLiteral(x); ok {
-		return intRange{n, n}, true
+		return intRange{n, n}, n != math.MinInt64 && n != math.MaxInt64
 	}
 	be, ok := x.(*syntax.BinaryExpr)
 	if !ok || be.Op == nil || be.Op.Kind() != syntax.RANGE {
@@ -336,7 +356,8 @@ func literalIntRange(x syntax.Expr) (intRange, bool) {
 
 func literalBound(x syntax.Expr, open int64) (int64, bool) {
 	if n, ok := signedIntLiteral(x); ok {
-		return n, true
+		// One at the limits of int64 is not told from infinity.
+		return n, n != math.MinInt64 && n != math.MaxInt64
 	}
 	neg := false
 	if u, ok := x.(*syntax.UnaryExpr); ok && u.Op != nil && u.Op.Kind() == syntax.SUB {
@@ -350,14 +371,19 @@ func literalBound(x syntax.Expr, open int64) (int64, bool) {
 }
 
 // v5HiddenLabels reports the definitions that would hide a label: one of
-// the module with a label's name, and a local one of a behaviour that
-// refers to the label's type.
+// the module with a label's name, and a local one in scope where a
+// variable or constant of the label's type is declared.
 func v5HiddenLabels(mod *syntax.Module, types map[string][]v5Enumerator) []Diagnostic {
-	labels := map[string]string{}
+	labelTypes := map[string][]string{}
 	for typeName, enums := range types {
 		for _, e := range enums {
-			labels[e.name] = typeName
+			labelTypes[e.name] = append(labelTypes[e.name], typeName)
 		}
+	}
+	labels := map[string]string{}
+	for name, ts := range labelTypes {
+		sort.Strings(ts)
+		labels[name] = strings.Join(ts, ", ")
 	}
 	var diags []Diagnostic
 	hidden := func(n syntax.Node, name, typeName, where string) {
@@ -395,34 +421,83 @@ func v5HiddenLabels(mod *syntax.Module, types map[string][]v5Enumerator) []Diagn
 		if body == nil {
 			return false
 		}
-		locals := map[string]*syntax.Ident{}
-		refs := map[string]syntax.Node{}
-		syntax.Inspect(body, func(m syntax.Node) bool {
-			switch y := m.(type) {
-			case *syntax.ValueDecl:
-				for _, dec := range y.Decls {
-					if dec != nil && dec.Name != nil {
-						locals[dec.Name.String()] = dec.Name
-					}
-				}
-				if t := identName(y.Type); t != "" {
-					if _, ok := types[t]; ok {
-						if _, seen := refs[t]; !seen {
-							refs[t] = y.Type
-						}
-					}
-				}
+		diags = append(diags, v5HiddenLocals(body, types)...)
+		return false
+	})
+	return diags
+}
+
+// v5HiddenLocals reports the local definitions of a body that hide a
+// label: one with a label's name of type T, in scope where a variable or
+// constant of T is declared. A local is in scope in the block, or the
+// statement whose header declares it, and in what that encloses.
+func v5HiddenLocals(body *syntax.BlockStmt, types map[string][]v5Enumerator) []Diagnostic {
+	type local struct {
+		id    *syntax.Ident
+		scope syntax.Node
+	}
+	var locals []local
+	var stack []syntax.Node
+	scopeOf := func() syntax.Node {
+		for i := len(stack) - 1; i >= 0; i-- {
+			switch stack[i].(type) {
+			case *syntax.BlockStmt, *syntax.ForStmt, *syntax.ForRangeStmt, *syntax.IfStmt, *syntax.WhileStmt, *syntax.DoWhileStmt:
+				return stack[i]
 			}
+		}
+		return body
+	}
+	walk := func(visit func(n syntax.Node)) {
+		stack = stack[:0]
+		syntax.Inspect(body, func(n syntax.Node) bool {
+			if n == nil {
+				stack = stack[:len(stack)-1]
+				return true
+			}
+			stack = append(stack, n)
+			visit(n)
 			return true
 		})
-		for t, at := range refs {
-			for _, e := range types[t] {
-				if id, ok := locals[e.name]; ok {
-					hidden(at, id.String(), t, "local definition")
+	}
+	walk(func(n syntax.Node) {
+		if vd, ok := n.(*syntax.ValueDecl); ok {
+			for _, dec := range vd.Decls {
+				if dec != nil && dec.Name != nil {
+					locals = append(locals, local{dec.Name, scopeOf()})
 				}
 			}
 		}
-		return false
+	})
+	var diags []Diagnostic
+	reported := map[*syntax.Ident]bool{}
+	walk(func(n syntax.Node) {
+		vd, ok := n.(*syntax.ValueDecl)
+		if !ok {
+			return
+		}
+		t := identName(vd.Type)
+		enums, ok := types[t]
+		if !ok {
+			return
+		}
+		for _, l := range locals {
+			if reported[l.id] || !slices.Contains(stack, l.scope) {
+				continue
+			}
+			for _, e := range enums {
+				if e.name == l.id.String() {
+					reported[l.id] = true
+					diags = append(diags, Diagnostic{
+						Code:     "enum-label-hidden",
+						Severity: SeverityError,
+						Message:  fmt.Sprintf("local definition %q hides the label %q of %s", e.name, e.name, t),
+						Node:     l.id,
+						Span:     syntax.SpanOf(l.id),
+					})
+					break
+				}
+			}
+		}
 	})
 	return diags
 }

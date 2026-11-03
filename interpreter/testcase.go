@@ -7,6 +7,7 @@ import (
 	"math"
 	"os"
 	"runtime/debug"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -2162,6 +2163,8 @@ type moduleInit struct {
 	errs   []*runtime.Error
 	typed  bool // pass 0 is done
 	closed bool // pass 1 is done
+	// What optionalOwners tells of a module, by module.
+	owners map[*syntax.Module]moduleOwners
 	// The enumerated types pass 0 could not evaluate: their integers may
 	// name constants (ETSI 6.2.4), which pass 1 evaluates.
 	enums  []int
@@ -2345,31 +2348,12 @@ func (m *moduleInit) evalDef(i int) *runtime.Error {
 		return err
 	}
 	// A template of a scope whose optional attribute is "implicit omit"
-	// has its optional fields set to omit that it, or what it modifies
-	// with, gives no value (ETSI 27.7).
-	if t, ok := d.Def.(*syntax.TemplateDecl); ok && t.Name != nil && t.Params == nil && hasImplicitOmit(typeDescForScoped("", t.With, fd.scopes)) {
-		name := syntax.Name(t.Name)
-		td := typeDescOfSpec(t.Type, m.env)
-		// A template evaluated at each use (@fuzzy, "dynamic") is not
-		// a value here.
-		if v, ok := m.env.Get(name); ok && !isThunk(v) {
-			if t.Base == nil {
-				m.env.Set(name, withImplicitOmit(v, td, m.env, 0, omitMode{}))
-			} else if t.Value != nil && !isUnionTyped(t.Base, m.env) {
-				// What a modified template has of its base is the
-				// base's; the attribute completes the modification.
-				// In V4 a field it does not mention is the base's
-				// (15.5 b); V5 sets it to omit too, but one it gives
-				// `-` (ETSI TTF, Berlin 2026).
-				base := expandAnyValueBase(eval(t.Base, m.env), t.Type, m.env)
-				mod := eval(t.Value, m.env)
-				if !runtime.IsError(base) && !runtime.IsError(mod) {
-					mode := omitMode{keepDash: true, modifies: true, fillTop: m.mod.Edition() == syntax.V5}
-					if merged, ok := mergeTemplateMod(base, withImplicitOmit(coerceToDeclaredStruct(mod, t.Type, t.Value, m.env), td, m.env, 0, mode)); ok {
-						m.env.Set(name, merged)
-					}
-				}
-			}
+	// has its optional fields set to omit that it gives no value (ETSI
+	// 27.7). In V5, one modified also those of its base that the
+	// modification does not mention.
+	if t, ok := d.Def.(*syntax.TemplateDecl); ok && t.Name != nil && t.Params == nil {
+		if opt, override := optionalAttr(t.With, fd.scopes); strings.EqualFold(opt, "implicit omit") {
+			m.implicitOmitTemplate(t, override)
 		}
 	}
 	// The type descriptor is bound by its name too, so attribute
@@ -2382,6 +2366,248 @@ func (m *moduleInit) evalDef(i int) *runtime.Error {
 	}
 	annotateDef(m.env, d, syntax.Name(m.mod.Name))
 	return nil
+}
+
+// implicitOmitTemplate sets to omit the optional fields template t, of a
+// scope whose optional attribute is "implicit omit", gives no value. A
+// field it takes from a template with an optional attribute of its own
+// keeps what that one gives, but for an override (27.7, mw_myTemplate24
+// and 25). Of a modified template, it is the modification that is
+// completed, in V5 only: there a field it does not mention is set to
+// omit, but one it gives `-` (ETSI TTF, Berlin 2026); in V4 such a field
+// is the base's (15.5 b).
+func (m *moduleInit) implicitOmitTemplate(t *syntax.TemplateDecl, override bool) {
+	name := syntax.Name(t.Name)
+	td := typeDescOfSpec(t.Type, m.env)
+	v, ok := m.env.Get(name)
+	// A template evaluated at each use (@fuzzy, "dynamic") is not a
+	// value here.
+	if !ok || isThunk(v) {
+		return
+	}
+	if t.Base == nil {
+		out := withImplicitOmit(v, td, m.env, 0, omitMode{})
+		if !override {
+			out = keepLowerScope(out, v, t.Value, m.ownsOptional)
+		}
+		m.env.Set(name, out)
+		return
+	}
+	if m.mod.Edition() != syntax.V5 || t.Value == nil || isUnionTyped(t.Base, m.env) {
+		return
+	}
+	base := expandAnyValueBase(eval(t.Base, m.env), t.Type, m.env)
+	mod := eval(t.Value, m.env)
+	if runtime.IsError(base) || runtime.IsError(mod) {
+		return
+	}
+	mode := omitMode{keepDash: true, modifies: true, fillTop: true}
+	if merged, ok := mergeTemplateMod(base, withImplicitOmit(coerceToDeclaredStruct(mod, t.Type, t.Value, m.env), td, m.env, 0, mode)); ok {
+		m.env.Set(name, merged)
+	}
+}
+
+// optionalAttr is the optional attribute in effect for a definition whose
+// own is local, inside scopes (outermost first): the innermost one, but an
+// outer one given with override wins over those inside it (ETSI 27.1.2).
+// It also tells whether the one in effect was given with override.
+func optionalAttr(local *syntax.WithSpec, scopes []*syntax.WithSpec) (string, bool) {
+	var val string
+	var override bool
+	for _, ws := range append(append([]*syntax.WithSpec(nil), scopes...), local) {
+		one, ov := map[string][]string{}, map[string]bool{}
+		collectWithAttrs(ws, one, ov, nil)
+		vs := one["optional"]
+		if len(vs) == 0 || override {
+			continue
+		}
+		val, override = strings.TrimSpace(vs[len(vs)-1]), ov["optional"]
+	}
+	return val, override
+}
+
+// ownsOptional reports whether x refers to a template of this module, or
+// of one it imports, with an optional attribute of its own. A name this
+// module defines is its own, whatever the modules it imports define.
+func (m *moduleInit) ownsOptional(x syntax.Expr) bool {
+	var modName, name string
+	switch e := x.(type) {
+	case *syntax.Ident:
+		name = e.String()
+	case *syntax.SelectorExpr:
+		id, ok := e.X.(*syntax.Ident)
+		if !ok {
+			return false
+		}
+		modName, name = id.String(), syntax.Name(e.Sel)
+	default:
+		return false
+	}
+	own := m.optionalOwners(m.mod)
+	if modName == "" || modName == syntax.Name(m.mod.Name) {
+		if owns, ok := own.defs[name]; ok || modName != "" {
+			return owns
+		}
+	}
+	for _, imp := range own.imports {
+		if modName != "" && imp != modName {
+			continue
+		}
+		other, ok := lookupModuleScope(m.root, imp)
+		if !ok || other.mod == nil {
+			continue
+		}
+		if owns, ok := m.optionalOwners(other.mod).defs[name]; ok {
+			return owns
+		}
+	}
+	return false
+}
+
+// moduleOwners is what optionalOwners tells of a module: its definitions,
+// by name, a template with an optional attribute of its own true, and
+// the modules it imports, each once.
+type moduleOwners struct {
+	defs    map[string]bool
+	imports []string
+}
+
+// optionalOwners indexes the module-level definitions of mod, in groups
+// too, once.
+func (m *moduleInit) optionalOwners(mod *syntax.Module) moduleOwners {
+	if o, ok := m.owners[mod]; ok {
+		return o
+	}
+	o := moduleOwners{defs: map[string]bool{}}
+	seen := map[string]bool{}
+	var walk func(defs []*syntax.ModuleDef)
+	walk = func(defs []*syntax.ModuleDef) {
+		for _, d := range defs {
+			if d == nil {
+				continue
+			}
+			switch x := d.Def.(type) {
+			case *syntax.GroupDecl:
+				walk(x.Defs)
+			case *syntax.ImportDecl:
+				if x.Module != nil && !seen[x.Module.String()] {
+					seen[x.Module.String()] = true
+					o.imports = append(o.imports, x.Module.String())
+				}
+			case *syntax.TemplateDecl:
+				if x.Name != nil {
+					one := map[string][]string{}
+					collectWithAttrs(x.With, one, nil, nil)
+					o.defs[x.Name.String()] = len(one["optional"]) > 0
+				}
+			case *syntax.ValueDecl:
+				for _, dec := range x.Decls {
+					if dec != nil && dec.Name != nil {
+						o.defs[dec.Name.String()] = false
+					}
+				}
+			}
+		}
+	}
+	walk(mod.Defs)
+	if m.owners == nil {
+		m.owners = map[*syntax.Module]moduleOwners{}
+	}
+	m.owners[mod] = o
+	return o
+}
+
+// keepLowerScope gives back to out, the value of notation x with implicit
+// omit applied, what a field of x takes from a definition owns tells has
+// an optional attribute of its own, as it was in orig: the attribute on
+// the lower scope is not overwritten (ETSI 27.7).
+func keepLowerScope(out, orig runtime.Object, x syntax.Expr, owns func(syntax.Expr) bool) runtime.Object {
+	lit, ok := x.(*syntax.CompositeLiteral)
+	if !ok || lit == nil {
+		return out
+	}
+	for i, e := range lit.List {
+		var name string
+		if be, ok := e.(*syntax.BinaryExpr); ok && be.Op != nil && be.Op.Kind() == syntax.ASSIGN {
+			if id, ok := be.X.(*syntax.Ident); ok {
+				name, e = id.String(), be.Y
+			} else {
+				continue
+			}
+		}
+		was, ok := fieldOf(orig, name, i)
+		if !ok {
+			continue
+		}
+		is, _ := fieldOf(out, name, i)
+		switch {
+		case owns(e):
+			out = withField(out, name, i, was)
+		case is != nil:
+			if kept := keepLowerScope(is, was, e, owns); kept != is {
+				out = withField(out, name, i, kept)
+			}
+		}
+	}
+	return out
+}
+
+// fieldOf is the field of a record value v named name, or at position i
+// when name is empty.
+func fieldOf(v runtime.Object, name string, i int) (runtime.Object, bool) {
+	switch r := v.(type) {
+	case *runtime.Record:
+		if name == "" {
+			if i < len(r.Order) {
+				name = r.Order[i]
+			} else {
+				return nil, false
+			}
+		}
+		f, ok := r.Fields[name]
+		return f, ok
+	case *runtime.List:
+		if name != "" {
+			i = slices.Index(r.FieldNames, name)
+		}
+		if i < 0 || i >= len(r.Elements) {
+			return nil, false
+		}
+		return r.Elements[i], true
+	}
+	return nil, false
+}
+
+// withField is v with its field named name, or at position i, set to f;
+// v itself is left as it is.
+func withField(v runtime.Object, name string, i int, f runtime.Object) runtime.Object {
+	switch r := v.(type) {
+	case *runtime.Record:
+		if name == "" {
+			if i >= len(r.Order) {
+				return v
+			}
+			name = r.Order[i]
+		}
+		out := runtime.NewRecord()
+		out.Order = slices.Clone(r.Order)
+		for _, n := range r.Names() {
+			out.Set(n, r.Fields[n])
+		}
+		out.Set(name, f)
+		return out
+	case *runtime.List:
+		if name != "" {
+			i = slices.Index(r.FieldNames, name)
+		}
+		if i < 0 || i >= len(r.Elements) {
+			return v
+		}
+		out := runtime.Unshare(runtime.Share(r)).(*runtime.List)
+		out.Elements[i] = f
+		return out
+	}
+	return v
 }
 
 // evalConfigured evaluates definition d if it declares a module parameter

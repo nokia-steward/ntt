@@ -361,12 +361,16 @@ single functional test doubles as a performance probe. See
 ### Fixed
 
 - **Implicit omit sets a template's optional fields to omit** that it gives
-  no value, at any depth, value list templates' trailing ones too (27.7);
-  it was applied to variables only. A modified template keeps what it has
-  of its base.
+  no value, at any depth (27.7); it was applied to variables only. A field
+  written as a reference to a template with an optional attribute of its
+  own keeps what that one gives, unless the attribute is given with override, and an
+  outer override wins over an inner attribute (27.1.2). A modified
+  template is as it was: what it has of its base it keeps.
 - **An enumerator's integers may name constants** (6.2.4), of any module,
   and `-K`; and `Label(n)` naming no integer of the label is an error, not
   an uninitialised value.
+- **A unary minus leaves its operand alone** — `-K` negated the constant
+  `K` itself, so the next `-K` was `K`.
 - **Integer division truncates towards zero** — `-5/2` is `-2` (ETSI
   ES 201 873-1 7.1.1); it was rounded down to `-3`.
 - **An out parameter is uninitialised when the function is entered**, and
@@ -374,10 +378,12 @@ single functional test doubles as a performance probe. See
   the formal held the actual's value, and an unassigned one was written
   back. Testcases bind their out parameters uninitialised too.
 - **A value assigned whole replaces its target** — what it leaves
-  uninitialised becomes uninitialised there (19.1, EXAMPLE 3); only a
-  value list or assignment notation keeps what it does not mention, now
-  also when assigned to a field or an element, and whether the record was
-  written by name or positionally.
+  uninitialised becomes uninitialised there (19.1, EXAMPLE 3); only
+  assignment notation, or a value list of every field, keeps what it does
+  not mention or gives `-`, now also when assigned to a field or an
+  element that ntt can tell is of a record, set or list type, and whether
+  the record was written by name or positionally. A union's is chosen
+  anew, its type reached through a synonym too.
 - **`testcase.stop` stops the entire testcase** with the verdict error,
   from any component, its arguments the reason (21.2.1): it was an unknown
   identifier whose error happened to give the verdict, and the MTC went on

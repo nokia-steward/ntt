@@ -64,7 +64,8 @@ func TestEdition_EnumeratorIntegers(t *testing.T) {
 // Implicit omit sets the optional fields a template gives no value to omit,
 // at any depth (ETSI 27.7). A modified template keeps what it has of its
 // base; in V4 that includes the fields its modification does not mention
-// (15.5 b), in V5 those are set to omit, but for one it gives `-`.
+// (15.5 b), and the attribute changes nothing of it; in V5 those are set
+// to omit, but for one it gives `-`.
 func TestImplicitOmit_Templates(t *testing.T) {
 	v4v5(t, `type record S { integer a optional, boolean c }
 		type record R { integer i, integer j optional, S s optional }
@@ -176,5 +177,74 @@ func TestEdition_RangeLoopFollowsItsModule(t *testing.T) {
 	}
 	if v, reason := run("", `language "TTCN-3:5"`); v != runtime.PassVerdict {
 		t.Errorf("V4 function, V5 testcase: verdict = %s (%s), want pass", v, reason)
+	}
+}
+
+// A V5 enumerator of a negated constant has the negated integer, however
+// often the type's enumerators are evaluated.
+func TestEdition_EnumeratorOfNegatedConstant(t *testing.T) {
+	runPass(t, "M.tc", `module M language "TTCN-3:5" {
+		type component C {}
+		const integer K := 2;
+		type enumerated E { a(K), b, c(-K) }
+		testcase tc() runs on C {
+			if (enum2int(a) == 2 and enum2int(c) == -2 and K == 2) { setverdict(pass); }
+			else { setverdict(fail, enum2int(a), enum2int(c), K); }
+		}
+	}`)
+}
+
+// Implicit omit does not reach into a template a field takes whose own
+// optional attribute says otherwise, unless given with override; one
+// without an attribute of its own it does reach (ETSI 27.7, the examples
+// mw_myTemplate22, 24 and 25). An outer override wins over an inner
+// attribute (27.1.2).
+func TestImplicitOmit_LowerScopeAndOverride(t *testing.T) {
+	v, reason := runStrict(t, "M.tc", `module M {
+		type component C {}
+		type record MyRecord1 { integer a, boolean b optional }
+		type record MyRecord2 { MyRecord1 m }
+		template MyRecord1 t1a := { a := ? }
+		template MyRecord1 t1b := { a := ? } with { optional "explicit omit" }
+		template MyRecord2 t22 := { m := t1a } with { optional "implicit omit" }
+		template MyRecord2 t24 := { m := t1b } with { optional "implicit omit" }
+		template MyRecord2 t25 := { m := t1b } with { optional override "implicit omit" }
+		group g {
+			template MyRecord1 tg := { a := 1 } with { optional "implicit omit" }
+		} with { optional override "explicit omit" }
+		testcase tc() runs on C {
+			setverdict(pass, t22, t24, t25, tg);
+		}
+	}`)
+	want := `{m := {a := ?, b := omit}} {m := {a := ?}} {m := {a := ?, b := omit}} {a := 1}`
+	if v != runtime.PassVerdict || reason != want {
+		t.Fatalf("verdict = %s (%s), want pass (%s)", v, reason, want)
+	}
+}
+
+// A field's template is the module's own when it defines one of that
+// name, whatever a module it imports defines: an imported one with an
+// optional attribute of its own does not keep the field from implicit
+// omit.
+func TestImplicitOmit_OwnTemplateBeforeImported(t *testing.T) {
+	lib := `module L {
+		type record MyRecord1 { integer a, boolean b optional }
+		template MyRecord1 t_x := { a := 2 } with { optional "explicit omit" }
+	}`
+	main := `module M {
+		import from L all;
+		type component C {}
+		type record MyRecord2 { MyRecord1 m }
+		template MyRecord1 t_x := { a := 1 }
+		template MyRecord2 t := { m := t_x } with { optional "implicit omit" }
+		template MyRecord2 tq := { m := L.t_x } with { optional "implicit omit" }
+		testcase tc() runs on C { setverdict(pass, t, tq); }
+	}`
+	v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, lib), parse(t, main)}, "M.tc", interpreter.TestcaseOptions{})
+	if err != nil {
+		t.Fatalf("RunTestcaseWith: %v", err)
+	}
+	if want := `{m := {a := 1, b := omit}} {m := {a := 2}}`; v != runtime.PassVerdict || reason != want {
+		t.Fatalf("verdict = %s (%s), want pass (%s)", v, reason, want)
 	}
 }

@@ -70,9 +70,9 @@ decisions:
   of the label's integers, `Label(?)` any; a label of several integers
   written alone, where a value of its type is, is ambiguous. Labels are
   compared alone, `A < B(1)`, when they are of one type, and a label of
-  several types written alone is ambiguous. A definition of the module,
-  or a local one of a behaviour that uses the type, with a label's name
-  hides it, which is an error. V4's rules that a value list holds only
+  several types written alone is ambiguous. A definition of the module
+  with a label's name hides it, and so does a local one in scope where a
+  variable or constant of the type is declared; that is an error. V4's rules that a value list holds only
   literals, that `Label(n)` needs a list, and that labels compared alone
   need a typed operand do not apply.
 - **`sizeof`** of a record of or set of is the number of its elements,
@@ -103,9 +103,20 @@ edition.
 Not yet: local templates with parameters (the task forces' own
 experiment still uses one), templates in a range loop (left out at
 Budapest, 2025, without a rule yet), the enum-label checks inside groups
-and of imported types, and a field of an implicit-omit template that
-refers to an explicit-omit one, which is set to omit (27.7 says it is
-not).
+and of imported types, initial values of the other reference types and
+of arrays and fields (only `default` and `verdicttype` variables take
+them), and implicit omit inside union alternatives and nested records
+written as value lists. Implicit omit keeps what a template with an
+optional attribute of its own gives only to a field of a template's
+literal written as a plain reference to it; it still reaches one
+referenced whole, by `T:{...}`, by a parameterised call, through a group's
+attribute, or in a V5 modified template. The language server reads `language` from the
+project it is started in, one for all the suites it serves.
+
+Where the analyzer cannot tell a V5 rule holds, it says nothing: an
+enumerated value is checked only where the variable or parameter it is
+assigned to has one type throughout the module, and a local hides a
+label only where it is in scope.
 
 ## Core-language changes that affect ntt's semantic checks
 

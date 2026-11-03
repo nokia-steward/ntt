@@ -2564,7 +2564,7 @@ func evalUnary(n *syntax.UnaryExpr, env runtime.Scope) runtime.Object {
 	case syntax.SUB:
 		switch val := val.(type) {
 		case runtime.Int:
-			return runtime.Int{Int: val.Neg(val.Int)}
+			return runtime.Int{Int: new(big.Int).Neg(val.Int)}
 		case runtime.Float:
 			return -val
 
@@ -3578,6 +3578,38 @@ func isMapType(td *runtime.TypeDesc, env runtime.Scope) bool {
 	return mapTypeDesc(td, env) != nil
 }
 
+// structTypeDecl is the record, set or union type td is, or is a synonym
+// of, or nil.
+func structTypeDecl(td *runtime.TypeDesc, env runtime.Scope) *syntax.StructTypeDecl {
+	for depth := 0; td != nil && depth < 8; depth++ {
+		if td.Struct != nil {
+			return td.Struct
+		}
+		if td.Underlying == "" {
+			return nil
+		}
+		home := td.Home
+		if home == nil {
+			home = env
+		}
+		td = lookupTypeDesc(td.Underlying, home)
+	}
+	return nil
+}
+
+// notationMerges reports whether a notation assigned to the field or
+// element lhs merges into what is there: its type is known to be a
+// record, a set, a record of, a set of or an array. One whose type is not
+// known (anytype, or a synonym that does not resolve) may be a union,
+// whose notation chooses an alternative anew, so it is assigned whole.
+func notationMerges(lhs syntax.Expr, env runtime.Scope) bool {
+	td := lvalueTypeDesc(lhs, env)
+	if st := structTypeDecl(td, env); st != nil {
+		return st.KindTok != nil && st.KindTok.Kind() != syntax.UNION
+	}
+	return listTypeDesc(td, env) != nil
+}
+
 // mapTypeDesc is the map type td is, or is a synonym of, or nil.
 func mapTypeDesc(td *runtime.TypeDesc, env runtime.Scope) *runtime.TypeDesc {
 	for depth := 0; td != nil && depth < 8; depth++ {
@@ -3897,7 +3929,7 @@ func mergeNotation(existing, fresh runtime.Object, lhs syntax.Expr, env runtime.
 	if merged, ok := mergeFieldReassignment(existing, fresh, lhs, env); ok {
 		return merged, true
 	}
-	if st := structDeclOf(lvalueTypeDesc(lhs, env)); st != nil && st.KindTok.Kind() == syntax.UNION {
+	if st := structTypeDecl(lvalueTypeDesc(lhs, env), env); st != nil && st.KindTok.Kind() == syntax.UNION {
 		return nil, false
 	}
 	switch old := existing.(type) {
@@ -4046,7 +4078,7 @@ func mergeFieldReassignment(existing, fresh runtime.Object, lhs syntax.Expr, env
 	if !ok {
 		return nil, false
 	}
-	if st := structDeclOf(lvalueTypeDesc(lhs, env)); st != nil && st.KindTok.Kind() == syntax.UNION {
+	if st := structTypeDecl(lvalueTypeDesc(lhs, env), env); st != nil && st.KindTok.Kind() == syntax.UNION {
 		return nil, false
 	}
 	out := runtime.NewRecord()
@@ -4402,8 +4434,9 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 
 	// A notation assigned to a field or an element merges into what is
 	// there as one assigned to a variable does. The target is read first
-	// only when that cannot run anything: no call in its path.
-	if _, isIdent := lhs.(*syntax.Ident); !isIdent && isNotation(rhs) && !hasCall(lhs) {
+	// only when that cannot run anything: no call in its path, and only
+	// when its type is known not to be a union's (notationMerges).
+	if _, isIdent := lhs.(*syntax.Ident); !isIdent && isNotation(rhs) && !hasCall(lhs) && notationMerges(lhs, env) {
 		if existing := eval(lhs, env); existing != nil && !runtime.IsError(existing) && existing != runtime.Undefined && existing != runtime.Omit {
 			if merged, ok := mergeNotation(existing, val, lhs, env); ok {
 				val = merged

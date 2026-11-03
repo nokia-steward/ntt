@@ -179,3 +179,30 @@ func TestAssignmentNotation_MergesIntoFieldsAndElements(t *testing.T) {
 		}
 	}`)
 }
+
+// A notation assigned to a union chooses its alternative anew, whether the
+// union is reached through a synonym or is anytype (ETSI 6.2.5.1); the
+// alternative there before is not kept.
+func TestAssignmentNotation_UnionThroughSynonymIsReplaced(t *testing.T) {
+	runPass(t, "M.tc", `module M {
+		type component C {}
+		type union U { integer a, charstring b }
+		type U U2;
+		type record WA { U2 u }
+		type record of U2 RU2;
+		testcase tc() runs on C {
+			var U2 u := { a := 1 };
+			u := { b := "x" };
+			var WA w := { u := { a := 1 } };
+			w.u := { b := "x" };
+			var RU2 l := { { a := 1 } };
+			l[0] := { b := "x" };
+			var record { anytype at } y := { at := { integer := 1 } };
+			y.at := { charstring := "a" };
+			if (ischosen(u.b) and not ischosen(u.a) and ischosen(w.u.b) and not ischosen(w.u.a) and
+			    ischosen(l[0].b) and not ischosen(l[0].a) and
+			    ischosen(y.at.charstring) and not ischosen(y.at.integer)) { setverdict(pass); }
+			else { setverdict(fail, u, w, l, y); }
+		}
+	}`)
+}

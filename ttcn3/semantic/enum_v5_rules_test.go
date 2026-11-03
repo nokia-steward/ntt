@@ -67,3 +67,31 @@ func TestEnumV5Rules(t *testing.T) {
 		})
 	}
 }
+
+// What the V5 rules cannot tell they leave alone: a name of several types
+// in the module, a field's or a parameter's `:=` in a notation, two labels
+// compared that are of one type together, a local out of scope where the
+// type is, and an integer at the limits of int64.
+func TestEnumV5RulesNoFalsePositives(t *testing.T) {
+	tests := []struct{ name, src string }{
+		{"parameter of another type", `type enumerated E1 { A(1..3), B } type enumerated E2 { A(7), C }
+			function a() { var E1 x := B; }
+			function b(inout E2 x) { x := A(7); }`},
+		{"field of another type", `type enumerated E1 { A(1..3), B } type enumerated E2 { A(7), C }
+			type record R { E2 x }
+			function a() { var E1 x := B; }
+			function b() { var R r := { x := A(7) }; }`},
+		{"labels of one type together", `type enumerated E1 { A, B } type enumerated E2 { A }
+			function f() return boolean { return A == B; }`},
+		{"local in a sibling block", `type enumerated E { A, B }
+			function f(boolean c) { if (c) { var integer A := 1; } else { var E e := B; } }`},
+		{"integer at the limit of int64", `type enumerated E { A(0..9223372036854775807), B }`},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if cs := analyzeCodes(t, `module M language "TTCN-3:5" { `+tt.src+` }`); len(cs) != 0 {
+				t.Errorf("expected no diagnostics, got %v", cs)
+			}
+		})
+	}
+}
