@@ -90,14 +90,15 @@ func (a *Analyzer) checkEnumUseRules(mod *syntax.Module) []Diagnostic {
 		delete(fixedEnumNames, name)
 	}
 	var diags []Diagnostic
+	// V5 reads a label's integers and its type from the label itself
+	// (enum_v5_rules.go).
+	v4 := mod.Edition() == syntax.V4
 	syntax.Inspect(mod, func(n syntax.Node) bool {
 		switch x := n.(type) {
 		case *syntax.ValueDecl:
 			diags = append(diags, checkEnumVarInit(x, enumTypes)...)
 		}
-		// V5 reads a label's integers and its type from the label
-		// itself (enum_v5_rules.go).
-		if mod.Edition() == syntax.V4 {
+		if v4 {
 			diags = append(diags, checkEnumOrdinalCall(n, fixedEnumNames, defCalls)...)
 			diags = append(diags, checkBareEnumComparison(n, enumLabels)...)
 		}

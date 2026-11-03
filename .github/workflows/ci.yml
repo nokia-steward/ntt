@@ -34,7 +34,10 @@ jobs:
         with:
           go-version: stable
       - name: Test
-        run: go test -race ./...
+        # The race detector makes the interpreter's tests several times
+        # slower; on a loaded runner they outlast go test's default
+        # ten minutes per package.
+        run: go test -race -timeout 20m ./...
 
   lint:
     name: Linting

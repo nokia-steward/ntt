@@ -3,6 +3,7 @@ package lsp
 import (
 	"context"
 	"errors"
+	"sort"
 
 	"github.com/hashicorp/go-multierror"
 	"github.com/nokia/ntt/internal/fs"
@@ -56,6 +57,7 @@ func (s *Server) Diagnose(uris ...protocol.DocumentURI) {
 		// on a broken tree produces too much noise to be useful while
 		// the user is mid-edit.
 		if tree.Err == nil {
+			s.setDefaultLanguage(uri, tree)
 			s.reportLintProblems(uri, linter.Lint(tree))
 			s.reportSemanticDiagnostics(uri, semantic.NewAnalyzer(&s.db).Analyze(tree))
 		}
@@ -158,6 +160,40 @@ func (s *Server) syncDiagnostics() {
 				Diagnostics: v,
 				URI:         protocol.DocumentURI(k),
 			})
+		}
+	}
+}
+
+// setDefaultLanguage gives the modules of the tree of uri the language of
+// the suite the file is in, its manifest's `language` (or NTT_LANGUAGE),
+// so that the analyzer reads them in that edition whatever directory the
+// server was started in. Of several suites, the innermost wins: the one
+// of the longest root, of equal ones the first by name.
+func (s *Server) setDefaultLanguage(uri protocol.DocumentURI, tree *ttcn3.Tree) {
+	owners := s.Owners(uri)
+	if len(owners) == 0 {
+		return
+	}
+	root := func(suite *Suite) string {
+		if suite.Config == nil {
+			return ""
+		}
+		return suite.Root
+	}
+	sort.Slice(owners, func(i, j int) bool {
+		ri, rj := root(owners[i]), root(owners[j])
+		if len(ri) != len(rj) {
+			return len(ri) > len(rj)
+		}
+		return ri < rj
+	})
+	lang := ""
+	if owners[0].Config != nil {
+		lang = owners[0].Language
+	}
+	for _, n := range tree.Nodes {
+		if m, ok := n.(*syntax.Module); ok {
+			m.SetDefaultLanguage(lang)
 		}
 	}
 }

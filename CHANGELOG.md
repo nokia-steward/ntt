@@ -37,7 +37,9 @@ single functional test doubles as a performance probe. See
   implicit omit completes a modified template's modification. A range
   loop iterating into a variable declared outside it takes no
   uninitialised element. See
-  [docs/v5-migration-notes.md](docs/v5-migration-notes.md).
+  [docs/v5-migration-notes.md](docs/v5-migration-notes.md). The language
+  server reads each suite's `language`, whatever directory it was started
+  in.
 - **The line log follows the event catalogue of the format** — a receive,
   trigger or check that finds its queue empty is a `ptre` (one `(any)` for
   `any port` and all its queues), with the template's type, a predefined

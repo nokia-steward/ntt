@@ -35,3 +35,20 @@ func TestModuleEdition(t *testing.T) {
 		}
 	}
 }
+
+// A module's own default language wins over DefaultLanguage; empty, it
+// makes the module V4 whatever DefaultLanguage says.
+func TestModuleDefaultLanguage(t *testing.T) {
+	defer func(l string) { DefaultLanguage = l }(DefaultLanguage)
+	DefaultLanguage = V5Language
+	parse := func() *Module { return Parse([]byte(`module M {}`)).Nodes[0].(*Module) }
+	m, other := parse(), parse()
+	m.SetDefaultLanguage("")
+	if m.Edition() != V4 || other.Edition() != V5 {
+		t.Fatalf("editions %d and %d, want V4 and V5", m.Edition(), other.Edition())
+	}
+	m.SetDefaultLanguage(V5Language)
+	if m.Edition() != V5 {
+		t.Fatalf("edition %d after setting V5, want V5", m.Edition())
+	}
+}

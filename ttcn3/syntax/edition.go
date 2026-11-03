@@ -1,6 +1,12 @@
 package syntax
 
-import "strings"
+import (
+	"runtime"
+	"strings"
+	"sync"
+	"sync/atomic"
+	"weak"
+)
 
 // An Edition is the major release of the TTCN-3 core language a module is
 // written in. Where two editions disagree, the analyzer and the interpreter
@@ -31,8 +37,43 @@ const V5Language = "TTCN-3:5"
 // read.
 var DefaultLanguage string
 
+// defaultLanguages holds the default languages set for single modules
+// (SetDefaultLanguage), keyed weakly, so that a module no longer used is
+// dropped from it.
+var defaultLanguages sync.Map // weak.Pointer[Module] -> string
+
+// anyDefaultLanguage tells that a default language was set for a module,
+// so that a process that sets none does not look them up.
+var anyDefaultLanguage atomic.Bool
+
+// SetDefaultLanguage makes lang the default language of module m, in
+// place of DefaultLanguage: that of the project the module is in, when
+// one process reads the modules of several, as a language server does.
+func (m *Module) SetDefaultLanguage(lang string) {
+	if m == nil {
+		return
+	}
+	anyDefaultLanguage.Store(true)
+	k := weak.Make(m)
+	if _, loaded := defaultLanguages.Swap(k, lang); !loaded {
+		runtime.AddCleanup(m, func(k weak.Pointer[Module]) { defaultLanguages.Delete(k) }, k)
+	}
+}
+
+// defaultLanguage is the default language of m: the one set for it, else
+// DefaultLanguage.
+func (m *Module) defaultLanguage() string {
+	if m != nil && anyDefaultLanguage.Load() {
+		if lang, ok := defaultLanguages.Load(weak.Make(m)); ok {
+			return lang.(string)
+		}
+	}
+	return DefaultLanguage
+}
+
 // Edition returns the edition the module is written in: the one its
-// language clause names, else the one DefaultLanguage names, else V4.
+// language clause names, else the one its default language names
+// (SetDefaultLanguage, DefaultLanguage), else V4.
 func (m *Module) Edition() Edition {
 	if m != nil && m.Language != nil {
 		for _, t := range m.Language.List {
@@ -44,7 +85,7 @@ func (m *Module) Edition() Edition {
 			}
 		}
 	}
-	if e, ok := languageEdition(DefaultLanguage); ok {
+	if e, ok := languageEdition(m.defaultLanguage()); ok {
 		return e
 	}
 	return V4

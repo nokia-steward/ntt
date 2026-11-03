@@ -51,13 +51,14 @@ module M language "TTCN-3:5" { ... }
 language: "TTCN-3:5"
 ```
 
-or `NTT_LANGUAGE=TTCN-3:5` in the environment. The release defines no
-language identifier yet; ntt's, kept in one place, `syntax.V5Language`,
-names the major version rather than a year. The identifiers of years are
-V4's, and its releases take a year other than their own (V4.17.1, of 2025,
-is `"TTCN-3:2023"`), so any year could yet name a V4 release. A clause
-naming another TTCN-3 edition (`"TTCN-3:2018 Object-Oriented"`) keeps a
-module V4 whatever the default.
+or `NTT_LANGUAGE=TTCN-3:5` in the environment; the language server reads
+each suite's, a file being in the edition of the innermost suite it is in.
+The release defines no language identifier yet; ntt's, kept in one
+place, `syntax.V5Language`, names the major version rather than a year.
+The identifiers of years are V4's, and its releases take a year other
+than their own (V4.17.1, of 2025, is `"TTCN-3:2023"`), so any year could
+yet name a V4 release. A clause naming another TTCN-3 edition
+(`"TTCN-3:2018 Object-Oriented"`) keeps a module V4 whatever the default.
 
 What a V5 module reads differently today, after the draft of the core
 language in the task forces' working space (`src/`) and their meeting
@@ -110,8 +111,7 @@ written as value lists. Implicit omit keeps what a template with an
 optional attribute of its own gives only to a field of a template's
 literal written as a plain reference to it; it still reaches one
 referenced whole, by `T:{...}`, by a parameterised call, through a group's
-attribute, or in a V5 modified template. The language server reads `language` from the
-project it is started in, one for all the suites it serves.
+attribute, or in a V5 modified template.
 
 Where the analyzer cannot tell a V5 rule holds, it says nothing: an
 enumerated value is checked only where the variable or parameter it is
