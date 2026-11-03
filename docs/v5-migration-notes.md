@@ -36,6 +36,62 @@ V5 splits the language across seven ES + two TR:
 - ES 202 781 (configuration + deployment support)
 - ES 202 786 (continuous signals)
 
+## Writing a module in V5
+
+V4 stays the default. A module is read as V5 when its language clause
+says so, or when the project makes V5 the default for the modules whose
+clause names no TTCN-3 edition:
+
+```ttcn3
+module M language "TTCN-3:2026" { ... }
+```
+
+```yaml
+# package.yml
+language: "TTCN-3:2026"
+```
+
+or `NTT_LANGUAGE=TTCN-3:2026` in the environment. The release defines no
+language identifier yet; `"TTCN-3:2026"` is provisional and kept in one
+place, `syntax.V5Language`. A clause naming another TTCN-3 edition
+(`"TTCN-3:2018 Object-Oriented"`) keeps a module V4 whatever the default.
+
+What a V5 module reads differently today, after the draft of the core
+language in the task forces' working space (`src/`) and their meeting
+decisions:
+
+- **Enumerated types** (draft 6, "Enumerations"): an enumerator's integers
+  are integer expressions, constants included, and ranges, `infinity` an
+  open bound; one declared without gets the lowest integer from 0 on that
+  no other has, and it is an error when none is left. `Label(n)` names one
+  of the label's integers, `Label(?)` any; a label of several integers
+  written alone, where a value of its type is, is ambiguous. Labels are
+  compared alone, `A < B(1)`, when they are of one type, and a label of
+  several types written alone is ambiguous. A definition of the module,
+  or a local one of a behaviour that uses the type, with a label's name
+  hides it, which is an error. V4's rules that a value list holds only
+  literals, that `Label(n)` needs a list, and that labels compared alone
+  need a typed operand do not apply.
+- **`sizeof`** of a record of or set of is the number of its elements,
+  uninitialised ones included (draft annex B); `lengthof` still leaves out
+  those at the end.
+- **Initial values** (draft 11): a `default` variable starts `null`, a
+  `verdicttype` variable `none`; in V4 both are uninitialised.
+- **Implicit omit on a modified template** completes the modification:
+  the optional fields it does not mention are set to omit, but for those
+  it gives `-` (Berlin, 2026). In V4 a field the modification does not
+  mention is the base's (15.5 b).
+
+The analyzer and the interpreter ask the module (`Module.Edition`), so a
+suite can mix V4 and V5 modules.
+
+Not yet: `???` (not implemented), the
+restriction of a range loop over a predeclared variable, local templates
+with parameters (the task forces' own experiment still uses one), the
+enum-label checks inside groups and of imported types, and a field of an
+implicit-omit template that refers to an explicit-omit one, which is set
+to omit (27.7 says it is not).
+
 ## Core-language changes that affect ntt's semantic checks
 
 ### Moved out of core (now extension-only)
@@ -116,22 +172,19 @@ gated against "core V5", we should be ready to either:
 
 ## Action items (not blocking, file as ideas)
 
-- [ ] Add a `--language v5` flag (or `module` attribute sniff)
-      that downgrades procedure-based comm fixtures to
-      `non-core` instead of failing them outright.
-- [ ] Accept the lowercase `'..'b`/`'..'h`/`'..'o` literal forms
-      in the scanner. Today these likely parse as syntax errors;
-      the V5 suite will rely on them.
-- [ ] Recognise `type port P { ... }` (no `message`) as a
-      message port. Should be a one-line scanner / parser tweak.
-- [ ] Static vs dynamic template enforcement (esp. forbid
-      local templates with parameters when `template "static"`
-      is in effect). Probably warrants its own
-      `template_evaluation_mode.go` rule once we move on the
-      V5 suite.
-- [ ] Audit the V5 list of "moved to extensions" against the
-      current conformance cohort labels — anything we already
-      reject as a sem error but the V5 suite expects to accept
-      under an extension flag should grow a `non-core` switch.
+- [x] Read a module as V5 by its language clause, or by the project's
+      default (see "Writing a module in V5").
+- [x] Accept the lowercase `'..'b`/`'..'h`/`'..'o` literal forms.
+- [x] Recognise `type port P { ... }` (no `message`) as a message port.
+- [ ] Downgrade procedure-based communication in a V5 module to an
+      extension instead of core.
+- [ ] Static vs dynamic template enforcement (esp. forbid local
+      templates with parameters when `template "static"` is in
+      effect), once the task forces settle it.
+- [ ] Audit the V5 list of "moved to extensions" against the current
+      conformance cohort labels — anything we already reject as a sem
+      error but the V5 suite expects to accept under an extension flag
+      should grow a `non-core` switch.
 
-When in doubt about a specific item, ask Matthias on Teams.
+When in doubt about a specific item, raise it in the issue tracker of the
+working space, <https://labs.etsi.org/rep/mts/ttcn3/standard/-/issues>.

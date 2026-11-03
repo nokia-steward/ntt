@@ -21,6 +21,20 @@ single functional test doubles as a performance probe. See
 
 ### Added
 
+- **A module can be written in the next major release of the core
+  language (V5)** — by its language clause, `language "TTCN-3:2026"`
+  (provisional: the release defines none yet), or for the modules whose
+  clause names no TTCN-3 edition by the project's `language` (or
+  `NTT_LANGUAGE`). V4 stays the default, and a suite can mix both. A V5
+  module takes enumerators of integer expressions and ranges open to
+  `infinity`, an integer of a label's own in `Label(n)` and `Label(?)`,
+  and labels compared alone; an enumerator no integer is left for, an
+  integer not of its label, a label of several integers or of several
+  types written alone, and a label a definition hides are errors. Its
+  `sizeof` counts a list's elements, uninitialised ones included; its
+  `default` and `verdicttype` variables start `null` and `none`; and
+  implicit omit completes a modified template's modification. See
+  [docs/v5-migration-notes.md](docs/v5-migration-notes.md).
 - **The line log follows the event catalogue of the format** — a receive,
   trigger or check that finds its queue empty is a `ptre` (one `(any)` for
   `any port` and all its queues), with the template's type, a predefined
@@ -343,6 +357,13 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **Implicit omit sets a template's optional fields to omit** that it gives
+  no value, at any depth, value list templates' trailing ones too (27.7);
+  it was applied to variables only. A modified template keeps what it has
+  of its base.
+- **An enumerator's integers may name constants** (6.2.4), of any module,
+  and `-K`; and `Label(n)` naming no integer of the label is an error, not
+  an uninitialised value.
 - **Integer division truncates towards zero** — `-5/2` is `-2` (ETSI
   ES 201 873-1 7.1.1); it was rounded down to `-3`.
 - **An out parameter is uninitialised when the function is entered**, and

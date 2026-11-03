@@ -1771,6 +1771,14 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// `lengthof(v)` and `sizeof(v)` of a list take its declared
 		// type: an array's fixed size, a record of's minimal length.
 		if _, ok := f.(*runtime.Builtin); ok && len(args) == 1 {
+			// In V5 the size of a list is the number of its elements,
+			// those uninitialised included; its length leaves out
+			// those at its end (the draft's annex B).
+			if id, ok := n.Fun.(*syntax.Ident); ok && id.String() == "sizeof" && moduleEdition(env) == syntax.V5 {
+				if l, ok := args[0].(*runtime.List); ok && (l.ListType == runtime.RECORD_OF || l.ListType == runtime.SET_OF) && len(l.FieldNames) == 0 {
+					return runtime.NewInt(len(l.Elements))
+				}
+			}
 			if id, ok := n.Fun.(*syntax.Ident); ok && (id.String() == "lengthof" || id.String() == "sizeof") {
 				if td := listTypeDesc(lvalueTypeDesc(n.Args.List[0], env), env); td != nil {
 					if res, ok := listLength(args[0], td, env); ok {
@@ -2008,7 +2016,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return evalEnumTypeDecl(n, env)
 
 	case *syntax.EnumSpec:
-		return evalEnumSpec(n)
+		return evalEnumSpec(n, env)
 
 	case *syntax.SubTypeDecl:
 		switch t := n.Field.Type.(type) {
@@ -5627,7 +5635,10 @@ func unwrap(obj runtime.Object) runtime.Object {
 	return obj
 }
 
-func evalEnumTypeDeclRange(expr syntax.Expr) ([]runtime.EnumRange, error) {
+// evalEnumTypeDeclRange evaluates the integers an enumerator is declared
+// with (ETSI 6.2.4), in env: integer expressions, and ranges whose bounds
+// are, `infinity` an open one.
+func evalEnumTypeDeclRange(expr syntax.Expr, env runtime.Scope) ([]runtime.EnumRange, error) {
 
 	enumKeyRanges := []runtime.EnumRange{}
 
@@ -5646,16 +5657,18 @@ func evalEnumTypeDeclRange(expr syntax.Expr) ([]runtime.EnumRange, error) {
 				argRet.First, argErr = evalInt(argT)
 				argRet.Last = argRet.First
 			case *syntax.UnaryExpr:
-				argRet.First, argErr = evalInt(argT)
+				if argRet.First, argErr = evalInt(argT); argErr != nil {
+					argRet.First, argErr = enumIntExpr(argT, env)
+				}
 				argRet.Last = argRet.First
 			case *syntax.BinaryExpr:
 				if argT.Op != nil && argT.Op.Kind() == syntax.RANGE {
-					argRet.First, argErr = evalInt(argT.X)
+					argRet.First, argErr = enumBound(argT.X, math.MinInt, env)
 					if argErr != nil {
 						argErr = fmt.Errorf("BinaryExpr l-arguments %w", argErr)
 						break
 					}
-					argRet.Last, argErr = evalInt(argT.Y)
+					argRet.Last, argErr = enumBound(argT.Y, math.MaxInt, env)
 					if argErr != nil {
 						argErr = fmt.Errorf("BinaryExpr r-arguments %w", argErr)
 					}
@@ -5665,11 +5678,11 @@ func evalEnumTypeDeclRange(expr syntax.Expr) ([]runtime.EnumRange, error) {
 					// so calls like `Tuesday(1+1)` or
 					// `Wednesday(bit2int('0011'B))` resolve to a
 					// single point value.
-					argRet.First, argErr = enumIntExpr(argT)
+					argRet.First, argErr = enumIntExpr(argT, env)
 					argRet.Last = argRet.First
 				}
 			default:
-				argRet.First, argErr = enumIntExpr(argT)
+				argRet.First, argErr = enumIntExpr(argT, env)
 				if argErr == nil {
 					argRet.Last = argRet.First
 				} else {
@@ -5689,13 +5702,18 @@ func evalEnumTypeDeclRange(expr syntax.Expr) ([]runtime.EnumRange, error) {
 	return enumKeyRanges, nil
 }
 
-// enumIntExpr evaluates an arbitrary integer expression in a fresh
-// scope that knows about the registered built-ins. Used by enum-element
-// parsing so `Tuesday(1+1)` or `Friday(hex2int('FF'H))` resolve to
-// concrete integers without having to teach evalInt about every shape.
-func enumIntExpr(e syntax.Expr) (int, error) {
-	env := runtime.NewEnv(nil)
-	v := eval(e, env)
+// enumIntExpr evaluates an integer expression of an enumerator's value
+// list: in env, so a constant it names resolves, else in a fresh scope
+// that knows about the registered built-ins, so `Tuesday(1+1)` or
+// `Friday(hex2int('FF'H))` resolve before the module's constants are.
+func enumIntExpr(e syntax.Expr, env runtime.Scope) (int, error) {
+	var v runtime.Object
+	if env != nil {
+		v = eval(e, env)
+	}
+	if v == nil || runtime.IsError(v) {
+		v = eval(e, runtime.NewEnv(nil))
+	}
 	if runtime.IsError(v) {
 		return 0, fmt.Errorf("%s", v.Inspect())
 	}
@@ -5718,6 +5736,11 @@ func enumTemplateFromArgs(ev *runtime.EnumValue, args []runtime.Object) (*runtim
 	}
 	var ranges []runtime.EnumRange
 	for _, a := range args {
+		if a == runtime.Any {
+			// `Label(?)`: any of the label's own integers.
+			ranges = append(ranges, ev.Ranges()...)
+			continue
+		}
 		switch v := a.(type) {
 		case runtime.Int:
 			n, ok := asEnumInt(v)
@@ -5756,6 +5779,25 @@ func enumRangeBounds(r *runtime.Range) (int, int, bool) {
 	return lo, hi, true
 }
 
+// enumBound evaluates a bound of an enumerator's range; `infinity`, or
+// `-infinity`, is the open one, open.
+func enumBound(e syntax.Expr, open int, env runtime.Scope) (int, error) {
+	x, neg := e, false
+	if u, ok := e.(*syntax.UnaryExpr); ok && u.Op != nil && u.Op.Kind() == syntax.SUB {
+		x, neg = u.X, true
+	}
+	if lit, ok := x.(*syntax.ValueLiteral); syntax.Name(x) == "infinity" || ok && lit.Tok != nil && lit.Tok.String() == "infinity" {
+		if neg != (open < 0) {
+			return 0, fmt.Errorf("infinity bounds a range only on its side")
+		}
+		return open, nil
+	}
+	if n, err := evalInt(e); err == nil {
+		return n, nil
+	}
+	return enumIntExpr(e, env)
+}
+
 func asEnumInt(o runtime.Object) (int, bool) {
 	iv, ok := o.(runtime.Int)
 	if !ok || !iv.IsInt64() {
@@ -5764,7 +5806,7 @@ func asEnumInt(o runtime.Object) (int, bool) {
 	return int(iv.Int64()), true
 }
 
-func evalEnumElements(enums []syntax.Expr) (runtime.EnumElements, error) {
+func evalEnumElements(enums []syntax.Expr, env runtime.Scope) (runtime.EnumElements, error) {
 	ret := make(runtime.EnumElements)
 
 	validateNewEnumKeyRanges := func(ranges []runtime.EnumRange) error {
@@ -5787,17 +5829,13 @@ func evalEnumElements(enums []syntax.Expr) (runtime.EnumElements, error) {
 	// e_white must skip 0 because e_yellow is going to take it),
 	// we pre-scan the explicit numbers and reserve them before
 	// handing out auto-numbered slots.
-	used := map[int]bool{}
+	var used []runtime.EnumRange
 	for _, e := range enums {
-		eRanges, eErr := evalEnumTypeDeclRange(e)
+		eRanges, eErr := evalEnumTypeDeclRange(e, env)
 		if eErr != nil || len(eRanges) == 0 {
 			continue
 		}
-		for _, r := range eRanges {
-			for v := r.First; v <= r.Last; v++ {
-				used[v] = true
-			}
-		}
+		used = append(used, eRanges...)
 	}
 	nextAuto := 0
 	for _, e := range enums {
@@ -5811,14 +5849,16 @@ func evalEnumElements(enums []syntax.Expr) (runtime.EnumElements, error) {
 			return ret, fmt.Errorf("can't add key %s, key with this name aleady exists", eName)
 		}
 
-		eRanges, eErr := evalEnumTypeDeclRange(e)
+		eRanges, eErr := evalEnumTypeDeclRange(e, env)
 		if eErr != nil {
 			return ret, fmt.Errorf("can't add key %s, %w", eName, eErr)
 		}
 		if len(eRanges) == 0 {
-			for used[nextAuto] {
-				nextAuto++
+			n, ok := unusedEnumInt(nextAuto, used)
+			if !ok {
+				return ret, fmt.Errorf("can't add key %s, every integer is another's", eName)
 			}
+			nextAuto = n
 			eRanges = []runtime.EnumRange{{First: nextAuto, Last: nextAuto}}
 		}
 		if err := validateNewEnumKeyRanges(eRanges); err != nil {
@@ -5833,11 +5873,7 @@ func evalEnumElements(enums []syntax.Expr) (runtime.EnumElements, error) {
 		}
 
 		ret[eName] = eRanges
-		for _, r := range eRanges {
-			for i := r.First; i <= r.Last; i++ {
-				used[i] = true
-			}
-		}
+		used = append(used, eRanges...)
 	}
 	if len(ret) == 0 {
 		return ret, runtime.Errorf("this enum has no elements")
@@ -5845,10 +5881,28 @@ func evalEnumElements(enums []syntax.Expr) (runtime.EnumElements, error) {
 	return ret, nil
 }
 
-func evalEnumSpec(n *syntax.EnumSpec) runtime.Object {
+// unusedEnumInt is the lowest integer from n on that no range in used
+// holds, the one an enumerator declared without integers is given (ETSI
+// 6.2.4), if there is one.
+func unusedEnumInt(n int, used []runtime.EnumRange) (int, bool) {
+	for moved := true; moved; {
+		moved = false
+		for _, r := range used {
+			if r.Contains(n) {
+				if r.Last == math.MaxInt {
+					return 0, false
+				}
+				n, moved = r.Last+1, true
+			}
+		}
+	}
+	return n, true
+}
+
+func evalEnumSpec(n *syntax.EnumSpec, env runtime.Scope) runtime.Object {
 	ret := runtime.NewEnumType("")
 	var err error
-	ret.Elements, err = evalEnumElements(n.Enums)
+	ret.Elements, err = evalEnumElements(n.Enums, env)
 	if err != nil {
 		return runtime.Errorf("%s", err.Error())
 	}
@@ -5861,7 +5915,7 @@ func evalEnumTypeDecl(n *syntax.EnumTypeDecl, env runtime.Scope) runtime.Object 
 	ret := runtime.NewEnumType(name)
 
 	var err error
-	ret.Elements, err = evalEnumElements(n.Enums)
+	ret.Elements, err = evalEnumElements(n.Enums, env)
 	if err != nil {
 		return runtime.Errorf("%s", err.Error())
 	}
@@ -5906,20 +5960,16 @@ func evalEnumValDecl(d *syntax.Declarator, enumType *runtime.EnumType, env runti
 
 	case *syntax.CallExpr:
 
+		// `Label(N)` with a literal N; any other argument list (a
+		// template, `Label(?)`, `Label(1..3)`) is evaluated below.
 		enumElementName := syntax.Name(n)
-
-		if len(n.Args.List) != 1 {
-			return runtime.Errorf("invalid enum value")
-		}
-		arg0 := n.Args.List[0]
-		enumElementValue, err := evalInt(arg0)
-		if err != nil {
-			return runtime.Errorf("invalid enum value")
-		}
-
-		enumVal, err := runtime.NewEnumValue(enumType, enumElementName, enumElementValue)
-		if err == nil {
-			return enumVal
+		if n.Args != nil && len(n.Args.List) == 1 {
+			if enumElementValue, err := evalInt(n.Args.List[0]); err == nil {
+				enumVal, err := runtime.NewEnumValue(enumType, enumElementName, enumElementValue)
+				if err == nil {
+					return enumVal
+				}
+			}
 		}
 
 	case *syntax.Ident:
@@ -5935,7 +5985,13 @@ func evalEnumValDecl(d *syntax.Declarator, enumType *runtime.EnumType, env runti
 	// whatever the interpreter produces than a hard "invalid
 	// declarator" error.
 	if env != nil {
-		if val := eval(d.Value, env); !runtime.IsError(val) && val != nil {
+		val := eval(d.Value, env)
+		if !runtime.IsError(val) && val != nil {
+			return val
+		}
+		// `Label(n)` naming no integer of the label is an error, not
+		// an uninitialised value (ETSI 6.2.4).
+		if _, ok := d.Value.(*syntax.CallExpr); ok && runtime.IsError(val) {
 			return val
 		}
 	}
@@ -6060,7 +6116,38 @@ func buildTimerArrayDims(name string, dims []*syntax.ParenExpr, init runtime.Obj
 	return &runtime.List{Elements: elems, ListType: runtime.RECORD_OF}
 }
 
+// v5InitialValues gives the variables a declaration leaves uninitialised
+// the initial value V5 gives them (the draft's clause 11): a default
+// reference null, a verdict none. In V4 they stay uninitialised.
+func v5InitialValues(vd *syntax.ValueDecl, env runtime.Scope) {
+	if vd.KindTok == nil || vd.KindTok.Kind() != syntax.VAR || vd.TemplateRestriction != nil || vd.Type == nil {
+		return
+	}
+	var initial runtime.Object
+	switch x := vd.Type.(type) {
+	case *syntax.Ident:
+		switch {
+		case x.String() == "default":
+			initial = runtime.Null
+		case x.String() == "verdicttype":
+			initial = runtime.NoneVerdict
+		}
+	}
+	if initial == nil || moduleEdition(env) != syntax.V5 {
+		return
+	}
+	for _, decl := range vd.Decls {
+		if decl == nil || decl.Value != nil || len(decl.ArrayDef) > 0 {
+			continue
+		}
+		if v, ok := env.Get(syntax.Name(decl.Name)); ok && v == runtime.Undefined {
+			env.Set(syntax.Name(decl.Name), initial)
+		}
+	}
+}
+
 func evalValueDecl(vd *syntax.ValueDecl, env runtime.Scope) runtime.Object {
+	defer v5InitialValues(vd, env)
 	if vd.Type != nil {
 		if id, ok := vd.Type.(*syntax.Ident); ok && id.Tok.Kind() == syntax.TIMER {
 			// `timer t;` / `timer t := 5.0;` / `timer t[N] := {...}`
@@ -6388,6 +6475,117 @@ func implicitOmitRecord(st *syntax.StructTypeDecl) *runtime.Record {
 		rec.Fields[fieldName(f)] = runtime.Omit
 	}
 	return rec
+}
+
+// withImplicitOmit is val, a record or set of type td, with the optional
+// fields it gives no value set to omit, at any depth: in the fields it
+// gives a value and in the elements of their lists (ETSI 27.7, "implicit
+// omit"). For a modification, mod says what is the base's: a field it
+// gives `-`, and when not mod.fillTop one it does not mention. What
+// changes goes into a new value.
+func withImplicitOmit(val runtime.Object, td *runtime.TypeDesc, env runtime.Scope, depth int, mod omitMode) runtime.Object {
+	if td == nil || depth > 16 {
+		return val
+	}
+	home := td.Home
+	if home == nil {
+		home = env
+	}
+	if l, ok := val.(*runtime.List); ok && td.IsList && len(l.FieldNames) == 0 {
+		elem := elemTypeDesc(td, env)
+		out := l
+		for i, e := range l.Elements {
+			if ne := withImplicitOmit(e, elem, env, depth+1, mod.inner()); ne != e {
+				if out == l {
+					out = runtime.Unshare(runtime.Share(l)).(*runtime.List)
+				}
+				out.Elements[i] = ne
+			}
+		}
+		return out
+	}
+	st := structDeclOf(td)
+	if st == nil || st.KindTok.Kind() == syntax.UNION {
+		return val
+	}
+	switch v := val.(type) {
+	case *runtime.Record:
+		out := runtime.NewRecord()
+		for _, name := range v.Names() {
+			out.Set(name, v.Fields[name])
+		}
+		for _, f := range st.Fields {
+			name := fieldName(f)
+			if f == nil || name == "" {
+				continue
+			}
+			cur, has := out.Fields[name]
+			if has && cur == runtime.Undefined && mod.keepDash || !has && !mod.fillAbsent(depth) {
+				continue
+			}
+			if !has || cur == runtime.Undefined {
+				if f.Optional != nil {
+					out.Set(name, runtime.Omit)
+				}
+				continue
+			}
+			out.Set(name, withImplicitOmit(cur, fieldTypeDesc(f, home), env, depth+1, mod.inner()))
+		}
+		return coerceRecordFields(out, td, env)
+	case *runtime.List:
+		if len(v.FieldNames) == 0 {
+			return val
+		}
+		out := runtime.Unshare(runtime.Share(v)).(*runtime.List)
+		for _, f := range st.Fields {
+			name := fieldName(f)
+			if f == nil || name == "" {
+				continue
+			}
+			i := slices.Index(out.FieldNames, name)
+			if i < 0 || i >= len(out.Elements) {
+				// A value list that ends before the field: the
+				// fields after it are written positionally too.
+				if f.Optional != nil && i < 0 && len(out.FieldNames) == len(out.Elements) && mod.fillAbsent(depth) {
+					out.FieldNames = append(out.FieldNames, name)
+					out.Elements = append(out.Elements, runtime.Omit)
+				}
+				continue
+			}
+			if out.Elements[i] == runtime.Undefined {
+				if f.Optional != nil && !mod.keepDash {
+					out.Elements[i] = runtime.Omit
+				}
+				continue
+			}
+			out.Elements[i] = withImplicitOmit(out.Elements[i], fieldTypeDesc(f, home), env, depth+1, mod.inner())
+		}
+		return out
+	}
+	return val
+}
+
+// An omitMode tells withImplicitOmit what of a value is a modification's
+// base: nothing for a template's own value (the zero mode).
+type omitMode struct {
+	// keepDash keeps a field given `-`, the base's.
+	keepDash bool
+	// modifies is set for a modification: a field it does not mention
+	// at its top is the base's, unless fillTop.
+	modifies, fillTop bool
+}
+
+// fillAbsent reports whether a field not mentioned at depth is set to omit.
+func (m omitMode) fillAbsent(depth int) bool { return !m.modifies || depth > 0 || m.fillTop }
+
+// inner is the mode of the values inside: a field a modification gives a
+// value is its own, every field of it, but for those it gives `-`.
+func (m omitMode) inner() omitMode { return omitMode{keepDash: m.keepDash} }
+
+// isThunk reports whether v is evaluated where it is used (LazyThunk).
+func isThunk(v runtime.Object) bool {
+	_, ok := v.(*runtime.LazyThunk)
+	return ok
 }
 
 // structDeclOf returns a type descriptor's record/set/union

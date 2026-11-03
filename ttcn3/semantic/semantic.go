@@ -167,6 +167,7 @@ func (a *Analyzer) Analyze(tree *ttcn3.Tree) []Diagnostic {
 		out = append(out, a.checkPortDeclTypeRules(mod)...)
 		out = append(out, a.checkInterleaveBodyRules(mod)...)
 		out = append(out, a.checkEnumUseRules(mod)...)
+		out = append(out, a.checkEnumV5Rules(mod)...)
 		out = append(out, a.checkStructFieldRangeRules(mod)...)
 		out = append(out, a.checkInoutParamOverlapRules(mod)...)
 		out = append(out, a.checkAllFromSourceRules(mod)...)

@@ -32,7 +32,9 @@ func (a *Analyzer) checkEnumRules(mod *syntax.Module) []Diagnostic {
 		seenName := map[string]bool{}
 		seenValue := map[int64]bool{}
 		for _, e := range ed.Enums {
-			if shape := badEnumeratorShape(e); shape != "" {
+			// V5 takes any integer expressions and ranges
+			// (enum_v5_rules.go), though not an empty list.
+			if shape := badEnumeratorShape(e); shape != "" && (mod.Edition() == syntax.V4 || emptyEnumeratorList(e)) {
 				diags = append(diags, Diagnostic{
 					Code:     "enum-user-value-not-literal",
 					Severity: SeverityError,
@@ -115,6 +117,13 @@ func badEnumeratorShape(e syntax.Expr) string {
 		}
 	}
 	return ""
+}
+
+// emptyEnumeratorList reports whether e is an enumerator with an empty
+// list of integers, `Tuesday()`.
+func emptyEnumeratorList(e syntax.Expr) bool {
+	ce, ok := e.(*syntax.CallExpr)
+	return ok && ce != nil && (ce.Args == nil || len(ce.Args.List) == 0)
 }
 
 // isIntLiteralOrRange is true for an integer literal, a signed

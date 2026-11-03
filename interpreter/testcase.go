@@ -324,6 +324,14 @@ func newModuleEnv(trees []*ttcn3.Tree, modNode *syntax.Module, module string, op
 	if err := target.eval(0, true); err != nil {
 		return nil, fmt.Sprintf("module init: %s", err.Inspect())
 	}
+	// The enumerated types whose integers name constants, every module's
+	// before the values of any, which may be of those types.
+	for _, m := range others {
+		_ = m.evalEnums(false)
+	}
+	if err := target.evalEnums(true); err != nil {
+		return nil, fmt.Sprintf("module init: %s", err.Inspect())
+	}
 	for _, m := range others {
 		_ = m.eval(1, false)
 	}
@@ -2154,6 +2162,9 @@ type moduleInit struct {
 	errs   []*runtime.Error
 	typed  bool // pass 0 is done
 	closed bool // pass 1 is done
+	// The enumerated types pass 0 could not evaluate: their integers may
+	// name constants (ETSI 6.2.4), which pass 1 evaluates.
+	enums  []int
 	nested bool // bindNestedTypes is done
 }
 
@@ -2216,11 +2227,33 @@ func (m *moduleInit) eval(pass int, strict bool) *runtime.Error {
 		if pass == 0 {
 			if err = m.evalDef(i); err != nil {
 				bindDeclNameScoped(m.env, d, fd.scopes)
+				if _, ok := d.Def.(*syntax.EnumTypeDecl); ok {
+					m.enums = append(m.enums, i)
+					continue
+				}
 			}
 		} else {
 			err = m.value(i)
 		}
 		if err != nil && strict && !isUnknownNodeError(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+// evalEnums evaluates the enumerated types pass 0 could not, once every
+// module's types are bound: their integers may name constants, of any
+// module, which are evaluated when named.
+func (m *moduleInit) evalEnums(strict bool) *runtime.Error {
+	if len(m.enums) == 0 {
+		return nil
+	}
+	defer publishModuleScope(m.root, m.env)
+	m.root.Set(valuesBegunKey, runtime.NewBool(true))
+	m.bindNested()
+	for _, i := range m.enums {
+		if err := m.evalDef(i); err != nil && strict && !isUnknownNodeError(err) {
 			return err
 		}
 	}
@@ -2310,6 +2343,34 @@ func (m *moduleInit) evalDef(i int) *runtime.Error {
 	if runtime.IsError(r) {
 		err, _ := r.(*runtime.Error)
 		return err
+	}
+	// A template of a scope whose optional attribute is "implicit omit"
+	// has its optional fields set to omit that it, or what it modifies
+	// with, gives no value (ETSI 27.7).
+	if t, ok := d.Def.(*syntax.TemplateDecl); ok && t.Name != nil && t.Params == nil && hasImplicitOmit(typeDescForScoped("", t.With, fd.scopes)) {
+		name := syntax.Name(t.Name)
+		td := typeDescOfSpec(t.Type, m.env)
+		// A template evaluated at each use (@fuzzy, "dynamic") is not
+		// a value here.
+		if v, ok := m.env.Get(name); ok && !isThunk(v) {
+			if t.Base == nil {
+				m.env.Set(name, withImplicitOmit(v, td, m.env, 0, omitMode{}))
+			} else if t.Value != nil && !isUnionTyped(t.Base, m.env) {
+				// What a modified template has of its base is the
+				// base's; the attribute completes the modification.
+				// In V4 a field it does not mention is the base's
+				// (15.5 b); V5 sets it to omit too, but one it gives
+				// `-` (ETSI TTF, Berlin 2026).
+				base := expandAnyValueBase(eval(t.Base, m.env), t.Type, m.env)
+				mod := eval(t.Value, m.env)
+				if !runtime.IsError(base) && !runtime.IsError(mod) {
+					mode := omitMode{keepDash: true, modifies: true, fillTop: m.mod.Edition() == syntax.V5}
+					if merged, ok := mergeTemplateMod(base, withImplicitOmit(coerceToDeclaredStruct(mod, t.Type, t.Value, m.env), td, m.env, 0, mode)); ok {
+						m.env.Set(name, merged)
+					}
+				}
+			}
+		}
 	}
 	// The type descriptor is bound by its name too, so attribute
 	// lookups like `MyType.encode` keep working.
@@ -4410,6 +4471,17 @@ func componentTypeKey(moduleName, compTypeName string) string {
 	return moduleName + "." + compTypeName
 }
 
+// moduleEdition is the edition of the core language the module whose code
+// runs in env is written in (syntax.Module.Edition).
+func moduleEdition(env runtime.Scope) syntax.Edition {
+	if root := runtime.RootScope(env); root != nil {
+		if m, ok := lookupModuleScope(root, moduleNameFromEnv(env)); ok && m.mod != nil {
+			return m.mod.Edition()
+		}
+	}
+	return (*syntax.Module)(nil).Edition()
+}
+
 func moduleNameFromEnv(env runtime.Scope) string {
 	if env == nil {
 		return ""
@@ -4509,6 +4581,7 @@ func bindComponentMembers(env runtime.Scope, body *syntax.BlockStmt) {
 			}
 			env.Set(name, runtime.Undefined)
 		}
+		v5InitialValues(vd, env)
 	}
 }
 

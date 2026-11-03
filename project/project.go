@@ -87,6 +87,12 @@ type Manifest struct {
 	// test-cases. E.g. common code, adapters, codecs, ...
 	Imports []string
 
+	// Language is the language of the modules whose language clause
+	// names no TTCN-3 edition, "TTCN-3:2026" for the next major release
+	// of the core language (provisional, see syntax.V5Language). Default:
+	// ES 201 873-1 V4.
+	Language string `json:"language"`
+
 	// BeforeBuild is a list of shell commands to be executed before
 	// building. An exit code unequal to 0 will cancel any further
 	// execution.
@@ -879,6 +885,8 @@ func AutomaticEnv() ConfigOption {
 				c.Sources = strings.Split(v, string(os.PathListSeparator))
 			case "NTT_IMPORTS":
 				c.Imports = strings.Split(v, string(os.PathListSeparator))
+			case "NTT_LANGUAGE":
+				c.Language = v
 			case "NTT_PARAMETERS_FILE":
 				c.ParametersFile = v
 			case "NTT_HOOKS_FILE":

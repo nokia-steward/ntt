@@ -14,6 +14,7 @@ import (
 	"github.com/nokia/ntt/internal/log"
 	"github.com/nokia/ntt/internal/proc"
 	"github.com/nokia/ntt/project"
+	"github.com/nokia/ntt/ttcn3/syntax"
 	"github.com/spf13/cobra"
 )
 
@@ -63,6 +64,8 @@ var (
 				return err
 			}
 			Project = p
+			// The edition of the modules that name none.
+			syntax.DefaultLanguage = p.Language
 
 			return nil
 		},

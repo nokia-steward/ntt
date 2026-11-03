@@ -95,8 +95,12 @@ func (a *Analyzer) checkEnumUseRules(mod *syntax.Module) []Diagnostic {
 		case *syntax.ValueDecl:
 			diags = append(diags, checkEnumVarInit(x, enumTypes)...)
 		}
-		diags = append(diags, checkEnumOrdinalCall(n, fixedEnumNames, defCalls)...)
-		diags = append(diags, checkBareEnumComparison(n, enumLabels)...)
+		// V5 reads a label's integers and its type from the label
+		// itself (enum_v5_rules.go).
+		if mod.Edition() == syntax.V4 {
+			diags = append(diags, checkEnumOrdinalCall(n, fixedEnumNames, defCalls)...)
+			diags = append(diags, checkBareEnumComparison(n, enumLabels)...)
+		}
 		return true
 	})
 	return diags

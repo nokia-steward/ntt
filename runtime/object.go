@@ -950,6 +950,15 @@ func (ev *EnumValue) WithExplicitInt(i int) (*EnumValue, *Error) {
 	return nil, Errorf("%d is not in any range associated with %s.%s", i, ev.typeRef.Name, ev.key)
 }
 
+// Ranges returns the integers associated with the value's key (ETSI
+// 6.2.4).
+func (ev *EnumValue) Ranges() []EnumRange {
+	if ev == nil || ev.typeRef == nil {
+		return nil
+	}
+	return ev.typeRef.Elements[ev.key]
+}
+
 func NewEnumValueByKey(enumType *EnumType, key string) (*EnumValue, error) {
 
 	ret := &EnumValue{typeRef: enumType, key: key, value: 0}
