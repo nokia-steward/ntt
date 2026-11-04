@@ -1,11 +1,9 @@
-# github.com/5nord/goldenfile v0.0.0-20260507121108-52d2910ea576
-## explicit; go 1.26.2
+# github.com/5nord/goldenfile v0.0.0-20261104194339-4f95f84a5ba8
+## explicit; go 1.25
 github.com/5nord/goldenfile
 # github.com/acarl005/stripansi v0.0.0-20180116102854-5a71ef0e047d
 ## explicit
 github.com/acarl005/stripansi
-# github.com/bmatcuk/doublestar v1.3.4
-## explicit; go 1.12
 # github.com/cpuguy83/go-md2man/v2 v2.0.1
 ## explicit; go 1.11
 github.com/cpuguy83/go-md2man/v2/md2man
@@ -43,10 +41,6 @@ github.com/hashicorp/go-multierror
 # github.com/inconshreveable/mousetrap v1.0.0
 ## explicit
 github.com/inconshreveable/mousetrap
-# github.com/kr/pretty v0.2.1
-## explicit; go 1.12
-# github.com/kr/text v0.1.0
-## explicit
 # github.com/mattn/go-colorable v0.1.9
 ## explicit; go 1.13
 github.com/mattn/go-colorable
@@ -69,9 +63,6 @@ github.com/spf13/pflag
 # github.com/stretchr/testify v1.7.1
 ## explicit; go 1.13
 github.com/stretchr/testify/assert
-# golang.org/x/exp v0.0.0-20220827204233-334a2380cb91
-## explicit; go 1.18
-golang.org/x/exp/ebnf
 # golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
 ## explicit
 golang.org/x/sync/errgroup
