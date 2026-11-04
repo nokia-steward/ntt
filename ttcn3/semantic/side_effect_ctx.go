@@ -12,12 +12,14 @@
 //
 //  1. Building a map of every module-level function to the set of
 //     forbidden operations referenced in its body (transitively, so
-//     g() calling h() inherits h's forbidden ops).
-//  2. Walking each module for "restricted contexts" - TemplateDecl
-//     value, alt branch guards, args to receive / trigger / check /
-//     getreply / getcall / catch - and for every CallExpr in such a
-//     context emitting a diagnostic if the callee has any forbidden
-//     op.
+//     g() calling h() inherits h's forbidden ops - except having out
+//     or inout parameters, which note 7 does not propagate).
+//  2. Walking each module for "restricted contexts" - alt branch
+//     guards, args to receive / trigger / check / getreply / getcall /
+//     catch, altstep local definitions, the body of a template used in
+//     one of those, and the body of a deterministic fuzzy template
+//     (15.0 g) - and for every CallExpr in such a context emitting a
+//     diagnostic if the callee has any forbidden op.
 package semantic
 
 import (
@@ -132,6 +134,7 @@ func (a *Analyzer) checkSideEffectInRestrictedContext(mod *syntax.Module) []Diag
 		transitive map[string]bool // post-closure result
 	}
 	funcs := map[string]*funcInfo{}
+	outPars := collectByRefParams(mod)
 
 	for _, d := range mod.Defs {
 		if d == nil {
@@ -160,16 +163,17 @@ func (a *Analyzer) checkSideEffectInRestrictedContext(mod *syntax.Module) []Diag
 			}
 		} else if fn.Body != nil {
 			collectFnBodyOps(fn.Body, info.direct, info.calls)
-			if assignsComponentVar(fn.Body, compVars) {
+			if assignsComponentVar(fn.Body, compVars) || passesComponentVarToOutPar(fn.Body, compVars, outPars) {
 				info.direct["component-var-assignment"] = true
 			}
 		}
-		// Rule 16.1.4 (c): a value-returning function with `out`
+		// Rule 16.1.4 (j): a value-returning function with `out`
 		// or `inout` formal parameters has observable side
 		// effects through writeback; it cannot be used in a
-		// restricted context regardless of the body.
+		// restricted context regardless of the body. Note 7: the
+		// restriction is not recursive, see outOrInoutOp.
 		if hasOutOrInoutFormalPar(fn.Params) {
-			info.direct["out-or-inout-formal-param"] = true
+			info.direct[outOrInoutOp] = true
 		}
 		// Rule 16.1.4 (f): @fuzzy formal parameters or local
 		// fuzzy variables introduce evaluation timing that
@@ -223,6 +227,12 @@ func (a *Analyzer) checkSideEffectInRestrictedContext(mod *syntax.Module) []Diag
 					src = other.direct
 				}
 				for k := range src {
+					// Note 7: calling a function that itself
+					// calls one with out or inout parameters
+					// is legal.
+					if k == outOrInoutOp {
+						continue
+					}
 					if !fi.transitive[k] {
 						fi.transitive[k] = true
 						changed = true
@@ -263,6 +273,41 @@ func (a *Analyzer) checkSideEffectInRestrictedContext(mod *syntax.Module) []Diag
 		})
 	}
 
+	// flagOutParCalls reports the calls in root of functions with out
+	// or inout parameters, which the body of a fuzzy template shall
+	// not contain (15.0 e). Functions called may use such functions
+	// internally.
+	flagOutParCalls := func(root syntax.Node) {
+		if root == nil {
+			return
+		}
+		syntax.Inspect(root, func(n syntax.Node) bool {
+			if n == nil {
+				return false
+			}
+			call, ok := n.(*syntax.CallExpr)
+			if !ok {
+				return true
+			}
+			id, ok := call.Fun.(*syntax.Ident)
+			if !ok {
+				return true
+			}
+			if fi, ok := funcs[id.String()]; ok && fi.direct[outOrInoutOp] {
+				diags = append(diags, Diagnostic{
+					Code:     "restricted-context-side-effect",
+					Severity: SeverityError,
+					Message: fmt.Sprintf(
+						"function %q with out or inout parameters is called in the body of a fuzzy template (15.0)",
+						id.String()),
+					Node: call,
+					Span: syntax.SpanOf(call),
+				})
+			}
+			return true
+		})
+	}
+
 	flagDirect := func(node syntax.Node, op string) {
 		diags = append(diags, Diagnostic{
 			Code:     "restricted-context-side-effect",
@@ -274,7 +319,26 @@ func (a *Analyzer) checkSideEffectInRestrictedContext(mod *syntax.Module) []Diag
 		})
 	}
 
-	inspectCallsIn := func(root syntax.Node) {
+	// A template's body is evaluated where the template is used, so
+	// it is a restricted context when the template is referenced
+	// from one (16.1.4: "in templates, template fields"). A name is
+	// the template of the behaviour it is written in, else the
+	// module's. The body of a template of another module, which this
+	// one imports, is not seen here.
+	templates, ownerOf := collectTemplateDecls(mod)
+	inspectedTemplates := map[*syntax.TemplateDecl]bool{}
+
+	var inspectCallsIn func(root syntax.Node)
+	inspectTemplate := func(td *syntax.TemplateDecl) {
+		if inspectedTemplates[td] {
+			return
+		}
+		inspectedTemplates[td] = true
+		inspectCallsIn(td.Base)
+		inspectCallsIn(td.Value)
+	}
+
+	inspectCallsIn = func(root syntax.Node) {
 		if root == nil {
 			return
 		}
@@ -292,6 +356,9 @@ func (a *Analyzer) checkSideEffectInRestrictedContext(mod *syntax.Module) []Diag
 			// null]` and `[deactivate]` are the typical
 			// patterns the conformance suite exercises.
 			if sel, ok := n.(*syntax.SelectorExpr); ok {
+				if isTestcaseStop(sel) {
+					return false
+				}
 				if sid, ok := sel.Sel.(*syntax.Ident); ok && sid.Tok != nil {
 					if forbiddenSelectorSels[sid.String()] {
 						flagDirect(sel, sid.String())
@@ -301,6 +368,9 @@ func (a *Analyzer) checkSideEffectInRestrictedContext(mod *syntax.Module) []Diag
 			if id, ok := n.(*syntax.Ident); ok && id.Tok != nil {
 				if forbiddenBareCallees[id.String()] {
 					flagDirect(id, id.String())
+				}
+				for _, td := range templates.named(id, ownerOf[id]) {
+					inspectTemplate(td)
 				}
 			}
 			return true
@@ -313,30 +383,44 @@ func (a *Analyzer) checkSideEffectInRestrictedContext(mod *syntax.Module) []Diag
 		}
 		switch x := n.(type) {
 		case *syntax.TemplateDecl:
-			// Template RHS - any function call inside the
-			// initializer expression is in a restricted ctx
-			// because the template can be used in receive().
-			inspectCallsIn(x.Value)
+			// 15.0 (g): the body of a deterministic fuzzy
+			// template is restricted wherever it is used.
+			// Other templates are restricted only where they
+			// are used in a restricted context (see
+			// inspectTemplate), except that a fuzzy template
+			// shall not call functions with out or inout
+			// parameters directly (15.0 e).
+			if isFuzzyModif(x.Modif) {
+				if x.Deterministic != nil {
+					inspectTemplate(x)
+				} else {
+					flagOutParCalls(x.Value)
+				}
+			}
 		case *syntax.FuncDecl:
 			// Altstep local definition initializers are
-			// restricted contexts per 16.2 (see 16.1.4 cross
-			// reference). We walk every Declarator.Value in
-			// the altstep's body.
+			// restricted contexts per 16.2 (b). The local
+			// definitions are the declarations preceding the
+			// alternatives; declarations inside a branch's
+			// statement block are ordinary behaviour.
 			if x.KindTok != nil && x.KindTok.Kind() == syntax.ALTSTEP {
 				if x.Body != nil {
-					syntax.Inspect(x.Body, func(b syntax.Node) bool {
-						if b == nil {
-							return false
+					for _, s := range x.Body.Stmts {
+						ds, ok := s.(*syntax.DeclStmt)
+						if !ok {
+							continue
 						}
-						if vd, ok := b.(*syntax.ValueDecl); ok {
-							for _, dec := range vd.Decls {
+						switch d := ds.Decl.(type) {
+						case *syntax.ValueDecl:
+							for _, dec := range d.Decls {
 								if dec != nil && dec.Value != nil {
 									inspectCallsIn(dec.Value)
 								}
 							}
+						case *syntax.TemplateDecl:
+							inspectTemplate(d)
 						}
-						return true
-					})
+					}
 				}
 				// Default values for altstep formal
 				// parameters are evaluated lazily at
@@ -387,7 +471,7 @@ func (a *Analyzer) checkSideEffectInRestrictedContext(mod *syntax.Module) []Diag
 		return true
 	})
 
-	return diags
+	return dedupeDiagnostics(diags)
 }
 
 // collectFnBodyOps walks a function body and fills `ops` with every
@@ -398,6 +482,11 @@ func collectFnBodyOps(body syntax.Node, ops map[string]bool, calls map[string]bo
 			return false
 		}
 		if sel, ok := n.(*syntax.SelectorExpr); ok {
+			// testcase.stop may be invoked from specific
+			// places (clause 18, table 16).
+			if isTestcaseStop(sel) {
+				return false
+			}
 			if sid, ok := sel.Sel.(*syntax.Ident); ok {
 				name := sid.String()
 				if forbiddenSelectorSels[name] {
@@ -433,6 +522,140 @@ func firstKey(m map[string]bool) string {
 		return k
 	}
 	return ""
+}
+
+// outOrInoutOp is the forbidden-op key of a function with out or inout
+// formal parameters (16.1.4 j). Unlike the other keys it is not
+// inherited by callers (note 7).
+const outOrInoutOp = "out-or-inout-formal-param"
+
+// isTestcaseStop reports whether sel is the `testcase.stop` operation.
+func isTestcaseStop(sel *syntax.SelectorExpr) bool {
+	id, ok := sel.X.(*syntax.Ident)
+	return ok && id.Tok != nil && id.Tok.Kind() == syntax.TESTCASE
+}
+
+// isFuzzyModif reports whether the modifier token is `@fuzzy`.
+func isFuzzyModif(tok syntax.Token) bool {
+	return tok != nil && tok.String() == "@fuzzy"
+}
+
+// templateDecls are the templates of a module by name: those of the
+// module, in groups too, and those local to each of its behaviours.
+type templateDecls struct {
+	module map[string][]*syntax.TemplateDecl
+	local  map[*syntax.FuncDecl]map[string][]*syntax.TemplateDecl
+}
+
+// named is what a reference id, written in behaviour owner (nil at
+// module level), names: the behaviour's template of that name, else the
+// module's.
+func (t templateDecls) named(id *syntax.Ident, owner *syntax.FuncDecl) []*syntax.TemplateDecl {
+	if tds := t.local[owner][id.String()]; owner != nil && len(tds) > 0 {
+		return tds
+	}
+	return t.module[id.String()]
+}
+
+// collectTemplateDecls collects the templateDecls of mod, and the
+// behaviour each identifier named like a template is written in.
+func collectTemplateDecls(mod *syntax.Module) (templateDecls, map[*syntax.Ident]*syntax.FuncDecl) {
+	t := templateDecls{module: map[string][]*syntax.TemplateDecl{}, local: map[*syntax.FuncDecl]map[string][]*syntax.TemplateDecl{}}
+	var fns []*syntax.FuncDecl
+	var walk func(defs []*syntax.ModuleDef)
+	walk = func(defs []*syntax.ModuleDef) {
+		for _, d := range defs {
+			if d == nil {
+				continue
+			}
+			switch x := d.Def.(type) {
+			case *syntax.GroupDecl:
+				walk(x.Defs)
+			case *syntax.TemplateDecl:
+				if x.Name != nil {
+					t.module[x.Name.String()] = append(t.module[x.Name.String()], x)
+				}
+			case *syntax.FuncDecl:
+				fns = append(fns, x)
+			}
+		}
+	}
+	walk(mod.Defs)
+	names := map[string]bool{}
+	for name := range t.module {
+		names[name] = true
+	}
+	for _, fn := range fns {
+		if fn.Body == nil {
+			continue
+		}
+		syntax.Inspect(fn.Body, func(n syntax.Node) bool {
+			if td, ok := n.(*syntax.TemplateDecl); ok && td.Name != nil {
+				if t.local[fn] == nil {
+					t.local[fn] = map[string][]*syntax.TemplateDecl{}
+				}
+				t.local[fn][td.Name.String()] = append(t.local[fn][td.Name.String()], td)
+				names[td.Name.String()] = true
+			}
+			return n != nil
+		})
+	}
+	ownerOf := map[*syntax.Ident]*syntax.FuncDecl{}
+	for _, fn := range fns {
+		syntax.Inspect(fn, func(n syntax.Node) bool {
+			if id, ok := n.(*syntax.Ident); ok && names[id.String()] {
+				ownerOf[id] = fn
+			}
+			return n != nil
+		})
+	}
+	return t, ownerOf
+}
+
+// dedupeDiagnostics drops a diagnostic of a code a node already has: a
+// call two of a rule's checks find is reported once.
+func dedupeDiagnostics(diags []Diagnostic) []Diagnostic {
+	type key struct {
+		node syntax.Node
+		code string
+	}
+	seen := map[key]bool{}
+	out := diags[:0]
+	for _, d := range diags {
+		k := key{d.Node, d.Code}
+		if d.Node != nil && seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, d)
+	}
+	return out
+}
+
+// passesComponentVarToOutPar reports whether body passes a component
+// variable as the actual parameter of an out or inout formal parameter,
+// which changes the variable like an assignment does (16.1.4 g).
+func passesComponentVarToOutPar(body syntax.Node, compVars map[string]bool, outPars byRefParams) bool {
+	if len(compVars) == 0 || len(outPars) == 0 {
+		return false
+	}
+	found := false
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		if n == nil || found {
+			return false
+		}
+		ce, ok := n.(*syntax.CallExpr)
+		if !ok || ce.Args == nil {
+			return true
+		}
+		for _, a := range outPars.args(ce) {
+			if compVars[rootIdentName(a)] {
+				found = true
+			}
+		}
+		return true
+	})
+	return found
 }
 
 // assignsComponentVar reports whether body contains an assignment

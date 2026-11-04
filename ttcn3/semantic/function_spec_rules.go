@@ -11,8 +11,9 @@
 //     _008). Declaring one is allowed.
 //
 //   - A function or altstep without a `runs on` clause shall not
-//     invoke a function or altstep that *does* carry one
-//     (NegSem_1601_toplevel_003 and the symmetric _006 / _009).
+//     invoke a function or altstep, or activate an altstep as
+//     default, that *does* carry one (restriction a, 16.2.0 d;
+//     NegSem_1601_toplevel_003 and the symmetric _006 / _009).
 //     We catch the most common case: the calling function has no
 //     runs-on AND it invokes a sibling module-level function whose
 //     declaration we can resolve.
@@ -77,18 +78,19 @@ func (a *Analyzer) checkFunctionSpecRules(mod *syntax.Module) []Diagnostic {
 		}
 		info := infos[syntax.Name(fn.Name)]
 		// Rule 2: a runs-on-less function calling a runs-on
-		// function. Skip externals (no body) and testcases.
+		// function, or activating a runs-on altstep as default
+		// (16.1 a, 16.2.0 d). Skip externals (no body) and
+		// testcases.
 		if info.isTC || info.external || info.runsOn != "" || fn.Body == nil {
 			continue
 		}
 		started := startedBehaviourCalls(fn.Body)
-		activated := activatedBehaviourCalls(fn.Body)
 		syntax.Inspect(fn.Body, func(n syntax.Node) bool {
 			ce, ok := n.(*syntax.CallExpr)
 			if !ok {
 				return true
 			}
-			if started[ce] || activated[ce] {
+			if started[ce] {
 				return true
 			}
 			id, ok := ce.Fun.(*syntax.Ident)
@@ -260,31 +262,6 @@ func startedBehaviourCalls(body *syntax.BlockStmt) map[*syntax.CallExpr]bool {
 			return true
 		}
 		if opIdent.String() != "start" || ce.Args == nil {
-			return true
-		}
-		for _, arg := range ce.Args.List {
-			if inner, ok := arg.(*syntax.CallExpr); ok {
-				out[inner] = true
-			}
-		}
-		return true
-	})
-	return out
-}
-
-// activatedBehaviourCalls returns the set of CallExprs that
-// appear as the argument of a top-level `activate(<altstep>)`
-// invocation, mirroring the start-based exemption above
-// (ETSI 16.1 restriction f covers activated altsteps too).
-func activatedBehaviourCalls(body *syntax.BlockStmt) map[*syntax.CallExpr]bool {
-	out := map[*syntax.CallExpr]bool{}
-	syntax.Inspect(body, func(n syntax.Node) bool {
-		ce, ok := n.(*syntax.CallExpr)
-		if !ok {
-			return true
-		}
-		id, ok := ce.Fun.(*syntax.Ident)
-		if !ok || id.String() != "activate" || ce.Args == nil {
 			return true
 		}
 		for _, arg := range ce.Args.List {

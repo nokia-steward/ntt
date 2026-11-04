@@ -15,12 +15,14 @@ package semantic
 import (
 	"fmt"
 
+	"github.com/nokia/ntt/ttcn3"
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
-func (a *Analyzer) checkConstKindRules(mod *syntax.Module) []Diagnostic {
+func (a *Analyzer) checkConstKindRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagnostic {
 	portTypes := collectPortTypes(mod)
 	consts := collectConstNames(mod)
+	db := a.db()
 
 	var diags []Diagnostic
 	syntax.Inspect(mod, func(n syntax.Node) bool {
@@ -68,6 +70,14 @@ func (a *Analyzer) checkConstKindRules(mod *syntax.Module) []Diagnostic {
 			if name == "" || !consts[name] {
 				return true
 			}
+			// The name must resolve to the constant: in
+			// assignment notation (`{ c := 1 }`) it names a
+			// field, in an actual parameter list a formal
+			// parameter, and a constant of one function does
+			// not reach into another.
+			if !resolvesToConst(tree, db, v.X) {
+				return true
+			}
 			diags = append(diags, Diagnostic{
 				Code:     "const-reassign",
 				Severity: SeverityError,
@@ -81,6 +91,17 @@ func (a *Analyzer) checkConstKindRules(mod *syntax.Module) []Diagnostic {
 		return true
 	})
 	return diags
+}
+
+// resolvesToConst reports whether the reference x resolves to a
+// constant declaration.
+func resolvesToConst(tree *ttcn3.Tree, db *ttcn3.DB, x syntax.Expr) bool {
+	for _, def := range tree.LookupWithDB(x, db) {
+		if vd, ok := def.Node.(*syntax.ValueDecl); ok && vd.KindTok != nil && vd.KindTok.Kind() == syntax.CONST {
+			return true
+		}
+	}
+	return false
 }
 
 // collectConstNames returns the set of every `const T name :=

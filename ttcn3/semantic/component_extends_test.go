@@ -64,3 +64,34 @@ func TestComponentExtendsCleanAccepted(t *testing.T) {
 		t.Fatalf("did not expect name-clash, got %v", codes(diags))
 	}
 }
+
+func TestComponentExtendsDiamondAccepted(t *testing.T) {
+	// 6.2.10.2 NOTE 1: CB's members reach CG through CE and CF (and
+	// directly); they are one definition, not a clash.
+	tree := parse(t, `module M {
+		type component CB { var integer vc_t; timer tc_t; }
+		type component CE extends CB { var integer vc_e; }
+		type component CF extends CB { var float vc_f; }
+		type component CG extends CB, CE, CF {}
+		type component CH extends CE, CF {}
+	}`)
+	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree)
+	if containsCode(diags, "component-extends-name-clash") {
+		t.Fatalf("did not expect name-clash for a diamond, got %v", codes(diags))
+	}
+}
+
+func TestComponentExtendsDiamondRedeclarationRejected(t *testing.T) {
+	// A diamond does not hide a real clash: CE and CF both declare
+	// vc_e, so they contribute different definitions.
+	tree := parse(t, `module M {
+		type component CB { var integer vc_t; }
+		type component CE extends CB { var integer vc_e; }
+		type component CF extends CB { var integer vc_e; }
+		type component CG extends CE, CF {}
+	}`)
+	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree)
+	if !containsCode(diags, "component-extends-name-clash") {
+		t.Fatalf("expected component-extends-name-clash, got %v", codes(diags))
+	}
+}

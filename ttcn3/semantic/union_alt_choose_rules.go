@@ -17,7 +17,9 @@
 //   - skipping arguments of introspection helpers (`ispresent`,
 //     `ischosen`, etc.) the same way union_alt_ref does;
 //   - clearing the chosen-alt mark when the entire variable is
-//     reassigned to a non-composite value or to a different alt.
+//     reassigned to a non-composite value or to a different alt;
+//   - treating actual out / inout parameters of module functions
+//     as assignments, not reads (5.4.2).
 package semantic
 
 import (
@@ -32,6 +34,7 @@ func (a *Analyzer) checkUnionAltChooseRules(mod *syntax.Module) []Diagnostic {
 		return nil
 	}
 	varTypes := collectModuleVarTypes(mod)
+	byRef := collectByRefParams(mod)
 	var diags []Diagnostic
 	for _, d := range mod.Defs {
 		if d == nil {
@@ -49,37 +52,37 @@ func (a *Analyzer) checkUnionAltChooseRules(mod *syntax.Module) []Diagnostic {
 		for k, v := range bodyVarTypes {
 			merged[k] = v
 		}
-		diags = append(diags, checkUnionAltChooseInBody(fn.Body, merged, unions)...)
+		diags = append(diags, checkUnionAltChooseInBody(fn.Body, merged, unions, byRef)...)
 	}
 	return diags
 }
 
-func checkUnionAltChooseInBody(body *syntax.BlockStmt, varTypes map[string]string, unions map[string]map[string]bool) []Diagnostic {
+func checkUnionAltChooseInBody(body *syntax.BlockStmt, varTypes map[string]string, unions map[string]map[string]bool, byRef byRefParams) []Diagnostic {
 	state := map[string]string{}
 	if body == nil {
 		return nil
 	}
-	return walkChooseBlock(body, state, varTypes, unions)
+	return walkChooseBlock(body, state, varTypes, unions, byRef)
 }
 
-func walkChooseBlock(body *syntax.BlockStmt, state map[string]string, varTypes map[string]string, unions map[string]map[string]bool) []Diagnostic {
+func walkChooseBlock(body *syntax.BlockStmt, state map[string]string, varTypes map[string]string, unions map[string]map[string]bool, byRef byRefParams) []Diagnostic {
 	if body == nil {
 		return nil
 	}
 	var diags []Diagnostic
 	for _, stmt := range body.Stmts {
-		diags = append(diags, walkChooseStmt(stmt, state, varTypes, unions)...)
+		diags = append(diags, walkChooseStmt(stmt, state, varTypes, unions, byRef)...)
 	}
 	return diags
 }
 
-func walkChooseStmt(stmt syntax.Stmt, state map[string]string, varTypes map[string]string, unions map[string]map[string]bool) []Diagnostic {
+func walkChooseStmt(stmt syntax.Stmt, state map[string]string, varTypes map[string]string, unions map[string]map[string]bool, byRef byRefParams) []Diagnostic {
 	if stmt == nil {
 		return nil
 	}
 	switch v := stmt.(type) {
 	case *syntax.ExprStmt:
-		return walkChooseExprStmt(v, state, varTypes, unions)
+		return walkChooseExprStmt(v, state, varTypes, unions, byRef)
 	case *syntax.DeclStmt:
 		if v == nil || v.Decl == nil {
 			return nil
@@ -97,7 +100,7 @@ func walkChooseStmt(stmt syntax.Stmt, state map[string]string, varTypes map[stri
 			if d == nil || d.Name == nil || d.Value == nil {
 				continue
 			}
-			diags = append(diags, checkChooseReads(d.Value, state, varTypes, unions)...)
+			diags = append(diags, checkChooseReads(d.Value, state, varTypes, unions, byRef)...)
 			alt := singleCompositeKey(d.Value)
 			if alt != "" {
 				state[d.Name.String()] = alt
@@ -109,73 +112,90 @@ func walkChooseStmt(stmt syntax.Stmt, state map[string]string, varTypes map[stri
 			return nil
 		}
 		var diags []Diagnostic
-		diags = append(diags, checkChooseReads(v.Cond, state, varTypes, unions)...)
-		diags = append(diags, walkChooseBlock(v.Then, state, varTypes, unions)...)
-		diags = append(diags, walkChooseStmt(v.Else, state, varTypes, unions)...)
+		diags = append(diags, checkChooseReads(v.Cond, state, varTypes, unions, byRef)...)
+		diags = append(diags, walkChooseBlock(v.Then, state, varTypes, unions, byRef)...)
+		diags = append(diags, walkChooseStmt(v.Else, state, varTypes, unions, byRef)...)
 		return diags
 	case *syntax.BlockStmt:
-		return walkChooseBlock(v, state, varTypes, unions)
+		return walkChooseBlock(v, state, varTypes, unions, byRef)
 	case *syntax.ForStmt:
 		if v == nil {
 			return nil
 		}
 		var diags []Diagnostic
-		diags = append(diags, walkChooseStmt(v.Init, state, varTypes, unions)...)
-		diags = append(diags, checkChooseReads(v.Cond, state, varTypes, unions)...)
-		diags = append(diags, walkChooseStmt(v.Post, state, varTypes, unions)...)
-		diags = append(diags, walkChooseBlock(v.Body, state, varTypes, unions)...)
+		diags = append(diags, walkChooseStmt(v.Init, state, varTypes, unions, byRef)...)
+		diags = append(diags, checkChooseReads(v.Cond, state, varTypes, unions, byRef)...)
+		diags = append(diags, walkChooseStmt(v.Post, state, varTypes, unions, byRef)...)
+		diags = append(diags, walkChooseBlock(v.Body, state, varTypes, unions, byRef)...)
 		return diags
 	case *syntax.WhileStmt:
 		if v == nil {
 			return nil
 		}
 		var diags []Diagnostic
-		diags = append(diags, checkChooseReads(v.Cond, state, varTypes, unions)...)
-		diags = append(diags, walkChooseBlock(v.Body, state, varTypes, unions)...)
+		diags = append(diags, checkChooseReads(v.Cond, state, varTypes, unions, byRef)...)
+		diags = append(diags, walkChooseBlock(v.Body, state, varTypes, unions, byRef)...)
 		return diags
 	case *syntax.DoWhileStmt:
 		if v == nil {
 			return nil
 		}
 		var diags []Diagnostic
-		diags = append(diags, walkChooseBlock(v.Body, state, varTypes, unions)...)
-		diags = append(diags, checkChooseReads(v.Cond, state, varTypes, unions)...)
+		diags = append(diags, walkChooseBlock(v.Body, state, varTypes, unions, byRef)...)
+		diags = append(diags, checkChooseReads(v.Cond, state, varTypes, unions, byRef)...)
 		return diags
 	case *syntax.AltStmt:
 		if v == nil {
 			return nil
 		}
-		return walkChooseBlock(v.Body, state, varTypes, unions)
+		return walkChooseBlock(v.Body, state, varTypes, unions, byRef)
 	case *syntax.SelectStmt:
 		if v == nil {
 			return nil
 		}
 		var diags []Diagnostic
 		if v.Tag != nil {
-			diags = append(diags, checkChooseReads(v.Tag, state, varTypes, unions)...)
+			diags = append(diags, checkChooseReads(v.Tag, state, varTypes, unions, byRef)...)
 		}
 		for _, cc := range v.Body {
 			if cc == nil {
 				continue
 			}
-			diags = append(diags, walkChooseBlock(cc.Body, state, varTypes, unions)...)
+			diags = append(diags, walkChooseBlock(cc.Body, state, varTypes, unions, byRef)...)
 		}
 		return diags
 	}
 	return nil
 }
 
-func walkChooseExprStmt(es *syntax.ExprStmt, state map[string]string, varTypes map[string]string, unions map[string]map[string]bool) []Diagnostic {
+func walkChooseExprStmt(es *syntax.ExprStmt, state map[string]string, varTypes map[string]string, unions map[string]map[string]bool, byRef byRefParams) []Diagnostic {
 	if es == nil {
 		return nil
 	}
 	be, ok := es.Expr.(*syntax.BinaryExpr)
 	if !ok || be == nil || be.Op == nil || be.Op.Kind() != syntax.ASSIGN {
-		return checkChooseReads(es.Expr, state, varTypes, unions)
+		diags := checkChooseReads(es.Expr, state, varTypes, unions, byRef)
+		updateChosenByRef(es.Expr, state, varTypes, unions, byRef)
+		return diags
 	}
-	diags := checkChooseReads(be.Y, state, varTypes, unions)
+	diags := checkChooseReads(be.Y, state, varTypes, unions, byRef)
+	updateChosenByRef(be.Y, state, varTypes, unions, byRef)
 	updateChosenLHS(be.X, be.Y, state, varTypes, unions)
 	return diags
+}
+
+// updateChosenByRef applies the left hand side rules to the actual
+// out / inout parameters of the calls in e (5.4.2): `f(v_u.b)`
+// chooses b, and passing the whole `v_u` forgets the choice.
+func updateChosenByRef(e syntax.Expr, state map[string]string, varTypes map[string]string, unions map[string]map[string]bool, byRef byRefParams) {
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		if ce, ok := n.(*syntax.CallExpr); ok && ce != nil {
+			for _, arg := range byRef.args(ce) {
+				updateChosenLHS(arg, nil, state, varTypes, unions)
+			}
+		}
+		return true
+	})
 }
 
 // updateChosenLHS records the chosen alternative implied by an LHS
@@ -242,7 +262,7 @@ func topLevelUnionAccess(sel *syntax.SelectorExpr, varTypes map[string]string, u
 	return "", ""
 }
 
-func checkChooseReads(node syntax.Node, state map[string]string, varTypes map[string]string, unions map[string]map[string]bool) []Diagnostic {
+func checkChooseReads(node syntax.Node, state map[string]string, varTypes map[string]string, unions map[string]map[string]bool, byRef byRefParams) []Diagnostic {
 	if node == nil {
 		return nil
 	}
@@ -257,6 +277,21 @@ func checkChooseReads(node syntax.Node, state map[string]string, varTypes map[st
 			switch callee {
 			case "isbound", "ispresent", "ischosen", "isvalue",
 				"lengthof", "sizeof", "match", "omit":
+				return
+			}
+			// An actual out / inout parameter is not read: it
+			// follows the left hand side rules (5.4.2).
+			if args := byRef.args(ce); len(args) > 0 {
+				out := map[syntax.Node]bool{}
+				for _, arg := range args {
+					out[arg] = true
+				}
+				walk(ce.Fun)
+				for _, arg := range ce.Args.List {
+					if !out[arg] {
+						walk(arg)
+					}
+				}
 				return
 			}
 		}

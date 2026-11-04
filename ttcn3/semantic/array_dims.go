@@ -146,6 +146,19 @@ func checkOneArrayDim(expr syntax.Expr, consts map[string]int64, binds map[strin
 // dimension constness check.
 func collectIntegerBindings(mod *syntax.Module) map[string]bindingKind {
 	out := map[string]bindingKind{}
+	constInits := map[string]syntax.Expr{}
+	syntax.Inspect(mod, func(n syntax.Node) bool {
+		vd, ok := n.(*syntax.ValueDecl)
+		if !ok || vd.KindTok == nil || vd.KindTok.Kind() != syntax.CONST {
+			return true
+		}
+		for _, dec := range vd.Decls {
+			if dec != nil && dec.Name != nil && dec.Value != nil {
+				constInits[dec.Name.String()] = dec.Value
+			}
+		}
+		return true
+	})
 	syntax.Inspect(mod, func(n syntax.Node) bool {
 		if n == nil {
 			return true
@@ -171,17 +184,11 @@ func collectIntegerBindings(mod *syntax.Module) map[string]bindingKind {
 			}
 			thisKind := kind
 			if kind == bindConstLit {
-				// Refine: const initialised by a CallExpr
-				// (or anything not reducible to a literal)
-				// is non-constant for array-dim purposes.
-				if dec.Value == nil {
-					thisKind = bindConstCall
-				} else if _, isCall := dec.Value.(*syntax.CallExpr); isCall {
-					thisKind = bindConstCall
-				} else if _, ok := evalConstInt(dec.Value, nil); !ok {
-					// Not a literal we can fold - treat
-					// as call-initialised so the array
-					// dim check rejects.
+				// Refine: a const whose initialiser is not
+				// a constant expression of clause 10 b)
+				// (e.g. a user function call) is
+				// non-constant for array-dim purposes.
+				if dec.Value == nil || !isTypeConstantExpr(dec.Value, constInits, map[string]bool{}) {
 					thisKind = bindConstCall
 				}
 			}
@@ -190,6 +197,55 @@ func collectIntegerBindings(mod *syntax.Module) map[string]bindingKind {
 		return true
 	})
 	return out
+}
+
+// isTypeConstantExpr reports whether e may initialise a constant used
+// in type and array definitions (clause 10 b): it contains only
+// literals, operators, predefined functions except rnd, and other
+// such constants. constInits maps constant names to their
+// initialisers; seen guards against cyclic definitions.
+func isTypeConstantExpr(e syntax.Expr, constInits map[string]syntax.Expr, seen map[string]bool) bool {
+	switch v := e.(type) {
+	case *syntax.ValueLiteral:
+		return v != nil
+	case *syntax.Ident:
+		if v == nil {
+			return false
+		}
+		name := v.String()
+		init, ok := constInits[name]
+		if !ok || seen[name] {
+			return false
+		}
+		seen[name] = true
+		defer delete(seen, name)
+		return isTypeConstantExpr(init, constInits, seen)
+	case *syntax.UnaryExpr:
+		return v != nil && isTypeConstantExpr(v.X, constInits, seen)
+	case *syntax.BinaryExpr:
+		return v != nil && isTypeConstantExpr(v.X, constInits, seen) &&
+			isTypeConstantExpr(v.Y, constInits, seen)
+	case *syntax.ParenExpr:
+		if v == nil || len(v.List) != 1 {
+			return false
+		}
+		return isTypeConstantExpr(v.List[0], constInits, seen)
+	case *syntax.CallExpr:
+		if v == nil {
+			return false
+		}
+		name := identName(v.Fun)
+		if !predefinedFunctionNames[name] || name == "rnd" || v.Args == nil {
+			return false
+		}
+		for _, arg := range v.Args.List {
+			if !isTypeConstantExpr(arg, constInits, seen) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
 }
 
 // collectIntegerConsts gathers the integer values of module-scope

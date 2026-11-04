@@ -15,10 +15,10 @@
 //     started behaviour.
 //
 //  3. start-runs-on-compat: the started function's `runs on Comp`
-//     clause must match the declared component type of the receiver
-//     variable. We don't yet model `extends`-chains so the check is
-//     exact-name equality with the obvious safe exits (unknown
-//     receiver type, unresolved function).
+//     clause must be compatible with the declared component type of
+//     the receiver variable (6.3.3): the receiver extends Comp, or
+//     holds identical copies of all of Comp's definitions. Unknown
+//     receiver types and unresolved functions are skipped.
 //
 // All three checks rely on the same module-level scans the connect /
 // map compat code already does (component-port table, var ->
@@ -41,6 +41,7 @@ func (a *Analyzer) checkComponentOps(mod *syntax.Module) []Diagnostic {
 	classes := collectClassNames(mod)
 	abstracts := collectAbstractClasses(mod)
 	compParents := collectComponentParents(mod)
+	compDefs := collectComponentDefs(mod, compParents)
 
 	diags = append(diags, checkClassSubtyping(mod, classes)...)
 	diags = append(diags, checkClassMemberShadowing(mod)...)
@@ -60,7 +61,7 @@ func (a *Analyzer) checkComponentOps(mod *syntax.Module) []Diagnostic {
 		}
 		diags = append(diags, checkComponentOpsInBody(
 			fn.Body, runsOn, varTypes, funcs,
-			compPorts, classes, abstracts, compParents,
+			compPorts, classes, abstracts, compParents, compDefs,
 		)...)
 	}
 	return diags
@@ -295,6 +296,151 @@ func collectComponentParents(mod *syntax.Module) map[string][]string {
 	return out
 }
 
+// collectComponentDefs maps each module-local component type to its
+// effective definitions (6.2.10.2): member name -> declaration text.
+// The text carries kind, type, array dimensions and initial value or
+// duration, so the identity rules of 6.3.3 a-d reduce to string
+// equality. A component type whose body holds a definition we cannot
+// name is left out, which makes the structural check below silent.
+func collectComponentDefs(mod *syntax.Module, parents map[string][]string) map[string]map[string]string {
+	own := map[string]map[string]string{}
+	for _, d := range mod.Defs {
+		if d == nil {
+			continue
+		}
+		ct, ok := d.Def.(*syntax.ComponentTypeDecl)
+		if !ok || ct.Name == nil || ct.Body == nil {
+			continue
+		}
+		defs, ok := componentBodyDefs(ct.Body)
+		if !ok {
+			continue
+		}
+		own[ct.Name.String()] = defs
+	}
+	out := map[string]map[string]string{}
+	var effective func(name string, onPath map[string]bool) (map[string]string, bool)
+	effective = func(name string, onPath map[string]bool) (map[string]string, bool) {
+		if defs, ok := out[name]; ok {
+			return defs, true
+		}
+		defs, ok := own[name]
+		if !ok || onPath[name] {
+			return nil, false
+		}
+		onPath[name] = true
+		defer delete(onPath, name)
+		merged := map[string]string{}
+		for _, p := range parents[name] {
+			pDefs, ok := effective(p, onPath)
+			if !ok {
+				return nil, false
+			}
+			for k, v := range pDefs {
+				merged[k] = v
+			}
+		}
+		for k, v := range defs {
+			merged[k] = v
+		}
+		out[name] = merged
+		return merged, true
+	}
+	for name := range own {
+		effective(name, map[string]bool{})
+	}
+	return out
+}
+
+// componentBodyDefs renders the definitions declared directly in a
+// component body. ok is false when a statement is not a definition
+// we know how to name.
+func componentBodyDefs(body *syntax.BlockStmt) (map[string]string, bool) {
+	defs := map[string]string{}
+	for _, st := range body.Stmts {
+		ds, ok := st.(*syntax.DeclStmt)
+		if !ok || ds == nil {
+			return nil, false
+		}
+		switch x := ds.Decl.(type) {
+		case *syntax.ValueDecl:
+			head := ""
+			if x.KindTok != nil {
+				head = x.KindTok.String()
+			}
+			head += " " + tokenText(x.TemplateRestriction) + " " + tokenText(x.Type)
+			for _, dec := range x.Decls {
+				if dec == nil || dec.Name == nil {
+					return nil, false
+				}
+				defs[dec.Name.String()] = head + " " + tokenText(dec)
+			}
+		case *syntax.TemplateDecl:
+			if x.Name == nil {
+				return nil, false
+			}
+			defs[x.Name.String()] = tokenText(x)
+		default:
+			return nil, false
+		}
+	}
+	return defs, true
+}
+
+// isPortDef reports whether def, a rendering of componentBodyDefs, is
+// of a port: it begins with the definition's kind.
+func isPortDef(def string) bool { return strings.HasPrefix(def, "port ") }
+
+// tokenText joins the tokens of n with single blanks, giving a
+// layout-independent rendering for comparing two declarations.
+func tokenText(n syntax.Node) string {
+	if syntax.IsNil(n) {
+		return ""
+	}
+	first, last := n.FirstTok(), n.LastTok()
+	if syntax.IsNil(first) || syntax.IsNil(last) {
+		return ""
+	}
+	var sb strings.Builder
+	for tok := first; !syntax.IsNil(tok); tok = tok.NextTok() {
+		if k := tok.Kind(); k != syntax.COMMENT && k != syntax.PREPROC {
+			if sb.Len() > 0 {
+				sb.WriteByte(' ')
+			}
+			sb.WriteString(tok.String())
+		}
+		if tok.Pos() >= last.Pos() {
+			break
+		}
+	}
+	return sb.String()
+}
+
+// runsOnCompatible reports whether a behaviour that runs on
+// `target` may be started on a component of type `recv`: either
+// `recv` extends `target`, or every definition of `target` has an
+// identical definition in `recv` (6.3.3 item 2). Unknown component
+// types fall back to the extends-chain answer.
+func runsOnCompatible(recv, target string, parents map[string][]string, defs map[string]map[string]string) bool {
+	if extendsOrEqual(recv, target, parents) {
+		return true
+	}
+	recvDefs, ok := defs[recv]
+	if !ok {
+		return false
+	}
+	targetDefs, ok := defs[target]
+	if !ok {
+		return false
+	}
+	for name, def := range targetDefs {
+		if recvDefs[name] != def {
+			return false
+		}
+	}
+	return true
+}
+
 // extendsOrEqual returns true when `child` is `parent` or any
 // transitive parent reached via the extends-chain.
 func extendsOrEqual(child, parent string, parents map[string][]string) bool {
@@ -402,6 +548,7 @@ func checkComponentOpsInBody(
 	classes map[string]bool,
 	abstracts map[string]bool,
 	compParents map[string][]string,
+	compDefs map[string]map[string]string,
 ) []Diagnostic {
 	var diags []Diagnostic
 	syntax.Inspect(body, func(n syntax.Node) bool {
@@ -449,7 +596,7 @@ func checkComponentOpsInBody(
 			diags = append(diags, checkCreateArgs(ce)...)
 		case "start", "call":
 			diags = append(diags, checkStartArgs(
-				ce, sel, runsOn, varTypes, funcs, compParents,
+				ce, sel, runsOn, varTypes, funcs, compParents, compDefs,
 			)...)
 		}
 		return true
@@ -608,6 +755,7 @@ func checkStartArgs(
 	varTypes map[string]string,
 	funcs map[string]*funcMeta,
 	compParents map[string][]string,
+	compDefs map[string]map[string]string,
 ) []Diagnostic {
 	if ce.Args == nil || len(ce.Args.List) != 1 {
 		return nil
@@ -647,7 +795,7 @@ func checkStartArgs(
 
 	recvType := receiverComponentType(sel.X, runsOn, varTypes)
 	if recvType != "" && meta.runsOn != "" &&
-		!extendsOrEqual(recvType, meta.runsOn, compParents) {
+		!runsOnCompatible(recvType, meta.runsOn, compParents, compDefs) {
 		diags = append(diags, Diagnostic{
 			Code:     "start-runs-on-incompatible",
 			Severity: SeverityError,

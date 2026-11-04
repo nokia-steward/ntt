@@ -112,8 +112,10 @@ func (a *Analyzer) checkTimerSyntaxRules(mod *syntax.Module) []Diagnostic {
 			}
 			// Bare value-literal at statement position
 			// (e.g. `t_timer.start 1.0;` leaves `1.0;`
-			// as a residual statement).
-			if _, ok := es.Expr.(*syntax.ValueLiteral); ok {
+			// as a residual statement). The not-implemented
+			// function `???` is a valid stand-alone statement
+			// (ETSI 16.1.6).
+			if vl, ok := es.Expr.(*syntax.ValueLiteral); ok && (vl.Tok == nil || vl.Tok.Kind() != syntax.NOTIMPL) {
 				diags = append(diags, Diagnostic{
 					Code:     "stray-value-literal-stmt",
 					Severity: SeverityError,

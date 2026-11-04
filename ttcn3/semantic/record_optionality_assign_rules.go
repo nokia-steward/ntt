@@ -71,26 +71,20 @@ func (a *Analyzer) checkRecordOptionalityAssignRules(mod *syntax.Module) []Diagn
 		if len(fa) == 0 || len(fb) == 0 {
 			return false
 		}
-		// Build name sets and compare.
+		// Only the alternative selected in the source value needs a
+		// same-named alternative in the target (6.3.2.4). We don't
+		// track the selection, so reject only when no source
+		// alternative can match, whichever is selected.
 		sa := map[string]bool{}
 		for _, n := range fa {
 			sa[n] = true
 		}
 		for _, n := range fb {
-			if !sa[n] {
-				return true
+			if sa[n] {
+				return false
 			}
 		}
-		sb := map[string]bool{}
-		for _, n := range fb {
-			sb[n] = true
-		}
-		for _, n := range fa {
-			if !sb[n] {
-				return true
-			}
-		}
-		return false
+		return true
 	}
 	funcParamTypes := collectFunctionParamTypes(mod)
 	var diags []Diagnostic
@@ -140,7 +134,7 @@ func (a *Analyzer) checkRecordOptionalityAssignRules(mod *syntax.Module) []Diagn
 						Code:     "union-assign-name-mismatch",
 						Severity: SeverityError,
 						Message: fmt.Sprintf(
-							"cannot assign value of union type %q to variable of union type %q: alternative names differ (ETSI 6.3.2)",
+							"cannot assign value of union type %q to variable of union type %q: no alternative of the source exists in the target (ETSI 6.3.2.4)",
 							rhsType, lhsType),
 						Node: dec.Value,
 						Span: syntax.SpanOf(dec.Value),
@@ -181,7 +175,7 @@ func (a *Analyzer) checkRecordOptionalityAssignRules(mod *syntax.Module) []Diagn
 					Code:     "union-assign-name-mismatch",
 					Severity: SeverityError,
 					Message: fmt.Sprintf(
-						"cannot assign value of union type %q to variable of union type %q: alternative names differ (ETSI 6.3.2)",
+						"cannot assign value of union type %q to variable of union type %q: no alternative of the source exists in the target (ETSI 6.3.2.4)",
 						rhsType, lhsType),
 					Node: be,
 					Span: syntax.SpanOf(be),
@@ -228,7 +222,10 @@ func (a *Analyzer) checkRecordOptionalityAssignRules(mod *syntax.Module) []Diagn
 }
 
 // collectUnionFieldTypes returns the ordered list of alternative
-// names for each top-level union type in the module.
+// names for each top-level union type in the module. Unions with a
+// @default alternative are left out: 6.3.2.4 makes them compatible
+// through the default alternative's type too, which names alone
+// cannot decide.
 func collectUnionFieldTypes(mod *syntax.Module) map[string][]string {
 	out := map[string][]string{}
 	for _, d := range mod.Defs {
@@ -243,11 +240,18 @@ func collectUnionFieldTypes(mod *syntax.Module) map[string][]string {
 			continue
 		}
 		var names []string
+		hasDefault := false
 		for _, f := range std.Fields {
 			if f == nil || f.Name == nil {
 				continue
 			}
+			if f.DefaultTok != nil {
+				hasDefault = true
+			}
 			names = append(names, f.Name.String())
+		}
+		if hasDefault {
+			continue
 		}
 		out[std.Name.String()] = names
 	}

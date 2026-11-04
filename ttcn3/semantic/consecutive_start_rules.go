@@ -3,6 +3,7 @@ package semantic
 import (
 	"fmt"
 
+	"github.com/nokia/ntt/ttcn3"
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
@@ -25,21 +26,19 @@ import (
 // level of a function / testcase body. Nested if/while shapes are
 // skipped because the scheduler can interleave them in ways that
 // make a purely syntactic rule unsound.
-func (a *Analyzer) checkConsecutiveStartRules(mod *syntax.Module) []Diagnostic {
+//
+// Only receivers that resolve to a component reference take part:
+// `start` on a timer (23.2) or a port (22.5.2) restarts it and needs
+// no synchronisation.
+func (a *Analyzer) checkConsecutiveStartRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagnostic {
 	var diags []Diagnostic
-	// Timer names are excluded from the component start/sync
-	// pairing rule: `T.start` on a timer is idempotent (it
-	// restarts the wall clock from zero) and explicitly NOT
-	// covered by ETSI 21.3.2. This is module-wide because the
-	// receiver could be a component-body timer reached via a
-	// `runs on` clause.
-	timers := collectModuleTimerIdents(mod)
 	syntax.Inspect(mod, func(n syntax.Node) bool {
 		fn, ok := n.(*syntax.FuncDecl)
 		if !ok || fn == nil || fn.Body == nil {
 			return true
 		}
 		startSites := map[string]syntax.Node{}
+		isComponent := map[string]bool{}
 		for _, s := range fn.Body.Stmts {
 			es, ok := s.(*syntax.ExprStmt)
 			if !ok || es.Expr == nil {
@@ -49,8 +48,12 @@ func (a *Analyzer) checkConsecutiveStartRules(mod *syntax.Module) []Diagnostic {
 			if recv == "" {
 				continue
 			}
-			if timers[recv] {
-				// Timer ops follow ETSI 23, not 21.3.2.
+			comp, seen := isComponent[recv]
+			if !seen {
+				comp = a.isComponentRef(tree, componentOpReceiver(call))
+				isComponent[recv] = comp
+			}
+			if !comp {
 				continue
 			}
 			switch op {
@@ -99,4 +102,30 @@ func classifyComponentOp(e syntax.Expr) (string, string, syntax.Node) {
 		}
 	}
 	return "", "", nil
+}
+
+// componentOpReceiver returns the receiver expression of a node
+// returned by classifyComponentOp.
+func componentOpReceiver(n syntax.Node) syntax.Expr {
+	if ce, ok := n.(*syntax.CallExpr); ok {
+		n = ce.Fun
+	}
+	if sel, ok := n.(*syntax.SelectorExpr); ok {
+		return sel.X
+	}
+	return nil
+}
+
+// isComponentRef reports whether e resolves to a value of a
+// component type. Without a DB only the tree itself is searched.
+func (a *Analyzer) isComponentRef(tree *ttcn3.Tree, e syntax.Expr) bool {
+	if tree == nil || e == nil {
+		return false
+	}
+	for _, t := range tree.TypeOf(e, a.db()) {
+		if _, ok := t.Node.(*syntax.ComponentTypeDecl); ok {
+			return true
+		}
+	}
+	return false
 }

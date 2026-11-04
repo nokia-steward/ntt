@@ -70,6 +70,12 @@ func (a *Analyzer) checkActualParameterRules(mod *syntax.Module) []Diagnostic {
 	lazyVars := collectLazyFuzzyVars(mod)
 	paramTmpls := collectParameterizedTemplates(mod)
 	portTypes := collectPortTypeNames(mod)
+	// A synonym of a port type is a port type too (6.3.6).
+	for name, kind := range collectTypeAliasKinds(mod) {
+		if kind == "port" {
+			portTypes[name] = true
+		}
+	}
 	localVarTypes := collectLocalVarTypeNames(mod)
 	tmplVarRestr := collectTemplateVarRestrictions(mod)
 	tmplBodies := collectActualParamTemplateBodies(mod)
@@ -340,6 +346,19 @@ func localUnboundVars(body syntax.Node, sigs map[string][]formalSig) map[string]
 			if name := identName(x.Sender); name != "" {
 				delete(cand, name)
 			}
+			// `-> param(v_a, v_b)` and `-> param(v_a := p_a)`
+			// bind the variables to the parameters of the
+			// accepted call or reply (22.3.2, 22.3.4); so do
+			// `@index value` and `timestamp`.
+			for _, name := range paramRedirectVars(x.Param) {
+				delete(cand, name)
+			}
+			if name := rootIdentName(x.Index); name != "" {
+				delete(cand, name)
+			}
+			if name := rootIdentName(x.Timestamp); name != "" {
+				delete(cand, name)
+			}
 		case *syntax.CallExpr:
 			if x.Args == nil {
 				break
@@ -363,6 +382,34 @@ func localUnboundVars(body syntax.Node, sigs map[string][]formalSig) map[string]
 		return true
 	})
 	return cand
+}
+
+// paramRedirectVars returns the variables a `param` redirect writes, in
+// list notation (`param(v_a, -, v_c)`) or assignment notation
+// (`param(v_a := p_a)`).
+func paramRedirectVars(param []syntax.Expr) []string {
+	var out []string
+	var add func(e syntax.Expr)
+	add = func(e syntax.Expr) {
+		switch x := e.(type) {
+		case *syntax.ParenExpr:
+			for _, item := range x.List {
+				add(item)
+			}
+		case *syntax.BinaryExpr:
+			if x.Op != nil && x.Op.Kind() == syntax.ASSIGN {
+				add(x.X)
+			}
+		default:
+			if name := rootIdentName(e); name != "" {
+				out = append(out, name)
+			}
+		}
+	}
+	for _, p := range param {
+		add(p)
+	}
+	return out
 }
 
 // outResultFuncs are the predefined functions whose second parameter is

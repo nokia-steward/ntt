@@ -241,6 +241,21 @@ var uninitReadSafePredicates = map[string]bool{
 	"isunbound": true,
 }
 
+// isAttributeRetrieval reports whether sel retrieves an attribute
+// value (27.8): `x.display`, `x.encode`, `x.variant`, `x.extension`
+// or `x.optional`.
+func isAttributeRetrieval(sel *syntax.SelectorExpr) bool {
+	id, ok := sel.Sel.(*syntax.Ident)
+	if !ok || id == nil || id.Tok == nil {
+		return false
+	}
+	switch id.Tok.Kind() {
+	case syntax.DISPLAY, syntax.ENCODE, syntax.VARIANT, syntax.EXTENSION, syntax.OPTIONAL:
+		return true
+	}
+	return false
+}
+
 func scanStmtForUninitReads(st syntax.Stmt, ctx *uninitRecordCtx, records map[string][]recordFieldFull) []Diagnostic {
 	var diags []Diagnostic
 	// First, find every selector inside an uninit-safe predicate
@@ -270,6 +285,26 @@ func scanStmtForUninitReads(st syntax.Stmt, ctx *uninitRecordCtx, records map[st
 				}
 				return true
 			})
+		}
+		return true
+	})
+	// Retrieving an attribute (`v.field.encode`, 27.8) does not read
+	// the value preceding the dot, which may be uninitialized.
+	syntax.Inspect(st, func(n syntax.Node) bool {
+		sel, ok := n.(*syntax.SelectorExpr)
+		if !ok || sel == nil || !isAttributeRetrieval(sel) {
+			return true
+		}
+		for e := sel.X; e != nil; {
+			switch x := e.(type) {
+			case *syntax.SelectorExpr:
+				skip[x] = true
+				e = x.X
+			case *syntax.IndexExpr:
+				e = x.X
+			default:
+				e = nil
+			}
 		}
 		return true
 	})

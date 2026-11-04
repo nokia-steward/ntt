@@ -409,9 +409,13 @@ func checkPortOpsInBody(body *syntax.BlockStmt, ports map[string]string, portTyp
 			return true
 		}
 
+		// Directions follow 6.2.9: send, call, getreply and catch
+		// use the out list (a reply or exception answers our own
+		// call); receive, trigger, getcall, reply and raise use
+		// the in list.
 		var diag *Diagnostic
 		switch op.String() {
-		case "send", "call", "raise":
+		case "send", "call", "getreply", "catch":
 			if !dirs.canSend(typeName) {
 				diag = &Diagnostic{
 					Code:     "port-op-type-not-allowed",
@@ -423,7 +427,7 @@ func checkPortOpsInBody(body *syntax.BlockStmt, ports map[string]string, portTyp
 					Span: syntax.SpanOf(first),
 				}
 			}
-		case "receive", "trigger", "check", "getcall", "getreply", "catch":
+		case "receive", "trigger", "check", "getcall", "reply", "raise":
 			if !dirs.canReceive(typeName) {
 				diag = &Diagnostic{
 					Code:     "port-op-type-not-allowed",

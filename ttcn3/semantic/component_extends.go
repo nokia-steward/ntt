@@ -199,8 +199,11 @@ func formatComponentCycle(cycle []string) string {
 // checkComponentNameClashes emits component-extends-name-clash
 // when two parents of the same component contribute a member with
 // the same name, or when a child member redeclares an inherited
-// one. Cycles are skipped to avoid infinite recursion when the
-// parent set isn't a DAG.
+// one. A member reaching the child through several extension
+// paths but declared by one component type is the same definition
+// and no clash (6.2.10.2 NOTE 1, restrictions a and b). Cycles are
+// skipped to avoid infinite recursion when the parent set isn't a
+// DAG.
 func checkComponentNameClashes(comps map[string]componentMeta) []Diagnostic {
 	var diags []Diagnostic
 	cyclic := componentsInCycles(comps)
@@ -208,17 +211,25 @@ func checkComponentNameClashes(comps map[string]componentMeta) []Diagnostic {
 		if len(meta.parents) == 0 || cyclic[name] {
 			continue
 		}
-		// inheritedFrom[member] -> list of parents contributing it
+		// inheritedFrom[member] -> list of parents contributing it;
+		// declaredBy[member] -> component types declaring it.
 		inheritedFrom := map[string][]string{}
+		declaredBy := map[string]map[string]bool{}
 		for _, parent := range meta.parents {
 			pSet := flatMembers(parent, comps, cyclic, map[string]bool{})
-			for member := range pSet {
+			for member, origins := range pSet {
 				inheritedFrom[member] = append(inheritedFrom[member], parent)
+				if declaredBy[member] == nil {
+					declaredBy[member] = map[string]bool{}
+				}
+				for o := range origins {
+					declaredBy[member][o] = true
+				}
 			}
 		}
 		// Parent-vs-parent clash:
 		for member, sources := range inheritedFrom {
-			if len(sources) > 1 {
+			if len(sources) > 1 && len(declaredBy[member]) > 1 {
 				sort.Strings(sources)
 				diags = append(diags, Diagnostic{
 					Code:     "component-extends-name-clash",
@@ -251,14 +262,15 @@ func checkComponentNameClashes(comps map[string]componentMeta) []Diagnostic {
 }
 
 // flatMembers returns the transitive member set of `name` walking
-// the extends-DAG. Cyclic components are skipped (they're handled
-// by checkComponentCycles).
+// the extends-DAG, mapping each member to the component types that
+// declare it. Cyclic components are skipped (they're handled by
+// checkComponentCycles).
 func flatMembers(
 	name string,
 	comps map[string]componentMeta,
 	cyclic map[string]bool,
 	visited map[string]bool,
-) map[string]bool {
+) map[string]map[string]bool {
 	if visited[name] || cyclic[name] {
 		return nil
 	}
@@ -267,13 +279,21 @@ func flatMembers(
 	if !ok {
 		return nil
 	}
-	out := map[string]bool{}
+	out := map[string]map[string]bool{}
+	add := func(member, origin string) {
+		if out[member] == nil {
+			out[member] = map[string]bool{}
+		}
+		out[member][origin] = true
+	}
 	for m := range meta.ownMembers {
-		out[m] = true
+		add(m, name)
 	}
 	for _, p := range meta.parents {
-		for m := range flatMembers(p, comps, cyclic, visited) {
-			out[m] = true
+		for m, origins := range flatMembers(p, comps, cyclic, visited) {
+			for o := range origins {
+				add(m, o)
+			}
 		}
 	}
 	return out

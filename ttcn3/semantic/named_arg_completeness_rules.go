@@ -1,7 +1,7 @@
 // named_arg_completeness_rules.go enforces ETSI ES 201 873-1
 // clause 5.4.2: when a call uses assignment (named-argument)
-// notation, every formal parameter that has no default value must
-// still receive an actual parameter.
+// notation, every formal parameter that has no default value and is
+// not an out parameter must still receive an actual parameter.
 //
 //	function f(integer p1, integer p2 := 0, integer p3) { ... }
 //	f(p2 := 5, p3 := 7);   // ERROR: p1 has no default and is omitted
@@ -76,6 +76,14 @@ func checkOneNamedCall(call *syntax.CallExpr, fd *syntax.FuncDecl) []Diagnostic 
 		}
 		// A formal with a default value (`:= expr`) may be omitted.
 		if p.Value != nil {
+			continue
+		}
+		// So may an out formal: the dash "-" is taken for it
+		// (5.4.2, and explicitly for assignment notation in
+		// 21.3.2). Restriction c of 5.4.2, which asks an actual
+		// parameter of every formal without a default, is read
+		// as of the in and inout ones.
+		if p.Direction != nil && p.Direction.Kind() == syntax.OUT {
 			continue
 		}
 		// Covered by an explicit named argument.

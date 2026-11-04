@@ -59,6 +59,15 @@ type Analyzer struct {
 	DB *ttcn3.DB
 }
 
+// db is the database names are resolved in: the Analyzer's, or, without
+// one, an empty one, in which only the analyzed tree is searched.
+func (a *Analyzer) db() *ttcn3.DB {
+	if a.DB == nil {
+		return &ttcn3.DB{}
+	}
+	return a.DB
+}
+
 // NewAnalyzer returns an Analyzer wired up to the given database.
 func NewAnalyzer(db *ttcn3.DB) *Analyzer {
 	return &Analyzer{DB: db}
@@ -150,7 +159,7 @@ func (a *Analyzer) Analyze(tree *ttcn3.Tree) []Diagnostic {
 		out = append(out, a.checkGetcallRedirectRules(mod)...)
 		out = append(out, a.checkAddrClauseTypeRules(mod)...)
 		out = append(out, a.checkComponentArrayInitRules(mod)...)
-		out = append(out, a.checkConsecutiveStartRules(mod)...)
+		out = append(out, a.checkConsecutiveStartRules(tree, mod)...)
 		out = append(out, a.checkTimerArityRules(mod)...)
 		out = append(out, a.checkTimerSyntaxRules(mod)...)
 		out = append(out, a.checkTimerReceiverRules(mod)...)
@@ -174,7 +183,7 @@ func (a *Analyzer) Analyze(tree *ttcn3.Tree) []Diagnostic {
 		out = append(out, a.checkAllFromSourceRules(mod)...)
 		out = append(out, a.checkIndexRedirectDimRules(mod)...)
 		out = append(out, a.checkIndexRedirectTargetTypeRules(mod)...)
-		out = append(out, a.checkConstKindRules(mod)...)
+		out = append(out, a.checkConstKindRules(tree, mod)...)
 		out = append(out, a.checkAssignmentPrimitiveRules(mod)...)
 		out = append(out, a.checkTypeCompatRules(mod)...)
 		out = append(out, a.checkClassMemberRules(mod)...)

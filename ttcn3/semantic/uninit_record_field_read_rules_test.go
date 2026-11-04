@@ -139,3 +139,48 @@ func TestRecordFieldReadInSiblingClauseWithoutRedirectRejected(t *testing.T) {
 		t.Fatalf("expected uninit-record-field-read for the branch with no redirect, got %v", codes(diags))
 	}
 }
+
+// TestRecordFieldAttributeRetrievalAccepted: retrieving an attribute
+// (27.8) does not read the value preceding the dot, which may be
+// uninitialized.
+func TestRecordFieldAttributeRetrievalAccepted(t *testing.T) {
+	tree := parse(t, `module M {
+		type record of universal charstring RUC;
+		type record R {
+			integer f1,
+			integer f2
+		} with { encode (f1) "Rule" }
+		type component C {}
+		testcase tc() runs on C {
+			var R v;
+			var RUC e := v.f1.encode;
+			var RUC w := v.f2.variant("Rule");
+		}
+	}`)
+	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree)
+	if containsCode(diags, "uninit-record-field-read") {
+		t.Fatalf("unexpected uninit-record-field-read, got %v", codes(diags))
+	}
+}
+
+// TestRecordFieldReadBesideAttributeRetrievalRejected keeps the
+// exemption to the attribute operand: a plain read of the same field
+// is still reported.
+func TestRecordFieldReadBesideAttributeRetrievalRejected(t *testing.T) {
+	tree := parse(t, `module M {
+		type record of universal charstring RUC;
+		type record R {
+			integer f1
+		}
+		type component C {}
+		testcase tc() runs on C {
+			var R v;
+			var RUC e := v.f1.encode;
+			var integer i := v.f1;
+		}
+	}`)
+	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree)
+	if !containsCode(diags, "uninit-record-field-read") {
+		t.Fatalf("expected uninit-record-field-read, got %v", codes(diags))
+	}
+}

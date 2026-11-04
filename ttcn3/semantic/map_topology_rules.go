@@ -5,7 +5,8 @@
 // `map(..., system:...)`, and vice-versa. The same port
 // instance cannot be both connected to another component
 // and mapped to the system interface within the same
-// testcase body.
+// testcase body, unless a `disconnect` / `unmap` in between
+// released it (21.1.2).
 //
 // We deliberately do NOT enforce the older "one system port
 // maps to at most one component port" rule (NegSem_0902_001
@@ -24,6 +25,7 @@ package semantic
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
@@ -57,7 +59,7 @@ func (a *Analyzer) checkMapTopologyRules(mod *syntax.Module) []Diagnostic {
 // inside loops to avoid false positives on iterating maps).
 func walkMapTopology(body *syntax.BlockStmt) []Diagnostic {
 	var diags []Diagnostic
-	connectedCompPorts := map[string]bool{}
+	connectedCompPorts := map[string]map[string]bool{}
 	mappedCompPorts := map[string]bool{}
 	var walk func(stmt syntax.Stmt)
 	walk = func(stmt syntax.Stmt) {
@@ -109,39 +111,61 @@ func walkMapTopology(body *syntax.BlockStmt) []Diagnostic {
 	return diags
 }
 
+// checkMapTopologyExpr applies one statement-level operation to the
+// topology state. connectedCompPorts maps each connected component
+// port to its peers; mappedCompPorts holds the component ports
+// mapped to the system. `disconnect` and `unmap` release the ports
+// they name (21.1.2), so a later `map` / `connect` of them is legal.
 func checkMapTopologyExpr(
 	expr syntax.Expr,
-	connectedCompPorts, mappedCompPorts map[string]bool,
+	connectedCompPorts map[string]map[string]bool,
+	mappedCompPorts map[string]bool,
 ) *Diagnostic {
-	ce, ok := expr.(*syntax.CallExpr)
-	if !ok || ce == nil {
-		return nil
+	var args []syntax.Expr
+	var id *syntax.Ident
+	switch x := expr.(type) {
+	case *syntax.Ident:
+		// `disconnect;` / `unmap;` without parentheses.
+		id = x
+	case *syntax.CallExpr:
+		id, _ = x.Fun.(*syntax.Ident)
+		if x.Args != nil {
+			args = x.Args.List
+		}
 	}
-	id, ok := ce.Fun.(*syntax.Ident)
-	if !ok || id == nil {
+	if id == nil {
 		return nil
 	}
 	name := id.String()
-	if name != "connect" && name != "map" {
+	switch name {
+	case "disconnect":
+		releaseConnections(args, connectedCompPorts)
+		return nil
+	case "unmap":
+		releaseMappings(args, mappedCompPorts)
+		return nil
+	case "connect", "map":
+	default:
 		return nil
 	}
-	if ce.Args == nil || len(ce.Args.List) < 2 {
+	ce, ok := expr.(*syntax.CallExpr)
+	if !ok || len(args) < 2 {
 		return nil
 	}
-	leftComp, leftPort := portRefParts(ce.Args.List[0])
-	rightComp, rightPort := portRefParts(ce.Args.List[1])
+	leftComp, leftPort := portRefParts(args[0])
+	rightComp, rightPort := portRefParts(args[1])
 	if leftComp == "" || rightComp == "" {
 		return nil
 	}
+	leftComp, rightComp = topologyComp(leftComp), topologyComp(rightComp)
 	switch name {
 	case "connect":
 		// Both sides are component ports. Mark them as
 		// connected and flag any side that was already
 		// mapped to the system interface.
-		for _, key := range []string{
-			leftComp + ":" + leftPort,
-			rightComp + ":" + rightPort,
-		} {
+		left := leftComp + ":" + leftPort
+		right := rightComp + ":" + rightPort
+		for _, key := range []string{left, right} {
 			if mappedCompPorts[key] {
 				return &Diagnostic{
 					Code:     "connect-on-mapped-port",
@@ -153,8 +177,9 @@ func checkMapTopologyExpr(
 					Span: syntax.SpanOf(ce),
 				}
 			}
-			connectedCompPorts[key] = true
 		}
+		addPeer(connectedCompPorts, left, right)
+		addPeer(connectedCompPorts, right, left)
 	case "map":
 		// Determine the component-side port (the side not
 		// labelled `system`). When neither side is `system`
@@ -169,7 +194,7 @@ func checkMapTopologyExpr(
 		default:
 			return nil
 		}
-		if connectedCompPorts[compKey] {
+		if len(connectedCompPorts[compKey]) > 0 {
 			return &Diagnostic{
 				Code:     "map-on-connected-port",
 				Severity: SeverityError,
@@ -183,6 +208,102 @@ func checkMapTopologyExpr(
 		mappedCompPorts[compKey] = true
 	}
 	return nil
+}
+
+func addPeer(connected map[string]map[string]bool, port, peer string) {
+	if connected[port] == nil {
+		connected[port] = map[string]bool{}
+	}
+	connected[port][peer] = true
+}
+
+// topologyComp names the component of a port reference; in a
+// testcase body `self` is the mtc.
+func topologyComp(comp string) string {
+	if comp == "self" {
+		return "mtc"
+	}
+	return comp
+}
+
+// portRefMatches reports whether the `<comp>:<port>` reference
+// (`all component` and `all port` allowed) denotes key.
+func portRefMatches(comp, port, key string) bool {
+	kc, kp, _ := strings.Cut(key, ":")
+	return (comp == "all component" || comp == kc) &&
+		(port == "all port" || port == kp)
+}
+
+// releaseConnections applies `disconnect(args)` (21.1.2): without
+// arguments it releases the ports of the invoking component, with
+// one reference every connection of the ports it denotes, with two
+// the connections between them. A shape we cannot read releases
+// everything, so it never leads to a false report.
+func releaseConnections(args []syntax.Expr, connected map[string]map[string]bool) {
+	var refs [][2]string
+	for _, a := range args {
+		comp, port := portRefParts(a)
+		if comp == "" {
+			clear(connected)
+			return
+		}
+		refs = append(refs, [2]string{topologyComp(comp), port})
+	}
+	if len(refs) == 0 {
+		refs = [][2]string{{"mtc", "all port"}}
+	}
+	if len(refs) > 2 {
+		clear(connected)
+		return
+	}
+	matches := func(ref [2]string, key string) bool {
+		return portRefMatches(ref[0], ref[1], key)
+	}
+	for key, peers := range connected {
+		for peer := range peers {
+			var released bool
+			if len(refs) == 1 {
+				released = matches(refs[0], key) || matches(refs[0], peer)
+			} else {
+				released = matches(refs[0], key) && matches(refs[1], peer) ||
+					matches(refs[1], key) && matches(refs[0], peer)
+			}
+			if released {
+				delete(peers, peer)
+			}
+		}
+	}
+	for key, peers := range connected {
+		if len(peers) == 0 {
+			delete(connected, key)
+		}
+	}
+}
+
+// releaseMappings applies `unmap(args)` (21.1.2) to the mapped
+// component ports. A reference to a system port, or a shape we
+// cannot read, releases everything.
+func releaseMappings(args []syntax.Expr, mapped map[string]bool) {
+	var refs [][2]string
+	for _, a := range args {
+		comp, port := portRefParts(a)
+		if comp == "" || comp == "system" {
+			continue
+		}
+		refs = append(refs, [2]string{topologyComp(comp), port})
+	}
+	switch {
+	case len(args) == 0:
+		refs = [][2]string{{"mtc", "all port"}}
+	case len(refs) != 1:
+		clear(mapped)
+		return
+	}
+	for key := range mapped {
+		if portRefMatches(refs[0][0], refs[0][1], key) {
+			delete(mapped, key)
+		}
+	}
 }
 
 // portRefParts splits a `<comp>:<port>` BinaryExpr into the two

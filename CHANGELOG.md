@@ -362,6 +362,55 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **The analyzer no longer rejects valid code** in some 60 cases, among
+  them: an index under `isbound`/`ispresent`/`isvalue` (7.1.8.0), an out
+  argument, an array of a ranged dimension (6.2.7) or a template whose
+  permutation or `* length(n)` gives its size (15.6.3), read as out of
+  bounds; reading an attribute, `v.f.encode` (27.8), read as an
+  uninitialised read; a field named like a constant in assignment
+  notation, taken for the constant; a template body, an out parameter's
+  call and an altstep branch's declarations held to the 16.1.4
+  restrictions; a standalone `???;` (16.1.6); an omitted out parameter in
+  assignment notation (5.4.2, 21.3.2); `-> param(v)` not taken as
+  assigning `v`; a component reached twice through `extends` (6.2.10.2),
+  one structurally compatible with a runs on clause (6.3.3), or a
+  function's system clause without a runs on one; a union of whose
+  alternatives one is the target's (6.3.2.4); a map after a `disconnect`
+  or a connect after an `unmap` (21.1); `p.start` on a port, taken for a
+  component's; getreply, catch and raise checked against the wrong list
+  of the port type (6.2.9); a port type synonym (6.3.6); a sender
+  redirect without a from clause held to the runs on type; `any from
+  v.done` in a function never called; `all from` a template with `*`
+  inside a permutation (B.1.3.3). An altstep without runs on activating
+  one with it is now rejected (16.2.0 d), and calling a behaviour whose
+  system clause the caller's system type lacks a port of (6.3.3).
+- **`and4b`, `or4b` and `xor4b` keep the length of their operands**,
+  leading zeros included: `'1001'B and4b '0101'B` is `'0001'B`, not
+  `'1'B`; operands of different lengths are an error (7.1.5).
+- **Binary strings are equal only of one length**: `'0'B` is not `'00'B`,
+  as fields of records and keys of maps too; they compared by their
+  digits' value alone.
+- **`isbound` of an optional field set to omit is true** (7.1.8.4).
+- **Rotate takes character strings, records of, sets of and arrays**
+  (7.1.7), by characters or elements.
+- **`v++` and `v--`** (19.1.2) run; they were an unknown node.
+- **A select case matches by template** (19.3.1): `case (t)` with `t :=
+  (5..10)` selects 7.
+- **`testcasename()` names the running testcase** (C.6.2), on any of its
+  components; it was always the empty string.
+- **`__SCOPE__` is the name of the scope unit around it in the source**
+  (D.5): the module, a template, a component or other type, "control";
+  outside testcases and functions it was unknown.
+- **`execute()` runs an imported testcase**, named bare or `M.tc`, and one
+  inside a group (8.2.3, 26.1), in the module that defines it.
+- **`int2enum` assigns a new value** (C.1.4): it changed the value its out
+  parameter held in place, and with it every variable and constant
+  sharing it; an unbound variable takes its declared type's value.
+- **`hostid()`** is the loopback address of the kind asked for (C.6.3);
+  it was "localhost". **`str2oct` of an odd number of digits** puts a 0
+  in front (C.1.28). **`bit2str`, `hex2str`, `oct2str` of an empty
+  string** are the empty string, and the literals `''B`, `''H`, `''O` are
+  values, no longer taken for strings with wildcards.
 - **Two ports of one component connected to each other deliver to each
   other** (9.1, figure 6): a message one sends, the other's receive or
   check matches with a template, on either clock. A receive dropped any

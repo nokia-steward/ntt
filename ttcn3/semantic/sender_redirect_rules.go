@@ -1,8 +1,12 @@
 // sender_redirect_rules.go enforces ETSI ES 201 873-1 clause 22
 // rules on `-> sender X` redirects of port operations:
 //
-//   - With no `from` clause: X's declared type must match the
-//     enclosing function's runs-on component type.
+//   - With no `from` clause: the sender shall be type compatible
+//     with X (22.2.2 / 22.3.x). The standard does not tie the sender
+//     to the receiver's own component type, so we only report when
+//     the module's connect operations name every component that can
+//     send on the port, and none of them is compatible with X's
+//     component type (6.3.3 item 1).
 //
 //   - With a `from CompName:?` clause: X's declared type must match
 //     CompName.
@@ -15,6 +19,7 @@ package semantic
 
 import (
 	"fmt"
+	"strings"
 
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
@@ -28,6 +33,12 @@ func (a *Analyzer) checkSenderRedirectRules(mod *syntax.Module) []Diagnostic {
 	primAliases := collectPrimitiveTypeAliases(mod)
 	addressVars := collectPortAddressVars(mod)
 	hasAddress := moduleHasAddressType(mod)
+	parents := collectComponentParents(mod)
+	peers := &senderPeers{
+		ports:   collectConnectedPeerTypes(mod, varTypes),
+		parents: parents,
+		defs:    collectComponentDefs(mod, parents),
+	}
 	var diags []Diagnostic
 	for _, d := range mod.Defs {
 		if d == nil {
@@ -35,10 +46,135 @@ func (a *Analyzer) checkSenderRedirectRules(mod *syntax.Module) []Diagnostic {
 		}
 		switch v := d.Def.(type) {
 		case *syntax.FuncDecl:
-			diags = append(diags, walkFuncForSenderRedirects(v, varTypes, primAliases, addressVars, components, hasAddress)...)
+			diags = append(diags, walkFuncForSenderRedirects(v, varTypes, primAliases, addressVars, components, hasAddress, peers)...)
 		}
 	}
 	return diags
+}
+
+// senderPeers knows which components can send to a port: ports maps
+// "<component type>.<port>" to the component types that connect
+// operations attach to it, "" marking a peer we cannot resolve (or
+// the system, for a mapped port).
+type senderPeers struct {
+	ports   map[string]map[string]bool
+	parents map[string][]string
+	defs    map[string]map[string]string
+}
+
+// collectConnectedPeerTypes builds senderPeers.ports from every
+// `connect` / `map` in the module's functions, altsteps and testcases.
+func collectConnectedPeerTypes(mod *syntax.Module, varTypes map[string]string) map[string]map[string]bool {
+	out := map[string]map[string]bool{}
+	add := func(key, peer string) {
+		if out[key] == nil {
+			out[key] = map[string]bool{}
+		}
+		out[key][peer] = true
+	}
+	for _, d := range mod.Defs {
+		if d == nil {
+			continue
+		}
+		fn, ok := d.Def.(*syntax.FuncDecl)
+		if !ok || fn == nil || fn.Body == nil {
+			continue
+		}
+		self := runsOnComponentName(fn.RunsOn)
+		mtc := ""
+		if fn.Mtc != nil {
+			mtc = syntax.Name(fn.Mtc.Comp)
+		} else if fn.KindTok != nil && fn.KindTok.Kind() == syntax.TESTCASE {
+			mtc = self
+		}
+		// endpoint resolves `<comp>:<port>` to "<type>.<port>",
+		// with "" for the type when it is unknown.
+		endpoint := func(e syntax.Expr) (comp, key string) {
+			be, ok := e.(*syntax.BinaryExpr)
+			if !ok || be == nil || be.Op == nil || be.Op.Kind() != syntax.COLON {
+				return "", ""
+			}
+			port := identName(be.Y)
+			if ix, ok := be.Y.(*syntax.IndexExpr); ok && ix != nil {
+				port = identName(ix.X)
+			}
+			comp = identName(be.X)
+			ty := ""
+			switch comp {
+			case "self":
+				ty = self
+			case "mtc":
+				ty = mtc
+			case "system", "":
+			default:
+				ty = varTypes[comp]
+			}
+			if ty == "" || port == "" {
+				return comp, ""
+			}
+			return comp, ty + "." + port
+		}
+		syntax.Inspect(fn.Body, func(n syntax.Node) bool {
+			ce, ok := n.(*syntax.CallExpr)
+			if !ok || ce == nil || ce.Args == nil || len(ce.Args.List) != 2 {
+				return true
+			}
+			op := identName(ce.Fun)
+			if op != "connect" && op != "map" {
+				return true
+			}
+			compA, keyA := endpoint(ce.Args.List[0])
+			compB, keyB := endpoint(ce.Args.List[1])
+			typeOf := func(key string) string {
+				ty, _, _ := strings.Cut(key, ".")
+				return ty
+			}
+			if keyA != "" {
+				if op == "map" || compB == "system" {
+					add(keyA, "")
+				} else {
+					add(keyA, typeOf(keyB))
+				}
+			}
+			if keyB != "" {
+				if op == "map" || compA == "system" {
+					add(keyB, "")
+				} else {
+					add(keyB, typeOf(keyA))
+				}
+			}
+			return true
+		})
+	}
+	return out
+}
+
+// mismatch reports whether no component that can send on port of a
+// component of type recv is compatible with want, the component type
+// of the sender redirect target. A peer is known by the type it is
+// declared of, which a component of an extending type may be too, so
+// a want compatible with the peer's, either way, is no mismatch. Any
+// unknown peer or component type makes it false.
+func (s *senderPeers) mismatch(recv, port, want string) bool {
+	if s == nil || recv == "" || port == "" {
+		return false
+	}
+	peers := s.ports[recv+"."+port]
+	if len(peers) == 0 || peers[""] {
+		return false
+	}
+	if _, ok := s.defs[want]; !ok {
+		return false
+	}
+	for peer := range peers {
+		if _, ok := s.defs[peer]; !ok {
+			return false
+		}
+		if runsOnCompatible(peer, want, s.parents, s.defs) || runsOnCompatible(want, peer, s.parents, s.defs) {
+			return false
+		}
+	}
+	return true
 }
 
 // moduleHasAddressType reports whether the module declares an
@@ -137,6 +273,7 @@ func walkFuncForSenderRedirects(
 	addressVars map[string]bool,
 	components map[string]bool,
 	hasAddress bool,
+	peers *senderPeers,
 ) []Diagnostic {
 	if fn == nil || fn.Body == nil {
 		return nil
@@ -210,6 +347,21 @@ func walkFuncForSenderRedirects(
 				}
 			}
 			if runsOn == "" || !components[runsOn] {
+				return true
+			}
+			if target := identName(be.Sender); target != "" && components[varTypes[target]] {
+				port := redirectedPortName(be.X)
+				if ty := varTypes[target]; peers.mismatch(runsOn, port, ty) {
+					diags = append(diags, Diagnostic{
+						Code:     "sender-redirect-component-mismatch",
+						Severity: SeverityError,
+						Message: fmt.Sprintf(
+							"sender redirect target %q has component type %q, which no component connected to %s is compatible with (ETSI 22, 6.3.3)",
+							target, ty, port),
+						Node: be,
+						Span: syntax.SpanOf(be),
+					})
+				}
 				return true
 			}
 			if d := senderMismatchDiag(be, runsOn, "runs-on", varTypes, primAliases, components, hasAddress); d != nil {

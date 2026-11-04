@@ -9,8 +9,9 @@
 //
 // We don't have a full template-length inferencer yet, so the check
 // is intentionally narrow: it flags literal hex / bit / oct strings
-// that carry a `*` / `?` wildcard, and `LengthExpr` wrappers whose
-// size clause names a range with distinct lower and upper bounds.
+// that carry a `*` wildcard unless a length attribute pins their
+// length, and other `LengthExpr` wrappers whose size clause names a
+// range with distinct lower and upper bounds.
 // Anything else (a bare ident referring to a template, a function
 // call, etc.) is left alone - the interpreter still produces a
 // value at runtime, just not a verifiable one.
@@ -57,13 +58,25 @@ func (a *Analyzer) checkLengthofArgs(mod *syntax.Module) []Diagnostic {
 func lengthofViolation(e syntax.Expr) string {
 	switch v := e.(type) {
 	case *syntax.ValueLiteral:
+		// `?` (AnyElement) stands for exactly one item:
+		// lengthof('1??1'B) is 4. Only `*` leaves it open.
 		if v.Tok != nil && v.Tok.Kind() == syntax.BSTRING {
 			lit := v.Tok.String()
-			if strings.ContainsAny(lit, "*?") {
+			if strings.Contains(lit, "*") {
 				return "wildcard in literal"
 			}
 		}
 	case *syntax.LengthExpr:
+		// A length attribute can pin the length of a literal
+		// with `*`: lengthof('1*F'H length(8)) is 8 and
+		// lengthof('00*FF'O length(1..2)) is 2 (C.2.1).
+		if lit, ok := v.X.(*syntax.ValueLiteral); ok && lit.Tok != nil &&
+			lit.Tok.Kind() == syntax.BSTRING && strings.Contains(lit.Tok.String(), "*") {
+			if !lengthPinnedByAttribute(lit.Tok.String(), v) {
+				return "length restriction does not pin the length"
+			}
+			return ""
+		}
 		if isLengthRange(v.Size) {
 			return "length restriction is a range"
 		}
@@ -73,6 +86,38 @@ func lengthofViolation(e syntax.Expr) string {
 		}
 	}
 	return ""
+}
+
+// lengthPinnedByAttribute reports whether the length attribute le
+// leaves a single length for the binary string literal lit, which
+// contains `*`: the literal matches its fixed items (`?` counting
+// as one) or more, so the attribute must allow exactly one of those
+// lengths. A bound that is not an integer literal is given the
+// benefit of the doubt.
+func lengthPinnedByAttribute(lit string, le *syntax.LengthExpr) bool {
+	lr, _, _, ok := parseLengthRange(le)
+	if !ok || lr.exclusive {
+		return true
+	}
+	lq, rq := strings.IndexByte(lit, '\''), strings.LastIndexByte(lit, '\'')
+	if lq < 0 || rq <= lq || rq+1 >= len(lit) {
+		return true
+	}
+	fixed, digits := 0, 0
+	for _, c := range lit[lq+1 : rq] {
+		switch {
+		case c == '?':
+			fixed++
+		case c == '*', c == ' ', c == '\t', c == '\n', c == '\r':
+		default:
+			digits++
+		}
+	}
+	if lit[rq+1] == 'O' || lit[rq+1] == 'o' {
+		digits /= 2
+	}
+	fixed += digits
+	return lr.hasUpper && max(fixed, lr.min) == lr.max
 }
 
 // isLengthRange returns true when the parenthesised size expression

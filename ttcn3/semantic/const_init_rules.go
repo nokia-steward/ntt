@@ -15,6 +15,10 @@
 // user-defined function calls transitively so that a
 // modulepar like `modulepar integer X := f();` where `f()`
 // internally calls `rnd()` is also flagged.
+//
+// Constants are runtime constants (clause 10): only those used,
+// directly or through other constants, in type and array
+// definitions are restricted (clause 10 b, 6.2.10.1).
 package semantic
 
 import (
@@ -28,6 +32,7 @@ func (a *Analyzer) checkConstInitRules(mod *syntax.Module) []Diagnostic {
 		return nil
 	}
 	nondet := computeNonDeterministicFuncs(mod)
+	typeConsts := collectTypeDefConsts(mod)
 	var diags []Diagnostic
 	syntax.Inspect(mod, func(n syntax.Node) bool {
 		vd, ok := n.(*syntax.ValueDecl)
@@ -49,6 +54,9 @@ func (a *Analyzer) checkConstInitRules(mod *syntax.Module) []Diagnostic {
 			if dec == nil || dec.Value == nil {
 				continue
 			}
+			if kind == "const" && (dec.Name == nil || !typeConsts[dec.Name.String()]) {
+				continue
+			}
 			if fn := findNonDeterministicCall(dec.Value, nondet); fn != "" {
 				diags = append(diags, Diagnostic{
 					Code:     kind + "-init-non-deterministic",
@@ -64,6 +72,88 @@ func (a *Analyzer) checkConstInitRules(mod *syntax.Module) []Diagnostic {
 		return true
 	})
 	return diags
+}
+
+// collectTypeDefConsts returns the names referenced from type and
+// array definitions - field and declaration types, subtype
+// constraints, array dimensions, enumerated values - closed over the
+// initializers of the constants among them. Constants are matched by
+// name.
+func collectTypeDefConsts(mod *syntax.Module) map[string]bool {
+	out := map[string]bool{}
+	add := func(n syntax.Node) {
+		if n == nil {
+			return
+		}
+		syntax.Inspect(n, func(m syntax.Node) bool {
+			if id, ok := m.(*syntax.Ident); ok && id.Tok != nil {
+				out[id.String()] = true
+			}
+			return m != nil
+		})
+	}
+	addDims := func(dims []*syntax.ParenExpr) {
+		for _, d := range dims {
+			if d != nil {
+				add(d)
+			}
+		}
+	}
+	inits := map[string][]syntax.Expr{}
+	syntax.Inspect(mod, func(n syntax.Node) bool {
+		switch x := n.(type) {
+		case *syntax.Field:
+			add(x.Type)
+			addDims(x.ArrayDef)
+			if x.ValueConstraint != nil {
+				add(x.ValueConstraint)
+			}
+			if x.LengthConstraint != nil {
+				add(x.LengthConstraint)
+			}
+		case *syntax.EnumTypeDecl:
+			for _, e := range x.Enums {
+				if ce, ok := e.(*syntax.CallExpr); ok && ce.Args != nil {
+					add(ce.Args)
+				}
+			}
+		case *syntax.ValueDecl:
+			add(x.Type)
+			for _, dec := range x.Decls {
+				if dec == nil {
+					continue
+				}
+				addDims(dec.ArrayDef)
+				if x.KindTok != nil && x.KindTok.Kind() == syntax.CONST && dec.Name != nil && dec.Value != nil {
+					inits[dec.Name.String()] = append(inits[dec.Name.String()], dec.Value)
+				}
+			}
+		case *syntax.TemplateDecl:
+			add(x.Type)
+		case *syntax.FormalPar:
+			add(x.Type)
+			addDims(x.ArrayDef)
+		}
+		return n != nil
+	})
+	// A constant used in a type definition shall itself refer only
+	// to constants obeying the restriction.
+	for changed := true; changed; {
+		changed = false
+		for name, vals := range inits {
+			if !out[name] {
+				continue
+			}
+			n := len(out)
+			for _, v := range vals {
+				add(v)
+			}
+			if len(out) != n {
+				changed = true
+			}
+		}
+	}
+	return out
 }
 
 // computeNonDeterministicFuncs scans every function body in

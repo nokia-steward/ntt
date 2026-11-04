@@ -258,9 +258,12 @@ func checkUnionAltReads(expr syntax.Node, state map[string]unionAltBadKind) []Di
 				//     same path itself is often the
 				//     legitimate target of an
 				//     introspection (already skipped
-				//     above) or condition.
+				//     above) or condition. A bare
+				//     variable is no alternative
+				//     reference: `v_timer == null`
+				//     just reads the null value.
 				if strings.HasPrefix(path, p+".") ||
-					(path == p && isValueShapeBad(kind)) {
+					(path == p && strings.Contains(p, ".") && isValueShapeBad(kind)) {
 					diags = append(diags, Diagnostic{
 						Code:     "union-alt-ref-bad-parent",
 						Severity: SeverityError,
