@@ -2,29 +2,28 @@
 
 Generated from `off.json` using the current workspace runner.
 
-- Summary: `ran 5164 files: 4986 matched, 21 skipped (96.95% match rate)`
-- Misses: `178`
+- Summary: `ran 5164 files: 5002 matched, 21 skipped (97.26% match rate)`
+- Misses: `162`
 
 ## Misses By Outcome
 
 - `reject->pass`: `65`
 - `reject->none`: `27`
-- `pass->error`: `25`
 - `->`: `21`
 - `pass->fail`: `14`
 - `pass->parse-error`: `13`
-- `pass->semantic-error`: `8`
+- `pass->error`: `11`
+- `pass->semantic-error`: `7`
 - `pass->none`: `3`
 - `error->parse-error`: `1`
-- `error->semantic-error`: `1`
 
 ## Misses By Chapter
 
 - `core_language/06_types_and_values`: `59` (`->`=8, `pass->error`=6, `pass->fail`=5, `pass->none`=1, `pass->parse-error`=6, `pass->semantic-error`=2, `reject->none`=13, `reject->pass`=18)
-- `core_language/22_communication_operations`: `32` (`pass->error`=12, `reject->none`=1, `reject->pass`=19)
+- `core_language/22_communication_operations`: `20` (`reject->none`=1, `reject->pass`=19)
 - `core_language/15_templates`: `18` (`->`=2, `pass->error`=2, `pass->fail`=4, `reject->none`=3, `reject->pass`=7)
 - `core_language/05_basic_language_elements`: `16` (`->`=2, `pass->parse-error`=2, `reject->none`=1, `reject->pass`=11)
-- `core_language/16_functions_altsteps_testcases`: `12` (`->`=1, `error->parse-error`=1, `error->semantic-error`=1, `pass->none`=1, `pass->parse-error`=2, `pass->semantic-error`=2, `reject->none`=1, `reject->pass`=3)
+- `core_language/16_functions_altsteps_testcases`: `10` (`->`=1, `error->parse-error`=1, `pass->none`=1, `pass->parse-error`=2, `pass->semantic-error`=1, `reject->none`=1, `reject->pass`=3)
 - `core_language/B_matching_incoming_values`: `10` (`pass->error`=2, `pass->fail`=5, `reject->none`=2, `reject->pass`=1)
 - `core_language/09_test_configurations`: `8` (`pass->error`=1, `reject->none`=4, `reject->pass`=3)
 - `core_language/07_expressions`: `6` (`pass->semantic-error`=4, `reject->pass`=2)
@@ -32,7 +31,6 @@ Generated from `off.json` using the current workspace runner.
 - `oo/501_classes_and_objects`: `3` (`pass->parse-error`=2, `reject->pass`=1)
 - `core_language/08_modules`: `2` (`->`=2)
 - `core_language/11_variables`: `2` (`->`=2)
-- `core_language/19_basic_program_statements`: `2` (`pass->error`=2)
 - `core_language/27_specifying_attributes`: `2` (`->`=1, `reject->none`=1)
 - `core_language/10_constants`: `1` (`pass->parse-error`=1)
 - `core_language/C_predefined_functions`: `1` (`pass->none`=1)
@@ -87,7 +85,6 @@ Generated from `off.json` using the current workspace runner.
 - `core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/NegSem_220305_raise_operation_009.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2203_procedure_based_communication/220306_catch_operation/NegSem_220306_catch_operation_014.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2204_the_check_operation/NegSem_2204_the_check_operation_005.ttcn`: `reject -> pass`
-- ... `12` more in `current-misses.json`
 
 ### `core_language/15_templates`
 
@@ -138,10 +135,8 @@ Generated from `off.json` using the current workspace runner.
 - `core_language/16_functions_altsteps_testcases/1601_functions/160105_explicit_control_functions/NegSem_160105_explicit_control_functions_009.ttcn`: `reject -> pass`
 - `core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/NegSem_160106_the_not_implemented_function_004.ttcn`: `error -> parse-error` - 1 error occurred:
 	* testdata/ttcn3-conformance-tests/ATS/core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/NegSem_160106_the_not_implemented_function_00...
-- `core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/NegSem_160106_the_not_implemented_function_005.ttcn`: `error -> semantic-error` - stray literal at statement position; missing operator or punctuation
 - `core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/Sem_160106_the_not_implemented_function_001.ttcn`: `pass -> parse-error` - 1 error occurred:
 	* testdata/ttcn3-conformance-tests/ATS/core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/Sem_160106_the_not_implemented_function_001.t...
-- `core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/Sem_160106_the_not_implemented_function_002.ttcn`: `pass -> semantic-error` - stray literal at statement position; missing operator or punctuation
 - `core_language/16_functions_altsteps_testcases/1601_functions/1601_toplevel/NegSem_1601_toplevel_001.ttcn`: `reject -> pass`
 - `core_language/16_functions_altsteps_testcases/1601_functions/1601_toplevel/Sem_1601_toplevel_004.ttcn`: `pass -> parse-error` - 1 error occurred:
 	* testdata/ttcn3-conformance-tests/ATS/core_language/16_functions_altsteps_testcases/1601_functions/1601_toplevel/Sem_1601_toplevel_004.ttcn:8:14-10:2: expected module definition, f...

@@ -1,18 +1,17 @@
 {
- "summary": "ran 5164 files: 4986 matched, 21 skipped (96.95% match rate)",
+ "summary": "ran 5164 files: 5002 matched, 21 skipped (97.26% match rate)",
  "source": "off.json",
- "miss_count": 178,
+ "miss_count": 162,
  "outcomes": {
   "reject->pass": 65,
   "reject->none": 27,
-  "pass->error": 25,
   "->": 21,
   "pass->fail": 14,
   "pass->parse-error": 13,
-  "pass->semantic-error": 8,
+  "pass->error": 11,
+  "pass->semantic-error": 7,
   "pass->none": 3,
-  "error->parse-error": 1,
-  "error->semantic-error": 1
+  "error->parse-error": 1
  },
  "chapters": [
   {
@@ -31,11 +30,10 @@
   },
   {
    "chapter": "core_language/22_communication_operations",
-   "misses": 32,
+   "misses": 20,
    "outcomes": {
     "reject->pass": 19,
-    "reject->none": 1,
-    "pass->error": 12
+    "reject->none": 1
    }
   },
   {
@@ -61,16 +59,15 @@
   },
   {
    "chapter": "core_language/16_functions_altsteps_testcases",
-   "misses": 12,
+   "misses": 10,
    "outcomes": {
     "reject->none": 1,
     "reject->pass": 3,
     "error->parse-error": 1,
-    "error->semantic-error": 1,
     "pass->parse-error": 2,
-    "pass->semantic-error": 2,
     "->": 1,
-    "pass->none": 1
+    "pass->none": 1,
+    "pass->semantic-error": 1
    }
   },
   {
@@ -127,13 +124,6 @@
    "misses": 2,
    "outcomes": {
     "->": 2
-   }
-  },
-  {
-   "chapter": "core_language/19_basic_program_statements",
-   "misses": 2,
-   "outcomes": {
-    "pass->error": 2
    }
   },
   {
@@ -1097,27 +1087,11 @@
   },
   {
    "chapter": "core_language/16_functions_altsteps_testcases",
-   "expected": "error",
-   "actual": "semantic-error",
-   "outcome": "error->semantic-error",
-   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/NegSem_160106_the_not_implemented_function_005.ttcn",
-   "message": "stray literal at statement position; missing operator or punctuation"
-  },
-  {
-   "chapter": "core_language/16_functions_altsteps_testcases",
    "expected": "pass",
    "actual": "parse-error",
    "outcome": "pass->parse-error",
    "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/Sem_160106_the_not_implemented_function_001.ttcn",
    "message": "1 error occurred:\n\t* testdata/ttcn3-conformance-tests/ATS/core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/Sem_160106_the_not_implemented_function_001.t..."
-  },
-  {
-   "chapter": "core_language/16_functions_altsteps_testcases",
-   "expected": "pass",
-   "actual": "semantic-error",
-   "outcome": "pass->semantic-error",
-   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/Sem_160106_the_not_implemented_function_002.ttcn",
-   "message": "stray literal at statement position; missing operator or punctuation"
   },
   {
    "chapter": "core_language/16_functions_altsteps_testcases",
@@ -1158,22 +1132,6 @@
    "outcome": "pass->semantic-error",
    "relpath": "core_language/16_functions_altsteps_testcases/1603_testcases/Syn_1603_testcases_004.ttcn",
    "message": "testcase references component member \"messagePort\" (declared in component GeneralComp) but has no `runs on` clause (ETSI 16.1)"
-  },
-  {
-   "chapter": "core_language/19_basic_program_statements",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/19_basic_program_statements/1901_assignments/190102_shorthand_assignments/Sem_190102_shorthand_decrement.ttcn",
-   "message": "Error: unknown syntax node type: *syntax.PostExpr (&{X:v_i Op:--})"
-  },
-  {
-   "chapter": "core_language/19_basic_program_statements",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/19_basic_program_statements/1901_assignments/190102_shorthand_assignments/Sem_190102_shorthand_increment.ttcn",
-   "message": "Error: unknown syntax node type: *syntax.PostExpr (&{X:v_i Op:++})"
   },
   {
    "chapter": "core_language/22_communication_operations",
@@ -1334,102 +1292,6 @@
    "outcome": "reject->pass",
    "relpath": "core_language/22_communication_operations/2204_the_check_operation/NegSem_2204_the_check_operation_005.ttcn",
    "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_025.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_027.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_029.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_031.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_041.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_042.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_043.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_044.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_045.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_046.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_047.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/22_communication_operations/2204_the_check_operation/Sem_2204_the_check_operation_048.ttcn",
-   "message": "test system deadlocked: every component is blocked and no timer can fire"
   },
   {
    "chapter": "core_language/26_module_control",
