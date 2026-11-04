@@ -356,6 +356,49 @@ func ControlPartIsLoadBearing(trees []*ttcn3.Tree, module string) bool {
 	return loadBearing || executes > 1
 }
 
+// ControlModuleFor names the module whose control part runs the testcases
+// of module: module itself when it has one, else a module of trees whose
+// control part executes one of them; "" when there is none.
+func ControlModuleFor(trees []*ttcn3.Tree, module string) string {
+	if findControlPart(findModule(trees, module)) != nil {
+		return module
+	}
+	for _, t := range trees {
+		if t == nil || t.Root == nil {
+			continue
+		}
+		for _, n := range t.Modules() {
+			m, ok := n.Node.(*syntax.Module)
+			if !ok || syntax.Name(m.Name) == module {
+				continue
+			}
+			if cp := findControlPart(m); cp != nil && executesFrom(trees, m, cp, module) {
+				return syntax.Name(m.Name)
+			}
+		}
+	}
+	return ""
+}
+
+// executesFrom reports whether control part cp of module m executes a
+// testcase that module defines.
+func executesFrom(trees []*ttcn3.Tree, m *syntax.Module, cp *syntax.ControlPart, module string) bool {
+	found := false
+	syntax.Inspect(cp, func(n syntax.Node) bool {
+		call, ok := n.(*syntax.CallExpr)
+		if found || !ok || syntax.Name(call.Fun) != "execute" || call.Args == nil || len(call.Args.List) == 0 {
+			return !found
+		}
+		if tc, ok := call.Args.List[0].(*syntax.CallExpr); ok {
+			if def, _ := resolveTestcase(trees, m, syntax.Name(tc.Fun)); def != nil && syntax.Name(def.Name) == module {
+				found = true
+			}
+		}
+		return !found
+	})
+	return found
+}
+
 // RunControlWith executes a module's `control` part as a program (ETSI
 // ES 201 873-1 clause 26): statements run in order, and each
 // `execute(...)` runs a testcase to completion on its own executor and
@@ -439,8 +482,14 @@ func RunControlWith(trees []*ttcn3.Tree, module string, opts TestcaseOptions) (v
 			}
 			budget.pause()
 			defer budget.resume()
-			tlExecute(opts.TestLogger, control, modNode, module, tcName, args, timeout, hasTimeout)
-			v, r, took := runOneExecute(trees, modNode, module, tcName, args, timeout, hasTimeout, host, hasHost, opts)
+			// The testcase runs in the module that defines it, which
+			// the control part's may import it from.
+			tcMod, tcModule, tcBase := modNode, module, tcName
+			if m, base := resolveTestcase(trees, modNode, tcName); m != nil {
+				tcMod, tcModule, tcBase = m, syntax.Name(m.Name), base
+			}
+			tlExecute(opts.TestLogger, control, tcMod, tcModule, tcBase, args, timeout, hasTimeout)
+			v, r, took := runOneExecute(trees, tcMod, tcModule, tcBase, args, timeout, hasTimeout, host, hasHost, opts)
 			if clock != nil {
 				clock.now += took
 			}
@@ -549,10 +598,8 @@ func controlActuals(trees []*ttcn3.Tree, modNode *syntax.Module, module string, 
 		}
 	}()
 	own := map[string]bool{}
-	for _, d := range modNode.Defs {
-		if fn, ok := d.Def.(*syntax.FuncDecl); ok && fn.IsTest() {
-			own[syntax.Name(fn.Name)] = true
-		}
+	for _, tc := range moduleTestcases(modNode) {
+		own[syntax.Name(tc.Name)] = true
 	}
 	captured := 0
 	inner := opts
@@ -575,6 +622,8 @@ func controlActuals(trees []*ttcn3.Tree, modNode *syntax.Module, module string, 
 	env.Set(controlQuietKey, runtime.NewBool(true))
 	env.Set(executeHandlerKey, executeHandler{
 		run: func(name string, a []runtime.Object, d float64, hasD bool, _ string, _ bool) runtime.Verdict {
+			// `M.tc` of this module is its `tc`.
+			name = strings.TrimPrefix(name, module+".")
 			if _, seen := calls[name]; !seen {
 				calls[name] = executeCall{args: a, timeout: d, hasTimeout: hasD}
 				if own[name] {
@@ -744,8 +793,9 @@ func evalExecute(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	if !ok {
 		return runtime.Undefined
 	}
-	id, ok := call.Fun.(*syntax.Ident)
-	if !ok {
+	// The testcase is named `tc`, or `M.tc` qualified by its module.
+	tcName := syntax.Name(call.Fun)
+	if tcName == "" {
 		return runtime.Undefined
 	}
 
@@ -785,7 +835,7 @@ func evalExecute(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 			}
 		}
 	}
-	return handler.run(id.String(), args, timeout, hasTimeout, host, hasHost)
+	return handler.run(tcName, args, timeout, hasTimeout, host, hasHost)
 }
 
 // numericSeconds coerces an execute() timeout operand to seconds.
@@ -833,14 +883,86 @@ func findControlPart(mod *syntax.Module) *syntax.ControlPart {
 
 // findTestcase returns the named testcase declared in mod, or nil.
 func findTestcase(mod *syntax.Module, name string) *syntax.FuncDecl {
-	if mod == nil {
-		return nil
-	}
-	for _, d := range mod.Defs {
-		fn, ok := d.Def.(*syntax.FuncDecl)
-		if ok && fn.IsTest() && syntax.Name(fn.Name) == name {
-			return fn
+	for _, tc := range moduleTestcases(mod) {
+		if syntax.Name(tc.Name) == name {
+			return tc
 		}
 	}
 	return nil
+}
+
+// moduleTestcases lists the testcases mod defines, in groups too.
+func moduleTestcases(mod *syntax.Module) []*syntax.FuncDecl {
+	if mod == nil {
+		return nil
+	}
+	var out []*syntax.FuncDecl
+	var walk func(defs []*syntax.ModuleDef)
+	walk = func(defs []*syntax.ModuleDef) {
+		for _, d := range defs {
+			if d == nil {
+				continue
+			}
+			switch x := d.Def.(type) {
+			case *syntax.FuncDecl:
+				if x.IsTest() {
+					out = append(out, x)
+				}
+			case *syntax.GroupDecl:
+				walk(x.Defs)
+			}
+		}
+	}
+	walk(mod.Defs)
+	return out
+}
+
+// resolveTestcase finds the testcase an execute() of the control part of
+// mod names, `tc` or `M.tc` (ETSI 8.2.3, 26.1): the module defining it,
+// mod or one it imports, and its unqualified name; nil when none does.
+func resolveTestcase(trees []*ttcn3.Tree, mod *syntax.Module, name string) (*syntax.Module, string) {
+	qualifier, base := "", name
+	if i := strings.LastIndexByte(name, '.'); i >= 0 {
+		qualifier, base = name[:i], name[i+1:]
+	}
+	if qualifier == "" || qualifier == syntax.Name(mod.Name) {
+		if findTestcase(mod, base) != nil {
+			return mod, base
+		}
+	}
+	for _, other := range importedModules(mod) {
+		if qualifier != "" && qualifier != other {
+			continue
+		}
+		if m := findModule(trees, other); m != nil && findTestcase(m, base) != nil {
+			return m, base
+		}
+	}
+	return nil, ""
+}
+
+// importedModules names the modules mod imports from, each once, in the
+// order of its import statements, in groups too.
+func importedModules(mod *syntax.Module) []string {
+	var out []string
+	seen := map[string]bool{}
+	var walk func(defs []*syntax.ModuleDef)
+	walk = func(defs []*syntax.ModuleDef) {
+		for _, d := range defs {
+			if d == nil {
+				continue
+			}
+			switch x := d.Def.(type) {
+			case *syntax.GroupDecl:
+				walk(x.Defs)
+			case *syntax.ImportDecl:
+				if x.Module != nil && !seen[x.Module.String()] {
+					seen[x.Module.String()] = true
+					out = append(out, x.Module.String())
+				}
+			}
+		}
+	}
+	walk(mod.Defs)
+	return out
 }

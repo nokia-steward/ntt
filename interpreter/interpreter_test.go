@@ -262,9 +262,9 @@ func TestBinarystring(t *testing.T) {
 	}{
 		{"'011'b", "'011'B"},
 		{"not4b '01'b", "'10'B"},
-		{"'0011'b and4b '0101'b", "'1'B"},
-		{"'0011'b or4b  '0101'b", "'111'B"},
-		{"'0011'b xor4b '0101'b", "'110'B"},
+		{"'0011'b and4b '0101'b", "'0001'B"},
+		{"'0011'b or4b  '0101'b", "'0111'B"},
+		{"'0011'b xor4b '0101'b", "'0110'B"},
 	}
 	for _, tt := range tests {
 		val := testEval(t, tt.input)
@@ -291,7 +291,7 @@ func TestBuiltinFunctions(t *testing.T) {
 		{`int2bit(1, 4)`, `'0001'B`},
 		{`int2bit(4, 1)`, runtime.Errorf("4 value requires more than 1 bits")},
 		{`int2bit(4, -1)`, runtime.Errorf("length must be greater or equal than zero")},
-		{`int2bit(0, 0)`, `'0'B`},
+		{`int2bit(0, 0)`, `''B`},
 		{`int2bit(1, 0)`, runtime.Errorf("1 value requires more than 0 bits")},
 		{`int2bit(1, -1)`, runtime.Errorf("length must be greater or equal than zero")},
 		{`int2bit(-1, 8)`, runtime.Errorf("integer invalue is less than zero")},

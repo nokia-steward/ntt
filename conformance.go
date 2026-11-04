@@ -327,9 +327,21 @@ func runOneConformance(path string) ConformanceResult {
 	// bounded by a timeout or pinned to a host. A plain
 	// `control { execute(TheOnlyTestcase()); }` keeps the direct path,
 	// which is equivalent and far better exercised.
-	if module, ok := moduleOfTestcase(tcName); ok && interpreter.ControlPartIsLoadBearing(trees, module) {
+	//
+	// A testcase of a module without a control part is run by the
+	// control part of the file's module that executes it: what actuals
+	// it gets, that one says.
+	module, ok := moduleOfTestcase(tcName)
+	ctl := ""
+	if ok {
+		ctl = interpreter.ControlModuleFor([]*ttcn3.Tree{tree}, module)
+	}
+	switch {
+	case ctl != "" && ctl != module:
+		r.Actual, r.Reason = controlVerdict(trees, ctl)
+	case ok && interpreter.ControlPartIsLoadBearing(trees, module):
 		r.Actual, r.Reason = controlVerdict(trees, module)
-	} else {
+	default:
 		r.Actual, r.Reason = execVerdict(trees, tcName)
 	}
 	classifyExecution(&r, expected, assertsNoVerdict(string(data)))

@@ -369,3 +369,32 @@ func TestControl_DefaultsApply(t *testing.T) {
 		}
 	}
 }
+
+// execute() runs a testcase the module imports, named bare or qualified by
+// its module, and one inside a group (ETSI 8.2.3, 26.1); each runs in the
+// module that defines it.
+func TestControl_ExecutesImportedAndGroupedTestcases(t *testing.T) {
+	lib := `module L {
+		type component C {}
+		const integer c_k := 7;
+		testcase tc_l() runs on C { if (c_k == 7) { setverdict(pass) } else { setverdict(fail) } }
+	}`
+	main := `module M {
+		import from L all;
+		group g { testcase tc_g() runs on C { setverdict(pass) } }
+		control {
+			var verdicttype v1 := execute(tc_l());
+			var verdicttype v2 := execute(L.tc_l());
+			var verdicttype v3 := execute(tc_g());
+			if (v1 != pass or v2 != pass or v3 != pass) { log("not all passed") }
+		}
+	}`
+	v, reason, err := interpreter.RunControlWith([]*ttcn3.Tree{parse(t, lib), parse(t, main)}, "M",
+		interpreter.TestcaseOptions{DeterministicClock: true, DeterministicScheduler: true})
+	if err != nil {
+		t.Fatalf("RunControlWith: %v", err)
+	}
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+}

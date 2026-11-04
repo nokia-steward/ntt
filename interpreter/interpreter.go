@@ -570,8 +570,11 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return evalUnary(n, env)
 
 	case *syntax.PostExpr:
-		if n.Op.Kind() == syntax.ELIPSIS {
+		switch n.Op.Kind() {
+		case syntax.ELIPSIS:
 			return eval(n.X, env)
+		case syntax.INC, syntax.DEC:
+			return evalIncDec(n, env)
 		}
 
 	case *syntax.BinaryExpr:
@@ -1389,6 +1392,10 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				return evalSetverdict(n, env)
 			case "getverdict":
 				return evalGetverdict(env)
+			case "testcasename":
+				return evalTestcasename(env)
+			case "int2enum":
+				return evalInt2Enum(n, env)
 			case "log":
 				return evalLog(n, env)
 			case "action":
@@ -2597,12 +2604,7 @@ func evalUnary(n *syntax.UnaryExpr, env runtime.Scope) runtime.Object {
 				src = big.NewInt(0)
 			}
 			z := new(big.Int).Xor(src, mask)
-			return &runtime.Binarystring{
-				String: runtime.BigIntToBinaryString(z, b.Unit),
-				Value:  z,
-				Unit:   b.Unit,
-				Length: b.Length,
-			}
+			return runtime.NewBinarystringValue(b.Unit, z, b.Length)
 		}
 	case syntax.IFPRESENT:
 		// `X ifpresent` is the template suffix meaning "match the
@@ -2923,6 +2925,11 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 		// Bitwise / logical shift operators on binary strings take an
 		// integer RHS. Dispatch directly so we don't trip the
 		// type-mismatch check.
+		if yi, ok := y.(runtime.Int); ok && (op == syntax.ROL || op == syntax.ROR) {
+			if r, ok := evalRotate(x, yi, op); ok {
+				return r
+			}
+		}
 		if x.Type() != y.Type() {
 			if x.Type() == runtime.BITSTRING || x.Type() == runtime.HEXSTRING || x.Type() == runtime.OCTETSTRING {
 				if yi, ok := y.(runtime.Int); ok {
@@ -3175,6 +3182,130 @@ func promoteNumeric(x, y runtime.Object) (runtime.Object, runtime.Object) {
 		return xf, runtime.Float(v)
 	}
 	return x, y
+}
+
+// evalInt2Enum is int2enum(i, e) (ETSI C.1.4): it assigns the out
+// parameter e the value of its enumerated type that has the integer i, a
+// new value, so that one e shared is left as it was. The type is that of
+// the value e holds, or, an unbound variable, the one it is declared of;
+// that of an unbound field or element is not found yet.
+func evalInt2Enum(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
+	if n.Args == nil || len(n.Args.List) != 2 {
+		return runtime.Errorf("int2enum: expected 2 arguments")
+	}
+	i, ok := eval(n.Args.List[0], env).(runtime.Int)
+	if !ok {
+		return runtime.Errorf("int2enum: first argument is not an integer")
+	}
+	if !i.IsInt64() {
+		return runtime.Errorf("integer value out of range (int64)")
+	}
+	target := n.Args.List[1]
+	var et *runtime.EnumType
+	if ev, ok := eval(target, env).(*runtime.EnumValue); ok {
+		et = ev.EnumType()
+	} else if t, ok := declaredTypeBinding(target, env).(*runtime.EnumType); ok {
+		et = t
+	}
+	if et == nil {
+		return runtime.Errorf("second argument must be an enum value")
+	}
+	v, err := et.ValueOf(int(i.Int64()))
+	if err != nil {
+		return err
+	}
+	tmp := runtime.NewEnv(env)
+	tmp.Set(rangeElementKey, v)
+	if r := evalAssign(target, rangeElement, tmp); runtime.IsError(r) {
+		return r
+	}
+	return nil
+}
+
+// evalTestcasename is testcasename() (ETSI C.6.2): the unqualified name of
+// the testcase that runs, on any of its components, and the empty string
+// outside one (in the control part).
+func evalTestcasename(env runtime.Scope) runtime.Object {
+	exec := runtime.FindTestcaseExec(env)
+	if exec == nil {
+		return runtime.NewCharstring("")
+	}
+	// A testcase's name is qualified, `M.tc`; the control part's
+	// executor, which only logs, is named "control".
+	i := strings.LastIndexByte(exec.Name, '.')
+	if i < 0 {
+		return runtime.NewCharstring("")
+	}
+	return runtime.NewCharstring(exec.Name[i+1:])
+}
+
+// evalIncDec runs `v++` and `v--`, the shorthands of `v := v + 1` and
+// `v := v - 1` for an integer variable (ETSI 19.1.2): the new value is
+// assigned as by an assignment statement.
+func evalIncDec(n *syntax.PostExpr, env runtime.Scope) runtime.Object {
+	v := eval(n.X, env)
+	if runtime.IsError(v) {
+		return v
+	}
+	if v == nil || v == runtime.Undefined {
+		return runtime.Errorf("%s of an uninitialised variable", n.Op)
+	}
+	i, ok := v.(runtime.Int)
+	if !ok {
+		return runtime.Errorf("%s of a value that is not an integer: %s", n.Op, v.Inspect())
+	}
+	step := big.NewInt(1)
+	if n.Op.Kind() == syntax.DEC {
+		step = big.NewInt(-1)
+	}
+	tmp := runtime.NewEnv(env)
+	tmp.Set(rangeElementKey, runtime.Int{Int: new(big.Int).Add(i.Int, step)})
+	return evalAssign(n.X, rangeElement, tmp)
+}
+
+// evalRotate rotates a character string by characters, and a record of,
+// set of or array by elements (ETSI 7.1.7 d, e): what leaves one side
+// re-enters on the other. A negative count rotates the other way, as for
+// the binary strings (evalBinaryStringShift). It reports whether x is
+// such an operand.
+func evalRotate(x runtime.Object, n runtime.Int, op syntax.Kind) (runtime.Object, bool) {
+	var length int
+	switch v := x.(type) {
+	case *runtime.String:
+		length = len(v.Value)
+	case *runtime.List:
+		if v.ListType != runtime.RECORD_OF && v.ListType != runtime.SET_OF {
+			return nil, false
+		}
+		length = len(v.Elements)
+	default:
+		return nil, false
+	}
+	if !n.IsInt64() {
+		return runtime.Errorf("rotate count too large"), true
+	}
+	// left is how far the operand rotates to the left.
+	left := 0
+	if length > 0 {
+		k := n.Int64()
+		if op == syntax.ROR {
+			k = -k
+		}
+		left = int(((k % int64(length)) + int64(length)) % int64(length))
+	}
+	switch v := x.(type) {
+	case *runtime.String:
+		out := append(append(make([]rune, 0, length), v.Value[left:]...), v.Value[:left]...)
+		if v.IsASCII() {
+			return runtime.NewCharstringFromRunes(out), true
+		}
+		return runtime.NewUniversalString(string(out)), true
+	case *runtime.List:
+		out := runtime.Unshare(runtime.Share(v)).(*runtime.List)
+		out.Elements = append(append(make([]runtime.Object, 0, length), v.Elements[left:]...), v.Elements[:left]...)
+		return out, true
+	}
+	return nil, false
 }
 
 // evalBinaryStringShift handles `bitstring << integer` / `bitstring >> integer`
@@ -4242,15 +4373,23 @@ func evalStringBinary(x string, y string, op syntax.Kind, env runtime.Scope) run
 
 func evalBinarystringBinary(x *runtime.Binarystring, y *runtime.Binarystring, op syntax.Kind, env runtime.Scope) runtime.Object {
 	switch op {
-	case syntax.AND4B:
-		z := new(big.Int).And(x.Value, y.Value)
-		return &runtime.Binarystring{String: runtime.BigIntToBinaryString(z, x.Unit), Value: z, Unit: x.Unit, Length: len(z.Text(x.Unit.Base()))}
-	case syntax.OR4B:
-		z := new(big.Int).Or(x.Value, y.Value)
-		return &runtime.Binarystring{String: runtime.BigIntToBinaryString(z, x.Unit), Value: z, Unit: x.Unit, Length: len(z.Text(x.Unit.Base()))}
-	case syntax.XOR4B:
-		z := new(big.Int).Xor(x.Value, y.Value)
-		return &runtime.Binarystring{String: runtime.BigIntToBinaryString(z, x.Unit), Value: z, Unit: x.Unit, Length: len(z.Text(x.Unit.Base()))}
+	case syntax.AND4B, syntax.OR4B, syntax.XOR4B:
+		// Operands of equal length give one of that length, its
+		// leading zeros kept: '1001'B and4b '0101'B is '0001'B (ETSI
+		// 7.1.5).
+		if x.Length != y.Length {
+			return runtime.Errorf("operands of %s are of different lengths: %s and %s", op, x.Inspect(), y.Inspect())
+		}
+		z := new(big.Int)
+		switch op {
+		case syntax.AND4B:
+			z.And(x.Value, y.Value)
+		case syntax.OR4B:
+			z.Or(x.Value, y.Value)
+		default:
+			z.Xor(x.Value, y.Value)
+		}
+		return runtime.NewBinarystringValue(x.Unit, z, x.Length)
 	case syntax.CONCAT:
 		// If either operand carries wildcards (Value == -1) the
 		// big-int path can't faithfully represent the result; fall
@@ -4258,8 +4397,7 @@ func evalBinarystringBinary(x *runtime.Binarystring, y *runtime.Binarystring, op
 		// stays a valid template literal. Otherwise bit-shift the
 		// LHS by the RHS's bit width and OR them together - that's
 		// the cheaper path and preserves Value for arithmetic.
-		// An empty string, whose Value is -1 as a template's is, adds
-		// nothing.
+		// An empty string adds nothing.
 		if x.Length == 0 {
 			return y
 		}
@@ -4919,7 +5057,10 @@ var (
 	slotIndex  = &syntax.Ident{Tok: nameTok(slotIndexKey)}
 )
 
-// rangeElement names, in a scope of evalForRange, the element assigned.
+// rangeElement names, in a scope of its own, a value an assignment takes
+// that no expression of the source gives: the element of a range loop
+// (evalForRange), the new value of `v++` (evalIncDec), the one int2enum
+// assigns (evalInt2Enum).
 const rangeElementKey = "\x00ttcn3:range-element"
 
 var rangeElement = &syntax.Ident{Tok: nameTok(rangeElementKey)}
@@ -11119,12 +11260,16 @@ func evalPredefinedMacro(name string, n syntax.Node, env runtime.Scope) (runtime
 		}
 		return runtime.NewInt(0), true
 	case "__SCOPE__":
-		// __SCOPE__ context depends on where the macro lives in the
-		// source (component, function, testcase, control). We only
-		// have the testcase / function name reliably; outside of
-		// those we leave it unresolved so identifier-lookup falls
-		// back to the original "identifier not found" semantics that
-		// older fixtures relied on.
+		// The name of the lowest named scope unit around the macro in
+		// the source (ETSI D.5), as the module tells it; else the
+		// testcase's or function's that runs.
+		if root := runtime.RootScope(env); root != nil {
+			if m, ok := lookupModuleScope(root, moduleNameFromEnv(env)); ok && m.mod != nil {
+				if name, ok := scopeMacroName(m.mod, n); ok {
+					return runtime.NewCharstring(name), true
+				}
+			}
+		}
 		if v, ok := env.Get(runtime.ScopeNameKey); ok {
 			if s, ok := v.(*runtime.String); ok {
 				return runtime.NewCharstring(string(s.Value)), true
@@ -11132,6 +11277,79 @@ func evalPredefinedMacro(name string, n syntax.Node, env runtime.Scope) (runtime
 		}
 	}
 	return nil, false
+}
+
+// scopeMacroName is what __SCOPE__ at node n of module mod stands for
+// (ETSI D.5): the name of the lowest named basic scope unit around it —
+// a template, function, altstep or testcase, a component or other named
+// type, "control" for the control part, else the module. A statement
+// block has no name; the unit around it is meant. It reports whether n
+// is in mod. Only the nodes whose span holds n's are visited.
+func scopeMacroName(mod *syntax.Module, n syntax.Node) (string, bool) {
+	if syntax.IsNil(n) {
+		return "", false
+	}
+	pos, end := n.Pos(), n.End()
+	var stack []syntax.Node
+	name, found := "", false
+	syntax.Inspect(mod, func(x syntax.Node) bool {
+		if x == nil {
+			stack = stack[:len(stack)-1]
+			return true
+		}
+		stack = append(stack, x)
+		if found || syntax.IsNil(x) || x.Pos() > pos || x.End() < end {
+			return false
+		}
+		if x == n {
+			name, found = lowestScopeName(stack), true
+			return false
+		}
+		return true
+	})
+	return name, found
+}
+
+// lowestScopeName is the name of the innermost named scope unit of the
+// path from a module to a node (scopeMacroName).
+func lowestScopeName(path []syntax.Node) string {
+	for i := len(path) - 1; i >= 0; i-- {
+		var id *syntax.Ident
+		switch x := path[i].(type) {
+		case *syntax.TemplateDecl:
+			id = x.Name
+		case *syntax.FuncDecl:
+			id = x.Name
+		case *syntax.ComponentTypeDecl:
+			id = x.Name
+		case *syntax.StructTypeDecl:
+			id = x.Name
+		case *syntax.EnumTypeDecl:
+			id = x.Name
+		case *syntax.PortTypeDecl:
+			id = x.Name
+		case *syntax.ClassTypeDecl:
+			id = x.Name
+		case *syntax.SignatureDecl:
+			id = x.Name
+		case *syntax.MapTypeDecl:
+			id = x.Name
+		case *syntax.BehaviourTypeDecl:
+			id = x.Name
+		case *syntax.SubTypeDecl:
+			if x.Field != nil {
+				id = x.Field.Name
+			}
+		case *syntax.ControlPart:
+			return "control"
+		case *syntax.Module:
+			id = x.Name
+		}
+		if id != nil {
+			return id.String()
+		}
+	}
+	return ""
 }
 
 // lookupModuleName climbs the scope chain looking for the cached
@@ -12061,11 +12279,13 @@ func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 				bs = &runtime.Binarystring{Unit: runtime.Bit, Value: o.Value, Length: 8 * o.Length}
 			}
 		}
+		// What the engine cannot encode is the one zero octet
+		// encvalue_o gives for it, as bits.
 		if bs == nil {
 			bs = &runtime.Binarystring{
 				Unit:   runtime.Bit,
 				Value:  big.NewInt(0),
-				Length: 0,
+				Length: 8,
 			}
 		}
 		rememberEncoded(env, bs, v)
@@ -14265,7 +14485,11 @@ func evalPresencePred(name string, n *syntax.CallExpr, env runtime.Scope) runtim
 		if _, ok := val.(*runtime.IfPresent); ok {
 			present = false
 		}
-	case "isbound", "ischosen":
+	case "isbound":
+		// An optional field set to omit is initialized (ETSI
+		// 7.1.8.4): only what was never assigned is unbound.
+		present = val != nil && val != runtime.Undefined
+	case "ischosen":
 		// The argument is "bound" / "has a value" when the
 		// interpreter resolved it to something other than
 		// Undefined. ischosen for unions resolves to the same
@@ -15039,6 +15263,44 @@ func presentnessConversion(o runtime.Object) runtime.Object {
 		return runtime.Errorf("presentness conversion of a template that matches only omit (ETSI 15.14)")
 	}
 	return o
+}
+
+// hasMatchingMechanism reports whether o, or a field or an element of it at
+// any depth, is a matching mechanism rather than a value (ETSI B.1): `?`,
+// `*`, a range, a length restriction, ifpresent, a pattern or a binary
+// string with wildcards, an enumerated value of match ranges, a value
+// list, complement, subset, superset or permutation.
+func hasMatchingMechanism(o runtime.Object) bool {
+	switch v := o.(type) {
+	case nil:
+		return false
+	case *runtime.Range, *runtime.LengthRestricted, *runtime.IfPresent:
+		return true
+	case *runtime.EnumValue:
+		return v.IsTemplate()
+	case *runtime.String:
+		return v.IsPattern
+	case *runtime.Binarystring:
+		return v.Value != nil && v.Value.Sign() < 0
+	case *runtime.List:
+		if v.ListType != runtime.RECORD_OF && v.ListType != runtime.SET_OF {
+			return true
+		}
+		for _, e := range v.Elements {
+			if hasMatchingMechanism(e) {
+				return true
+			}
+		}
+		return false
+	case *runtime.Record:
+		for _, f := range v.Fields {
+			if hasMatchingMechanism(f) {
+				return true
+			}
+		}
+		return false
+	}
+	return o == runtime.Any || o == runtime.AnyOrNone
 }
 
 // isConcreteValue reports whether o is a fully-initialised concrete

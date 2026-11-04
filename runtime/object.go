@@ -917,18 +917,22 @@ func (ev *EnumValue) SetValueByKey(key string) *Error {
 	ev.value = keyRanges[0].First
 	return nil
 }
-func (ev *EnumValue) SetValueById(id int) *Error {
-	for key, enumRanges := range ev.typeRef.Elements {
+
+// ValueOf is the value of the enumerated type that has the integer id, a
+// new one (ETSI C.1.4).
+func (et *EnumType) ValueOf(id int) (*EnumValue, *Error) {
+	for key, enumRanges := range et.Elements {
 		for _, enumRange := range enumRanges {
 			if enumRange.Contains(id) {
-				ev.key = key
-				ev.value = id
-				return nil
+				return &EnumValue{typeRef: et, key: key, value: id}, nil
 			}
 		}
 	}
-	return Errorf("id %d does not exist in any ranges of Enum %s", id, ev.typeRef.Name)
+	return nil, Errorf("id %d does not exist in any ranges of Enum %s", id, et.Name)
 }
+
+// EnumType is the enumerated type the value is of.
+func (ev *EnumValue) EnumType() *EnumType { return ev.typeRef }
 
 // WithExplicitInt returns a copy of the enum value carrying the
 // explicit integer i (the `Label(i)` notation of ETSI 6.2.4). i must
@@ -1222,6 +1226,10 @@ func (b *Binarystring) Inspect() string {
 	if b.Value != nil && b.Value.Sign() < 0 && b.String != "" {
 		return b.String
 	}
+	// No digits: a width of 0 would still print the value 0.
+	if b.Length == 0 {
+		return "''" + b.Unit.String()
+	}
 	switch b.Unit {
 	case Bit:
 		return fmt.Sprintf("'%0*b'B", b.Length, b.Value)
@@ -1232,16 +1240,24 @@ func (b *Binarystring) Inspect() string {
 	}
 }
 
+// Equal reports whether obj is the same string: of the same unit and
+// length, `'0'B` is not `'00'B`, and digits. Strings with wildcards,
+// which all carry the value -1, are the same when written the same.
 func (b *Binarystring) Equal(obj Object) bool {
-	if other, ok := obj.(*Binarystring); ok {
-		return b.Value.Cmp(other.Value) == 0
+	other, ok := obj.(*Binarystring)
+	if !ok || b.Unit != other.Unit {
+		return false
 	}
-	return false
+	if b.Value == nil || other.Value == nil || b.Value.Sign() < 0 || other.Value.Sign() < 0 {
+		return b.String == other.String
+	}
+	return b.Length == other.Length && b.Value.Cmp(other.Value) == 0
 }
 
 func (b *Binarystring) hashKey() hashKey {
 	h := fnv.New64a()
 	h.Write(b.Value.Bytes())
+	h.Write([]byte{byte(b.Length), byte(b.Length >> 8), byte(b.Length >> 16), byte(b.Length >> 24)})
 	return hashKey{Type: b.Type(), Value: h.Sum64()}
 }
 
@@ -1265,6 +1281,11 @@ func NewBinarystring(s string) (*Binarystring, error) {
 	}
 	n := removeWhitespaces(s[1 : len(s)-2])
 
+	// The empty string is a value, of no units: not one with wildcards,
+	// which big.Int's parse of no digits would make it.
+	if n == "" {
+		return &Binarystring{String: s, Value: new(big.Int), Unit: unit}, nil
+	}
 	if i, ok := new(big.Int).SetString(n, unit.Base()); ok {
 		return &Binarystring{String: s, Value: i, Unit: unit, Length: lengthInUnits(n, unit)}, nil
 	}
@@ -1314,6 +1335,14 @@ func NewBinarystringWithWildcards(s string, unit Unit) (*Binarystring, error) {
 		}
 	}
 	return &Binarystring{String: s, Value: new(big.Int).SetInt64(-1), Unit: unit, Length: lengthInUnits(n, unit)}, nil
+}
+
+// NewBinarystringValue is the bit, hex or octet string of length units
+// holding v, its String the literal written for it: `”B` of none.
+func NewBinarystringValue(unit Unit, v *big.Int, length int) *Binarystring {
+	b := &Binarystring{Value: v, Unit: unit, Length: length}
+	b.String = b.Inspect()
+	return b
 }
 
 func (b *Binarystring) Len() int { return b.Length }

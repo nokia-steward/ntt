@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/nokia/ntt/builtins"
 	"github.com/nokia/ntt/runtime"
 	"github.com/nokia/ntt/runtime/tl"
 	"github.com/nokia/ntt/ttcn3"
@@ -182,20 +183,7 @@ func RunTestcaseWith(trees []*ttcn3.Tree, qname string, opts TestcaseOptions) (v
 		return runtime.ErrorVerdict, "", fmt.Errorf("module %q not found", module)
 	}
 
-	var tcNode *syntax.FuncDecl
-	for _, def := range modNode.Defs {
-		md, ok := def.Def.(*syntax.FuncDecl)
-		if !ok {
-			continue
-		}
-		if !md.IsTest() {
-			continue
-		}
-		if syntax.Name(md.Name) == fnName {
-			tcNode = md
-			break
-		}
-	}
+	tcNode := findTestcase(modNode, fnName)
 	if tcNode == nil {
 		return runtime.ErrorVerdict, "", fmt.Errorf("testcase %q not found in %q", fnName, module)
 	}
@@ -2860,7 +2848,16 @@ func evalSelectStmt(n *syntax.SelectStmt, env runtime.Scope) runtime.Object {
 				matched = true
 				break
 			}
-			// A case's value is compared with the tag as `==` compares.
+			// A case selects when its template matches the tag (ETSI
+			// 19.3.1): a template, `(5..10)` or `?`, by matching; a value
+			// as `==` compares.
+			if hasMatchingMechanism(v) {
+				if b, ok := builtins.Match(tag, v).(runtime.Bool); ok && bool(b) {
+					matched = true
+					break
+				}
+				continue
+			}
 			if t, c := shapeCompared(tag, v, n.Tag, p, env); t.Equal(c) {
 				matched = true
 				break

@@ -197,12 +197,7 @@ func Int2Bit(args ...runtime.Object) runtime.Object {
 		return runtime.Errorf("length argument out of range (int64)")
 	}
 
-	return &runtime.Binarystring{
-		String: fmt.Sprintf("'%0*s'B", l.Int64(), i.Text(2)),
-		Value:  i.Value(),
-		Unit:   runtime.Bit,
-		Length: int(l.Int64()),
-	}
+	return runtime.NewBinarystringValue(runtime.Bit, i.Value(), int(l.Int64()))
 }
 
 func Int2Float(args ...runtime.Object) runtime.Object {
@@ -222,12 +217,7 @@ func Int2Hex(args ...runtime.Object) runtime.Object {
 	if i.BitLen() > int(l.Int64())*4 {
 		return runtime.Errorf("int2hex: value does not fit in %d hex digits", l.Int64())
 	}
-	return &runtime.Binarystring{
-		String: fmt.Sprintf("'%0*X'H", l.Int64(), i.Value()),
-		Value:  i.Value(),
-		Unit:   runtime.Hex,
-		Length: int(l.Int64()),
-	}
+	return runtime.NewBinarystringValue(runtime.Hex, i.Value(), int(l.Int64()))
 }
 
 // Int2Oct converts an integer to an octetstring of the given length (bytes).
@@ -243,12 +233,7 @@ func Int2Oct(args ...runtime.Object) runtime.Object {
 	if i.BitLen() > int(l.Int64())*8 {
 		return runtime.Errorf("int2oct: value does not fit in %d octets", l.Int64())
 	}
-	return &runtime.Binarystring{
-		String: fmt.Sprintf("'%0*X'O", l.Int64()*2, i.Value()),
-		Value:  i.Value(),
-		Unit:   runtime.Octet,
-		Length: int(l.Int64()),
-	}
+	return runtime.NewBinarystringValue(runtime.Octet, i.Value(), int(l.Int64()))
 }
 
 // Bit2Int returns the integer value of a bitstring.
@@ -331,14 +316,23 @@ func universal(f func(...runtime.Object) runtime.Object) func(...runtime.Object)
 // Bit2Str / Hex2Str / Oct2Str produce charstring repr of the value.
 func Bit2Str(args ...runtime.Object) runtime.Object {
 	b := args[0].(*runtime.Binarystring)
+	if b.Length == 0 {
+		return runtime.NewCharstring("")
+	}
 	return runtime.NewCharstring(fmt.Sprintf("%0*b", b.Length, b.Value))
 }
 func Hex2Str(args ...runtime.Object) runtime.Object {
 	b := args[0].(*runtime.Binarystring)
+	if b.Length == 0 {
+		return runtime.NewCharstring("")
+	}
 	return runtime.NewCharstring(fmt.Sprintf("%0*X", b.Length, b.Value))
 }
 func Oct2Str(args ...runtime.Object) runtime.Object {
 	b := args[0].(*runtime.Binarystring)
+	if b.Length == 0 {
+		return runtime.NewCharstring("")
+	}
 	return runtime.NewCharstring(fmt.Sprintf("%0*X", b.Length*2, b.Value))
 }
 
@@ -379,12 +373,7 @@ func Char2Oct(args ...runtime.Object) runtime.Object {
 		v.Or(v, big.NewInt(int64(r&0xff)))
 	}
 	n := s.Len()
-	return &runtime.Binarystring{
-		String: fmt.Sprintf("'%0*X'O", n*2, v),
-		Value:  v,
-		Unit:   runtime.Octet,
-		Length: n,
-	}
+	return runtime.NewBinarystringValue(runtime.Octet, v, n)
 }
 
 // Str2Bit / Str2Hex / Str2Oct parse the literal string content as bit/hex/oct.
@@ -394,12 +383,7 @@ func Str2Bit(args ...runtime.Object) runtime.Object {
 	if !ok {
 		return runtime.Errorf("str2bit: %q is not a bitstring", s)
 	}
-	return &runtime.Binarystring{
-		String: fmt.Sprintf("'%0*b'B", len(s), v),
-		Value:  v,
-		Unit:   runtime.Bit,
-		Length: len(s),
-	}
+	return runtime.NewBinarystringValue(runtime.Bit, v, len(s))
 }
 func Str2Hex(args ...runtime.Object) runtime.Object {
 	return strToHex("str2hex", args...)
@@ -411,14 +395,15 @@ func strToHex(name string, args ...runtime.Object) runtime.Object {
 	if !ok {
 		return runtime.Errorf("%s: %q is not a hexstring", name, s)
 	}
-	return &runtime.Binarystring{
-		String: fmt.Sprintf("'%0*X'H", len(s), v),
-		Value:  v,
-		Unit:   runtime.Hex,
-		Length: len(s),
-	}
+	return runtime.NewBinarystringValue(runtime.Hex, v, len(s))
 }
+
+// Str2Oct is str2oct (ETSI C.1.28): a string of an odd number of
+// hexadecimal digits gets a 0 in front, str2oct("1D7") = '01D7'O.
 func Str2Oct(args ...runtime.Object) runtime.Object {
+	if s, ok := args[0].(*runtime.String); ok && len(s.Value)%2 != 0 {
+		return strToOct("str2oct", runtime.NewCharstring("0"+s.String()))
+	}
 	return strToOct("str2oct", args...)
 }
 
@@ -427,16 +412,19 @@ func strToOct(name string, args ...runtime.Object) runtime.Object {
 	if len(s)%2 != 0 {
 		return runtime.Errorf("%s: %q must have even length", name, s)
 	}
+	for _, r := range s {
+		if !strings.ContainsRune("0123456789abcdefABCDEF", r) {
+			return runtime.Errorf("%s: %q is not octets", name, s)
+		}
+	}
 	v, ok := new(big.Int).SetString(s, 16)
+	if s == "" {
+		v, ok = new(big.Int), true
+	}
 	if !ok {
 		return runtime.Errorf("%s: %q is not octets", name, s)
 	}
-	return &runtime.Binarystring{
-		String: fmt.Sprintf("'%0*X'O", len(s), v),
-		Value:  v,
-		Unit:   runtime.Octet,
-		Length: len(s) / 2,
-	}
+	return runtime.NewBinarystringValue(runtime.Octet, v, len(s)/2)
 }
 
 // Enum2Int returns the integer value of an enum.
@@ -458,7 +446,8 @@ func Float2Str(args ...runtime.Object) runtime.Object {
 // interpreter does not yet track presence/choice metadata so we treat
 // anything other than Undefined as "yes".
 func IsBound(args ...runtime.Object) runtime.Object {
-	if args[0] == runtime.Undefined || args[0] == runtime.Omit {
+	// An optional field set to omit is initialized (ETSI 7.1.8.4).
+	if args[0] == runtime.Undefined {
 		return runtime.NewBool(false)
 	}
 	return runtime.NewBool(true)
@@ -682,8 +671,7 @@ func Replace(args ...runtime.Object) runtime.Object {
 		right.And(right, rmask)
 		out := new(big.Int).Set(left)
 		out.Lsh(out, uint(rep.Length)*unitBits)
-		// An empty string's Value is -1, as a template's is; it adds
-		// nothing.
+		// An empty string adds nothing.
 		if rep.Length > 0 {
 			out.Or(out, rep.Value)
 		}
@@ -1059,12 +1047,7 @@ func newOctetstringFromBytes(raw []byte) *runtime.Binarystring {
 		v.Lsh(v, 8)
 		v.Or(v, big.NewInt(int64(b)))
 	}
-	return &runtime.Binarystring{
-		String: fmt.Sprintf("'%0*X'O", len(raw)*2, v),
-		Value:  v,
-		Unit:   runtime.Octet,
-		Length: len(raw),
-	}
+	return runtime.NewBinarystringValue(runtime.Octet, v, len(raw))
 }
 
 // binarystringBytes returns the big-endian byte representation of an
@@ -1092,8 +1075,26 @@ func DecValue(args ...runtime.Object) runtime.Object {
 
 // HostId / TestcaseName / Mtc are misc TTCN-3 functions that show
 // up in fixtures; safe stubs keep things moving.
+// HostId is hostid(idkind) (ETSI C.6.3): an address of the host in the
+// format idkind asks for, "Ipv4orIPv6" (the default), "Ipv4" or "Ipv6",
+// else the empty string. The runtime runs on the local host, so it is
+// the loopback address of that kind, the same on every machine.
 func HostId(args ...runtime.Object) runtime.Object {
-	return runtime.NewCharstring("localhost")
+	kind := "Ipv4orIPv6"
+	if len(args) > 0 {
+		s, ok := args[0].(*runtime.String)
+		if !ok {
+			return runtime.Errorf("hostid: idkind is not a charstring")
+		}
+		kind = s.String()
+	}
+	switch kind {
+	case "Ipv4orIPv6", "Ipv4":
+		return runtime.NewCharstring("127.0.0.1")
+	case "Ipv6":
+		return runtime.NewCharstring("::1")
+	}
+	return runtime.NewCharstring("")
 }
 func TestcaseName(args ...runtime.Object) runtime.Object {
 	return runtime.NewCharstring("")
@@ -1115,6 +1116,10 @@ func Float2Int(args ...runtime.Object) runtime.Object {
 	return runtime.NewInt(int(args[0].(runtime.Float)))
 }
 
+// Int2Enum is the value int2enum (ETSI C.1.4) assigns to its out
+// parameter, of the enumerated type of the value it holds; the
+// interpreter assigns it (evalInt2Enum), and finds the type of an
+// unbound one. The value is a new one: the one held may be shared.
 func Int2Enum(args ...runtime.Object) runtime.Object {
 	i := args[0].(runtime.Int)
 	if !i.IsInt64() {
@@ -1124,10 +1129,11 @@ func Int2Enum(args ...runtime.Object) runtime.Object {
 	if !ok {
 		return runtime.Errorf("second argument must be an enum value")
 	}
-	if err := e.SetValueById(int(i.Int64())); err != nil {
+	v, err := e.EnumType().ValueOf(int(i.Int64()))
+	if err != nil {
 		return err
 	}
-	return nil
+	return v
 }
 
 // GetStringencoding inspects the BOM prefix of an octetstring and
