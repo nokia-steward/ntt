@@ -13174,6 +13174,18 @@ func isProcedureRecvOp(op string) bool {
 	return false
 }
 
+// isReceivingOpName reports whether op names a receiving communication
+// operation, one a port's queue is matched by and that check takes
+// (ETSI 22.2-22.4): receive and trigger, and the procedure ones getcall,
+// getreply and catch.
+func isReceivingOpName(op string) bool {
+	switch op {
+	case "receive", "trigger", "getcall", "getreply", "catch":
+		return true
+	}
+	return false
+}
+
 // commOpKind reports the port envelope kind a receive-style comm op
 // consumes: getreply -> reply, catch -> exception, getcall -> call,
 // and everything else (receive / trigger / check) -> message. Used to
@@ -15464,8 +15476,7 @@ func extractCommOp(expr syntax.Expr) commOpInfo {
 			info.call = v
 			return info
 		case *syntax.Ident:
-			switch v.String() {
-			case "receive", "trigger", "getreply", "catch", "check":
+			if op := v.String(); isReceivingOpName(op) || op == "check" {
 				info.call = &syntax.CallExpr{Fun: v}
 			}
 			return info
@@ -15621,12 +15632,6 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 			}
 			return runtime.Undefined
 		}
-		if receiveIgnoresSelfSentOnConnectedPort(exec, port, head) {
-			if !altCtx.active() && exec.CurrentComponent() != nil {
-				return &runtime.ReturnValue{Value: runtime.Undefined}
-			}
-			return runtime.Undefined
-		}
 		// Procedure receives (getreply / getcall / catch) match
 		// leniently by signature template - the conformance suite
 		// keys verdicts off "a reply/call/exception arrived on this
@@ -15724,30 +15729,6 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 		}
 		return runtime.NewBool(true)
 	}
-}
-
-func receiveIgnoresSelfSentOnConnectedPort(exec *runtime.TestcaseExec, port string, msg runtime.PortMessage) bool {
-	if exec == nil {
-		return false
-	}
-	cur := exec.CurrentComponent()
-	if cur == nil {
-		return false
-	}
-	sender, ok := msg.Sender.(*runtime.ComponentRef)
-	if !ok || sender == nil || sender.ID != cur.ID {
-		return false
-	}
-	// Ignore a component's own sent message only when the port is
-	// connected to a different endpoint (the message went to that
-	// peer). A self-loop (`connect(self:p, self:p)`) must deliver the
-	// message back to the sender, so it is not ignored.
-	for _, peer := range connectedPeers(exec, cur.ID, port) {
-		if peer.Comp != cur.ID || peer.Port != port {
-			return true
-		}
-	}
-	return false
 }
 
 // prePopulateRedirectExpr binds the redirect's sender target to the
@@ -16006,11 +15987,8 @@ func evalPortCheck(port string, n *syntax.CallExpr, env runtime.Scope) runtime.O
 	if n.Args != nil && len(n.Args.List) == 1 {
 		info := extractCommOp(n.Args.List[0])
 		if info.call != nil {
-			if name, ok := info.call.Fun.(*syntax.Ident); ok {
-				switch name.String() {
-				case "receive", "trigger", "getreply", "catch":
-					return evalPortReceiveInfo(port, info, env, false)
-				}
+			if name, ok := info.call.Fun.(*syntax.Ident); ok && isReceivingOpName(name.String()) {
+				return evalPortReceiveInfo(port, info, env, false)
 			}
 		}
 		// `check(from <addr>)` / `check(to <addr>)` / `check(->
@@ -16605,8 +16583,7 @@ func isReceivingOp(e syntax.Expr) bool {
 			e = x.Fun
 			continue
 		case *syntax.SelectorExpr:
-			switch syntax.Name(x.Sel) {
-			case "receive", "trigger", "check", "getcall", "getreply", "catch":
+			if op := syntax.Name(x.Sel); isReceivingOpName(op) || op == "check" {
 				return true
 			}
 		}

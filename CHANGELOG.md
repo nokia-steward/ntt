@@ -362,6 +362,14 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **Two ports of one component connected to each other deliver to each
+  other** (9.1, figure 6): a message one sends, the other's receive or
+  check matches with a template, on either clock. A receive dropped any
+  message its own component had sent when the port had a peer — a guard
+  from the model that looped messages back to the sender, which a send on
+  a connected port no longer does.
+- **`check` takes `getcall`** as it takes the other receiving operations
+  (22.4), with a template or bare; it never matched.
 - **Implicit omit sets a template's optional fields to omit** that it gives
   no value, at any depth (27.7); it was applied to variables only. A field
   written as a reference to a template with an optional attribute of its
