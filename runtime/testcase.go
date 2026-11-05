@@ -430,7 +430,18 @@ func (t *TestcaseExec) RegisterPTC(refID int64) *PTCExit {
 	}
 	t.ptcExits[refID] = p
 	t.ptcMu.Unlock()
+	t.WakeWaiters()
 	return p
+}
+
+// WakeWaiters wakes the components that wait on the real clock for
+// others' state (WakeChan): a component another one just started, which
+// a wait took for one that never ran, now has a behaviour to wait on. The
+// cooperative scheduler re-checks waits by itself.
+func (t *TestcaseExec) WakeWaiters() {
+	if !t.SchedulerActive() {
+		t.signalMessageReady()
+	}
 }
 
 // PTCExit returns the cancel envelope associated with refID, or
@@ -464,13 +475,15 @@ func (t *TestcaseExec) PTCExit(refID int64) *PTCExit {
 
 // StopPTC closes the matching PTCExit.StopChan and delivers a
 // wake-up on MessageReady so a PTC goroutine parked in a blocked alt
-// sees the cancel and unwinds. No-op when the id is unknown or has
-// already been stopped.
+// sees the cancel and unwinds. A component that never ran a behaviour
+// has nothing to stop, but its being stopped or killed can end another
+// component's wait for it, so the waiters are woken all the same.
 func (t *TestcaseExec) StopPTC(refID int64) {
 	t.ptcMu.Lock()
 	p := t.ptcExits[refID]
 	t.ptcMu.Unlock()
 	if p == nil {
+		t.signalMessageReady()
 		return
 	}
 	p.Stop()

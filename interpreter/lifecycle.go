@@ -167,7 +167,7 @@ func floatSeconds(v runtime.Object) (float64, bool) {
 // virtual time, not wall time — so a real-time measure would read ~0 and
 // the modelled body would never complete) and against wall time otherwise.
 func componentCompleted(ref *runtime.ComponentRef, env runtime.Scope) bool {
-	if ref == nil || !ref.Started || ref.ModeledDuration <= 0 {
+	if ref == nil || !ref.IsStarted() || ref.ModeledDuration <= 0 {
 		return false
 	}
 	if useVirtualClock(env) {
@@ -438,7 +438,7 @@ func compRunning(ref *runtime.ComponentRef, env runtime.Scope) bool {
 	// (ETSI 21.3.5). The MTC runs from the testcase's start, and a
 	// component asking about itself is running a behaviour — one it was
 	// given by call rather than start included.
-	if !ref.Started {
+	if !ref.IsStarted() {
 		exec := runtime.FindTestcaseExec(env)
 		if exec == nil {
 			return false
@@ -547,28 +547,43 @@ func componentStatePredicate(op string) func(*runtime.ComponentRef, runtime.Scop
 //     completion, which the virtual clock would advance to;
 //   - a PTC that has exited but is not in the state — an `alive` one whose
 //     behaviour ended is done but not killed: nothing announces a later
-//     kill, so a slow poll rather than a spin on the closed channel.
+//     kill, so a slow poll rather than a spin on the closed channel;
+//   - a PTC that never ran: another component stopping or killing it,
+//     which wakes the waiters (WakeChan).
 //
-// A ref that contributes nothing (never forked, nothing modelled) cannot
-// change, so it does not stop the wait on the others; only when no ref
-// contributes anything does the wait give up and leave the caller the
-// non-blocking answer rather than hang. The waiter's own stop signal and
-// the testcase being stopped abort it.
+// A started ref that contributes nothing (never forked, nothing
+// modelled) cannot change, so it does not stop the wait on the others;
+// only when no ref contributes anything does the wait give up and leave
+// the caller the non-blocking answer rather than hang. The waiter's own
+// stop signal and the testcase being stopped abort it.
 func waitPTCDoneRealClock(exec *runtime.TestcaseExec, refs []*runtime.ComponentRef,
 	done func() bool, stop <-chan struct{}, env runtime.Scope,
 	pred func(*runtime.ComponentRef, runtime.Scope) bool) {
 
 	defer markWaiting(exec)()
 	markBlocked(exec)
-	for !done() {
+	for {
+		// Taken before the check, so a wake-up between the two is
+		// not lost.
+		wake := exec.WakeChan(currentCompID(exec))
+		if done() {
+			return
+		}
 		cases := []reflect.SelectCase{
 			{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(stop)},
 			{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(exec.StopChan())},
 		}
 		const aborts = 2
 		var soonest time.Duration
+		idle := false
 		for _, r := range refs {
 			if r == nil || pred(r, env) {
+				continue
+			}
+			// A PTC that never ran changes only when another component
+			// stops or kills it, which wakes the waiters.
+			if !r.IsStarted() {
+				idle = true
 				continue
 			}
 			if exit := exec.PTCExit(r.ID); exit != nil {
@@ -591,6 +606,9 @@ func waitPTCDoneRealClock(exec *runtime.TestcaseExec, refs []*runtime.ComponentR
 			t = time.NewTimer(soonest)
 			cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(t.C)})
 		}
+		if idle {
+			cases = append(cases, reflect.SelectCase{Dir: reflect.SelectRecv, Chan: reflect.ValueOf(wake)})
+		}
 		if len(cases) == aborts {
 			return
 		}
@@ -612,7 +630,7 @@ const realClockStatePoll = 5 * time.Millisecond
 // body was modelled rather than forked is considered complete, or 0 when
 // nothing is modelled or the duration has already elapsed.
 func modelledRemaining(ref *runtime.ComponentRef) time.Duration {
-	if ref == nil || !ref.Started || ref.ModeledDuration <= 0 || ref.StartedAt.IsZero() {
+	if ref == nil || !ref.IsStarted() || ref.ModeledDuration <= 0 || ref.StartedAt.IsZero() {
 		return 0
 	}
 	total := time.Duration(ref.ModeledDuration * float64(time.Second))

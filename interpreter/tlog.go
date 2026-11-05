@@ -1231,7 +1231,7 @@ func tlCompStatus(ref *runtime.ComponentRef, env runtime.Scope, op string, answe
 		return tl.ComponentKilled
 	case op == "tliCAlive" && compRunning(ref, env):
 		return tl.ComponentRunning
-	case ref.Started:
+	case ref.IsStarted():
 		return tl.ComponentStopped
 	}
 	return tl.ComponentInactive

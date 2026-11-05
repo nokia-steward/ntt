@@ -10625,13 +10625,6 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 			tlEmitWith(lexec, n, tlOp, func(e *tl.Event) { e.Site = decl },
 				tlArg("comp", lexec.TLComponent(ref).Content()), tlArg("name", tl.BehaviourID(mod, fn)))
 		}
-		// Record that behaviour was started on this component (even
-		// when the body is skipped below), by start or by call, which
-		// starts one too. `all component.done` / `.killed` / `.kill`
-		// consider only ever-started PTCs (ETSI 21.3.7).
-		if ref != nil {
-			ref.Started = true
-		}
 		// Skip the body when running it synchronously would
 		// diverge or dead-end: an infinite loop, a procedure-based
 		// op, or a `timer.timeout` wait the synchronous model can't
@@ -10717,7 +10710,6 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 			// finite model leave ModeledDuration at 0 and stay running
 			// until an explicit stop/kill.
 			if ref != nil {
-				ref.Started = true
 				ref.StartedAt = time.Now()
 				if exec := runtime.FindTestcaseExec(env); exec != nil {
 					ref.StartedAtVirtual = exec.VirtualClock()
@@ -10743,8 +10735,21 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 						ref.SetAlive(false)
 					}
 				}
+				// Started, after what a watcher reads with it.
+				ref.SetStarted()
+				if exec := runtime.FindTestcaseExec(env); exec != nil {
+					exec.WakeWaiters()
+				}
 			}
 			return runtime.Undefined, true
+		}
+		// Record that behaviour was started on this component (the
+		// skipped body above records it too), by start or by call,
+		// which starts one too. `running` (any and all), `all
+		// component.done` and `all component.stop` consider only
+		// ever-started PTCs (ETSI 21.3.3, 21.3.6, 21.3.7).
+		if ref != nil {
+			ref.SetStarted()
 		}
 		runEnv := componentExecutionEnv(ref, env)
 		runEnv.Set("self", ref)

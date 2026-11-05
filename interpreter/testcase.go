@@ -1081,13 +1081,12 @@ func bindVerdictConstants(env runtime.Scope) {
 	}
 }
 
-// evalSetverdict implements `setverdict(verdict [, reason ...])`. The
 // evalComponentQuery handles `all component.<op>` / `any component.
 // <op>` cross-component lookups. Returns (Bool, true) when the op
-// produces a boolean status (alive / running / done / killed). The
-// `mtc` component is excluded because TTCN-3 21.3.5 says only PTCs
-// participate; if no PTCs have been created the `all`-form is
-// vacuously true and the `any`-form is vacuously false.
+// produces a boolean status (alive / running / done / killed). Only the
+// MTC may ask, and only PTCs participate (ETSI 21.3.9, table 21); if
+// none has been created the `all`-form is vacuously true and the
+// `any`-form is vacuously false.
 func evalComponentQuery(kind string, sel syntax.Expr, env runtime.Scope) (runtime.Object, bool) {
 	op := strings.ToLower(syntax.Name(sel))
 	switch op {
@@ -1099,21 +1098,26 @@ func evalComponentQuery(kind string, sel syntax.Expr, env runtime.Scope) (runtim
 	if exec == nil {
 		return nil, false
 	}
+	mtcID := exec.MTCID()
+	if cur := exec.CurrentComponent(); cur != nil && cur.ID != mtcID {
+		return runtime.Errorf("%s.%s can be used by the MTC only (ETSI 21.3.9)", kind, op), true
+	}
 	refs := exec.AllComponents()
-	mtc := exec.CurrentComponent()
 	ptcs := make([]*runtime.ComponentRef, 0, len(refs))
 	for _, r := range refs {
-		if r == nil {
+		if r == nil || r.ID == mtcID {
 			continue
 		}
-		if mtc != nil && r.Equal(mtc) {
-			continue
-		}
-		// `all/any component.<op>` consider only PTCs that have ever
-		// been started: a created-but-inactive PTC is ignored, so
-		// `all component.done` matches even when such a PTC exists
-		// (ETSI 21.3.7, the note distinguishing it from `ptc.done`).
-		if !r.Started {
+		// `running` and `all component.done` consider only PTCs that
+		// have ever been started: a created-but-inactive PTC is ignored,
+		// so `all component.done` matches even when such a PTC exists
+		// (ETSI 21.3.6, 21.3.7, the notes distinguishing them from
+		// `ptc.running`, `ptc.done`). `any component.done` matches a PTC
+		// whose behaviour has been stopped or killed (21.3.7), one that
+		// never started too. `alive` and `killed` ask every PTC: an
+		// inactive one is alive and has not ceased to exist (21.3.5,
+		// 21.3.8).
+		if !r.IsStarted() && (op == "running" || op == "done" && kind == "all component") {
 			continue
 		}
 		ptcs = append(ptcs, r)
@@ -1179,14 +1183,21 @@ func evalAllComponentAction(kind string, sel syntax.Expr, env runtime.Scope) (ru
 	if exec == nil {
 		return nil, false
 	}
-	mtc := exec.CurrentComponent()
+	// The all keyword can be used by the MTC only (ETSI 21.3.3, 21.3.4,
+	// 21.3.9).
+	if cur := exec.CurrentComponent(); cur != nil && cur.ID != exec.MTCID() {
+		return runtime.Errorf("all component.%s can be used by the MTC only (ETSI 21.3.9)", op), true
+	}
+	mtcID := exec.MTCID()
 	for _, r := range exec.AllComponents() {
-		if r == nil || (mtc != nil && r.Equal(mtc)) {
+		if r == nil || r.ID == mtcID {
 			continue
 		}
-		// Only ever-started PTCs are affected; a created-but-inactive
-		// component has no behaviour to stop or kill.
-		if !r.Started {
+		// all component.stop stops the ever-started PTCs; a
+		// created-but-inactive one has no behaviour to stop. all
+		// component.kill kills every PTC, an inactive one too: each
+		// ceases to exist (ETSI 21.3.9, table 21, and 21.3.4 example 2).
+		if !r.IsStarted() && op == "stop" {
 			continue
 		}
 		r.SetDone(true)

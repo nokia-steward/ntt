@@ -395,7 +395,7 @@ type ComponentRef struct {
 	// goroutine while the MTC polls it.
 	done bool
 
-	// Started records that a `.start(...)` ran on this ref, even when
+	// started records that a `.start(...)` ran on this ref, even when
 	// the loopback model skipped the body (e.g. a finite-timer PTC).
 	// ModeledDuration/StartedAt then drive virtual completion: a PTC
 	// whose body only blocks on a finite `timer.timeout` is treated
@@ -403,7 +403,10 @@ type ComponentRef struct {
 	// start (the MTC's own blocking `timeout` provides the real
 	// observation window). ModeledDuration == 0 means "no finite
 	// model" - such a body stays running until an explicit stop/kill.
-	Started bool
+	// Another component may start this one while a third watches it,
+	// so it is atomic (IsStarted/SetStarted); what the starter sets
+	// before SetStarted, the watcher sees after IsStarted.
+	started atomic.Bool
 	// LoopTicks counts the loop iterations the component's behaviour has
 	// run, for yielding on the virtual clock; only its own goroutine
 	// touches it.
@@ -494,6 +497,13 @@ func (c *ComponentRef) SetDone(v bool) {
 
 // IsAlive reports whether the component is still reachable (not
 // stopped/killed). Safe to call from any goroutine (mu-guarded).
+// IsStarted reports whether a behaviour was ever started on the
+// component.
+func (c *ComponentRef) IsStarted() bool { return c != nil && c.started.Load() }
+
+// SetStarted records that a behaviour was started on the component.
+func (c *ComponentRef) SetStarted() { c.started.Store(true) }
+
 func (c *ComponentRef) IsAlive() bool {
 	if c == nil {
 		return false

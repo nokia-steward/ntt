@@ -362,6 +362,25 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **`any component` and `all component` ask the PTCs the standard
+  names, and only the MTC asks** (21.3.9, table 21). With `alive` and
+  `killed` they ask every PTC, one created but never started too: it is
+  alive, and it has not ceased to exist (21.3.5, 21.3.8). `running` and
+  `all component.done` keep to the PTCs ever started (21.3.6, 21.3.7),
+  and `any component.done` also matches a PTC that never started but
+  was stopped or killed. `all component.kill` kills every PTC, inactive
+  ones too. On a PTC each of them, as a statement or in an expression,
+  is an error; they left out the asking PTC and acted on the other
+  started ones (in an alt guard, an error still reads as no match).
+- **A wait for a PTC that never ran waits for it.** A standalone
+  `all component.killed` with an inactive PTC, `any component.done` or
+  `.killed` with inactive PTCs only, and on the real clock `v.done` or
+  `v.killed` of an inactive `v`, wait for it: until another component
+  stops or kills it, or starts it and that behaviour ends, ending in an
+  error when nothing will (on the real clock, at the run's timeout);
+  they passed it over. A stop or kill of such a PTC by another component
+  ends the wait at once; on the virtual clock it ended when that
+  component did.
 - **A component call's `catch(stop)` block runs when the called
   behaviour was stopped or killed, and only then** (21.3.10); it ran
   after every call, and a stop during the behaviour's last statement
