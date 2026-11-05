@@ -173,10 +173,16 @@ start.
 ## 5a. Static semantic checks
 
 `ntt check` runs the lightweight semantic analyser on every module
-in the suite (no execution). On top of the obvious "unresolved
-identifier" diagnostics it now enforces a growing list of
-TTCN-3-spec rules that Eclipse Titan only detects at C++ compile
-time:
+in the suite (no execution). Without paths it checks the project's
+`sources` and resolves imports against its `imports`; with paths, it
+checks those files and directories. `ntt check -v` lists every error
+and warning with its span, code and message, for example
+`src/A.ttcn3:8:5-8:11: const-reassign: cannot reassign constant "k" (ETSI 10)`.
+
+The analyser doesn't resolve every name yet: it reports an unknown
+imported module or component type, but an undeclared variable can
+still pass. On top of that it enforces a growing list of TTCN-3-spec
+rules that Eclipse Titan only detects at C++ compile time:
 
 - **Template restrictions** (clause 15.8): `omit`, `template(value)`,
   `template(present)` use-sites are checked for kind compatibility.

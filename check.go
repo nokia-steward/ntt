@@ -2,15 +2,19 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
 	"sync/atomic"
 
+	"github.com/hashicorp/go-multierror"
+	"github.com/nokia/ntt/project"
 	"github.com/nokia/ntt/ttcn3"
 	"github.com/nokia/ntt/ttcn3/semantic"
 	"github.com/spf13/cobra"
@@ -33,12 +37,22 @@ file it finds, runs the semantic analyzer on each, and prints a pass-rate
 summary. A file "passes" when it parses without errors and the analyzer
 reports no errors (warnings do not affect the verdict).
 
+Without paths, check takes the project's sources from package.yml (or
+the TTCN-3 files in the current directory) and resolves imports against
+the project's imports, which are not checked themselves. For a Titan
+.tpd project, the files of referenced projects count as sources. Paths
+that don't exist and files that aren't TTCN-3 are skipped.
+
+Each error and warning is one line, its span then its code and message:
+file:line:column-line:column: code: message. A syntax error has no code.
+-v lists them; the JSON output always has the errors ("errors") and the
+warnings ("warning_messages").
+
 When --baseline is given, check reads the prior pass-rate from that JSON
 file and exits non-zero if the current rate dropped by more than --regress
 percentage points. This is the gate the ntt-Titan roadmap uses to keep the
 ETSI conformance pass-rate from regressing between commits.
 `,
-		Args: cobra.MinimumNArgs(1),
 		RunE: runCheck,
 	}
 )
@@ -51,12 +65,14 @@ func init() {
 		"max allowed drop in pass-rate vs baseline, in percentage points")
 }
 
-// CheckResult is the per-file outcome reported by `ntt check`.
+// CheckResult is the per-file outcome reported by `ntt check`. Each
+// error and warning is one line, "file:line:column: code: message".
 type CheckResult struct {
-	Path     string   `json:"path"`
-	Passed   bool     `json:"passed"`
-	Errors   []string `json:"errors,omitempty"`
-	Warnings int      `json:"warnings,omitempty"`
+	Path            string   `json:"path"`
+	Passed          bool     `json:"passed"`
+	Errors          []string `json:"errors,omitempty"`
+	Warnings        int      `json:"warnings,omitempty"`
+	WarningMessages []string `json:"warning_messages,omitempty"`
 }
 
 // CheckSummary is the suite-wide aggregate. The field names are stable so
@@ -72,8 +88,11 @@ type CheckSummary struct {
 }
 
 func runCheck(cmd *cobra.Command, args []string) error {
-	files := collectTTCN3Files(args)
+	files, index := checkInputs(args, Project)
 	if len(files) == 0 {
+		if len(args) == 0 {
+			return fmt.Errorf("no TTCN-3 sources in the project")
+		}
 		return fmt.Errorf("no TTCN-3 files found under %v", args)
 	}
 
@@ -83,7 +102,7 @@ func runCheck(cmd *cobra.Command, args []string) error {
 	// to "unknown module" because each worker would otherwise only
 	// know about its own file.
 	db := &ttcn3.DB{}
-	db.Index(files...)
+	db.Index(index...)
 
 	summary := checkFiles(files, db)
 
@@ -107,6 +126,41 @@ func runCheck(cmd *cobra.Command, args []string) error {
 			summary.Failed, summary.Total)
 	}
 	return nil
+}
+
+// checkInputs returns the files to check and the files to index for
+// name lookup. Paths given on the command line are both. Without paths,
+// the project's sources are checked and its imports are only indexed;
+// both are collected like command-line paths, so a missing path or a
+// non-TTCN-3 file (a Titan project lists C++ and ASN.1 sources too) is
+// skipped and a file named twice is checked once.
+func checkInputs(args []string, p *project.Config) (files, index []string) {
+	if len(args) > 0 || p == nil {
+		files = collectTTCN3Files(args)
+		return files, files
+	}
+	files = collectTTCN3Files(p.Sources)
+	index = collectTTCN3Files(append(slices.Clone(p.Sources), p.Imports...))
+	return relativePaths(files), relativePaths(index)
+}
+
+// relativePaths shortens the paths below the current directory, which
+// the project gives as absolute paths. The files to check and the files
+// to index have to agree, because each file is parsed once, under the
+// path it was indexed with, and that path is the one its spans report.
+func relativePaths(paths []string) []string {
+	wd, err := os.Getwd()
+	if err != nil {
+		return paths
+	}
+	out := make([]string, len(paths))
+	for i, p := range paths {
+		out[i] = p
+		if rel, err := filepath.Rel(wd, p); err == nil && filepath.IsLocal(rel) {
+			out[i] = rel
+		}
+	}
+	return out
 }
 
 // checkFiles fans the per-file work out to a small worker pool. The default
@@ -175,20 +229,46 @@ func checkOne(path string, db *ttcn3.DB) CheckResult {
 		return r
 	}
 	if tree.Err != nil {
-		r.Errors = append(r.Errors, tree.Err.Error())
+		r.Errors = parseErrors(tree.Err)
 		return r
 	}
 	diags := semantic.NewAnalyzer(db).Analyze(tree)
 	for _, d := range diags {
+		line := fmt.Sprintf("%s: %s: %s", diagnosticSpan(d, path), d.Code, d.Message)
 		switch d.Severity {
 		case semantic.SeverityError:
-			r.Errors = append(r.Errors, fmt.Sprintf("%s: %s", d.Code, d.Message))
+			r.Errors = append(r.Errors, line)
 		case semantic.SeverityWarn:
 			r.Warnings++
+			r.WarningMessages = append(r.WarningMessages, line)
 		}
 	}
 	r.Passed = len(r.Errors) == 0
 	return r
+}
+
+// parseErrors returns one line per syntax error, each already carrying
+// its position.
+func parseErrors(err error) []string {
+	var me *multierror.Error
+	if !errors.As(err, &me) {
+		return []string{err.Error()}
+	}
+	lines := make([]string, 0, len(me.Errors))
+	for _, e := range me.Errors {
+		lines = append(lines, parseErrors(e)...)
+	}
+	return lines
+}
+
+// diagnosticSpan is where d points, in the file being checked when the
+// analyzer left the file name out.
+func diagnosticSpan(d semantic.Diagnostic, path string) string {
+	span := d.Span
+	if span.Filename == "" {
+		span.Filename = path
+	}
+	return span.String()
 }
 
 // collectTTCN3Files walks each argument and returns every TTCN-3 source
@@ -252,11 +332,19 @@ func writeText(w io.Writer, s CheckSummary) {
 	// big batches like the ETSI suite.
 	if verbose > 0 {
 		for _, r := range s.Results {
-			if !r.Passed {
+			switch {
+			case !r.Passed:
 				fmt.Fprintf(w, "  FAIL %s\n", r.Path)
-				for _, e := range r.Errors {
-					fmt.Fprintf(w, "    %s\n", e)
-				}
+			case len(r.WarningMessages) > 0:
+				fmt.Fprintf(w, "  WARN %s\n", r.Path)
+			default:
+				continue
+			}
+			for _, e := range r.Errors {
+				fmt.Fprintf(w, "    %s\n", e)
+			}
+			for _, e := range r.WarningMessages {
+				fmt.Fprintf(w, "    warning: %s\n", e)
 			}
 		}
 	}

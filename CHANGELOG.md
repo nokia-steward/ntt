@@ -362,6 +362,20 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **`ntt check` says where.** Each error and warning is one line, its
+  span then its code and message (`src/A.ttcn3:8:5-8:11: const-reassign:
+  ...`; a syntax error has no code), in the `-v` listing and in the JSON
+  `errors` lists. Warnings were only counted and are now listed too
+  (`warning_messages` in JSON, `warning:` lines under `WARN` in `-v`),
+  and each syntax error is its own line. Without paths, `check` checks
+  the project's `sources` and resolves imports against its `imports`,
+  instead of refusing to run; a missing path or a non-TTCN-3 file in the
+  project is skipped.
+- **`ntt show -- KEY` prints one value per line**, so
+  `$(ntt show -- sources)` works as `ntt list --help` shows; a list was
+  printed as `[a b]`, and the `NTT_SOURCES`/`NTT_IMPORTS` lines of
+  `ntt show` with it (an empty list now gives `NTT_IMPORTS=""`). A map,
+  like `variables`, gives one `'key=value'` per line.
 - **The analyzer no longer rejects valid code** in some 60 cases, among
   them: an index under `isbound`/`ispresent`/`isvalue` (7.1.8.0), an out
   argument, an array of a ranged dimension (6.2.7) or a template whose
