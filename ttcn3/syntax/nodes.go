@@ -336,7 +336,7 @@ type (
 		ValueTok      Token  // Position of "value" or nil
 		Value         []Expr // Value expression
 		VerdictTok    Token  // Position of "verdict" or nil
-		Verdict       []Expr // Verdict expression (call/done redirect)
+		Verdict       Expr   // Verdict expression
 		ParamTok      Token  // Position of "param" or nil
 		Param         []Expr // Param expression
 		SenderTok     Token  // Position of "sender" or nil
@@ -511,10 +511,20 @@ type (
 		Body      *BlockStmt // Block statement with alternations
 	}
 
-	// A CallStmt represents a "call" statement with communication-block.
+	// A CallStmt represents a "call" statement with communication-block or,
+	// for calls of test component behaviour, with catch clauses.
 	CallStmt struct {
-		Stmt Stmt       // "call" statement
-		Body *BlockStmt // Block statement with alternations
+		Stmt    Stmt           // "call" statement
+		Body    *BlockStmt     // Block statement with alternations or nil
+		Catches []*CatchClause // Catch clauses of a component call
+	}
+
+	// A CatchClause represents a "catch (stop)" or "catch (timeout)" clause
+	// of a test component call operation.
+	CatchClause struct {
+		Tok  Token      // Position of "catch"
+		Arg  *ParenExpr // "(stop)" or "(timeout)"
+		Body *BlockStmt // Handler body
 	}
 
 	// A ForStmt represents a "for" statement.
@@ -575,15 +585,19 @@ type (
 	}
 
 	// A SelectStmt represents a select statements.
+	//
+	// If the header contains an init statement, like in
+	// "select union (var U u := f(); u)", LParen, Init, InitSemi and RParen
+	// are set and Tag holds the expression list without parentheses.
 	SelectStmt struct {
 		Tok      Token         // Position of "select"
 		Union    Token         // Position of "union" or nil
 		Class    Token         // Position of "class" or nil
-		LParen   Token         // Position of "("
+		LParen   Token         // Position of "(" or nil
 		Init     Stmt          // Init statement or nil
 		InitSemi Token         // Position of ";" or nil
 		Tag      Expr          // Tag expression
-		RParen   Token         // Position of ")"
+		RParen   Token         // Position of ")" or nil
 		LBrace   Token         // Position of "{"
 		Body     []*CaseClause // List of case clauses
 		RBrace   Token         // Position of "}"
@@ -614,6 +628,7 @@ func (x *BranchStmt) stmtNode()   {}
 func (x *ReturnStmt) stmtNode()   {}
 func (x *RaiseStmt) stmtNode()    {}
 func (x *CallStmt) stmtNode()     {}
+func (x *CatchClause) stmtNode()  {}
 func (x *AltStmt) stmtNode()      {}
 func (x *ForStmt) stmtNode()      {}
 func (x *ForRangeStmt) stmtNode() {}
@@ -700,7 +715,8 @@ func (x *MapSpec) typeSpecNode()       {}
 func (x *EnumSpec) typeSpecNode()      {}
 func (x *BehaviourSpec) typeSpecNode() {}
 
-// Nested type definitions may be used where a type reference is expected.
+// Nested type definitions may be used wherever a type reference is expected,
+// e.g. "function f(record of integer p)".
 func (x *StructSpec) exprNode() {}
 func (x *ListSpec) exprNode()   {}
 func (x *MapSpec) exprNode()    {}
@@ -784,24 +800,24 @@ type (
 		Name         *Ident
 		Modif        Token // Position of "@deterministic" or nil
 		TypePars     *FormalPars
-		Params       *FormalPars    // Formal parameter list or nil
-		RunsOn       *RunsOnSpec    // Optional runs-on-spec
-		Mtc          *MtcSpec       // Optional mtc-spec
-		System       *SystemSpec    // Optional system-spec
-		Return       *ReturnSpec    // Optional return-spec
-		ExceptionTok Token          // Position of "exception" or nil (OO exception clause)
-		Exception    *ParenExpr     // Exception type list or nil
-		Body         *BlockStmt     // Body or nil
-		Catch        []*CatchClause // OO exception handlers after the body
-		FinallyTok   Token          // Position of "finally" or nil
-		Finally      *BlockStmt     // OO finally block or nil
+		Params       *FormalPars        // Formal parameter list or nil
+		RunsOn       *RunsOnSpec        // Optional runs-on-spec
+		Mtc          *MtcSpec           // Optional mtc-spec
+		System       *SystemSpec        // Optional system-spec
+		Return       *ReturnSpec        // Optional return-spec
+		ExceptionTok Token              // Position of "exception" or nil (OO exception clause)
+		Exception    *ParenExpr         // Exception type list or nil
+		Body         *BlockStmt         // Body or nil
+		Catch        []*ExceptionClause // OO exception handlers after the body
+		FinallyTok   Token              // Position of "finally" or nil
+		Finally      *BlockStmt         // OO finally block or nil
 		With         *WithSpec
 	}
 
-	// A CatchClause represents an object-oriented exception handler
+	// An ExceptionClause represents an object-oriented exception handler
 	// attached after a function, altstep or testcase body:
 	// `catch (Type [name]) { ... }` (ETSI ES 201 873-1 clause 5.2).
-	CatchClause struct {
+	ExceptionClause struct {
 		CatchTok Token      // Position of "catch"
 		LParen   Token      // Position of "("
 		Type     Expr       // Caught exception type
@@ -1006,9 +1022,9 @@ type (
 		FromTok   Token
 		Module    *Ident
 		Language  *LanguageSpec
-		Recursive Token // Position of "recursive" or nil
-		RedirTok  Token
-		Alias     *Ident
+		Recursive Token  // Position of "recursive" or nil
+		RedirTok  Token  // Position of "->" or nil
+		Alias     *Ident // Local name of the imported module or nil
 		LBrace    Token
 		List      []*DefKindExpr
 		RBrace    Token

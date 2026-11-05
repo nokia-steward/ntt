@@ -150,6 +150,18 @@ func collectScopeStmt(
 			parent[s] = cur
 			(*walk)(s)
 		}
+	case *syntax.CallStmt:
+		// The catch clauses of a component call are blocks of their
+		// own (ETSI 21.3.10).
+		if s == nil {
+			return
+		}
+		for _, c := range s.Catches {
+			if c != nil && c.Body != nil {
+				parent[c.Body] = cur
+				(*walk)(c.Body)
+			}
+		}
 	case *syntax.IfStmt:
 		if s == nil {
 			return
@@ -343,6 +355,16 @@ func collectScopeRefs(
 			descendBlock(s.Body, cur, chain, walkRef)
 		}
 		return
+	case *syntax.CallStmt:
+		if s != nil && len(s.Catches) > 0 {
+			collectScopeRefs(s.Stmt, cur, chain, singleDecl, diags, walkRef, seen)
+			for _, c := range s.Catches {
+				if c != nil {
+					descendBlock(c.Body, cur, chain, walkRef)
+				}
+			}
+			return
+		}
 	case *syntax.SelectStmt:
 		if s != nil {
 			if s.Tag != nil {

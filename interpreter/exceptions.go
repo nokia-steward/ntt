@@ -20,7 +20,7 @@ import (
 // call's return value. A `finally` block, when present, always runs
 // afterwards for its side effects; if it itself produces a control-flow
 // result (return/raise) that overrides raw.
-func runExceptionHandlers(raw runtime.Object, catch []*syntax.CatchClause, finally *syntax.BlockStmt, bodyEnv runtime.Scope) runtime.Object {
+func runExceptionHandlers(raw runtime.Object, catch []*syntax.ExceptionClause, finally *syntax.BlockStmt, bodyEnv runtime.Scope) runtime.Object {
 	if rv, ok := raw.(*runtime.RaisedValue); ok {
 		for _, cc := range catch {
 			if cc == nil || cc.Body == nil {

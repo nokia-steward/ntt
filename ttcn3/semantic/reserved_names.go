@@ -58,7 +58,7 @@ func (a *Analyzer) checkPredefinedNamesReserved(mod *syntax.Module) []Diagnostic
 			if d.Tok != nil && d.Tok.Kind() == syntax.LABEL {
 				check(d.Label)
 			}
-		case *syntax.CatchClause:
+		case *syntax.ExceptionClause:
 			check(d.Var)
 		case *syntax.FormalPar:
 			check(d.Name)

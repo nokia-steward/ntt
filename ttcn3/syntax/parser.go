@@ -820,6 +820,7 @@ func (p *parser) parsePrefixExpr() Expr {
 func (p *parser) parsePostfixExpr() Expr {
 	x := p.parseUnaryExpr()
 
+	// "..." expands a list into variadic arguments: "f({1,2}...)"
 	if p.tok == INC || p.tok == DEC || p.tok == ELIPSIS {
 		x = &PostExpr{X: x, Op: p.consume()}
 	}
@@ -1304,6 +1305,8 @@ func (p *parser) parseDecodeExpr(x Expr) Expr {
 func (p *parser) parseSelectorExpr(x Expr) *SelectorExpr {
 	dot := p.consume()
 	switch p.tok {
+	// Attribute value retrieval (e.g. "T.encode", "T.variant("Codec")") and
+	// presentness conversion ("t.present").
 	case ENCODE, VARIANT, DISPLAY, EXTENSION, OPTIONAL, PRESENT:
 		return &SelectorExpr{X: x, Dot: dot, Sel: p.make_use(p.consume())}
 	}
@@ -1369,12 +1372,11 @@ func (p *parser) parseRedirect(x Expr) *RedirectExpr {
 		p.noParam = saved
 	}
 
-	// `-> verdict v` captures a called/terminated component's verdict
-	// (ETSI 21.3.10). `verdict` is not a reserved keyword - it lexes as
-	// an IDENT - so match on the literal.
+	// "verdict" is not a keyword. It is used by the test component call
+	// operation: "ptc.call(f()) -> verdict v".
 	if p.tok == IDENT && p.lit(1) == "verdict" {
 		r.VerdictTok = p.consume()
-		r.Verdict = p.parseExprList()
+		r.Verdict = p.parsePrimaryExpr()
 	}
 
 	if p.tok == PARAM {
@@ -2610,7 +2612,7 @@ func (p *parser) parseTemplateDecl() *TemplateDecl {
 
 	x.Modif, x.Deterministic = p.parseModifiers()
 
-	x.Type = p.parseTypeRef()
+	x.Type = p.parseTypeOrNestedTypeDef()
 	if _, ok := x.Type.(*ErrorNode); ok {
 		return x
 	}
@@ -2664,6 +2666,7 @@ func (p *parser) parseModulePar() Decl {
 
 	x := &ValueDecl{KindTok: tok}
 	x.TemplateRestriction = p.parseRestrictionSpec()
+	// The type may be omitted: "modulepar p := 1".
 	if p.peek(2).Kind() != ASSIGN {
 		x.Type = p.parseTypeOrNestedTypeDef()
 	}
@@ -2801,7 +2804,7 @@ func (p *parser) parseFuncDecl() *FuncDecl {
 	// Optional `catch (...) { ... }` handlers and a trailing
 	// `finally { ... }` block after the body (ETSI 5.2).
 	for p.tok == IDENT && p.lit(1) == "catch" {
-		x.Catch = append(x.Catch, p.parseCatchClause())
+		x.Catch = append(x.Catch, p.parseExceptionClause())
 	}
 	if p.tok == IDENT && p.lit(1) == "finally" {
 		x.FinallyTok = p.consume()
@@ -2812,14 +2815,14 @@ func (p *parser) parseFuncDecl() *FuncDecl {
 	return x
 }
 
-// parseCatchClause parses a single object-oriented exception handler
+// parseExceptionClause parses a single object-oriented exception handler
 // `catch (Type [name]) { ... }` attached after a function, altstep or
 // testcase body (ETSI ES 201 873-1 clause 5.2).
-func (p *parser) parseCatchClause() *CatchClause {
+func (p *parser) parseExceptionClause() *ExceptionClause {
 	if p.trace {
-		defer un(trace(p, "CatchClause"))
+		defer un(trace(p, "ExceptionClause"))
 	}
-	x := new(CatchClause)
+	x := new(ExceptionClause)
 	x.CatchTok = p.consume() // "catch"
 	x.LParen = p.expect(LPAREN)
 	x.Type = p.parseTypeRef()
@@ -3149,6 +3152,9 @@ func (p *parser) parseStmt() Stmt {
 		return p.parseBlockStmt()
 	case IDENT, TESTCASE, ANYKW, ALL, MAP, UNMAP, MTC, INC, DEC:
 		x := p.parseSimpleStmt()
+		if !isCallOp(x.Expr) {
+			return x
+		}
 
 		// A call with a body: "p.call(...) to c -> timestamp t { ... }".
 		// "to" and "->" wrap the call, so it is not a bare CallExpr.
@@ -3156,6 +3162,19 @@ func (p *parser) parseStmt() Stmt {
 			call := new(CallStmt)
 			call.Stmt = x
 			call.Body = p.parseBlockStmt()
+			return call
+		}
+
+		// component call: "ptc.call(f()) catch(stop) {}"
+		if p.tok == IDENT && p.lit(1) == "catch" && p.peek(2).Kind() == LPAREN {
+			call := &CallStmt{Stmt: x}
+			for p.tok == IDENT && p.lit(1) == "catch" && p.peek(2).Kind() == LPAREN {
+				call.Catches = append(call.Catches, &CatchClause{
+					Tok:  p.consume(),
+					Arg:  p.parseParenExpr(),
+					Body: p.parseBlockStmt(),
+				})
+			}
 			return call
 		}
 		return x
@@ -3167,16 +3186,25 @@ func (p *parser) parseStmt() Stmt {
 	case INT, FLOAT, STRING, BSTRING, TRUE, FALSE, PASS, FAIL, NONE, INCONC, ERROR:
 		return p.parseSimpleStmt()
 
+	// not implemented statement: "???" or "???("reason")"
 	case NOTIMPL:
 		return p.parseSimpleStmt()
 
 	case MODIF:
 		switch v := p.lit(1); v {
+		// stand-alone receiving, timeout, done, killed and altstep statements:
+		// "@nodefault p.receive"
 		case "@nodefault":
 			tok := p.consume()
-			x := p.parseSimpleStmt()
-			x.NoDefault = tok
-			return x
+			switch p.tok {
+			case IDENT, ANYKW, ALL, MTC:
+				x := p.parseSimpleStmt()
+				x.NoDefault = tok
+				return x
+			}
+			p.errorExpected("stand-alone statement")
+			p.advance(stmtStart)
+			return &ErrorNode{From: etok, To: p.peek(1)}
 
 		// This enables parsing of Titan specific try/catch blocks.
 		// Note, we only parse the structure for prevent syntax-errors,
@@ -3237,6 +3265,31 @@ func isNamedCall(e Expr, name string) bool {
 		return ok && id.Tok.String() == name
 	}
 	return false
+}
+
+// isCallOp returns true if x is a call operation, optionally followed by a
+// "to" clause or a redirect, like "p.call(s) to a" or "ptc.call(f()) -> value v".
+func isCallOp(x Expr) bool {
+	for {
+		switch n := x.(type) {
+		case *BinaryExpr:
+			if n.Op.Kind() != TO {
+				return false
+			}
+			x = n.X
+		case *RedirectExpr:
+			x = n.X
+		case *CallExpr:
+			s, ok := n.Fun.(*SelectorExpr)
+			if !ok {
+				return false
+			}
+			id, ok := s.Sel.(*Ident)
+			return ok && id.Tok.String() == "call"
+		default:
+			return false
+		}
+	}
 }
 
 func (p *parser) parseForLoop() Stmt {
@@ -3337,9 +3390,19 @@ func (p *parser) parseSelect() *SelectStmt {
 	} else if p.tok == CLASS {
 		x.Class = p.consume()
 	}
-	x.LParen = p.expect(LPAREN)
-	x.Init, x.InitSemi, x.Tag = p.parseCondWithInit()
-	x.RParen = p.expect(RPAREN)
+	if p.tok == LPAREN && (p.peek(2).Kind() == VAR || p.peek(2).Kind() == CONST) {
+		x.LParen = p.consume()
+		x.Init = &DeclStmt{Decl: p.parseValueDecl()}
+		x.InitSemi = p.expect(SEMICOLON)
+		x.Tag = p.parseExpr()
+		x.RParen = p.expect(RPAREN)
+	} else if p.tok == LPAREN {
+		x.LParen = p.consume()
+		x.Init, x.InitSemi, x.Tag = p.parseCondWithInit()
+		x.RParen = p.expect(RPAREN)
+	} else {
+		x.Tag = p.parseParenExpr()
+	}
 	x.LBrace = p.expect(LBRACE)
 	for p.tok == CASE {
 		x.Body = append(x.Body, p.parseCaseStmt())

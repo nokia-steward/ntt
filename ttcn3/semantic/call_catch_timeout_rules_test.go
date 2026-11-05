@@ -73,3 +73,22 @@ func TestComponentCallCaughtTimeoutAccepted(t *testing.T) {
 		t.Fatalf("unexpected component-call-uncaught-timeout, got %v", codes(diags))
 	}
 }
+
+// A catch clause's block is a block of its own: a variable declared there
+// is in scope there, though another block declares one of the same name.
+func TestComponentCallCatchBlockScope(t *testing.T) {
+	tree := parse(t, `module M {
+		type component C {}
+		function f() runs on C { stop; }
+		testcase tc() runs on C system C {
+			var C c := C.create;
+			var integer n := 0;
+			c.call(f()) catch(stop) { var integer x := 1; n := n + x; }
+			if (true) { var integer x := 10; n := n + x; }
+		}
+	}`)
+	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree)
+	if containsCode(diags, "var-out-of-scope") {
+		t.Fatalf("unexpected var-out-of-scope, got %v", codes(diags))
+	}
+}

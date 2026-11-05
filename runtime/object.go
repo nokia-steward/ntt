@@ -1572,7 +1572,7 @@ type Function struct {
 	// declared after the body (ETSI 5.2): `... } catch (T e) { ... }
 	// finally { ... }`. They are run by the call path once the body
 	// produces a RaisedValue (catch) or unconditionally (finally).
-	Catch   []*syntax.CatchClause
+	Catch   []*syntax.ExceptionClause
 	Finally *syntax.BlockStmt
 
 	// RunsOn marks a function or altstep declared with a runs on clause: it

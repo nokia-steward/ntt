@@ -337,6 +337,17 @@ func (f *finder) lookup(n syntax.Expr, tree *Tree) []*Node {
 	case *syntax.CallExpr:
 		results = f.call(n, tree)
 
+	// decoded field reference: "x => T"
+	case *syntax.BinaryExpr:
+		if n.Op.Kind() == syntax.DECODE {
+			results = f.lookup(decodedFieldType(n.Y), tree)
+		}
+
+	case *syntax.ParenExpr:
+		if len(n.List) == 1 {
+			results = f.lookup(n.List[0], tree)
+		}
+
 	default:
 		spn := syntax.SpanOf(n)
 		log.Debugf("%s: unsupported node type: %T\n", spn.String(), n)
@@ -564,6 +575,16 @@ func (f *finder) call(n *syntax.CallExpr, tree *Tree) []*Node {
 	return result
 }
 
+// decodedFieldType returns the type of a decoded field reference. It is either
+// a type reference or a parenthesized type with optional encoding information:
+// "x => (T, "UTF-8")".
+func decodedFieldType(n syntax.Expr) syntax.Expr {
+	if p, ok := n.(*syntax.ParenExpr); ok && len(p.List) > 0 {
+		return p.List[0]
+	}
+	return n
+}
+
 func (f *finder) typeOf(def *Node) []*Node {
 	var result []*Node
 
@@ -585,6 +606,14 @@ func (f *finder) typeOf(def *Node) []*Node {
 			q = append(q, &Node{Node: def.ParentOf(n), Tree: def.Tree})
 
 		case *syntax.BinaryExpr:
+			// The type of a decoded field reference "x => T" is T.
+			if n.Op.Kind() == syntax.DECODE {
+				q = append(q, &Node{Node: decodedFieldType(n.Y), Tree: def.Tree})
+				break
+			}
+			q = append(q, &Node{Node: n.X, Tree: def.Tree})
+
+		case *syntax.PostExpr:
 			q = append(q, &Node{Node: n.X, Tree: def.Tree})
 
 		case *syntax.Declarator:
@@ -622,14 +651,11 @@ func (f *finder) typeOf(def *Node) []*Node {
 				q = append(q, f.lookup(n.Module, def.Tree)...)
 			}
 
-		case *syntax.IndexExpr:
-			q = append(q, f.lookup(n, def.Tree)...)
-
 		case *syntax.RefSpec:
 			q = append(q, f.lookup(n.X, def.Tree)...)
 
-		// Nested type definitions are expressions, too. Hence this case
-		// must precede the syntax.Expr case.
+		// Nested type definitions implement syntax.Expr, too. Hence they
+		// must be handled before the generic syntax.Expr case.
 		case *syntax.BehaviourSpec,
 			*syntax.BehaviourTypeDecl,
 			*syntax.ComponentTypeDecl,
@@ -644,6 +670,9 @@ func (f *finder) typeOf(def *Node) []*Node {
 			*syntax.MapTypeDecl,
 			*syntax.ClassTypeDecl:
 			result = append(result, &Node{Node: n, Tree: def.Tree})
+
+		case *syntax.IndexExpr:
+			q = append(q, f.lookup(n, def.Tree)...)
 
 		case syntax.Expr:
 			q = append(q, f.lookup(n, def.Tree)...)

@@ -604,3 +604,49 @@ func SetRange(startLine uint32, startCol uint32, endLine uint32, endCol uint32) 
 		Start: protocol.Position{Line: startLine, Character: startCol},
 		End:   protocol.Position{Line: endLine, Character: endCol}}
 }
+
+func TestNewSyntaxSemTok(t *testing.T) {
+	actual := testTokens(t, nil, `
+        module Test
+        {
+                import from TestNewSyntaxSemTok_Module_1 -> M1 all;
+                type record R { M1.B, integer i }
+                modulepar mp := 1;
+                function f(in integer p... , record of integer q) {
+                        var R r;
+                        var template integer t := present(r.B.b);
+                        @nodefault p.receive;
+                }
+        }
+        module TestNewSyntaxSemTok_Module_1
+        {
+                type record B { integer b }
+        }`)
+	assert.Equal(t, []Token{
+		{Line: 2, Text: "Test", Type: lsp.Namespace, Mod: lsp.Definition},
+		{Line: 4, Text: "TestNewSyntaxSemTok_Module_1", Type: lsp.Namespace},
+		{Line: 4, Text: "M1", Type: lsp.Namespace, Mod: lsp.Declaration},
+		{Line: 5, Text: "R", Type: lsp.Struct, Mod: lsp.Definition},
+		{Line: 5, Text: "M1", Type: lsp.Namespace},
+		{Line: 5, Text: "B", Type: lsp.Struct},
+		{Line: 5, Text: "integer", Type: lsp.Type, Mod: lsp.DefaultLibrary},
+		{Line: 6, Text: "mp", Type: lsp.Variable, Mod: lsp.Declaration | lsp.Readonly},
+		{Line: 7, Text: "f", Type: lsp.Function, Mod: lsp.Definition},
+		{Line: 7, Text: "integer", Type: lsp.Type, Mod: lsp.DefaultLibrary},
+		{Line: 7, Text: "p", Type: lsp.Parameter, Mod: lsp.Declaration},
+		{Line: 7, Text: "integer", Type: lsp.Type, Mod: lsp.DefaultLibrary},
+		{Line: 7, Text: "q", Type: lsp.Parameter, Mod: lsp.Declaration},
+		{Line: 8, Text: "R", Type: lsp.Struct},
+		{Line: 8, Text: "r", Type: lsp.Variable, Mod: lsp.Declaration},
+		{Line: 9, Text: "integer", Type: lsp.Type, Mod: lsp.DefaultLibrary},
+		{Line: 9, Text: "t", Type: lsp.Variable, Mod: lsp.Declaration},
+		{Line: 9, Text: "present", Type: lsp.Function, Mod: lsp.DefaultLibrary},
+		{Line: 9, Text: "r", Type: lsp.Variable},
+		{Line: 9, Text: "B", Type: lsp.Struct},
+		{Line: 10, Text: "p", Type: lsp.Parameter},
+
+		{Line: 13, Text: "TestNewSyntaxSemTok_Module_1", Type: lsp.Namespace, Mod: lsp.Definition},
+		{Line: 15, Text: "B", Type: lsp.Struct, Mod: lsp.Definition},
+		{Line: 15, Text: "integer", Type: lsp.Type, Mod: lsp.DefaultLibrary},
+	}, actual)
+}

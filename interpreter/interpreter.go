@@ -200,6 +200,11 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return nil
 
 	case *syntax.CallStmt:
+		// `c.call(f(), d) catch(timeout) { ... } catch(stop) { ... }`,
+		// the test component call with its catch clauses (ETSI 21.3.10).
+		if n.Body == nil && len(n.Catches) > 0 {
+			return evalComponentCallCatches(n, env)
+		}
 		// `p.call(...) { ... }` is the blocking procedure-call form:
 		// queue the call, let any deferred PTC responder run, then
 		// schedule the response block like an alt. The call's signature
@@ -374,7 +379,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// call, then store redirect values only after complete
 		// execution (ETSI 21.3.10). If the called behaviour stops
 		// itself, value/verdict targets stay unchanged.
-		if len(n.Value) > 0 || len(n.Verdict) > 0 {
+		if len(n.Value) > 0 || n.Verdict != nil {
 			if call, ok := n.X.(*syntax.CallExpr); ok {
 				if sel, ok := call.Fun.(*syntax.SelectorExpr); ok {
 					if op, ok := sel.Sel.(*syntax.Ident); ok && op.String() == "call" {
@@ -385,12 +390,12 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 								if len(n.Value) > 0 {
 									storeReceiver(n.Value[0], res, env)
 								}
-								if len(n.Verdict) > 0 {
+								if n.Verdict != nil {
 									v := ref.GetVerdict()
 									if v == "" {
 										v = runtime.NoneVerdict
 									}
-									storeReceiver(n.Verdict[0], v, env)
+									storeReceiver(n.Verdict, v, env)
 								}
 							}
 						}
@@ -5438,19 +5443,7 @@ func evalBlockStmts(stmts []syntax.Stmt, env runtime.Scope) runtime.Object {
 				return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
 			}
 		}
-		// `c.call(f(), d) catch(timeout) { ... }` is parsed as three
-		// statements: the call, `catch(timeout)` and the block, which
-		// runs only when the call timed out (ETSI 21.3.10).
-		if ce := callWithCatchTimeout(stmts, i); ce != nil {
-			callCatchesTimeout.Store(ce, struct{}{})
-			result = eval(stmts[i], env)
-			i += 2
-			if result == callTimedOut {
-				result = eval(stmts[i], env)
-			}
-		} else {
-			result = eval(stmts[i], env)
-		}
+		result = eval(stmts[i], env)
 		if g, ok := result.(*runtime.Goto); ok {
 			if idx := findLabel(stmts, g.Label); idx >= 0 {
 				i = idx // loop's i++ resumes at the statement after the label
@@ -5691,9 +5684,7 @@ func collectWrittenNames(body *syntax.BlockStmt) map[string]bool {
 			for _, v := range x.Param {
 				mark(v)
 			}
-			for _, v := range x.Verdict {
-				mark(v)
-			}
+			mark(x.Verdict)
 			mark(x.Sender)
 			mark(x.Index)
 			mark(x.Timestamp)
@@ -5748,59 +5739,80 @@ func rootIdent(e syntax.Expr) string {
 	}
 }
 
-// callTimedOut is the result of a component call that timed out and has a
-// `catch(timeout)` clause.
-var callTimedOut runtime.Object = callTimeoutSignal{}
+// callTimedOut and callStopped are the results of a component call whose
+// behaviour did not complete, that timed out or whose component was
+// stopped or killed, when the call has the catch(timeout) or catch(stop)
+// clause for it (ETSI 21.3.10).
+var (
+	callTimedOut runtime.Object = callEndSignal("timeout")
+	callStopped  runtime.Object = callEndSignal("stop")
+)
 
-type callTimeoutSignal struct{}
+type callEndSignal string
 
-func (callTimeoutSignal) Inspect() string             { return "timeout" }
-func (callTimeoutSignal) Type() runtime.ObjectType    { return runtime.Undefined.Type() }
-func (callTimeoutSignal) Equal(o runtime.Object) bool { _, ok := o.(callTimeoutSignal); return ok }
+func (s callEndSignal) Inspect() string             { return string(s) }
+func (callEndSignal) Type() runtime.ObjectType      { return runtime.Undefined.Type() }
+func (s callEndSignal) Equal(o runtime.Object) bool { return o == runtime.Object(s) }
 
-// callCatchesTimeout holds the component calls followed by a
-// `catch(timeout)` clause.
-var callCatchesTimeout sync.Map // *syntax.CallExpr -> struct{}
+// callCatchesTimeout and callCatchesStop hold the component calls with a
+// catch(timeout), respectively catch(stop), clause.
+var callCatchesTimeout, callCatchesStop sync.Map // *syntax.CallExpr -> struct{}
 
-// callWithCatchTimeout returns the call of stmts[i] when it is
-// `c.call(f(), d)` followed by `catch(timeout)` and a block, else nil.
-func callWithCatchTimeout(stmts []syntax.Stmt, i int) *syntax.CallExpr {
-	if i+2 >= len(stmts) {
+// evalComponentCallCatches runs a test component call with catch clauses
+// (ETSI 21.3.10): the call, then the block of the clause for how it ended
+// incomplete, if any.
+func evalComponentCallCatches(n *syntax.CallStmt, env runtime.Scope) runtime.Object {
+	ce := componentCallOf(n.Stmt)
+	var onTimeout, onStop *syntax.BlockStmt
+	for _, c := range n.Catches {
+		if c == nil || c.Arg == nil || len(c.Arg.List) != 1 {
+			continue
+		}
+		switch syntax.Name(c.Arg.List[0]) {
+		case "timeout":
+			onTimeout = c.Body
+			if ce != nil {
+				callCatchesTimeout.Store(ce, struct{}{})
+			}
+		case "stop":
+			onStop = c.Body
+			if ce != nil {
+				callCatchesStop.Store(ce, struct{}{})
+			}
+		}
+	}
+	var body *syntax.BlockStmt
+	switch res := eval(n.Stmt, env); res {
+	case callTimedOut:
+		body = onTimeout
+	case callStopped:
+		body = onStop
+	default:
+		return res
+	}
+	if body == nil {
 		return nil
 	}
-	if _, ok := stmts[i+2].(*syntax.BlockStmt); !ok {
-		return nil
-	}
-	es, ok := stmts[i+1].(*syntax.ExprStmt)
+	return eval(body, env)
+}
+
+// componentCallOf is the `c.call(...)` of a component call statement,
+// under its redirect if it has one; nil for anything else.
+func componentCallOf(s syntax.Stmt) *syntax.CallExpr {
+	es, ok := s.(*syntax.ExprStmt)
 	if !ok {
 		return nil
 	}
-	c, ok := es.Expr.(*syntax.CallExpr)
-	if !ok || c.Args == nil || len(c.Args.List) != 1 {
-		return nil
-	}
-	if id, ok := c.Fun.(*syntax.Ident); !ok || id.String() != "catch" {
-		return nil
-	}
-	if id, ok := c.Args.List[0].(*syntax.Ident); !ok || id.String() != "timeout" {
-		return nil
-	}
-	cs, ok := stmts[i].(*syntax.ExprStmt)
-	if !ok {
-		return nil
-	}
-	x := cs.Expr
+	x := es.Expr
 	if r, ok := x.(*syntax.RedirectExpr); ok {
 		x = r.X
 	}
 	ce, ok := x.(*syntax.CallExpr)
-	if !ok || ce.Args == nil || len(ce.Args.List) < 2 {
+	if !ok {
 		return nil
 	}
-	if sel, ok := ce.Fun.(*syntax.SelectorExpr); ok {
-		if op, ok := sel.Sel.(*syntax.Ident); ok && op.String() == "call" {
-			return ce
-		}
+	if sel, ok := ce.Fun.(*syntax.SelectorExpr); ok && syntax.Name(sel.Sel) == "call" {
+		return ce
 	}
 	return nil
 }
@@ -10959,6 +10971,12 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 						stopped = true
 					}
 				}
+				// Stopped by another component during its last
+				// statement, the behaviour ends without saying so; its
+				// execution is incomplete all the same (ETSI 21.3.10).
+				if exit.Stopped() {
+					stopped = true
+				}
 				exec.ClearDefaultsOf(ref.ID)
 				endOutlivedTimers(exec, ref.ID)
 			}()
@@ -11071,6 +11089,11 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		}
 		if op == "call" && !stopped {
 			return result, true
+		}
+		if op == "call" && stopped {
+			if _, ok := callCatchesStop.Load(n); ok {
+				return callStopped, true
+			}
 		}
 		return runtime.Undefined, true
 	case "running":

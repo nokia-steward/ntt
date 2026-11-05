@@ -2,15 +2,12 @@
 // clause 21.3.10 "The call operation": the optional
 // `catch(timeout)` clause attached to a component `call`
 // may be present only when the call also supplies a timeout
-// value (the second positional argument).
+// value (the second positional argument), and a call whose
+// behaviour stops, or outlasts the call's timeout, needs the
+// catch clause for it.
 //
-// The parser does not fuse the `catch(...)` clause into the
-// `call` expression - they are two consecutive statements -
-// so the rule scans each BlockStmt for a `catch(timeout)`
-// statement whose immediately preceding statement is a
-// `<comp>.call(<fn>)` with fewer than two positional
-// arguments. The bare `<fn>` form lacks a timeout value and
-// therefore cannot be combined with a timeout catch.
+// A call with catch clauses is a CallStmt whose Catches hold them;
+// one without is a plain ExprStmt.
 package semantic
 
 import (
@@ -25,102 +22,78 @@ func (a *Analyzer) checkCallCatchTimeoutRules(mod *syntax.Module) []Diagnostic {
 	}
 	callees := collectComponentCallCallees(mod)
 	var diags []Diagnostic
+	inCallStmt := map[syntax.Stmt]bool{}
 	syntax.Inspect(mod, func(n syntax.Node) bool {
-		blk, ok := n.(*syntax.BlockStmt)
-		if !ok || blk == nil {
+		var stmt syntax.Stmt
+		var catches []*syntax.CatchClause
+		switch s := n.(type) {
+		case *syntax.CallStmt:
+			// A procedure call with its response block is no
+			// component call.
+			if s.Body != nil {
+				return true
+			}
+			stmt, catches = s.Stmt, s.Catches
+			inCallStmt[s.Stmt] = true
+		case *syntax.ExprStmt:
+			if inCallStmt[s] {
+				return true
+			}
+			stmt = s
+		default:
 			return true
 		}
-		for i := 0; i < len(blk.Stmts); i++ {
-			callExpr := componentCallStmtExpr(blk.Stmts[i])
-			if callExpr == nil {
-				continue
-			}
-			callee := componentCallTarget(callExpr)
-			if callee == "" {
-				continue
-			}
-			fn := callees[callee]
-			if fn == nil || fn.Body == nil {
-				continue
-			}
-			next := syntax.Stmt(nil)
-			if i+1 < len(blk.Stmts) {
-				next = blk.Stmts[i+1]
-			}
-			if bodyHasBareStop(fn.Body) && !isCatchKindStmt(next, "stop") {
-				diags = append(diags, Diagnostic{
-					Code:     "component-call-uncaught-stop",
-					Severity: SeverityError,
-					Message:  "component `call` whose behaviour stops incompletely requires `catch(stop)` (ETSI 21.3.10)",
-					Node:     blk.Stmts[i],
-					Span:     syntax.SpanOf(blk.Stmts[i]),
-				})
-			}
-			if callTimeout, ok := componentCallTimeout(callExpr); ok {
-				if bodyTimeout, ok := bodyBlockingTimeout(fn.Body); ok && bodyTimeout > callTimeout && !isCatchKindStmt(next, "timeout") {
-					diags = append(diags, Diagnostic{
-						Code:     "component-call-uncaught-timeout",
-						Severity: SeverityError,
-						Message:  "component `call` whose timeout expires before the behaviour completes requires `catch(timeout)` (ETSI 21.3.10)",
-						Node:     blk.Stmts[i],
-						Span:     syntax.SpanOf(blk.Stmts[i]),
-					})
-				}
-			}
+		callExpr := componentCallStmtExpr(stmt)
+		if callExpr == nil {
+			return true
 		}
-		for i := 1; i < len(blk.Stmts); i++ {
-			if !isCatchTimeoutStmt(blk.Stmts[i]) {
-				continue
-			}
-			callExpr := componentCallStmtExpr(blk.Stmts[i-1])
-			if callExpr == nil {
-				continue
-			}
-			argCount := 0
-			if callExpr.Args != nil {
-				argCount = len(callExpr.Args.List)
-			}
-			if argCount >= 2 {
-				continue
-			}
+		if catchClause(catches, "timeout") != nil && (callExpr.Args == nil || len(callExpr.Args.List) < 2) {
+			c := catchClause(catches, "timeout")
 			diags = append(diags, Diagnostic{
 				Code:     "call-catch-timeout-without-value",
 				Severity: SeverityError,
 				Message:  "`catch(timeout)` on a component `call` requires the call to declare a timeout value (second argument) (ETSI 21.3.10)",
-				Node:     blk.Stmts[i],
-				Span:     syntax.SpanOf(blk.Stmts[i]),
+				Node:     c,
+				Span:     syntax.SpanOf(c),
 			})
+		}
+		fn := callees[componentCallTarget(callExpr)]
+		if fn == nil || fn.Body == nil {
+			return true
+		}
+		if bodyHasBareStop(fn.Body) && catchClause(catches, "stop") == nil {
+			diags = append(diags, Diagnostic{
+				Code:     "component-call-uncaught-stop",
+				Severity: SeverityError,
+				Message:  "component `call` whose behaviour stops incompletely requires `catch(stop)` (ETSI 21.3.10)",
+				Node:     n,
+				Span:     syntax.SpanOf(n),
+			})
+		}
+		if callTimeout, ok := componentCallTimeout(callExpr); ok {
+			if bodyTimeout, ok := bodyBlockingTimeout(fn.Body); ok && bodyTimeout > callTimeout && catchClause(catches, "timeout") == nil {
+				diags = append(diags, Diagnostic{
+					Code:     "component-call-uncaught-timeout",
+					Severity: SeverityError,
+					Message:  "component `call` whose timeout expires before the behaviour completes requires `catch(timeout)` (ETSI 21.3.10)",
+					Node:     n,
+					Span:     syntax.SpanOf(n),
+				})
+			}
 		}
 		return true
 	})
 	return diags
 }
 
-// isCatchTimeoutStmt reports whether the statement is the bare
-// `catch(timeout)` form the parser emits as a standalone
-// ExprStmt right after the `call` it qualifies.
-func isCatchTimeoutStmt(stmt syntax.Stmt) bool {
-	return isCatchKindStmt(stmt, "timeout")
-}
-
-func isCatchKindStmt(stmt syntax.Stmt, kind string) bool {
-	es, ok := stmt.(*syntax.ExprStmt)
-	if !ok || es == nil {
-		return false
+// catchClause is the `catch(kind)` clause among catches, or nil.
+func catchClause(catches []*syntax.CatchClause, kind string) *syntax.CatchClause {
+	for _, c := range catches {
+		if c != nil && c.Arg != nil && len(c.Arg.List) == 1 && syntax.Name(c.Arg.List[0]) == kind {
+			return c
+		}
 	}
-	ce, ok := es.Expr.(*syntax.CallExpr)
-	if !ok || ce == nil {
-		return false
-	}
-	id, ok := ce.Fun.(*syntax.Ident)
-	if !ok || id == nil || id.String() != "catch" {
-		return false
-	}
-	if ce.Args == nil || len(ce.Args.List) == 0 {
-		return false
-	}
-	arg, ok := ce.Args.List[0].(*syntax.Ident)
-	return ok && arg != nil && arg.String() == kind
+	return nil
 }
 
 // componentCallStmtExpr returns the `<comp>.call(...)` CallExpr

@@ -57,6 +57,9 @@ str
 			`STRING "\"\nmultiline\nstr\n\""`,
 			`EOF`,
 		}},
+		{"???", []string{`???`, `EOF`}},
+		{"?? ?", []string{`?`, `?`, `?`, `EOF`}},
+		{"x...", []string{`IDENT "x"`, `...`, `EOF`}},
 	}
 	for _, test := range tests {
 		root := Tokenize([]byte(test.input))

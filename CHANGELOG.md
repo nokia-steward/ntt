@@ -362,6 +362,12 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **A component call's `catch(stop)` block runs when the called
+  behaviour was stopped or killed, and only then** (21.3.10); it ran
+  after every call, and a stop during the behaviour's last statement
+  counted as completion, writing back its inout arguments. The call and
+  its catch clauses are now one statement, as master's parser reads
+  them.
 - **`checkstate` answers what the port is** (22.5.5). It takes exactly
   "Started", "Halted", "Stopped", "Connected", "Mapped" and "Linked";
   "Linked" was always true and is now connected or mapped. Any other
