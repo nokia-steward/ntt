@@ -381,10 +381,10 @@ func tlTimerEvent(exec *runtime.TestcaseExec, n syntax.Node, th *runtime.TimerHa
 // evaluated, so the component it creates is logged as alive.
 var aliveCreateCtx altContext
 
-// createComponent creates a PTC for a create operation and logs it
-// (tliCCreate).
-func createComponent(typeName, name string, n syntax.Node, env runtime.Scope) *runtime.ComponentRef {
-	ref := newComponentRef(typeName, name, env)
+// createComponent creates a PTC of the type typeName that module
+// declares for a create operation and logs it (tliCCreate).
+func createComponent(typeName, module, name string, n syntax.Node, env runtime.Scope) *runtime.ComponentRef {
+	ref := newComponentRef(typeName, module, name, env)
 	if exec := tlExec(env); exec != nil {
 		tlEmit(exec, n, "tliCCreate",
 			tlArg("comp", exec.TLComponent(ref).Content()),

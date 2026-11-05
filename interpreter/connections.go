@@ -291,79 +291,97 @@ func isPortMapForm(e syntax.Expr) bool {
 	return ok
 }
 
-// evalPortCheckstate implements `p.checkstate(state)` (ETSI 21.1.3)
-// against the real connection/mapping graph. The affirmative states
-// ("Connected", "Mapped") answer from the running component's endpoint;
-// the matching negative states are their complement. "Started" and
-// other port-lifecycle states keep the optimistic loopback answer.
+// evalPortCheckstate implements `p.checkstate(state)`, `any
+// port.checkstate(state)` and `all port.checkstate(state)` (ETSI
+// 22.5.5) against the running component's ports. The state is one of
+// six charstrings, compared exactly; any other value is an error.
 func evalPortCheckstate(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
-	if n.Args == nil || len(n.Args.List) == 0 {
-		return runtime.NewBool(false)
+	if n.Args == nil || len(n.Args.List) != 1 {
+		return runtime.Errorf("checkstate takes one argument, the state (ETSI 22.5.5)")
 	}
 	v := eval(n.Args.List[0], env)
 	if runtime.IsError(v) {
 		return v
 	}
 	s, ok := v.(*runtime.String)
-	if !ok {
-		return runtime.NewBool(false)
+	if !ok || !isCheckstateState(s.String()) {
+		return runtime.Errorf("checkstate: invalid state %s, want one of Started, Halted, Stopped, Connected, Mapped, Linked (ETSI 22.5.5)", v.Inspect())
 	}
-	state := strings.ToLower(s.String())
-
-	port := ""
-	if sel, ok := n.Fun.(*syntax.SelectorExpr); ok {
-		if pn, _ := resolvePortName(sel.X, env); pn != "" {
-			port = pn
-		} else {
-			port = portRefName(sel.X)
-		}
-	}
+	state := s.String()
 	exec := runtime.FindTestcaseExec(env)
+
+	sel, _ := n.Fun.(*syntax.SelectorExpr)
+	if sel == nil {
+		return runtime.NewBool(portInState(exec, "", state))
+	}
+	// any port: at least one of the component's ports is in the state;
+	// all port: every one is.
+	switch target := syntax.Name(sel.X); target {
+	case "any port", "all port":
+		all := target == "all port"
+		for _, port := range currentComponentPorts(env) {
+			if portInState(exec, port, state) != all {
+				return runtime.NewBool(!all)
+			}
+		}
+		return runtime.NewBool(all)
+	}
+	port, _ := resolvePortName(sel.X, env)
+	if port == "" {
+		port = portRefName(sel.X)
+	}
+	return runtime.NewBool(portInState(exec, port, state))
+}
+
+// currentComponentPorts are the names of the running component's ports,
+// declared by its type or inherited.
+func currentComponentPorts(env runtime.Scope) []string {
+	exec := runtime.FindTestcaseExec(env)
+	if exec == nil {
+		return nil
+	}
+	comp := exec.CurrentComponent()
+	if comp == nil {
+		return nil
+	}
+	return componentPortNames(runtime.RootScope(env), comp.Module, comp.TypeName)
+}
+
+// isCheckstateState reports whether s is a state checkstate takes
+// (ETSI 22.5.5 a).
+func isCheckstateState(s string) bool {
+	switch s {
+	case "Started", "Halted", "Stopped", "Connected", "Mapped", "Linked":
+		return true
+	}
+	return false
+}
+
+// portInState reports whether the running component's port is in
+// state. Started, Stopped and Halted are the port's operational state
+// (ETSI F.3): a port no lifecycle operation touched is started.
+// Connected and Mapped follow connect/disconnect and map/unmap (21.1),
+// and Linked is either.
+func portInState(exec *runtime.TestcaseExec, port, state string) bool {
+	known := exec != nil && port != ""
 	ep := runtime.PortEndpoint{Comp: currentComponentID(exec), Port: port}
-
-	// Explicit p.start / p.stop / p.halt state (ETSI 22.1). A port
-	// never touched by a lifecycle op keeps the optimistic default
-	// (started, not stopped, not halted).
-	lifecycle := "started"
-	if exec != nil && port != "" {
-		if s, ok := exec.PortLifecycle(ep); ok {
-			lifecycle = s
-		}
-	}
-
 	switch state {
-	case "connected":
-		if exec != nil && port != "" {
-			return runtime.NewBool(exec.IsConnected(ep))
+	case "Started", "Stopped", "Halted":
+		lifecycle := "started"
+		if known {
+			if s, ok := exec.PortLifecycle(ep); ok {
+				lifecycle = s
+			}
 		}
-		return runtime.NewBool(false)
-	case "unconnected":
-		if exec != nil && port != "" {
-			return runtime.NewBool(!exec.IsConnected(ep))
-		}
-		return runtime.NewBool(true)
-	case "mapped":
-		if exec != nil && port != "" {
-			return runtime.NewBool(exec.IsMapped(ep))
-		}
-		return runtime.NewBool(false)
-	case "unmapped":
-		if exec != nil && port != "" {
-			return runtime.NewBool(!exec.IsMapped(ep))
-		}
-		return runtime.NewBool(true)
-	case "started":
-		return runtime.NewBool(lifecycle == "started")
-	case "stopped":
-		return runtime.NewBool(lifecycle == "stopped")
-	case "halted":
-		return runtime.NewBool(lifecycle == "halted")
-	case "linked":
-		return runtime.NewBool(true)
-	case "unstarted", "unlinked":
-		return runtime.NewBool(lifecycle != "started")
+		return lifecycle == strings.ToLower(state)
+	case "Connected":
+		return known && exec.IsConnected(ep)
+	case "Mapped":
+		return known && exec.IsMapped(ep)
+	case "Linked":
+		return known && (exec.IsConnected(ep) || exec.IsMapped(ep))
 	}
-	return runtime.NewBool(false)
+	return false
 }
 
 // isPortLifecycleOp reports whether op is one of the no-argument port

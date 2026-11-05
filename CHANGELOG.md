@@ -362,6 +362,24 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **`checkstate` answers what the port is** (22.5.5). It takes exactly
+  "Started", "Halted", "Stopped", "Connected", "Mapped" and "Linked";
+  "Linked" was always true and is now connected or mapped. Any other
+  value is an error when the operation runs; states the standard
+  doesn't define ("Unconnected", "started") used to answer. `ntt check`
+  rejects a literal argument that isn't one of the six
+  (`checkstate-invalid-state`) and a receiver it can tell isn't a port.
+  `any port.checkstate` and `all port.checkstate` ask each of the
+  component's ports, inherited ones and each element of a port array
+  included; `any port` answered nothing and `all port` asked no port.
+  `all port.stop`, `.start`, `.halt` and `.clear` reach each of those
+  ports too (22.6); the first three changed none.
+- **A component created of another module's type is of that type.**
+  `B.C.create` in a module A that declares a `C` of its own made a
+  component whose ports and variables were looked up as A's `C`; the
+  component type now records the module declaring it. A component of a
+  component type synonym (`type C CS`, 6.4) has the variables and ports
+  of the type the synonym names; it had none.
 - **`ntt check` says where.** Each error and warning is one line, its
   span then its code and message (`src/A.ttcn3:8:5-8:11: const-reassign:
   ...`; a syntax error has no code), in the `-v` listing and in the JSON

@@ -491,7 +491,7 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 	if tcNode != nil && tcNode.RunsOn != nil && tcNode.RunsOn.Comp != nil {
 		mtcTypeName = syntax.Name(tcNode.RunsOn.Comp)
 	}
-	mtcRef := newComponentRef(mtcTypeName, "", tcEnv)
+	mtcRef := newComponentRef(mtcTypeName, "", "", tcEnv)
 	exec.SetMTCID(mtcRef.ID)
 	// Engage the cooperative scheduler now that the MTC id is known (it is
 	// the root participant that holds the token first).
@@ -1444,7 +1444,11 @@ func bindDeclNameScoped(env runtime.Scope, n syntax.Node, scopes []*syntax.WithS
 		bindDeclNameScoped(env, d.Def, scopes)
 	case *syntax.ComponentTypeDecl:
 		if d.Name != nil {
-			env.Set(syntax.Name(d.Name), typeDescForScoped(syntax.Name(d.Name), d.With, scopes))
+			// The module declaring it, where a component created of it
+			// resolves its type (newComponentRef).
+			td := typeDescForScoped(syntax.Name(d.Name), d.With, scopes)
+			td.Home = env
+			env.Set(syntax.Name(d.Name), td)
 		}
 		if d.Body != nil {
 			bindComponentMembers(env, d.Body)
@@ -4596,20 +4600,7 @@ func bindComponentType(env runtime.Scope, moduleName, compTypeName string) {
 	root := runtime.RootScope(env)
 	var bind func(module, name string, seen map[*syntax.BlockStmt]bool)
 	bind = func(module, name string, seen map[*syntax.BlockStmt]bool) {
-		// The run's own record of the type; else, for a type bound
-		// some other way, the registry.
-		var body *syntax.BlockStmt
-		var parents typeParents
-		declaring := module
-		if c, ok := lookupComponentType(root, module, name); ok {
-			body, parents = c.body, typeParents{module: c.module, names: c.extends}
-			declaring = c.module
-		} else {
-			body = componentTypeBody(module, name)
-			componentTypeBodiesMu.RLock()
-			parents = componentTypeParents[body]
-			componentTypeBodiesMu.RUnlock()
-		}
+		body, parents, declaring := resolveComponentType(root, module, name)
 		if body == nil || seen[body] {
 			return
 		}
@@ -4631,26 +4622,125 @@ func bindComponentType(env runtime.Scope, moduleName, compTypeName string) {
 	bind(moduleName, compTypeName, map[*syntax.BlockStmt]bool{})
 }
 
+// resolveComponentType finds the declaration of the component type name
+// as module sees it: its body, the types it extends and the module
+// declaring it. A synonym (`type C CS`, ETSI 6.4) is followed to the type
+// it names. A nil body means none was found.
+func resolveComponentType(root runtime.Scope, module, name string) (*syntax.BlockStmt, typeParents, string) {
+	for range 8 {
+		if c, ok := lookupComponentType(root, module, name); ok {
+			return c.body, typeParents{module: c.module, names: c.extends}, c.module
+		}
+		if body := componentTypeBody(module, name); body != nil {
+			componentTypeBodiesMu.RLock()
+			parents := componentTypeParents[body]
+			componentTypeBodiesMu.RUnlock()
+			return body, parents, module
+		}
+		td := lookupTypeDesc(name, moduleScopeOf(root, module))
+		if td == nil || td.Underlying == "" {
+			break
+		}
+		if m := typeModule(td); m != "" {
+			module = m
+		}
+		name = td.Underlying
+		if i := strings.LastIndexByte(name, '.'); i >= 0 {
+			module, name = name[:i], name[i+1:]
+		}
+	}
+	return nil, typeParents{}, module
+}
+
 // componentPortType is the type of the port named port of a component of
 // type compTypeName, as moduleName sees it: of its own ports or those it
 // inherits, resolved where the component type declaring it is.
 func componentPortType(root runtime.Scope, moduleName, compTypeName, port string) *runtime.TypeDesc {
-	var find func(module, name string, seen map[*syntax.BlockStmt]bool) *runtime.TypeDesc
-	find = func(module, name string, seen map[*syntax.BlockStmt]bool) *runtime.TypeDesc {
-		var body *syntax.BlockStmt
-		var parents typeParents
-		declaring := module
-		if c, ok := lookupComponentType(root, module, name); ok {
-			body, parents = c.body, typeParents{module: c.module, names: c.extends}
-			declaring = c.module
-		} else {
-			body = componentTypeBody(module, name)
-			componentTypeBodiesMu.RLock()
-			parents = componentTypeParents[body]
-			componentTypeBodiesMu.RUnlock()
+	var td *runtime.TypeDesc
+	eachComponentPortDecl(root, moduleName, compTypeName, func(vd *syntax.ValueDecl, declaring string) bool {
+		for _, d := range vd.Decls {
+			if d != nil && d.Name != nil && d.Name.String() == port {
+				td = lookupTypeDesc(syntax.Name(vd.Type), moduleScopeOf(root, declaring))
+				return false
+			}
 		}
+		return true
+	})
+	return td
+}
+
+// componentPortNames are the instance names of the ports a component of
+// type compTypeName has, as moduleName sees it: its own, then those it
+// inherits, a port array's as one name per element.
+func componentPortNames(root runtime.Scope, moduleName, compTypeName string) []string {
+	var names []string
+	eachComponentPortDecl(root, moduleName, compTypeName, func(vd *syntax.ValueDecl, declaring string) bool {
+		for _, d := range vd.Decls {
+			if d != nil && d.Name != nil {
+				names = append(names, portElementNames(d.Name.String(), d.ArrayDef, moduleScopeOf(root, declaring))...)
+			}
+		}
+		return true
+	})
+	return names
+}
+
+// portElementNames are the instance names of a port declared as name
+// with the array dimensions dims, written as portExprName writes them
+// (`p[0][1]`): each dimension indexed from its lower bound, `[N]` from 0
+// (ETSI 6.2.7). A dimension that doesn't evaluate, or an array of more
+// than maxPortElements elements, leaves the bare name.
+func portElementNames(name string, dims []*syntax.ParenExpr, scope runtime.Scope) []string {
+	names := []string{name}
+	for _, d := range dims {
+		lo, hi, ok := arrayDimBounds(d, scope)
+		if !ok || hi-lo < 0 || hi-lo >= maxPortElements || int64(len(names))*(hi-lo+1) > maxPortElements {
+			return []string{name}
+		}
+		next := make([]string, 0, len(names)*int(hi-lo+1))
+		for _, n := range names {
+			for i := lo; i <= hi; i++ {
+				next = append(next, fmt.Sprintf("%s[%d]", n, i))
+			}
+		}
+		names = next
+	}
+	return names
+}
+
+// maxPortElements bounds the port array elements any port and all port
+// enumerate, each operation anew.
+const maxPortElements = 1 << 16
+
+// arrayDimBounds are the first and last index of an array dimension:
+// 0 and N-1 for `[N]`, lo and hi for `[lo..hi]`.
+func arrayDimBounds(d *syntax.ParenExpr, scope runtime.Scope) (lo, hi int64, ok bool) {
+	if d == nil || len(d.List) != 1 {
+		return 0, 0, false
+	}
+	switch v := eval(d.List[0], scope).(type) {
+	case runtime.Int:
+		return 0, v.Int64() - 1, v.Int64() > 0
+	case *runtime.Range:
+		l, lok := v.Lower.(runtime.Int)
+		h, hok := v.Upper.(runtime.Int)
+		if lok && hok && l.Int64() <= h.Int64() {
+			return l.Int64(), h.Int64(), true
+		}
+	}
+	return 0, 0, false
+}
+
+// eachComponentPortDecl calls fn with each port declaration of a
+// component of type compTypeName, as moduleName sees it, and the module
+// declaring it: the type's own first, then those of the types it
+// extends. It stops when fn returns false.
+func eachComponentPortDecl(root runtime.Scope, moduleName, compTypeName string, fn func(vd *syntax.ValueDecl, declaring string) bool) {
+	var walk func(module, name string, seen map[*syntax.BlockStmt]bool) bool
+	walk = func(module, name string, seen map[*syntax.BlockStmt]bool) bool {
+		body, parents, declaring := resolveComponentType(root, module, name)
 		if body == nil || seen[body] {
-			return nil
+			return true
 		}
 		seen[body] = true
 		for _, stmt := range body.Stmts {
@@ -4662,20 +4752,18 @@ func componentPortType(root runtime.Scope, moduleName, compTypeName, port string
 			if !ok || vd.KindTok == nil || vd.KindTok.Kind() != syntax.PORT {
 				continue
 			}
-			for _, d := range vd.Decls {
-				if d != nil && d.Name != nil && d.Name.String() == port {
-					return lookupTypeDesc(syntax.Name(vd.Type), moduleScopeOf(root, declaring))
-				}
+			if !fn(vd, declaring) {
+				return false
 			}
 		}
 		for _, p := range parents.names {
-			if td := find(parents.module, p, seen); td != nil {
-				return td
+			if !walk(parents.module, p, seen) {
+				return false
 			}
 		}
-		return nil
+		return true
 	}
-	return find(moduleName, compTypeName, map[*syntax.BlockStmt]bool{})
+	walk(moduleName, compTypeName, map[*syntax.BlockStmt]bool{})
 }
 
 func componentTypeBody(moduleName, compTypeName string) *syntax.BlockStmt {
@@ -4703,6 +4791,15 @@ func moduleEdition(env runtime.Scope) syntax.Edition {
 		}
 	}
 	return (*syntax.Module)(nil).Edition()
+}
+
+// typeModule is the name of the module declaring td, or "" when td
+// doesn't record where it was declared.
+func typeModule(td *runtime.TypeDesc) string {
+	if td == nil || td.Home == nil {
+		return ""
+	}
+	return moduleNameFromEnv(td.Home)
 }
 
 func moduleNameFromEnv(env runtime.Scope) string {

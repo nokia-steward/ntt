@@ -27,12 +27,13 @@ var portOpsBuiltin = map[string]bool{
 	"getcall":  true,
 	"getreply": true,
 	"raise":    true,
-	// `call`, `check`, `catch`, `clear`, `halt`, `checkstate` are
-	// intentionally NOT flagged here. `call` collides with the
-	// 21.3.10 test-component-call operation; the others
-	// regress at least one positive Sem test in the suite when
-	// the receiver is a component reference rather than a bare
-	// port.
+	// checkstate's object reference shall be a port (22.5.5 c).
+	"checkstate": true,
+	// `call`, `check`, `catch`, `clear`, `halt` are intentionally NOT
+	// flagged here. `call` collides with the 21.3.10
+	// test-component-call operation; the others regress at least one
+	// positive Sem test in the suite when the receiver is a component
+	// reference rather than a bare port.
 }
 
 func (a *Analyzer) checkPortOpReceivers(mod *syntax.Module) []Diagnostic {

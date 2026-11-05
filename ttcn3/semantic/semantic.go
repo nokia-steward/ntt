@@ -144,6 +144,7 @@ func (a *Analyzer) Analyze(tree *ttcn3.Tree) []Diagnostic {
 		out = append(out, a.checkSelectStmtRules(mod)...)
 		out = append(out, a.checkCallOperationRules(mod)...)
 		out = append(out, a.checkPortOpReceivers(mod)...)
+		out = append(out, a.checkCheckstateArgs(mod)...)
 		out = append(out, a.checkModuleparKinds(mod)...)
 		out = append(out, a.checkRaiseOperationRules(mod)...)
 		out = append(out, a.checkFunctionSpecRules(mod)...)

@@ -605,7 +605,15 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		if op, ok := n.Sel.(*syntax.Ident); ok && op.String() == "clear" {
 			if syntax.Name(n.X) == "all port" {
 				if exec := runtime.FindTestcaseExec(env); exec != nil {
-					for _, pname := range exec.CurrentComponentPortNames() {
+					// The declared ports, and any other queue the
+					// component has.
+					ports := currentComponentPorts(env)
+					for _, q := range exec.CurrentComponentPortNames() {
+						if !slices.Contains(ports, q) {
+							ports = append(ports, q)
+						}
+					}
+					for _, pname := range ports {
 						clearPort(exec, n, pname)
 					}
 				}
@@ -625,6 +633,14 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// (`t.stop`) ops that share the selector, and follows a port
 		// passed as a parameter to its originating instance.
 		if op, ok := n.Sel.(*syntax.Ident); ok && isPortLifecycleOp(op.String()) {
+			// `all port.stop` applies to each of the component's ports
+			// (ETSI 22.6).
+			if syntax.Name(n.X) == "all port" {
+				for _, pname := range currentComponentPorts(env) {
+					applyPortLifecycle(n, op.String(), pname, env)
+				}
+				return runtime.Undefined
+			}
 			if pname, isPort := resolvePortName(n.X, env); isPort {
 				applyPortLifecycle(n, op.String(), pname, env)
 				return runtime.Undefined
@@ -859,7 +875,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				}
 				return compStateNotAValue(op)
 			case "create":
-				return createComponent(ref.TypeName, "", n, env)
+				return createComponent(ref.TypeName, ref.Module, "", n, env)
 			case "stop", "kill":
 				op := strings.ToLower(syntax.Name(n.Sel))
 				if ref != nil {
@@ -932,7 +948,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			// MyComp.create` produces a value `from <ref>` /
 			// `-> sender v` operations can match against.
 			if name == "create" {
-				return createComponent(td.Name, "", n, env)
+				return createComponent(td.Name, typeModule(td), "", n, env)
 			}
 			if isAnnexEAttr(name) {
 				if vals, ok := td.Lookup(name); ok {
@@ -1598,7 +1614,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 									}
 								}
 							}
-							return createComponent(td.Name, name, n, env)
+							return createComponent(td.Name, typeModule(td), name, n, env)
 						}
 						if ref, ok := recv.(*runtime.ComponentRef); ok {
 							if res, handled := evalComponentMethod(ref, op.String(), n, env); handled {
@@ -1636,6 +1652,11 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				// an IndexExpr); resolve both to the instance name
 				// that keys the message queue (TTCN-3 22.1).
 				if name, haveName := commPortName(sel.X, env); haveName {
+					// `p.checkstate(state)`, also on any port and
+					// all port, queries the port's state.
+					if op.String() == "checkstate" {
+						return evalPortCheckstate(n, env)
+					}
 					// `any port.receive(...)` (and friends)
 					// fan out across every known port queue
 					// and pick the first match. The lexer
@@ -1649,18 +1670,6 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 							}
 						}
 						return res
-					}
-					// `p.checkstate("Started"|"Connected"|...)`
-					// queries the port's state. The loopback
-					// model treats every port as always
-					// connected, mapped and started, so we
-					// return true for the affirmative states
-					// and false for the negative ones. This
-					// mirrors what 21_configuration_operations
-					// tests expect after a `connect` /
-					// `map`/`start` succeeded.
-					if op.String() == "checkstate" {
-						return evalPortCheckstate(n, env)
 					}
 					switch op.String() {
 					case "send":
@@ -10001,8 +10010,14 @@ func waitForNoTimer(env runtime.Scope) runtime.Object {
 // (e.g. evaluating a module-level constant) we still hand back a
 // ref with id 0; callers that compare refs always go through
 // (*ComponentRef).Equal which keys on id.
-func newComponentRef(typeName, name string, env runtime.Scope) *runtime.ComponentRef {
-	ref := &runtime.ComponentRef{TypeName: typeName, Module: moduleNameFromEnv(env), Name: name}
+//
+// module is the module declaring the type, in which typeName resolves;
+// empty, the module env runs in.
+func newComponentRef(typeName, module, name string, env runtime.Scope) *runtime.ComponentRef {
+	if module == "" {
+		module = moduleNameFromEnv(env)
+	}
+	ref := &runtime.ComponentRef{TypeName: typeName, Module: module, Name: name}
 	ref.SetAlive(true)
 	if exec := runtime.FindTestcaseExec(env); exec != nil {
 		ref.ID = exec.NewComponentID()
@@ -11120,7 +11135,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				}
 			}
 		}
-		return createComponent(ref.TypeName, name, n, env), true
+		return createComponent(ref.TypeName, ref.Module, name, n, env), true
 	}
 	return nil, false
 }
@@ -11387,15 +11402,6 @@ func nodeLine(n syntax.Node) (int, bool) {
 	return 0, false
 }
 
-// evalPortCheckstate implements `p.checkstate(state)` per
-// TTCN-3 21.1.3. The loopback model has no real port state machine
-// but the conformance suite typically only queries the affirmative
-// states ("Started", "Connected", "Mapped", "Linked", "Halted") to
-// guard `setverdict(pass)` paths after a successful connect / map /
-// start. We answer true for those, false for any negative state
-// ("Unstarted", "Unconnected", "Unmapped", "Unlinked"). Unknown or
-// missing-argument forms return false so the caller's else-branch
-// still runs.
 // evalAnyPortOp drives `any port.<op>(...)` calls by trying the op
 // against each known port in turn. The first port that produces a
 // non-Undefined result wins; if none matches we return Undefined so
