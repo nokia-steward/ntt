@@ -116,6 +116,11 @@ type TestcaseExec struct {
 	// testcase itself echoing values back to itself.
 	ports map[string][]PortMessage
 
+	// portControl is the state a port controlling operation (ETSI
+	// 22.5.2-22.5.4, F.3.2) left a queue in, keyed as ports is. A queue
+	// with no entry is started.
+	portControl map[string]portControl
+
 	// altFreeze enforces the ETSI ES 201 873-1 §20.2 alt SNAPSHOT boundary
 	// on the real-clock concurrent path. Keyed by the alt-executing
 	// goroutine's id, it records each port's queue length captured at the
@@ -199,12 +204,6 @@ type TestcaseExec struct {
 	connections map[PortEndpoint]map[PortEndpoint]bool
 	mapEdges    map[PortEndpoint]map[PortEndpoint]bool
 
-	// portLifecycle records the explicit operational state of a port
-	// endpoint set by `p.start` / `p.stop` / `p.halt` (ETSI 22.1).
-	// A missing entry means the default "started" state, so a port
-	// never touched by a lifecycle op keeps the optimistic
-	// always-started checkstate answer.
-	portLifecycle map[PortEndpoint]string
 
 	// virtualClock is a monotonic per-testcase virtual time (in
 	// seconds). It starts at 0 and is advanced by `T.timeout` to the
@@ -1056,7 +1055,7 @@ func (t *TestcaseExec) PeekMessageFullLimited(port string, limit int) (PortMessa
 	// message receive only ever observes message-kind entries, so a
 	// queued procedure call can never be consumed by `.receive`.
 	q := t.ports[port]
-	if limit >= 0 && limit < len(q) {
+	if limit = t.visibleLocked(port, limit); limit >= 0 && limit < len(q) {
 		q = q[:limit]
 	}
 	for _, m := range q {
@@ -1075,7 +1074,7 @@ func (t *TestcaseExec) PeekHeadLimited(port string, limit int) (PortMessage, boo
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	q := t.ports[port]
-	if len(q) == 0 || limit == 0 {
+	if len(q) == 0 || t.visibleLocked(port, limit) == 0 {
 		return PortMessage{}, false
 	}
 	return q[0], true
@@ -1351,26 +1350,104 @@ func (t *TestcaseExec) PortKeyFor(compID int64, name string) string {
 	return portQualPrefix + strconv.FormatInt(compID, 10) + "/" + name
 }
 
-// SetPortLifecycle records the operational state ("started", "stopped"
-// or "halted") of a port endpoint set by p.start / p.stop / p.halt
-// (ETSI 22.1).
-func (t *TestcaseExec) SetPortLifecycle(a PortEndpoint, state string) {
-	t.connMu.Lock()
-	defer t.connMu.Unlock()
-	if t.portLifecycle == nil {
-		t.portLifecycle = map[PortEndpoint]string{}
-	}
-	t.portLifecycle[a] = state
+// PortState is the state of a port as its controlling operations leave
+// it (ETSI 22.5.2-22.5.4, F.3.2).
+type PortState uint8
+
+const (
+	PortStarted PortState = iota
+	PortStopped
+	PortHalted
+)
+
+// portControl is a stopped or halted queue. A halted queue's ahead
+// entries are those queued before its halt marker.
+type portControl struct {
+	state PortState
+	ahead int
 }
 
-// PortLifecycle returns the explicitly recorded operational state of a
-// port endpoint and whether one was set. A missing entry means the
-// default started state.
-func (t *TestcaseExec) PortLifecycle(a PortEndpoint) (string, bool) {
-	t.connMu.Lock()
-	defer t.connMu.Unlock()
-	s, ok := t.portLifecycle[a]
-	return s, ok
+// StartPort starts a port (ETSI 22.5.2): its queue is cleared, and the
+// halt marker of a halted port removed.
+func (t *TestcaseExec) StartPort(port string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	if _, ok := t.ports[port]; ok {
+		t.ports[port] = nil
+	}
+	delete(t.portControl, port)
+}
+
+// StopPort stops a port (ETSI 22.5.3): receiving operations no longer
+// match at it, its queue is kept. Stopping a halted port removes the
+// halt marker.
+func (t *TestcaseExec) StopPort(port string) {
+	t.setPortControl(port, portControl{state: PortStopped})
+}
+
+// HaltPort halts a port (ETSI 22.5.4): the halt marker is put after the
+// entries queued so far, which receiving operations still match. A
+// stopped port gets the marker at the top of its queue; halting a
+// halted port does nothing.
+func (t *TestcaseExec) HaltPort(port string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	switch t.portControl[port].state {
+	case PortStarted:
+		t.setPortControlLocked(port, portControl{state: PortHalted, ahead: len(t.ports[port])})
+	case PortStopped:
+		t.setPortControlLocked(port, portControl{state: PortHalted})
+	}
+}
+
+func (t *TestcaseExec) setPortControl(port string, c portControl) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.setPortControlLocked(port, c)
+}
+
+func (t *TestcaseExec) setPortControlLocked(port string, c portControl) {
+	if t.portControl == nil {
+		t.portControl = map[string]portControl{}
+	}
+	t.portControl[port] = c
+}
+
+// PortStateOf returns the state the port controlling operations left
+// the port in.
+func (t *TestcaseExec) PortStateOf(port string) PortState {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	return t.portControl[port].state
+}
+
+// visibleLocked narrows limit, the number of queued entries a receiving
+// operation considers (limit < 0: all), to those the port's state lets
+// it match (ETSI F.3.3): none at a stopped port, those ahead of the halt
+// marker at a halted one.
+func (t *TestcaseExec) visibleLocked(port string, limit int) int {
+	c, ok := t.portControl[port]
+	if !ok {
+		return limit
+	}
+	n := 0
+	if c.state == PortHalted {
+		n = c.ahead
+	}
+	if limit < 0 || limit > n {
+		return n
+	}
+	return limit
+}
+
+// removeLocked removes the queued entry at index i.
+func (t *TestcaseExec) removeLocked(port string, i int) {
+	q := t.ports[port]
+	t.ports[port] = append(q[:i], q[i+1:]...)
+	if c, ok := t.portControl[port]; ok && c.state == PortHalted && i < c.ahead {
+		c.ahead--
+		t.portControl[port] = c
+	}
 }
 
 // VirtualClock returns the current per-testcase virtual time (seconds).
@@ -1582,13 +1659,13 @@ func (t *TestcaseExec) DequeueMessageFullLimited(port string, limit int) (PortMe
 	defer t.mu.Unlock()
 	q := t.ports[port]
 	hi := len(q)
-	if limit >= 0 && limit < hi {
+	if limit = t.visibleLocked(port, limit); limit >= 0 && limit < hi {
 		hi = limit
 	}
 	for i := 0; i < hi; i++ {
 		if q[i].Kind == MsgMessage {
 			m := q[i]
-			t.ports[port] = append(q[:i], q[i+1:]...)
+			t.removeLocked(port, i)
 			return m, true
 		}
 	}
@@ -1621,6 +1698,11 @@ func (t *TestcaseExec) ClearPort(port string) {
 	// lists.
 	if _, ok := t.ports[port]; ok {
 		t.ports[port] = nil
+	}
+	// A halted port's marker is now at the top of its queue (F.3.2).
+	if c, ok := t.portControl[port]; ok && c.state == PortHalted {
+		c.ahead = 0
+		t.portControl[port] = c
 	}
 	t.mu.Unlock()
 }
@@ -1751,7 +1833,7 @@ func (t *TestcaseExec) PeekKindLimited(port string, kind PortMsgKind, limit int)
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	q := t.ports[port]
-	if limit >= 0 && limit < len(q) {
+	if limit = t.visibleLocked(port, limit); limit >= 0 && limit < len(q) {
 		q = q[:limit]
 	}
 	for _, m := range q {
@@ -1776,13 +1858,13 @@ func (t *TestcaseExec) DequeueKindLimited(port string, kind PortMsgKind, limit i
 	defer t.mu.Unlock()
 	q := t.ports[port]
 	hi := len(q)
-	if limit >= 0 && limit < hi {
+	if limit = t.visibleLocked(port, limit); limit >= 0 && limit < hi {
 		hi = limit
 	}
 	for i := 0; i < hi; i++ {
 		if q[i].Kind == kind {
 			m := q[i]
-			t.ports[port] = append(q[:i], q[i+1:]...)
+			t.removeLocked(port, i)
 			return m, true
 		}
 	}

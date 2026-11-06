@@ -1272,11 +1272,10 @@ func tlDoneKilledMismatch(env runtime.Scope, n syntax.Node, op string, ref *runt
 // PortStatusType names it; a port no operation has stopped or halted is
 // started.
 func tlPortStatus(exec *runtime.TestcaseExec, port string) string {
-	s, _ := exec.PortLifecycle(runtime.PortEndpoint{Comp: currentComponentID(exec), Port: port})
-	switch s {
-	case "stopped":
+	switch exec.PortStateOf(exec.PortKey(port)) {
+	case runtime.PortStopped:
 		return tl.PortStopped
-	case "halted":
+	case runtime.PortHalted:
 		return tl.PortHalted
 	}
 	return tl.PortStarted

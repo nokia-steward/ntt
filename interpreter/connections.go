@@ -367,13 +367,11 @@ func portInState(exec *runtime.TestcaseExec, port, state string) bool {
 	ep := runtime.PortEndpoint{Comp: currentComponentID(exec), Port: port}
 	switch state {
 	case "Started", "Stopped", "Halted":
-		lifecycle := "started"
+		s := runtime.PortStarted
 		if known {
-			if s, ok := exec.PortLifecycle(ep); ok {
-				lifecycle = s
-			}
+			s = exec.PortStateOf(exec.PortKey(port))
 		}
-		return lifecycle == strings.ToLower(state)
+		return portStateName(s) == state
 	case "Connected":
 		return known && exec.IsConnected(ep)
 	case "Mapped":
@@ -382,6 +380,17 @@ func portInState(exec *runtime.TestcaseExec, port, state string) bool {
 		return known && (exec.IsConnected(ep) || exec.IsMapped(ep))
 	}
 	return false
+}
+
+// portStateName is the checkstate name of a port state (ETSI 22.5.5).
+func portStateName(s runtime.PortState) string {
+	switch s {
+	case runtime.PortStopped:
+		return "Stopped"
+	case runtime.PortHalted:
+		return "Halted"
+	}
+	return "Started"
 }
 
 // isPortLifecycleOp reports whether op is one of the no-argument port
@@ -401,14 +410,15 @@ func applyPortLifecycle(n syntax.Node, op, port string, env runtime.Scope) {
 	if exec == nil || port == "" {
 		return
 	}
-	state := "started"
+	key := exec.PortKey(port)
 	switch op {
+	case "start":
+		exec.StartPort(key)
 	case "stop":
-		state = "stopped"
+		exec.StopPort(key)
 	case "halt":
-		state = "halted"
+		exec.HaltPort(key)
 	}
-	exec.SetPortLifecycle(runtime.PortEndpoint{Comp: currentComponentID(exec), Port: port}, state)
 	if exec.TestLogger() != nil {
 		tlEmitLazy(exec, n, "tliP"+strings.ToUpper(op[:1])+op[1:], func() []tl.Arg {
 			return []tl.Arg{tlArg("port", tlOwnPort(exec, port).Content()), tlArg("stat", tl.String(tlPortStatus(exec, port)))}

@@ -225,11 +225,15 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			if ce, ok := call.(*syntax.CallExpr); ok {
 				if sel, ok := ce.Fun.(*syntax.SelectorExpr); ok {
 					if op, ok := sel.Sel.(*syntax.Ident); ok && op.String() == "call" {
-						if pname, ok := portExprName(sel.X, env); ok {
+						if pname, ok := commPortName(sel.X, env); ok {
+							var res runtime.Object
 							if to != nil {
-								_ = evalProcedureCallTo(pname, ce, to, env)
+								res = evalProcedureCallTo(pname, ce, to, env)
 							} else {
-								_ = evalProcedurePortOp("call", pname, ce, env)
+								res = evalProcedurePortOp("call", pname, ce, env)
+							}
+							if runtime.IsError(res) {
+								return res
 							}
 							pushCallSignature(ce, callEnv)
 							// The call's timeout duration becomes a virtual
@@ -593,14 +597,14 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		}
 		// Bare procedure receive ops (no parentheses) used as a
 		// statement: `p.getcall`, `p[i].getreply`, `p.catch`
-		// (TTCN-3 22.3). Resolve the port name syntactically and
+		// (TTCN-3 22.3). Resolve the port (a parameter to its actual) and
 		// consume the matching kind-tagged envelope. Alt-guard
 		// occurrences are intercepted earlier by commGuardMatches;
 		// this path covers the responder body (`f()` doing
 		// `p[i].getcall;`).
 		if op, ok := n.Sel.(*syntax.Ident); ok && isProcedureRecvOp(op.String()) {
 			if runtime.FindTestcaseExec(env) != nil {
-				if pname, ok := portExprName(n.X, env); ok {
+				if pname, ok := commPortName(n.X, env); ok {
 					return evalProcedurePortOp(op.String(), pname, nil, env)
 				}
 			}
@@ -1651,7 +1655,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			if op, ok := sel.Sel.(*syntax.Ident); ok && isProcedurePortOp(op.String()) {
 				// `any port.getcall(...)` is no port of that name: it
 				// fans out below (ETSI 22.5).
-				if pname, ok := portExprName(sel.X, env); ok && pname != "any port" {
+				if pname, ok := commPortName(sel.X, env); ok && pname != "any port" {
 					return evalProcedurePortOp(op.String(), pname, n, env)
 				}
 			}
@@ -13821,6 +13825,19 @@ func xmlWhiteSpaceReplace(s string) string {
 	}, s)
 }
 
+// portSendError is the error of the sending operation op (send, call,
+// reply or raise) on a port that is stopped or halted (ETSI 22.5.3,
+// 22.5.4, F.3.3), or nil when the port is started.
+func portSendError(exec *runtime.TestcaseExec, op, port string) runtime.Object {
+	switch exec.PortStateOf(exec.PortKey(port)) {
+	case runtime.PortStopped:
+		return runtime.Errorf("%s on port %s, which is stopped (ETSI 22.5.3)", op, port)
+	case runtime.PortHalted:
+		return runtime.Errorf("%s on port %s, which is halted (ETSI 22.5.4)", op, port)
+	}
+	return nil
+}
+
 // evalPortSend models the message-based `port.send(value [, to dest])`
 // operation by appending the payload to a per-testcase loopback queue
 // keyed by port name. The optional `to <addr>` clause (passed via the
@@ -13920,6 +13937,9 @@ func commPortName(x syntax.Expr, env runtime.Scope) (string, bool) {
 		}
 		return name, true
 	case *syntax.IndexExpr:
+		if pn, isPort := resolvePortName(x, env); isPort {
+			return pn, true
+		}
 		return portExprName(x, env)
 	}
 	return "", false
@@ -13978,6 +13998,9 @@ func evalProcedureCallTo(port string, call *syntax.CallExpr, toExpr syntax.Expr,
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil || call == nil {
 		return runtime.Undefined
+	}
+	if err := portSendError(exec, "call", port); err != nil {
+		return err
 	}
 	// A port bound to a driver is mapped to the system: its `to` address
 	// names something on the far side of the driver's transport, not a
@@ -14057,6 +14080,11 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil {
 		return runtime.Undefined
+	}
+	if op == "call" || op == "reply" || op == "raise" {
+		if err := portSendError(exec, op, port); err != nil {
+			return err
+		}
 	}
 	bareName := port          // pre-qualification instance name, for the connect graph
 	port = exec.PortKey(port) // real-scheduler: per-PTC port identity (no-op by default)
@@ -15139,6 +15167,10 @@ func evalIndexRead(n *syntax.IndexExpr, left runtime.Object, env runtime.Scope) 
 			return runtime.Undefined
 		}
 		return val
+	case left.Type() == runtime.PORT_REF && index.Type() == runtime.INTEGER:
+		// An element of a port array is a port of its own, named as
+		// portExprName names it, so it can be passed as a port parameter.
+		return &runtime.PortRef{Name: fmt.Sprintf("%s[%d]", left.(*runtime.PortRef).Name, index.(runtime.Int).Int64())}
 	}
 	return runtime.Errorf("index operator not supported: %s", left.Type())
 }
@@ -15862,6 +15894,9 @@ func evalProcedureReplyRaiseTo(op, bareName string, call *syntax.CallExpr, toExp
 	if exec == nil {
 		return runtime.Undefined
 	}
+	if err := portSendError(exec, op, bareName); err != nil {
+		return err
+	}
 	var msg runtime.PortMessage
 	switch op {
 	case "reply":
@@ -15897,6 +15932,9 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil || n.Args == nil || len(n.Args.List) == 0 {
 		return runtime.Undefined
+	}
+	if err := portSendError(exec, "send", port); err != nil {
+		return err
 	}
 	bareName := port          // pre-qualification instance name, for the connect graph
 	port = exec.PortKey(port) // real-scheduler: per-PTC port identity (no-op by default)
@@ -16599,12 +16637,15 @@ func evalPortTrigger(port string, n *syntax.CallExpr, env runtime.Scope) runtime
 	if exec == nil {
 		return runtime.Undefined
 	}
-	head, ok := exec.PeekMessageFull(port)
+	// The running component's own queue, as of the alt's snapshot.
+	key := exec.PortKey(port)
+	limit := altReceiveLimit(exec, key)
+	head, ok := exec.PeekMessageFullLimited(key, limit)
 	if !ok {
 		return runtime.Undefined
 	}
 	matches, tmpl := portReceiveMatch(head.Payload, systemLoopback(head), n, env)
-	_, _ = exec.DequeueMessage(port)
+	_, _ = exec.DequeueMessageFullLimited(key, limit)
 	if exec.TestLogger() != nil {
 		ev := "receive"
 		if !matches {

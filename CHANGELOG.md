@@ -362,6 +362,19 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **`start`, `stop` and `halt` act on the port's queue** as 22.5.2 to
+  22.5.4 and figures F.7 and F.8 define; they only recorded the state
+  `checkstate` answers. `start` clears the queue and a halted port's
+  marker; at a stopped port the receiving operations match nothing; at a
+  halted one they match what was queued before the halt, `clear` putting
+  the marker at the top and `stop` removing it. `send`, `call`, `reply`
+  and `raise` on a stopped or halted port are errors.
+- **A port passed as a parameter is the actual port for `call`, `reply`,
+  `raise`, `getcall`, `getreply` and `catch`** too, as it was for `send`
+  and `receive`: they used a queue named after the formal parameter. An
+  element of a port array can be passed as a port parameter (it was an
+  error), and a PTC's `trigger` takes from the PTC's own queue, where it
+  took from the MTC's port of the same name.
 - **`substr` takes templates as C.4.2 defines** (V4.17.1). A pattern is
   indexed by its items (15.6.1, table B.1: a set expression, an escape, a
   `{reference}`, a group, each with its repetition, is one item), where
