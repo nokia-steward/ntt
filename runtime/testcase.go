@@ -204,7 +204,6 @@ type TestcaseExec struct {
 	connections map[PortEndpoint]map[PortEndpoint]bool
 	mapEdges    map[PortEndpoint]map[PortEndpoint]bool
 
-
 	// virtualClock is a monotonic per-testcase virtual time (in
 	// seconds). It starts at 0 and is advanced by `T.timeout` to the
 	// expiring timer's deadline so `T2.read` reports deterministic

@@ -362,6 +362,21 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **Assigning a field of a template field holding `?`, `*` or omit
+  expands it** (15.6.2, 15.6.5): `?` for each mandatory field, `*` for
+  each optional one, down to the field assigned; a union's alternative
+  referenced becomes the chosen one. The other fields were left unbound,
+  so the template matched nothing. Reading a field of a template field
+  holding `*`, omit, a template list or a complemented list, or with
+  `ifpresent`, and assigning one of a template or complemented list, are
+  errors; reading one of a template list gave an alternative of the list.
+  A value's omitted field is not expanded, nor one of a template
+  restricted to `value` or `omit`, which is referenced as a value is
+  (15.6.0). The same holds through an out or inout parameter, a
+  redirect and an index into the field, and for a component's template
+  variables; the actual of an out parameter is no longer evaluated before
+  the call, as the parameter starts uninitialised (5.4.1). A signature template of `?`
+  modified expands to `?` for each parameter (15.6.4 b).
 - **`deactivate(d, true)` suspends a default** (20.5.3): it keeps its place
   in the list of defaults, is not invoked, and `activate(d)` re-activates
   it there and returns `d` (20.5.2). The second argument was ignored, so

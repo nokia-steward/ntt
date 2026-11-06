@@ -633,6 +633,9 @@ func bindTestcaseParamsWithValues(env runtime.Scope, tc *syntax.FuncDecl, args [
 		if fp == nil || fp.Name == nil {
 			continue
 		}
+		if referencedAsTemplate(fp.TemplateRestriction) {
+			markTemplate(env, fp.Name.String())
+		}
 		var val runtime.Object = runtime.Undefined
 		used := false
 		// An out parameter is uninitialised on entry (ETSI 3.1).
@@ -669,6 +672,9 @@ func bindTestcaseParamsWithArgs(env runtime.Scope, tc *syntax.FuncDecl, args []s
 	for i, fp := range tc.Params.List {
 		if fp == nil || fp.Name == nil {
 			continue
+		}
+		if referencedAsTemplate(fp.TemplateRestriction) {
+			markTemplate(env, fp.Name.String())
 		}
 		isTemplate := fp.TemplateRestriction != nil
 		var val runtime.Object = runtime.Undefined
@@ -4968,6 +4974,9 @@ func bindComponentMembers(env runtime.Scope, body *syntax.BlockStmt) {
 			// Undefined so identifier lookups still succeed.
 			recordMemberType(env, name, vd.Type)
 			recordDeclaredArray(env, vd.Type, dec)
+			if referencedAsTemplate(vd.TemplateRestriction) {
+				markTemplate(env, name)
+			}
 			if dec.Value != nil {
 				v := eval(dec.Value, env)
 				if v != nil && !runtime.IsError(v) {

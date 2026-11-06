@@ -115,6 +115,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			return nil
 		}
 		name := syntax.Name(n.Name)
+		if referencedAsTemplate(n.RestrictionSpec) || n.RestrictionSpec == nil {
+			markTemplate(env, name)
+		}
 		// `template T t2 modifies t1 := { ... }`: take t1's value
 		// as the base, then overlay any field assignments from the
 		// modifier literal. The TTCN-3 spec calls this "modified
@@ -780,6 +783,16 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// error.
 		if _, ok := left.(*runtime.PortRef); ok {
 			return runtime.Undefined
+		}
+
+		// A field of a template holding AnyValueOrNone, omit, a template
+		// list or a complemented list, or with ifpresent, is an error
+		// (ETSI 15.6.2 a, c; 15.6.5 a). Attributes (`t.encode`) are not
+		// fields.
+		if !isAnnexEAttr(syntax.Name(n.Sel)) {
+			if err := templateFieldReadError(left, n.X, env); err != nil {
+				return err
+			}
 		}
 
 		// Looking up an unset Record field returns Undefined rather
@@ -4049,6 +4062,9 @@ func bindDynamicTemplate(t *syntax.TemplateDecl, env runtime.Scope) runtime.Obje
 	}
 	name := syntax.Name(t.Name)
 	env.Set(name, &runtime.LazyThunk{Expr: value, Env: env, Fuzzy: true, Template: t.Type})
+	if referencedAsTemplate(t.RestrictionSpec) || t.RestrictionSpec == nil {
+		markTemplate(env, name)
+	}
 	recordDeclaredType(env, name, t.Type)
 	return nil
 }
@@ -5163,9 +5179,13 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 		if !ok {
 			return nil
 		}
-		recv := owned(l.X, env)
+		recv, expanded := ownedForField(l.X, env)
 		if runtime.IsError(recv) {
 			return recv
+		}
+		if expanded {
+			setField(recv, fid.String(), val)
+			return nil
 		}
 		if recv == nil || recv == runtime.Undefined || recv == runtime.Omit || recv == runtime.Any || recv == runtime.AnyOrNone {
 			// Materialising a fresh record for a previously
@@ -5284,7 +5304,7 @@ func evalSlot(lx syntax.Expr, env runtime.Scope) (runtime.Object, func(runtime.O
 		// again.
 		return indexValue(parent, x, env), nil
 	case *syntax.SelectorExpr:
-		parent := owned(x.X, env)
+		parent, _ := ownedForField(x.X, env)
 		if runtime.IsError(parent) {
 			return parent, nil
 		}
@@ -5322,9 +5342,14 @@ func owned(x syntax.Expr, env runtime.Scope) runtime.Object {
 		}
 		return v
 	case *syntax.SelectorExpr:
-		parent := owned(e.X, env)
+		parent, expanded := ownedForField(e.X, env)
 		if runtime.IsError(parent) {
 			return parent
+		}
+		// A union's: the alternative referenced is the chosen one,
+		// AnyValue until what follows expands it (15.6.5 a).
+		if r, ok := parent.(*runtime.Record); ok && expanded && len(r.Fields) == 0 {
+			r.Set(syntax.Name(e.Sel), runtime.Any)
 		}
 		v := selectValue(parent, e, env)
 		if runtime.IsShared(v) {
@@ -5349,6 +5374,26 @@ func owned(x syntax.Expr, env runtime.Scope) runtime.Object {
 		return v
 	}
 	return eval(x, env)
+}
+
+// ownedForField is owned(x) where a field of x is to be assigned: a
+// template field holding AnyValue, AnyValueOrNone or omit is expanded
+// first and the expansion stored at x (expandForSubfield), and expanded
+// reports whether it was.
+func ownedForField(x syntax.Expr, env runtime.Scope) (runtime.Object, bool) {
+	v := owned(x, env)
+	if runtime.IsError(v) {
+		return v, false
+	}
+	exp := expandForSubfield(v, x, env)
+	if exp == v {
+		return v, false
+	}
+	if runtime.IsError(exp) {
+		return exp, false
+	}
+	storeReceiver(x, exp, env)
+	return exp, true
 }
 
 // putElement writes v as the element idx of c, a list or a map, where
@@ -6693,6 +6738,11 @@ func v5InitialValues(vd *syntax.ValueDecl, env runtime.Scope) {
 
 func evalValueDecl(vd *syntax.ValueDecl, env runtime.Scope) runtime.Object {
 	defer v5InitialValues(vd, env)
+	if referencedAsTemplate(vd.TemplateRestriction) {
+		for _, decl := range vd.Decls {
+			markTemplate(env, syntax.Name(decl.Name))
+		}
+	}
 	if vd.Type != nil {
 		if id, ok := vd.Type.(*syntax.Ident); ok && id.Tok.Kind() == syntax.TIMER {
 			// `timer t;` / `timer t := 5.0;` / `timer t[N] := {...}`
@@ -7964,6 +8014,50 @@ func fieldTypeName(f *syntax.Field) string {
 // keeps it out of the user identifier namespace.
 func declaredTypeKey(name string) string { return "\x00decltype:" + name }
 
+// templateKey names the binding that marks name as a template, a template
+// variable or a template parameter, in the scope that declares it.
+func templateKey(name string) string { return "\x00template:" + name }
+
+// referencedAsTemplate reports whether a definition with the template
+// restriction r has its elements referenced as a template's: an
+// unrestricted or present template. One restricted to value or omit is
+// referenced as a value is (ETSI ES 201 873-1 15.6.0).
+func referencedAsTemplate(r *syntax.RestrictionSpec) bool {
+	return r != nil && (r.Tok == nil || r.Tok.Kind() == syntax.PRESENT)
+}
+
+// markTemplate records that name, declared in env, is a template.
+func markTemplate(env runtime.Scope, name string) {
+	if env != nil && name != "" {
+		env.Set(templateKey(name), runtime.NewBool(true))
+	}
+}
+
+// isTemplateRef reports whether lx refers into a template, a template
+// variable or a template parameter: whether the name it starts from is
+// one in the scope that declares it, so a value of the same name in an
+// inner scope is not.
+func isTemplateRef(lx syntax.Expr, env runtime.Scope) bool {
+	for {
+		switch x := lx.(type) {
+		case *syntax.SelectorExpr:
+			lx = x.X
+			continue
+		case *syntax.IndexExpr:
+			lx = x.X
+			continue
+		case *syntax.Ident:
+			e, ok := env.(*runtime.Env)
+			if !ok {
+				return false
+			}
+			owner := e.Owner(x.String())
+			return owner != nil && owner.Binds(templateKey(x.String()))
+		}
+		return false
+	}
+}
+
 // recordDeclaredType remembers the declared type name of a named
 // definition for value attribute introspection.
 func recordDeclaredType(env runtime.Scope, name string, typ syntax.Expr) {
@@ -8721,10 +8815,12 @@ func evalCallArgsLazy(fn *runtime.Function, callArgs []syntax.Expr, env runtime.
 	}
 	// Build a map: formal name -> modifier (lower-cased).
 	modOf := map[string]string{}
+	outOf := map[string]bool{}
 	for _, p := range fn.Params.List {
 		if p == nil || p.Name == nil {
 			continue
 		}
+		outOf[p.Name.String()] = isOutParam(p)
 		if p.Modif != nil && p.Modif.Kind() != syntax.ILLEGAL {
 			modOf[p.Name.String()] = strings.ToLower(p.Modif.String())
 		}
@@ -8764,6 +8860,12 @@ func evalCallArgsLazy(fn *runtime.Function, callArgs []syntax.Expr, env runtime.
 		argExpr := e
 		if b, ok := e.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.ASSIGN {
 			argExpr = b.Y
+		}
+		// The actual of an out parameter is only written, after the
+		// call: the parameter is uninitialised (ETSI 5.4.1.1, 5.4.1.2).
+		if outOf[formalOf[i]] {
+			out[i] = runtime.Undefined
+			continue
 		}
 		modif := modOf[formalOf[i]]
 		if modif == "@lazy" || modif == "@fuzzy" {
@@ -9029,6 +9131,9 @@ func bindFunctionParams(fn *runtime.Function, args []runtime.Object) *runtime.En
 		for i, param := range fn.Params.List {
 			if param == nil || param.Name == nil {
 				continue
+			}
+			if referencedAsTemplate(param.TemplateRestriction) {
+				markTemplate(fenv, param.Name.String())
 			}
 			if param.Variadic != nil {
 				// A variadic parameter is the record of the actual
@@ -9705,7 +9810,10 @@ func assignToLHS(lhs syntax.Expr, val runtime.Object, env runtime.Scope) {
 		if !ok {
 			return
 		}
-		recv := owned(l.X, env)
+		recv, _ := ownedForField(l.X, env)
+		if runtime.IsError(recv) {
+			return
+		}
 		if recv == nil || recv == runtime.Undefined {
 			rec := runtime.NewRecord()
 			rec.Set(fid.String(), val)
@@ -13041,14 +13149,112 @@ func mergeTemplateMod(base, mod runtime.Object) (runtime.Object, bool) {
 	return out, true
 }
 
+// expandForSubfield is what v, the template at lx, is when a field of it is
+// assigned (ETSI ES 201 873-1 15.6.2, 15.6.5): AnyValue, AnyValueOrNone or
+// omit expands to a record of AnyValue for each mandatory field and
+// AnyValueOrNone for each optional one, a union's to none chosen yet; a
+// template list, a complemented list or ifpresent is an error. Anything
+// else, and a value's omit, is v.
+func expandForSubfield(v runtime.Object, lx syntax.Expr, env runtime.Scope) runtime.Object {
+	switch x := v.(type) {
+	case *runtime.List:
+		if x.ListType != runtime.VALUE_LIST && x.ListType != runtime.COMPLEMENT {
+			return v
+		}
+		if structDeclOf(lvalueTypeDesc(lx, env)) == nil {
+			return v
+		}
+		return runtime.Errorf("assigning a field of a template holding a %s (ETSI 15.6.2 a, 15.6.5 a)", templateListName(x))
+	case *runtime.IfPresent:
+		if structDeclOf(lvalueTypeDesc(lx, env)) == nil {
+			return v
+		}
+		return runtime.Errorf("referencing a field of a template with ifpresent (ETSI 15.6.2 c)")
+	}
+	if v != runtime.Any && v != runtime.AnyOrNone && (v != runtime.Omit || !isTemplateRef(lx, env)) {
+		return v
+	}
+	st := structDeclOf(lvalueTypeDesc(lx, env))
+	if st == nil || st.KindTok == nil {
+		return v
+	}
+	rec := runtime.NewRecord()
+	rec.Order = structFieldNames(st)
+	if st.KindTok.Kind() == syntax.UNION {
+		return rec
+	}
+	for _, f := range st.Fields {
+		if f == nil || fieldName(f) == "" {
+			return v
+		}
+		if f.Optional != nil {
+			rec.Set(fieldName(f), runtime.AnyOrNone)
+		} else {
+			rec.Set(fieldName(f), runtime.Any)
+		}
+	}
+	return rec
+}
+
+// templateFieldReadError is the error of reading a field of v, the
+// template at x of a record, set or union type, when v holds
+// AnyValueOrNone, omit, a template list or a complemented list, or has
+// ifpresent (ETSI ES 201 873-1 15.6.2 a, c; 15.6.5 a), or nil.
+func templateFieldReadError(v runtime.Object, x syntax.Expr, env runtime.Scope) runtime.Object {
+	var what string
+	switch t := v.(type) {
+	case *runtime.List:
+		if t.ListType != runtime.VALUE_LIST && t.ListType != runtime.COMPLEMENT {
+			return nil
+		}
+		what = "a " + templateListName(t)
+	case *runtime.IfPresent:
+		what = "ifpresent"
+	default:
+		switch {
+		case v == runtime.AnyOrNone:
+			what = "AnyValueOrNone"
+		case v == runtime.Omit && isTemplateRef(x, env):
+			what = "omit"
+		default:
+			return nil
+		}
+	}
+	if structDeclOf(lvalueTypeDesc(x, env)) == nil {
+		return nil
+	}
+	return runtime.Errorf("referencing a field of a template holding %s (ETSI 15.6.2, 15.6.5)", what)
+}
+
+// templateListName names the matching mechanism a template list l is.
+func templateListName(l *runtime.List) string {
+	if l.ListType == runtime.COMPLEMENT {
+		return "complemented list"
+	}
+	return "template list"
+}
+
 // expandAnyValueBase is the base of a modified template of type typ: when
 // it is AnyValue and typ a record or set type, the fields it implicitly
 // expands to - AnyValue for a mandatory field, AnyValueOrNone for an
 // optional one - so a modification changes some and keeps the others
-// (ETSI ES 201 873-1 15.5 restriction c, 15.6.2).
+// (ETSI ES 201 873-1 15.5 restriction c, 15.6.2); for a signature,
+// AnyValue for each parameter (15.6.4 b).
 func expandAnyValueBase(base runtime.Object, typ syntax.Expr, env runtime.Scope) runtime.Object {
 	if base != runtime.Any || typ == nil {
 		return base
+	}
+	// A signature's: AnyValue for each of its parameters (15.6.4 b).
+	if names := signatureParamNames(syntax.Name(typ), env); len(names) > 0 {
+		rec := runtime.NewRecord()
+		rec.Order = names
+		for _, name := range names {
+			if name == "" {
+				return base
+			}
+			rec.Set(name, runtime.Any)
+		}
+		return rec
 	}
 	st := structDeclOf(typeDescOfSpec(typ, env))
 	if st == nil || st.KindTok == nil || st.KindTok.Kind() == syntax.UNION {
