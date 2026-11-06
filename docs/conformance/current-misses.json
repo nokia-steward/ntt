@@ -1,7 +1,7 @@
 {
- "summary": "ran 5164 files: 5002 matched, 21 skipped (97.26% match rate)",
- "source": "off.json",
- "miss_count": 162,
+ "summary": "ran 5164 files: 5003 matched, 21 skipped (97.28% match rate)",
+ "source": "etsi.json",
+ "miss_count": 161,
  "outcomes": {
   "reject->pass": 65,
   "reject->none": 27,
@@ -10,7 +10,7 @@
   "pass->parse-error": 13,
   "pass->error": 11,
   "pass->semantic-error": 7,
-  "pass->none": 3,
+  "pass->none": 2,
   "error->parse-error": 1
  },
  "chapters": [
@@ -58,19 +58,6 @@
    }
   },
   {
-   "chapter": "core_language/16_functions_altsteps_testcases",
-   "misses": 10,
-   "outcomes": {
-    "reject->none": 1,
-    "reject->pass": 3,
-    "error->parse-error": 1,
-    "pass->parse-error": 2,
-    "->": 1,
-    "pass->none": 1,
-    "pass->semantic-error": 1
-   }
-  },
-  {
    "chapter": "core_language/B_matching_incoming_values",
    "misses": 10,
    "outcomes": {
@@ -78,6 +65,18 @@
     "pass->fail": 5,
     "pass->error": 2,
     "reject->none": 2
+   }
+  },
+  {
+   "chapter": "core_language/16_functions_altsteps_testcases",
+   "misses": 9,
+   "outcomes": {
+    "reject->none": 1,
+    "reject->pass": 3,
+    "error->parse-error": 1,
+    "pass->parse-error": 2,
+    "->": 1,
+    "pass->semantic-error": 1
    }
   },
   {
@@ -1115,14 +1114,6 @@
    "actual": "",
    "outcome": "->",
    "relpath": "core_language/16_functions_altsteps_testcases/1602_altsteps/160201_invoking_altsteps/NegSyn_160201_invoking_altsteps_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/16_functions_altsteps_testcases",
-   "expected": "pass",
-   "actual": "none",
-   "outcome": "pass->none",
-   "relpath": "core_language/16_functions_altsteps_testcases/1602_altsteps/1602_toplevel/Sem_1602_toplevel_004.ttcn",
    "message": ""
   },
   {

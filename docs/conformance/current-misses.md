@@ -1,9 +1,9 @@
 # Current Conformance Misses
 
-Generated from `off.json` using the current workspace runner.
+Generated from `etsi.json` using the current workspace runner.
 
-- Summary: `ran 5164 files: 5002 matched, 21 skipped (97.26% match rate)`
-- Misses: `162`
+- Summary: `ran 5164 files: 5003 matched, 21 skipped (97.28% match rate)`
+- Misses: `161`
 
 ## Misses By Outcome
 
@@ -14,7 +14,7 @@ Generated from `off.json` using the current workspace runner.
 - `pass->parse-error`: `13`
 - `pass->error`: `11`
 - `pass->semantic-error`: `7`
-- `pass->none`: `3`
+- `pass->none`: `2`
 - `error->parse-error`: `1`
 
 ## Misses By Chapter
@@ -23,8 +23,8 @@ Generated from `off.json` using the current workspace runner.
 - `core_language/22_communication_operations`: `20` (`reject->none`=1, `reject->pass`=19)
 - `core_language/15_templates`: `18` (`->`=2, `pass->error`=2, `pass->fail`=4, `reject->none`=3, `reject->pass`=7)
 - `core_language/05_basic_language_elements`: `16` (`->`=2, `pass->parse-error`=2, `reject->none`=1, `reject->pass`=11)
-- `core_language/16_functions_altsteps_testcases`: `10` (`->`=1, `error->parse-error`=1, `pass->none`=1, `pass->parse-error`=2, `pass->semantic-error`=1, `reject->none`=1, `reject->pass`=3)
 - `core_language/B_matching_incoming_values`: `10` (`pass->error`=2, `pass->fail`=5, `reject->none`=2, `reject->pass`=1)
+- `core_language/16_functions_altsteps_testcases`: `9` (`->`=1, `error->parse-error`=1, `pass->parse-error`=2, `pass->semantic-error`=1, `reject->none`=1, `reject->pass`=3)
 - `core_language/09_test_configurations`: `8` (`pass->error`=1, `reject->none`=4, `reject->pass`=3)
 - `core_language/07_expressions`: `6` (`pass->semantic-error`=4, `reject->pass`=2)
 - `core_language/26_module_control`: `3` (`->`=3)
@@ -127,22 +127,6 @@ Generated from `off.json` using the current workspace runner.
 - `core_language/05_basic_language_elements/0504_parametrization/0504_toplevel/NegSyn_0504_forbidden_parametrization_001.ttcn`: `reject -> none`
 - `core_language/05_basic_language_elements/0505_cyclic_definitions/NegSem_0505_cyclic_definitions_001.ttcn`: ` -> `
 - `core_language/05_basic_language_elements/05_toplevel/NegSyn_05_TopLevel_001.ttcn`: ` -> `
-
-### `core_language/16_functions_altsteps_testcases`
-
-- `core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/NegSem_160102_predefined_functions_009.ttcn`: `reject -> none`
-- `core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/NegSem_160102_predefined_functions_039.ttcn`: `reject -> pass`
-- `core_language/16_functions_altsteps_testcases/1601_functions/160105_explicit_control_functions/NegSem_160105_explicit_control_functions_009.ttcn`: `reject -> pass`
-- `core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/NegSem_160106_the_not_implemented_function_004.ttcn`: `error -> parse-error` - 1 error occurred:
-	* testdata/ttcn3-conformance-tests/ATS/core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/NegSem_160106_the_not_implemented_function_00...
-- `core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/Sem_160106_the_not_implemented_function_001.ttcn`: `pass -> parse-error` - 1 error occurred:
-	* testdata/ttcn3-conformance-tests/ATS/core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/Sem_160106_the_not_implemented_function_001.t...
-- `core_language/16_functions_altsteps_testcases/1601_functions/1601_toplevel/NegSem_1601_toplevel_001.ttcn`: `reject -> pass`
-- `core_language/16_functions_altsteps_testcases/1601_functions/1601_toplevel/Sem_1601_toplevel_004.ttcn`: `pass -> parse-error` - 1 error occurred:
-	* testdata/ttcn3-conformance-tests/ATS/core_language/16_functions_altsteps_testcases/1601_functions/1601_toplevel/Sem_1601_toplevel_004.ttcn:8:14-10:2: expected module definition, f...
-- `core_language/16_functions_altsteps_testcases/1602_altsteps/160201_invoking_altsteps/NegSyn_160201_invoking_altsteps_001.ttcn`: ` -> `
-- `core_language/16_functions_altsteps_testcases/1602_altsteps/1602_toplevel/Sem_1602_toplevel_004.ttcn`: `pass -> none`
-- `core_language/16_functions_altsteps_testcases/1603_testcases/Syn_1603_testcases_004.ttcn`: `pass -> semantic-error` - testcase references component member "messagePort" (declared in component GeneralComp) but has no `runs on` clause (ETSI 16.1)
 
 ### `core_language/B_matching_incoming_values`
 
