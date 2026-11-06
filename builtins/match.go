@@ -301,17 +301,12 @@ func match(a, b runtime.Object) (bool, error) {
 		}
 	case *runtime.String:
 		as := a.(*runtime.String)
-		// `pattern "..."` matches: try the regex promotion first
-		// (handles `?#N` / `[...]` / `\d`...), then fall back to
-		// the bare `?` / `*` wildcardMatch on the raw rune
-		// payloads. Plain (non-pattern) charstrings get a
-		// literal byte-for-byte compare so the `*` in `"DE*"`
-		// stays a literal star (Sem_1511_*_010).
+		// `pattern "..."` matches by the pattern's regex (B.1.5).
+		// Plain (non-pattern) charstrings get a literal compare so
+		// the `*` in `"DE*"` stays a literal star (Sem_1511_*_010).
 		if b.IsPattern || as.IsPattern {
-			if ok, used := matchPatternString(as, b); used {
-				return ok, nil
-			}
-			return wildcardMatch(string(as.Value), string(b.Value)), nil
+			ok, _ := matchPatternString(as, b)
+			return ok, nil
 		}
 		// Plain charstrings: literal compare.
 		if as.Len() != b.Len() {
@@ -330,49 +325,31 @@ func match(a, b runtime.Object) (bool, error) {
 	}
 }
 
-// matchPatternString tries to evaluate a TTCN-3 charstring pattern
-// match using the Go regexp engine. It returns (matched, true) when
-// the pattern uses operators worth promoting to regex (`#`, `[`, `\`,
-// `(`, `|`). For purely `?`/`*` patterns it returns `(_, false)` so
-// the call site keeps using the simpler wildcardMatch path - that
-// path is faster and handles the implicit-omit / set-of edge cases
-// the regex engine wouldn't.
+// matchPatternString matches a TTCN-3 character pattern (B.1.5) by its
+// translation to a Go regexp; used is false only when there is nothing
+// to match.
 func matchPatternString(val, pat *runtime.String) (bool, used bool) {
 	if val == nil || pat == nil {
 		return false, false
 	}
+	// Every character pattern goes through the regex engine: it matches
+	// by character, a universal character included, and keeps case
+	// unless @nocase (B.1.5.6).
 	ps := string(pat.Value)
-	// @nocase always needs the regex engine: the wildcardMatch
-	// fallback only folds ASCII, but @nocase must fold the full
-	// (universal charstring) case mapping too.
-	if !pat.NoCase && !patternNeedsRegex(ps) {
-		return false, false
-	}
 	re, err := ttcnPatternToRegex(ps)
 	if err != nil {
-		return false, false
+		return false, true
 	}
 	if pat.NoCase {
 		re = "(?i)" + re
 	}
+	// One the regex engine can't take (a count above its limit, a
+	// reversed range) matches nothing.
 	rx, err := compileTTCNRegex(re)
 	if err != nil {
-		return false, false
+		return false, true
 	}
 	return rx.MatchString(string(val.Value)), true
-}
-
-// patternNeedsRegex reports whether the pattern uses any operator
-// the bare wildcardMatch can't handle (so the regex promotion is
-// worth the compile cost).
-func patternNeedsRegex(s string) bool {
-	for i := 0; i < len(s); i++ {
-		switch s[i] {
-		case '#', '[', '\\', '(', '|', ']', '+':
-			return true
-		}
-	}
-	return false
 }
 
 // regexCache memoises compiled regexes for TTCN-3 patterns. The
@@ -382,6 +359,8 @@ var (
 	regexCacheMu sync.Mutex
 	regexCache   = map[string]*regexp.Regexp{}
 )
+
+const maxRegexCache = 4096
 
 // RegexpMatch implements the TTCN-3 `regexp(instr, pattern, groupno)`
 // operation (ETSI 16.1.2 / Annex C.33): it matches the TTCN-3 pattern
@@ -425,153 +404,356 @@ func compileTTCNRegex(re string) (*regexp.Regexp, error) {
 		return nil, err
 	}
 	regexCacheMu.Lock()
+	// Patterns built from values are many: forget them all once the
+	// cache is large, rather than grow it without end.
+	if len(regexCache) >= maxRegexCache {
+		regexCache = map[string]*regexp.Regexp{}
+	}
 	regexCache[re] = rx
 	regexCacheMu.Unlock()
 	return rx, nil
 }
 
-// ttcnPatternToRegex converts a TTCN-3 charstring pattern (Annex A)
-// into a Go regexp source string anchored with `\A...\z`. Only the
-// subset the conformance suite exercises is supported; unknown
-// constructs cause an error so the caller can fall back.
+// ttcnPatternToRegex converts a TTCN-3 character pattern (ETSI ES 201
+// 873-1 B.1.5, table B.1) into a Go regexp source string anchored with
+// `\A...\z`. References ({ref}, {\ref}, \N{ref}) are already expanded
+// by the interpreter. A metacharacter symbol that forms no metacharacter
+// keeps its literal value (B.1.5.0).
 //
-// Mapping (subset):
+// Mapping:
 //
 //	?            -> .   (any character, a line end included)
 //	*            -> .*
-//	X#N          -> (X){N}
-//	X#(N,M)      -> (X){N,M}
-//	[abc]        -> [abc]            (passed through verbatim)
-//	[^abc]       -> [^abc]
-//	[a-z]        -> [a-z]
-//	(a|b|c)      -> (a|b|c)
-//	\d \w \s     -> \d \w \s         (Annex A char-class escapes)
-//	\?  \*  \\   -> literal ? * \
-//	regex metas  -> escaped (so .+ etc. are treated literally)
+//	X#n          -> X{n}  (n a single digit, B.1.5.3)
+//	X#(n, m)     -> X{n,m}, X#(n,) -> X{n,}, X#(,m) -> X{0,m}, X#() -> X*
+//	X+           -> X+
+//	[...]        -> a class (B.1.5.1): `]` right after `[` or `[^` and
+//	                `^` elsewhere are literal; escapes as below
+//	(...) |      -> groups and alternatives
+//	\d          -> [0-9]
+//	\w          -> [0-9a-zA-Z]
+//	\t \r       -> TAB, CR
+//	\n          -> any of LF, VT, FF, CR
+//	\s          -> any of TAB, LF, VT, FF, CR, space characters
+//	\b          -> a word boundary
+//	\q{g,p,r,c} \q{Uxxxx, ...} -> the universal character(s)
+//	\x          -> x literally, for any other character x
 func ttcnPatternToRegex(s string) (string, error) {
+	rs := []rune(s)
+	paired := patternGroups(rs)
 	var b strings.Builder
-	// `?` and `*` stand for any character (ETSI ES 201 873-1 B.1.5), a
-	// line end included: Go's `.` needs the s flag for that.
-	b.WriteString(`(?s)\A`)
-	for i := 0; i < len(s); {
-		c := s[i]
+	// `?` and `*` stand for any character (B.1.5), a line end included:
+	// Go's `.` needs the s flag for that. The group keeps a top-level
+	// alternative anchored at both ends.
+	b.WriteString(`(?s)\A(?:`)
+	// atom: an expression precedes, which a `+` or `#` may repeat; one
+	// that doesn't, or follows another repetition, is literal.
+	atom := false
+	literal := func(r rune) {
+		b.WriteString(regexp.QuoteMeta(string(r)))
+		atom = true
+	}
+	for i := 0; i < len(rs); {
+		c := rs[i]
 		switch c {
 		case '?':
 			b.WriteString(`(?:.)`)
+			atom = true
 			i++
 		case '*':
 			b.WriteString(`(?:.*)`)
+			atom = true
 			i++
 		case '#':
-			// `X#N` / `X#(N,M)` quantifier on the previously
-			// emitted atom. The pattern is invalid if it starts
-			// with `#`, but a previous atom must exist by the
-			// time we get here.
-			i++
-			if i >= len(s) {
-				return "", runtime.Errorf("trailing '#' in pattern")
-			}
-			if s[i] == '(' {
-				close := strings.IndexByte(s[i:], ')')
-				if close < 0 {
-					return "", runtime.Errorf("unclosed '#(...)' in pattern")
-				}
-				spec := s[i+1 : i+close]
-				if _, err := parseRange(spec); err != nil {
-					return "", err
-				}
-				trimmed := strings.TrimSpace(spec)
-				switch {
-				case trimmed == "":
-					// `#()` is the unbounded repetition (zero or more)
-					// - emit `*` rather than the empty `{}` RE2 rejects.
-					b.WriteByte('*')
-				case strings.HasPrefix(trimmed, ","):
-					// TTCN-3 allows an open lower bound `#(,m)`; RE2
-					// needs an explicit 0 (`{0,m}`), as a bare `{,m}`
-					// is treated as a literal there.
-					b.WriteByte('{')
-					b.WriteString("0" + trimmed)
-					b.WriteByte('}')
-				default:
-					b.WriteByte('{')
-					b.WriteString(spec)
-					b.WriteByte('}')
-				}
-				i += close + 1
+			if q, n, ok := patternCount(rs[i+1:]); ok && atom {
+				b.WriteString(q)
+				atom = false
+				i += 1 + n
 			} else {
-				start := i
-				for i < len(s) && s[i] >= '0' && s[i] <= '9' {
-					i++
-				}
-				if start == i {
-					return "", runtime.Errorf("expected count after '#'")
-				}
-				b.WriteByte('{')
-				b.WriteString(s[start:i])
-				b.WriteByte('}')
+				literal(c)
+				i++
 			}
-		case '[':
-			close := strings.IndexByte(s[i:], ']')
-			if close < 0 {
-				return "", runtime.Errorf("unclosed '[' in pattern")
-			}
-			b.WriteString(s[i : i+close+1])
-			i += close + 1
-		case '(', ')', '|':
-			b.WriteByte(c)
-			i++
 		case '+':
-			// TTCN-3 postfix repetition "one or more of the
-			// preceding set/atom" (B.1.5.3). A literal plus must be
-			// written `\+`, handled by the escape branch.
-			b.WriteByte('+')
+			if atom {
+				b.WriteByte('+')
+				atom = false
+			} else {
+				literal(c)
+			}
+			i++
+		case '[':
+			if class, n, ok := patternSet(rs[i:]); ok {
+				b.WriteString(class)
+				atom = true
+				i += n
+			} else {
+				literal(c)
+				i++
+			}
+		case '(', ')':
+			if !paired[i] {
+				literal(c)
+			} else {
+				b.WriteRune(c)
+				atom = c == ')'
+			}
+			i++
+		case '|':
+			b.WriteByte('|')
+			atom = false
 			i++
 		case '\\':
-			if i+1 >= len(s) {
-				return "", runtime.Errorf("trailing '\\' in pattern")
+			if i+1 >= len(rs) {
+				literal(c)
+				i++
+				continue
 			}
-			next := s[i+1]
-			switch next {
-			case 'd', 'w', 's', 'D', 'W', 'S', 'b', 'B':
-				b.WriteByte('\\')
-				b.WriteByte(next)
-			case '?', '*', '\\', '#', '[', ']', '(', ')', '|', '.', '+', '^', '$', '{', '}':
-				b.WriteString(regexp.QuoteMeta(string(next)))
-			case 'n':
-				b.WriteString(`\n`)
-			case 't':
-				b.WriteString(`\t`)
-			case 'r':
-				b.WriteString(`\r`)
-			default:
-				b.WriteString(regexp.QuoteMeta(string(next)))
+			if text, n, ok := patternEscape(rs[i+1:], false); ok {
+				b.WriteString(text)
+				atom = true
+				i += 1 + n
+				continue
 			}
+			literal(rs[i+1])
 			i += 2
-		case '.', '^', '$', '{', '}':
-			b.WriteString(regexp.QuoteMeta(string(c)))
-			i++
 		default:
-			b.WriteByte(c)
+			literal(c)
 			i++
 		}
 	}
-	b.WriteString(`\z`)
+	b.WriteString(`)\z`)
 	return b.String(), nil
 }
 
-func parseRange(spec string) (struct{}, error) {
-	parts := strings.Split(spec, ",")
-	for _, p := range parts {
-		p = strings.TrimSpace(p)
-		if p == "" {
-			continue
-		}
-		if _, err := strconv.Atoi(p); err != nil {
-			return struct{}{}, runtime.Errorf("bad range bound %q", p)
+// patternGroups reports which of the parentheses of rs, outside set
+// expressions and escapes, pair up as a group; one without a partner
+// keeps its literal value (B.1.5.0).
+func patternGroups(rs []rune) map[int]bool {
+	paired := map[int]bool{}
+	var open []int
+	for i := 0; i < len(rs); i++ {
+		switch rs[i] {
+		case '\\':
+			i++
+		case '[':
+			if _, n, ok := patternSet(rs[i:]); ok {
+				i += n - 1
+			}
+		case '(':
+			open = append(open, i)
+		case ')':
+			if len(open) > 0 {
+				paired[open[len(open)-1]], paired[i] = true, true
+				open = open[:len(open)-1]
+			}
 		}
 	}
-	return struct{}{}, nil
+	return paired
+}
+
+// patternCount translates the count after a `#` (B.1.5.3): a single
+// digit, or (n, m), (n,), (,m), (n) or (), spaces allowed; it reports how
+// many runes it took.
+func patternCount(rs []rune) (string, int, bool) {
+	if len(rs) == 0 {
+		return "", 0, false
+	}
+	if rs[0] >= '0' && rs[0] <= '9' {
+		return "{" + string(rs[0]) + "}", 1, true
+	}
+	if rs[0] != '(' {
+		return "", 0, false
+	}
+	end := -1
+	for j, r := range rs {
+		if r == ')' {
+			end = j
+			break
+		}
+	}
+	if end < 0 {
+		return "", 0, false
+	}
+	spec := strings.ReplaceAll(string(rs[1:end]), " ", "")
+	lo, hi, comma := strings.Cut(spec, ",")
+	for _, bound := range []string{lo, hi} {
+		if _, err := strconv.Atoi(bound); bound != "" && err != nil {
+			return "", 0, false
+		}
+	}
+	switch {
+	case !comma && lo == "":
+		return "*", end + 1, true
+	case !comma:
+		return "{" + lo + "}", end + 1, true
+	case lo == "" && hi == "":
+		return "*", end + 1, true
+	case lo == "":
+		return "{0," + hi + "}", end + 1, true
+	default:
+		return "{" + lo + "," + hi + "}", end + 1, true
+	}
+}
+
+// patternSet translates a set expression starting at rs[0] == '['
+// (B.1.5.1) into a regexp class; it reports how many runes it took,
+// false when the set is not closed. A `^` first negates it, except when
+// a `]` follows: `[^]...]` lists both literally, as no list is empty. A
+// `]` first, or right after the negating `^`, is a literal, and so is a
+// `-` right after the negating `^`, or a `^` elsewhere.
+func patternSet(rs []rune) (string, int, bool) {
+	var b strings.Builder
+	b.WriteByte('[')
+	i := 1
+	first := true
+	switch {
+	case len(rs) > 2 && rs[1] == '^' && rs[2] == ']':
+		b.WriteString(`\^\]`)
+		i, first = 3, false
+	case len(rs) > 1 && rs[1] == '^':
+		b.WriteByte('^')
+		i = 2
+		if i < len(rs) && rs[i] == '-' {
+			b.WriteString(`\-`)
+			i, first = 3, false
+		}
+	}
+	for i < len(rs) {
+		c := rs[i]
+		switch {
+		case c == ']' && !first:
+			b.WriteByte(']')
+			return b.String(), i + 1, true
+		case c == '\\' && i+1 < len(rs):
+			if text, n, ok := patternEscape(rs[i+1:], true); ok {
+				b.WriteString(text)
+				i += 1 + n
+			} else {
+				b.WriteString(classLiteral(rs[i+1]))
+				i += 2
+			}
+		case c == '-':
+			b.WriteByte('-')
+			i++
+		default:
+			b.WriteString(classLiteral(c))
+			i++
+		}
+		first = false
+	}
+	return "", 0, false
+}
+
+// classLiteral is r as a literal inside a regexp class.
+func classLiteral(r rune) string {
+	switch r {
+	case '\\', ']', '[', '^', '-':
+		return `\` + string(r)
+	}
+	return string(r)
+}
+
+// patternEscape translates the metacharacter after a `\` (table B.1),
+// inside a set expression when inSet; it reports how many runes it took,
+// false for a character without a metacharacter meaning, which stands
+// for itself.
+func patternEscape(rs []rune, inSet bool) (string, int, bool) {
+	class := func(members string) string {
+		if inSet {
+			return members
+		}
+		return "[" + members + "]"
+	}
+	switch rs[0] {
+	case 'd':
+		return class("0-9"), 1, true
+	case 'w':
+		return class("0-9a-zA-Z"), 1, true
+	case 't':
+		return `\t`, 1, true
+	case 'r':
+		return `\r`, 1, true
+	case 'n':
+		return class(`\n\v\f\r`), 1, true
+	case 's':
+		return class(`\t\n\v\f\r \p{Zs}`), 1, true
+	case 'b':
+		if inSet {
+			return "", 0, false
+		}
+		return `\b`, 1, true
+	case 'q':
+		if len(rs) < 2 || rs[1] != '{' {
+			return "", 0, false
+		}
+		end := -1
+		for j, r := range rs {
+			if r == '}' {
+				end = j
+				break
+			}
+		}
+		if end < 0 {
+			return "", 0, false
+		}
+		chars, ok := quadChars(string(rs[2:end]))
+		if !ok {
+			return "", 0, false
+		}
+		var b strings.Builder
+		for _, r := range chars {
+			if inSet {
+				b.WriteString(classLiteral(r))
+			} else {
+				b.WriteString(regexp.QuoteMeta(string(r)))
+			}
+		}
+		// Several characters are one string, which a repetition
+		// repeats whole.
+		if !inSet && len(chars) > 1 {
+			return "(?:" + b.String() + ")", end + 1, true
+		}
+		return b.String(), end + 1, true
+	}
+	return "", 0, false
+}
+
+// quadChars are the universal characters of a \q{...} (B.1.5.0, 6.1.1):
+// one quadruple group, plane, row, cell, or a list of USI-like Uxxxx.
+func quadChars(spec string) ([]rune, bool) {
+	parts := strings.Split(spec, ",")
+	for i := range parts {
+		parts[i] = strings.TrimSpace(parts[i])
+	}
+	if len(parts) == 0 || parts[0] == "" {
+		return nil, false
+	}
+	if p := parts[0]; p[0] == 'U' || p[0] == 'u' {
+		out := make([]rune, 0, len(parts))
+		for _, p := range parts {
+			if len(p) < 2 || (p[0] != 'U' && p[0] != 'u') {
+				return nil, false
+			}
+			v, err := strconv.ParseUint(strings.TrimPrefix(p[1:], "+"), 16, 32)
+			if err != nil {
+				return nil, false
+			}
+			out = append(out, rune(v))
+		}
+		return out, true
+	}
+	if len(parts) != 4 {
+		return nil, false
+	}
+	var v uint64
+	for _, p := range parts {
+		n, err := strconv.ParseUint(p, 10, 8)
+		if err != nil {
+			return nil, false
+		}
+		v = v<<8 | n
+	}
+	return []rune{rune(v)}, true
 }
 
 // matchBinaryString matches a concrete bit/hex/octet string against a

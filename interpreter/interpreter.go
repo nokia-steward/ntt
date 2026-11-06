@@ -2180,7 +2180,9 @@ func unquotePatternLiteral(raw string) string {
 //	\N{ref}   - insert referenced characters; a charstring subtype
 //	            reference (type charstring R ("a".."z")) becomes a
 //	            [lo-hi] character class. Honoured inside [...] too.
-//	\q{g,p,r,c} / \q{Uxxxx} - a quadruple / USI universal character.
+//
+// A \q{...} is the pattern translator's (builtins), which writes its
+// characters as literals.
 //
 // Substitution is single-level: inserted text is NOT re-scanned (each
 // referenced template/const is already expanded at its own definition
@@ -2199,18 +2201,8 @@ func expandPatternRefs(src string, env runtime.Scope) string {
 			case 'N':
 				if i+2 < len(src) && src[i+2] == '{' {
 					if cl := strings.IndexByte(src[i+3:], '}'); cl >= 0 {
-						if rep, ok := resolvePatternRef(strings.TrimSpace(src[i+3:i+3+cl]), env); ok {
+						if rep, ok := resolveCharSetRef(strings.TrimSpace(src[i+3:i+3+cl]), inSet, env); ok {
 							b.WriteString(rep)
-							i = i + 3 + cl + 1
-							continue
-						}
-					}
-				}
-			case 'q':
-				if i+2 < len(src) && src[i+2] == '{' {
-					if cl := strings.IndexByte(src[i+3:], '}'); cl >= 0 {
-						if r, ok := parseQuadChar(src[i+3 : i+3+cl]); ok {
-							b.WriteRune(r)
 							i = i + 3 + cl + 1
 							continue
 						}
@@ -2223,8 +2215,19 @@ func expandPatternRefs(src string, env runtime.Scope) string {
 			continue
 		}
 		switch {
-		case c == '[':
+		case c == '[' && !inSet:
+			// A `]` first, or right after the negating `^`, is a member
+			// (B.1.5.1), not the end of the set.
 			inSet = true
+			k := i + 1
+			if k < len(src) && src[k] == '^' {
+				k++
+			}
+			if k < len(src) && src[k] == ']' {
+				b.WriteString(src[i : k+1])
+				i = k + 1
+				continue
+			}
 		case c == ']':
 			inSet = false
 		case c == '{' && !inSet:
@@ -2283,10 +2286,63 @@ func resolvePatternRef(ident string, env runtime.Scope) (string, bool) {
 		return string(v.Value), true
 	case *runtime.TypeDesc:
 		if v.HasCharRange {
-			return "[" + string(v.CharLo) + "-" + string(v.CharHi) + "]", true
+			return "[" + escapeSetMember(string(v.CharLo)) + "-" + escapeSetMember(string(v.CharHi)) + "]", true
 		}
 	}
 	return "", false
+}
+
+// resolveCharSetRef is what \N{ident} stands for (B.1.5.4): a single
+// character of the (sub)set of characters ident denotes, written for
+// inside a set expression when inSet: a charstring value's character,
+// a charstring subtype's range, and charstring or universal charstring
+// any character, `?` (NOTE 2), outside a set. Anything else is left as
+// it is.
+func resolveCharSetRef(ident string, inSet bool, env runtime.Scope) (string, bool) {
+	if ident == "charstring" || ident == "universal charstring" {
+		if inSet {
+			return `\q{0,0,0,0}-\q{0,16,255,255}`, true
+		}
+		return "?", true
+	}
+	obj, ok := env.Get(ident)
+	if !ok || obj == nil {
+		return "", false
+	}
+	switch v := forceThunk(obj).(type) {
+	case *runtime.String:
+		if v.IsPattern {
+			return "", false
+		}
+		if inSet {
+			return escapeSetMember(string(v.Value)), true
+		}
+		return escapePatternLiteral(string(v.Value)), true
+	case *runtime.TypeDesc:
+		if !v.HasCharRange {
+			return "", false
+		}
+		rng := escapeSetMember(string(v.CharLo)) + "-" + escapeSetMember(string(v.CharHi))
+		if inSet {
+			return rng, true
+		}
+		return "[" + rng + "]", true
+	}
+	return "", false
+}
+
+// escapeSetMember backslash-escapes the characters of s that mean
+// something in a set expression (B.1.5.1), so that each is a member.
+func escapeSetMember(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch r {
+		case '\\', ']', '^', '-', '[':
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
 }
 
 // escapePatternLiteral backslash-escapes the TTCN-3 pattern
@@ -2303,34 +2359,6 @@ func escapePatternLiteral(s string) string {
 		b.WriteRune(r)
 	}
 	return b.String()
-}
-
-// parseQuadChar decodes a TTCN-3 universal-character reference body:
-// either a quadruple "group,plane,row,cell" or USI notation "Uxxxx"
-// (optionally "U+xxxx").
-func parseQuadChar(spec string) (rune, bool) {
-	spec = strings.TrimSpace(spec)
-	if len(spec) >= 2 && (spec[0] == 'U' || spec[0] == 'u') {
-		hex := strings.TrimPrefix(spec[1:], "+")
-		n, err := strconv.ParseInt(hex, 16, 32)
-		if err != nil {
-			return 0, false
-		}
-		return rune(n), true
-	}
-	parts := strings.Split(spec, ",")
-	if len(parts) != 4 {
-		return 0, false
-	}
-	var v [4]int64
-	for idx, p := range parts {
-		n, err := strconv.ParseInt(strings.TrimSpace(p), 10, 32)
-		if err != nil {
-			return 0, false
-		}
-		v[idx] = n
-	}
-	return rune(((v[0]*256+v[1])*256+v[2])*256 + v[3]), true
 }
 
 func evalLiteral(n *syntax.ValueLiteral, env runtime.Scope) runtime.Object {
@@ -9080,7 +9108,15 @@ func concatCharstringPattern(x, y runtime.Object) (runtime.Object, bool) {
 	if !xok || !yok {
 		return nil, false
 	}
-	return &runtime.String{Value: []rune(xf + yf), IsPattern: true}, true
+	// With a pattern @nocase among them, the result is @nocase too
+	// (15.11).
+	nocase := false
+	for _, o := range []runtime.Object{x, y} {
+		if s, ok := o.(*runtime.String); ok && s.IsPattern && s.NoCase {
+			nocase = true
+		}
+	}
+	return &runtime.String{Value: []rune(xf + yf), IsPattern: true, NoCase: nocase}, true
 }
 
 // isStringOperand reports whether o is a charstring/universal charstring

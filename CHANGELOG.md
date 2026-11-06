@@ -362,6 +362,33 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **Character patterns follow table B.1 and B.1.5.1 to B.1.5.3.**
+  - `\w` is `[0-9a-zA-Z]`, without `_`; `\n` matches LF, VT, FF and CR;
+    `\s` also VT and the space characters.
+  - A top-level `abc|xyz` is anchored as a whole; it matched anything
+    starting with `abc` or ending with `xyz`.
+  - In a set, a `]` first or right after the negating `^` is literal, a
+    `^` followed by `]` lists both (`[^]a]` is `^`, `]` or `a`), a `-`
+    right after the negating `^` is literal, and lists don't nest
+    (`[ab[r-z]]`); `\d`, `\w`, `\s`, `\n`, `\q{}` and `\N{}` work
+    inside one.
+  - `#n` takes one digit (`a#12` is `a` twice, then `2`), and `#(n, m)`
+    may have spaces.
+  - `\q{Uxxxx, ...}` is the sequence of those characters, and a `\q{}`
+    is a literal character, `\q{0,0,0,42}` a `*` and not "any".
+  - `\N{ref}` (B.1.5.4) inserts its set escaped: a value's character
+    literally, a subtype's range, and `charstring` or `universal
+    charstring` any character (NOTE 2), each inside a set expression too
+    (`[\N{Lower}5]`). A subtype of a list of values isn't expanded yet.
+  - A metacharacter symbol that forms no metacharacter is literal, as
+    the clause says: a `+` or `#` with nothing to repeat or after
+    another repetition, a parenthesis without a partner, an unclosed
+    `[`. A pattern Go's regexp still can't take (a count above 1000, a
+    reversed range) matches nothing.
+  - Every character pattern matches by character, so `?` takes one
+    universal character, and keeps case, where a pattern of only `?` and
+    `*` compared bytes and ignored case. Concatenating a `@nocase` pattern
+    gives a `@nocase` one (15.11).
 - **`int2enum` converts into the declared type of its target** (C.1.4)
   when the target has no value yet: a field (also of a record type's
   synonym, or an element of an array field), a record of element or an
