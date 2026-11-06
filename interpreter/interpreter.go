@@ -3218,11 +3218,14 @@ func evalInt2Enum(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 		return runtime.Errorf("integer value out of range (int64)")
 	}
 	target := n.Args.List[1]
+	// The type of the out parameter is the type converted to (C.1.4):
+	// the value's, or, unbound, the declared type of the variable, field
+	// or element.
 	var et *runtime.EnumType
 	if ev, ok := eval(target, env).(*runtime.EnumValue); ok {
 		et = ev.EnumType()
-	} else if t, ok := declaredTypeBinding(target, env).(*runtime.EnumType); ok {
-		et = t
+	} else {
+		et = lvalueEnumType(target, env)
 	}
 	if et == nil {
 		return runtime.Errorf("second argument must be an enum value")
@@ -3235,6 +3238,91 @@ func evalInt2Enum(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	tmp.Set(rangeElementKey, v)
 	if r := evalAssign(target, rangeElement, tmp); runtime.IsError(r) {
 		return r
+	}
+	return nil
+}
+
+// lvalueEnumType is the enumerated type the variable, field or element lx
+// is declared of, or nil.
+func lvalueEnumType(lx syntax.Expr, env runtime.Scope) *runtime.EnumType {
+	switch x := lx.(type) {
+	case *syntax.Ident:
+		return enumTypeNamed(declaredTypeName(env, x.String()), env)
+	case *syntax.ParenExpr:
+		if len(x.List) == 1 {
+			return lvalueEnumType(x.List[0], env)
+		}
+	case *syntax.SelectorExpr:
+		if f, parent := lvalueField(x, env); f != nil && len(f.ArrayDef) == 0 {
+			return enumTypeNamed(syntax.Name(f.Type), typeHome(parent, env))
+		}
+	case *syntax.IndexExpr:
+		// An array variable or field is declared of its element type,
+		// `var E a[2]`, `E f[2]`.
+		if sel, ok := x.X.(*syntax.SelectorExpr); ok {
+			if f, parent := lvalueField(sel, env); f != nil && len(f.ArrayDef) > 0 {
+				return enumTypeNamed(syntax.Name(f.Type), typeHome(parent, env))
+			}
+		}
+		if et := lvalueEnumType(x.X, env); et != nil {
+			return et
+		}
+		lt := listTypeDesc(lvalueTypeDesc(x.X, env), env)
+		if lt == nil {
+			return nil
+		}
+		if ls, ok := lt.Spec.(*syntax.ListSpec); ok && ls.ElemType != nil {
+			return enumTypeNamed(syntax.Name(ls.ElemType), typeHome(lt, env))
+		}
+	}
+	return nil
+}
+
+// lvalueField is the field x selects, of the record or set type its base
+// is declared of, through that type's synonyms, with that type; nil when
+// the type or the field is not known.
+func lvalueField(x *syntax.SelectorExpr, env runtime.Scope) (*syntax.Field, *runtime.TypeDesc) {
+	parent := lvalueTypeDesc(x.X, env)
+	for depth := 0; parent != nil && parent.Struct == nil && parent.Underlying != "" && depth < 8; depth++ {
+		parent = lookupTypeDesc(parent.Underlying, typeHome(parent, env))
+	}
+	if parent == nil || parent.Struct == nil {
+		return nil, nil
+	}
+	name := syntax.Name(x.Sel)
+	for _, f := range parent.Struct.Fields {
+		if f != nil && fieldName(f) == name {
+			return f, parent
+		}
+	}
+	return nil, nil
+}
+
+// typeHome is the scope td was declared in, where the names in it
+// resolve, or env.
+func typeHome(td *runtime.TypeDesc, env runtime.Scope) runtime.Scope {
+	if td != nil && td.Home != nil {
+		return td.Home
+	}
+	return env
+}
+
+// enumTypeNamed is the enumerated type name, possibly module-qualified,
+// denotes in scope, through type synonyms (`type E E2`), or nil.
+func enumTypeNamed(name string, scope runtime.Scope) *runtime.EnumType {
+	for depth := 0; name != "" && depth < 8; depth++ {
+		v, home, ok := resolveTypeName(name, scope)
+		if !ok {
+			return nil
+		}
+		switch t := v.(type) {
+		case *runtime.EnumType:
+			return t
+		case *runtime.TypeDesc:
+			name, scope = t.Underlying, typeHome(t, home)
+			continue
+		}
+		return nil
 	}
 	return nil
 }

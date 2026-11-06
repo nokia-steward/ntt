@@ -39,3 +39,34 @@ func TestConversionsAndHostid(t *testing.T) {
 		}
 	}`)
 }
+
+// int2enum converts into the type of its out parameter (C.1.4), one with
+// no value yet too: a variable, a field (of a record type's synonym as
+// well, or an array field's element), a record of element and an array
+// element, the enumerated type named module-qualified or through a
+// synonym.
+func TestInt2enumIntoAnUnboundTarget(t *testing.T) {
+	runPass(t, "M.tc", `module M {
+		type component C {}
+		type enumerated E { e0, e1, e2(5) }
+		type E ES;
+		type record R { E f, integer i, M.E q, ES s, E arr[2] }
+		type record of E RE;
+		type R RS;
+		testcase tc() runs on C {
+			var E v; var R r; var RE l; var E a[2]; var RS rs; var ES vs;
+			int2enum(1, v);
+			int2enum(5, r.f);
+			int2enum(0, l[0]);
+			int2enum(5, a[1]);
+			int2enum(1, rs.f);
+			int2enum(5, r.q);
+			int2enum(1, r.s);
+			int2enum(5, r.arr[1]);
+			int2enum(0, vs);
+			if (v == e1 and r.f == e2 and l[0] == e0 and a[1] == e2 and rs.f == e1 and
+			    r.q == e2 and r.s == e1 and r.arr[1] == e2 and vs == e0) { setverdict(pass) }
+			else { setverdict(fail, v, r, l[0], a[1], rs.f, vs) }
+		}
+	}`)
+}

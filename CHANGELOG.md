@@ -362,6 +362,13 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **`int2enum` converts into the declared type of its target** (C.1.4)
+  when the target has no value yet: a field (also of a record type's
+  synonym, or an element of an array field), a record of element or an
+  array element, and a variable or field whose enumerated type is
+  written module-qualified or through a type synonym. Before, only an
+  unbound plain variable of an enumerated type worked; the others gave
+  the error "second argument must be an enum value".
 - **`isvalue` is false for a template that is no specific value**
   (7.1.8.3): a value list `("ABCD", "EFGH")`, a complement, subset,
   superset or permutation, an `ifpresent`, a bit, hex or octet string
