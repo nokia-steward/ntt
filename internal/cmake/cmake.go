@@ -48,3 +48,17 @@ func FindCache(path string) *Cache {
 	})
 	return c
 }
+
+// FindBuildCache finds an out-of-source cache at build/CMakeCache.txt by
+// walking up from path. The nearest match wins.
+func FindBuildCache(path string) *Cache {
+	var c *Cache
+	fs.WalkUp(path, func(path string) bool {
+		if file := filepath.Join(path, "build", "CMakeCache.txt"); fs.IsRegular(file) {
+			c = &Cache{path: file}
+			return false
+		}
+		return true
+	})
+	return c
+}

@@ -26,7 +26,7 @@ func CommandContext(ctx context.Context, name string, args ...string) *exec.Cmd 
 }
 
 // Exec executes the named program with the given arguments.
-// The parent process will be replaced by the new process, for platforms that support it.
+// On Unix the parent process is replaced by the new process; on Windows a child runs.
 func Exec(name string, args ...string) error {
 	return execute(name, args...)
 }

@@ -1,0 +1,3732 @@
+# This file contains the T3XF instructions used by K3 runtime and MTC compiler.
+# It contains the opcode, stack operations, execution context and a
+# description, if available.
+#
+# When you update this file please run 'go generate' to update the implemtation.
+# It is recommended to also run 'go test ./...' from inside the t3xf directory.
+
+nop:
+  opcode: 0
+  context:
+    - vm
+  operations:
+    pre: []
+    post: []
+  description: |+
+    No operation.
+
+    nop shall normally be combined with eswap. Refer to the eswap
+    operation.
+
+version:
+  opcode: 3
+  context:
+    - beha_def
+  operations:
+    pre: [num]
+    post: []
+  description: |+
+    Specify the version number of t3xf to which this file
+    conforms. Version numbers start from one.
+
+load:
+  opcode: 5
+  arg: int
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Loads a local object indexed by x, where x is an unsigned
+    integer value in the range 0 to 32767.
+
+store:
+  opcode: 6
+  operations:
+    pre: [obj]
+    post: []
+  description: |+
+    Stores a local object indexed by x, where x in an unsigned
+    integer value in the range 0 to 32767.
+
+vlist:
+  opcode: 7
+  context:
+    - vm
+  operations:
+    pre: [mark, object1, .., objectn]
+    post: [vlist]
+  description: |+
+    Build a value list from a marked listed of objects,
+    potentially empty. The objects and the mark are removed from
+    the stack and replaced with a value list object.
+
+block:
+  opcode: 8
+  context:
+    - vm
+  operations:
+    pre: []
+    post: [blk]
+  description: |+
+    Switch from scanning back to execution mode pushing a block
+    object onto the stack.
+
+collect:
+  opcode: 9
+  context:
+    - vm
+  operations:
+    pre: [mark, object1, .., objectn]
+    post: [col]
+  description: |+
+    Build a collection from a marked listed of objects,
+    potentially empty. The objects and the mark are removed from
+    the stack and replaced with a collection object.
+
+drop:
+  opcode: 10
+  context:
+    - vm
+  operations:
+    pre: [obj]
+    post: []
+  description: |+
+    Remove the item at the top of the stack and discard it.
+
+dup:
+  opcode: 11
+  context:
+    - vm
+  operations:
+    pre: [obj]
+    post: [obj, obj]
+  description: |+
+    Duplicate the item at the top of the stack.
+
+mark:
+  opcode: 12
+  context:
+    - literal
+  operations:
+    pre: []
+    post: [mark]
+  description: |+
+    Push a mark object onto the stack.
+
+scan:
+  opcode: 13
+  context:
+    - vm
+  operations:
+    pre: []
+    post: [blk]
+  description: |+
+    Switch from instruction execution to scanning until a matching
+    block is seen.
+
+smatch:
+  opcode: 15
+  context:
+    - func
+  operations:
+    pre: [expr, tmpl]
+    post: [bool]
+  description: |+
+    Silent match
+
+utf8:
+  opcode: 16
+  arg: string
+  context:
+    - literal
+    - multibyte
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a string literal onto the stack. This is a
+    variable-length instruction with the details of the literal
+    string following the instruction itself: first, a length
+    field, then the bytes of the string, encoded UTF-8.
+
+    The length field is encoded with the same byte order as has
+    been selected for instructions. The string itself is always
+    encoded with the first byte of the string at the lowest file
+    offset – the natural ordering for strings.
+
+    Padding shall be placed at the end of the string bytes to
+    restore the correct alignment for following instructions.
+
+bits:
+  opcode: 17
+  arg: bits
+  context:
+    - literal
+    - multibyte
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a bitstring literal onto the stack. This is a
+    variable-length instruction with the details of the literal
+    bitstring following the instruction itself: first, a length
+    field, and then the bytes of the bitstring.
+
+    The length field is encoded with the same byte order as has
+    been selected for instructions. The length contains the number
+    of bits.
+
+    The string itself is always encoded with the first bit of the
+    string at the lowest file offset – the natural ordering for
+    strings – and in the most-significant bit of that byte.
+
+    Padding shall be placed at the end of the string bytes to
+    restore the correct alignment for following instructions.
+
+nibbles:
+  opcode: 18
+  arg: nibbles
+  context:
+    - literal
+    - multibyte
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Encoding of 9 nibbles, showing nibble endian-ness:
+    ‘BADC0FFEE’H
+
+    Note: 9th nibble in the upper half of most significant byte
+
+    0000 0123
+    0000 0009
+    BADC 0FFE
+    E000 0000
+
+octets:
+  opcode: 19
+  arg: octets
+  context:
+    - literal
+    - multibyte
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push an octetstring literal onto the stack. This is a
+    variable-length instruction with the details of the literal
+    octetstring following the instruction itself: first, a length
+    field, and then the bytes of the octetstring.
+
+    The length field is encoded with the same byte order as has
+    been selected for instructions. The length contains the number
+    of octets.
+
+    The string itself is always encoded with the first octet of
+    the string at the lowest file offset – the natural ordering
+    for strings.
+
+    Padding shall be placed at the end of the string bytes to
+    restore the correct alignment for following instructions.
+
+natlong:
+  opcode: 20
+  arg: int
+  context:
+    - literal
+    - multibyte
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a signed integer literal onto the stack. This is a
+    variable-length instruction with the value of the literal
+    integer following the instruction itself as a native long.
+
+    The literal integer value is encoded at the same width and
+    byte ordering as is currently selected for instructions: is
+    must be swapped when swapping is enabled.
+
+    If the currently selected instruction width is too small for
+    the encoding of a particular value then the istr literal
+    operation shall be used instead.
+
+ieee754dp:
+  opcode: 21
+  arg: float
+  context:
+    - literal
+    - multibyte
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a float literal onto the stack. The encoding of the
+    floating-point value follows the instruction word and shall be
+    in IEEE754 double-precision format.
+
+    IEEE754 double precision has a fixed size of 64-bits. Padding
+    will be required if the current instruction width is greater
+    than 64-bit.
+
+    The eight bytes of the representation must be swapped if
+    swapping is enabled.
+
+istr:
+  opcode: 22
+  arg: string
+  context:
+    - literal
+    - multibyte
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push an integer literal onto the stack, with the integer coded
+    as an ASCII string to allow for (nearly) arbitrary size. This
+    is a variable-length instruction with the details of the
+    literal string following the instruction itself: first, a
+    length field, and then the bytes of the string.
+
+    The length field is encoded with the same byte order as has
+    been selected for instructions. The string itself is always
+    encoded with the first byte of the string at the lowest file
+    offset – the natural ordering for strings.
+
+    Padding shall be placed at the end of the string bytes to
+    restore the correct alignment for following instructions.
+
+fstr:
+  opcode: 23
+  arg: string
+  context:
+    - literal
+    - multibyte
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a float literal onto the stack, with the value coded as
+    an ASCII string to allow for (nearly) arbitrary size and
+    precision. This is a variable-length instruction with the
+    details of the literal string following the instruction
+    itself: first, a length field, and then the bytes of the
+    string.
+
+    The length field is encoded with the same byte order as has
+    been selected for instructions. The string itself is always
+    encoded with the first byte of the string at the lowest file
+    offset – the natural ordering for strings.
+
+    Padding shall be placed at the end of the string bytes to
+    restore the correct alignment for following instructions.
+
+name:
+  opcode: 24
+  arg: string
+  context:
+    - literal
+    - multibyte
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push an object name literal onto the stack, coded as an ASCII
+    string. This is a variable-length instruction with the details
+    of the name following the instruction itself: first, a length
+    field, and then the bytes of the string.
+
+    The length field is encoded with the same byte order as has
+    been selected for instructions. The string itself is always
+    encoded with the first byte of the string at the lowest file
+    offset – the natural ordering for strings.
+
+    Padding shall be placed at the end of the string bytes to
+    restore the correct alignment for following instructions.
+
+apply:
+  opcode: 25
+  context:
+    - vm
+  operations:
+    pre: [closure]
+    post: []
+  description: ""
+"null":
+  opcode: 32
+  context:
+    - literal
+  operations:
+    pre: []
+    post: [nullref]
+  description: ""
+mtc:
+  opcode: 33
+  context:
+    - testcase_op
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Fetch a reference to the current MTC and push it on the stack.
+
+self:
+  opcode: 34
+  context:
+    - testcase_op
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Fetch a reference to the current component and push it on the
+    stack.
+
+system:
+  opcode: 35
+  context:
+    - testcase_op
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Fetch a reference to the current test system interface
+    component and push it on the stack.
+
+skip:
+  opcode: 36
+  context:
+    - literal
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a special literal onto the stack, corresponding to the
+    TTCN-3 ‘-‘ and meaning ‘skip this item.’
+
+    As an optimisation, skip may be used instead of an empty
+    block, saving one operation and avoid invocation of the block
+    scanning mechanism.
+
+omit:
+  opcode: 37
+  context:
+    - literal
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a special omit literal onto the stack.
+
+infinityn:
+  opcode: 38
+  context:
+    - literal
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a special -infinity literal onto the stack.
+
+infinityp:
+  opcode: 39
+  context:
+    - literal
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a special +infinity literal onto the stack.
+
+"false":
+  opcode: 40
+  context:
+    - literal
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a special false literal onto the stack.
+
+"true":
+  opcode: 41
+  context:
+    - literal
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a special true literal onto the stack.
+
+none:
+  opcode: 42
+  context:
+    - literal
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a special literal on the stack corresponding to the none
+    term of verdicttype.
+
+pass:
+  opcode: 43
+  context:
+    - literal
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a special literal on the stack corresponding to the pass
+    term of verdicttype.
+
+inconc:
+  opcode: 44
+  context:
+    - literal
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a special literal on the stack corresponding to the
+    inconc term of verdicttype.
+
+fail:
+  opcode: 45
+  context:
+    - literal
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a special literal on the stack corresponding to the fail
+    term of verdicttype.
+
+error:
+  opcode: 46
+  context:
+    - literal
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a special literal on the stack corresponding to the error
+    term of verdicttype.
+
+if:
+  opcode: 48
+  context:
+    - vm
+    - control_flow
+  operations:
+    pre: [cond, blk]
+    post: []
+  description: |+
+    Execute block blk if cond is true.
+
+ifelse:
+  opcode: 49
+  context:
+    - vm
+    - control_flow
+  operations:
+    pre: [cond, tblk, fblk]
+    post: []
+  description: |+
+    Execute block tblk if cond is true else execute block fblk.
+
+return:
+  opcode: 50
+  context:
+    - vm
+    - control_flow
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Causes immediate exit from the current function, altstep,
+    testcase or control.
+
+stopi:
+  opcode: 51
+  operations:
+    pre: []
+    post: []
+  description: |+
+    From within the behaviour of a component, causes immediate
+    termination of the behaviour of that component.
+
+    From within the behaviour of a control part, causes immediate
+    termination of the execution of that control part.
+
+for:
+  opcode: 52
+  context:
+    - vm
+    - control_flow
+  operations:
+    pre: [init, cond, body, incr]
+    post: []
+  description: |+
+    Implements the TTCN-3 for statement using four block
+    arguments.
+
+    First, block init is executed to establish initial values.
+
+    Block cond is evaluated to test the loop condition. If the
+    block yields a true value then block body is executed followed
+    by block incr to change the loop condition before looping to
+    evaluate the loop condition again.
+
+    Execution terminates when the loop condition returns a false
+    value.
+
+    Variables created within block init are visible within blocks
+    cond, incr and body. Such variables will be destroyed when the
+    operation terminates.
+
+while:
+  opcode: 53
+  context:
+    - vm
+    - control_flow
+  operations:
+    pre: [cond, body]
+    post: []
+  description: |+
+    Implements the TTCN-3 while statement using two block
+    arguments.
+
+    Block cond is evaluated to test the loop condition. If the
+    block yields a true value then block body is executed before
+    looping to evaluate the condition again.
+
+    Execution terminates when the loop condition returns a false
+    value.
+
+dowhile:
+  opcode: 54
+  context:
+    - vm
+    - control_flow
+  operations:
+    pre: [body, cond]
+    post: []
+  description: |+
+    Implements the TTCN-3 do/while statement using two block
+    arguments.
+
+    Block body is executed and then loop condition block cond is
+    evaluated. If the condition returns true then the process is
+    repeated.
+
+    Execution terminates when the loop condition returns a false
+    value.
+
+exec:
+  opcode: 55
+  context:
+    - vm
+  operations:
+    pre: [blk]
+    post: []
+  description: |+
+    Execute block blk. This is an optimisation of if(true), giving
+    a space saving of two operations with considerably better
+    performance.
+
+    The motivation for this operation is the translation of a
+    select statement containing only a single else statement.
+    Placing the block inline is not possible because of the issue
+    of variable scoping.
+
+alt:
+  opcode: 56
+  context:
+    - eval
+  operations:
+    pre: [blk]
+    post: []
+  description: |+
+    Evaluate the contents of blk until one of the contained
+    alternatives succeeds.
+
+    An empty block is allowed: activated defaults will still be
+    included in the operation.
+
+    If the successful alternative executes a repeat statement then
+    the whole block execution will be re-evaluated.
+
+interleave:
+  opcode: 57
+  context:
+    - eval
+  operations:
+    pre: [blk]
+    post: []
+  description: |+
+    Evaluate the contents of blk until all of the contained
+    alternatives succeed.
+
+    An empty block is allowed: activated defaults will still be
+    included in the operation.
+
+    Actions attached to successful alternatives may extend the set
+    of alternatives to complete.
+
+else:
+  opcode: 58
+  context:
+    - eval
+  operations:
+    pre: [blk]
+    post: []
+  description: |+
+    Create an alternative for an enclosing alt operation that is
+    immediately successful. Block blk contains the code to execute
+    if this alternative is chosen by the containing alt.
+
+repeat:
+  opcode: 59
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Cause the immediate repeat of the evaluation of the current
+    enclosing alt.
+
+break:
+  opcode: 60
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Leave the enclosing loop construct.
+
+continue:
+  opcode: 61
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Repeat the enclosing loop construct.
+
+step:
+  opcode: 62
+  context:
+    - eval
+  operations:
+    pre: [cblk, sblk]
+    post: []
+  description: |+
+    Create an alternative for an enclosing alt operation,
+    associating some condition with statements to perform should
+    the condition be chosen by the alt operation. Block cblk
+    contains code to execute to evaluate the condition of the
+    alternative. Block sblk contains code to execute should be
+    condition be chosen.
+
+clone:
+  opcode: 64
+  context:
+    - func
+  operations:
+    pre: [obj]
+    post: [res]
+  description: |+
+    Clone obj and push back clone.
+
+add:
+  opcode: 65
+  context:
+    - func
+  operations:
+    pre: [a, b]
+    post: [res]
+  description: |+
+    Evaluate a + b, pushing the result.
+
+neg:
+  opcode: 66
+  context:
+    - func
+  operations:
+    pre: [a]
+    post: [res]
+  description: |+
+    Evaluate -a (unary - operator) pushing the result.
+
+sub:
+  opcode: 67
+  context:
+    - func
+  operations:
+    pre: [a, b]
+    post: [res]
+  description: |+
+    Evaluate a – b, pushing the result on the stack.
+
+    The types of a and b must be compatible. The returned object
+    has the base type of the input parameters and is constant.
+
+mul:
+  opcode: 68
+  context:
+    - func
+  operations:
+    pre: [a, b]
+    post: [res]
+  description: |+
+    Evaluate a * b, pushing the result on the stack.
+
+    The types of a and b must be compatible. The returned object
+    has the base type of the input parameters and is constant.
+
+div:
+  opcode: 69
+  context:
+    - func
+  operations:
+    pre: [a, b]
+    post: [res]
+  description: |+
+    Evaluate a / b, pushing the result on the stack.
+
+    The types of a and b must be compatible. The returned object
+    has the base type of the input parameters and is constant.
+
+mod:
+  opcode: 70
+  context:
+    - func
+  operations:
+    pre: [a, b]
+    post: [res]
+  description: |+
+    Evaluate a mod b, pushing the result on the stack. The TTCN-3
+    definition of mod applies.
+
+    The types of a and b must be compatible. The returned object
+    has the base type of the input parameters and is constant.
+
+rem:
+  opcode: 71
+  context:
+    - func
+  operations:
+    pre: [a, b]
+    post: [res]
+  description: |+
+    Evaluate a rem b, pushing the result on the stack. The TTCN-3
+    definition of rem applies.
+
+    The types of a and b must be compatible. The returned object
+    has the base type of the input parameters and is constant.
+
+and:
+  opcode: 72
+  context:
+    - func
+  operations:
+    pre: [obj, obj]
+    post: [res]
+  description: |+
+    With a boolean first argument, perform the logical and
+    operation and return the boolean result. The second argument
+    may be either another boolean or a block. If the first
+    argument is false then the second argument shall not be
+    evaluated.
+
+    With bitstring, hexstring or octetstring inputs, perform the
+    bitwise and operation and return the result. The result type
+    will be of the same base type as the inputs.
+
+not:
+  opcode: 73
+  context:
+    - func
+  operations:
+    pre: [a]
+    post: [res]
+  description: |+
+    With boolean input, perform the logical not operation and
+    return the boolean result.
+
+    With bitstring, hexstring or octetstring input, perform the
+    bitwise not operation and return the result. The result type
+    will be of the same base type as the inputs.
+
+or:
+  opcode: 74
+  context:
+    - func
+  operations:
+    pre: [obj, obj]
+    post: [res]
+  description: |+
+    With a boolean first argument perform the logical or operation
+    and return the boolean result. The second argument shall be
+    either another boolean or a block. If the first argument is
+    true then the second argument shall not be evaluated.
+
+    With bitstring, hexstring or octetstring inputs, perform the
+    bitwise or operation and return the result. The result type
+    will be of the same base type as the inputs.
+
+xor:
+  opcode: 75
+  context:
+    - func
+  operations:
+    pre: [a, b]
+    post: [res]
+  description: |
+    With boolean inputs, perform the logical exclusive or
+    operation and return the boolean result.
+
+    With bitstring, hexstring or octetstring inputs perform the
+    bitwise exclusive or operation and return the result. The
+    result type will be of the same base type as the inputs.
+shl:
+  opcode: 76
+  context:
+    - func
+  operations:
+    pre: [str, num]
+    post: [res]
+  description: |+
+    Shift string str left by num items, and return the result.
+
+shr:
+  opcode: 77
+  context:
+    - func
+  operations:
+    pre: [str, num]
+    post: [res]
+  description: |+
+    Shift string str right by num items, and return the result.
+
+rol:
+  opcode: 78
+  context:
+    - func
+  operations:
+    pre: [str, num]
+    post: [res]
+  description: |+
+    Rotate string str left by num items, and return the result.
+
+ror:
+  opcode: 79
+  context:
+    - func
+  operations:
+    pre: [str, num]
+    post: [res]
+  description: |+
+    Rotate string str right by num items, and return the result.
+
+eq:
+  opcode: 80
+  context:
+    - func
+  operations:
+    pre: [a, b]
+    post: [res]
+  description: |+
+    Evaluate a == b, pushing the boolean result.
+
+ge:
+  opcode: 81
+  context:
+    - func
+  operations:
+    pre: [a, b]
+    post: [res]
+  description: |+
+    Evaluate a >= b, pushing the boolean result.
+
+gt:
+  opcode: 82
+  context:
+    - func
+  operations:
+    pre: [a, b]
+    post: [res]
+  description: |+
+    Evaluate a > b, pushing the boolean result.
+
+le:
+  opcode: 83
+  context:
+    - func
+  operations:
+    pre: [a, b]
+    post: [res]
+  description: |+
+    Evaluate a <= b, pushing the boolean result.
+
+lt:
+  opcode: 84
+  context:
+    - func
+  operations:
+    pre: [a, b]
+    post: [res]
+  description: |+
+    Evaluate a < b, pushing the boolean result.
+
+ne:
+  opcode: 85
+  context:
+    - func
+  operations:
+    pre: [a, b]
+    post: [res]
+  description: |+
+    Evaluate a != b, pushing the boolean result.
+
+cat:
+  opcode: 86
+  context:
+    - func
+  operations:
+    pre: [a, b]
+    post: [res]
+  description: |+
+    Concatenates strings a and b and returns the result. Objects a
+    and b must both be strings of the same base type.
+
+get:
+  opcode: 87
+  context:
+    - vm
+  operations:
+    pre: [obj, field]
+    post: [obj]
+  description: |+
+    When object obj is of type record, record-of, set, set-of,
+    union, array or string, fetch a reference to the element
+    indexed by idx, where idx is an unsigned integer value.
+
+    When object obj is of type component fetch a reference to the
+    field name.
+
+assign:
+  opcode: 88
+  context:
+    - vm
+  operations:
+    pre: [a, b]
+    post: []
+  description: |+
+    Assign the value of b to a.
+
+    The types of a and b must be compatible.
+
+assignd:
+  opcode: 89
+  context:
+    - vm
+  operations:
+    pre: [a, b]
+    post: [a]
+  description: |+
+    Assign the value of b to a. Leave object a on the stack.
+
+    The types of a and b must be compatible.
+
+iget:
+  opcode: 90
+  arg: imm
+  context:
+    - vm
+  operations:
+    pre: [obj]
+    post: [obj]
+  description: |+
+    When object obj is of type record, record-of, set, set-of,
+    union, array or string, fetch a reference to the element
+    indexed by x, where x is an unsigned integer value in the
+    range 0 to 32767.
+
+    This is the performance-optimised version of the get operation
+    above.
+
+def:
+  opcode: 91
+  context:
+    - vm
+  operations:
+    pre: [from, what]
+    post: [ref]
+  description: ""
+idef:
+  opcode: 92
+  arg: imm
+  context:
+    - vm
+  operations:
+    pre: [from]
+    post: [ref]
+  description: |+
+    Same behaviour as 'def'.
+
+ifield:
+  opcode: 93
+  arg: imm
+  context:
+    - type_new
+  operations:
+    pre: [type, name]
+    post: []
+  description: ""
+move:
+  opcode: 94
+  operations:
+    pre: [b, a]
+    post: []
+  description: |+
+    Move b to a
+
+any:
+  opcode: 96
+  context:
+    - literal
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a special any-value literal on the stack, corresponding
+    to the TTCN-3 ‘?’ literal.
+
+anyn:
+  opcode: 97
+  context:
+    - literal
+  operations:
+    pre: []
+    post: [lit]
+  description: |+
+    Push a special any-value-or-none literal on the stack,
+    corresponding to the TTCN-3 ‘*’ literal.
+
+complement:
+  opcode: 98
+  context:
+    - value
+  operations:
+    pre: [vlist]
+    post: [res]
+  description: |+
+    Make a complement template literal from the input value list
+    vlist. Push the resulting object on the stack.
+
+ifpresent:
+  opcode: 99
+  context:
+    - value
+  operations:
+    pre: [obj]
+    post: [obj]
+  description: |+
+    Modify obj to allow it to match optional fields in record or
+    set objects. Leave the object on the stack.
+
+length:
+  opcode: 100
+  context:
+    - value
+  operations:
+    pre: [obj, len]
+    post: [obj]
+  description: |+
+    Create a length restriction with length len and apply to obj,
+    leaving the result on the stack. len may be a range
+    constructed with the range operation.
+
+pattern:
+  opcode: 101
+  context:
+    - vm
+  operations:
+    pre: [str]
+    post: [pat]
+  description: |+
+    Make string str into a pattern template literal and push this
+    on the stack.
+
+    In addition to the obvious use with charstring and universal
+    charstring types, pattern shall be used for bitstring,
+    hexstring and octetstring literals when they contain
+    pattern-matching characters.
+
+permutation:
+  opcode: 102
+  context:
+    - value
+  operations:
+    pre: [vlist]
+    post: [res]
+  description: |+
+    Make a permutation template literal from the input value list
+    vlist. Push the resulting object on the stack.
+
+range:
+  opcode: 103
+  context:
+    - vm
+  operations:
+    pre: [lower, upper]
+    post: [obj]
+  description: |+
+    Construct a range template literal from bounds lower and
+    upper. Push the resulting object on the stack.
+
+subset:
+  opcode: 104
+  context:
+    - value
+  operations:
+    pre: [vlist]
+    post: [res]
+  description: |+
+    Make a subset template literal from the input value list
+    vlist. Push the resulting object on the stack.
+
+superset:
+  opcode: 105
+  context:
+    - value
+  operations:
+    pre: [vlist]
+    post: [res]
+  description: |+
+    Make a superset template literal from the input value list
+    vlist. Push the resulting object on the stack.
+
+allfrom:
+  opcode: 106
+  context:
+    - value
+    - all
+  operations:
+    pre: [obj]
+    post: [res]
+  description: ""
+allfromp:
+  opcode: 107
+  context:
+    - value
+    - all
+  operations:
+    pre: [obj]
+    post: [res]
+  description: ""
+from:
+  opcode: 108
+  context:
+    - func
+  operations:
+    pre: [mapv, setofFromType]
+    post: [res]
+  description: "Implements the TTCN-3 .from operation applied to mapv of \ntype: `type map from A to B MapT`. A setofFromType is provided\nfor creation of the return value. \nReturn value is of type `set of A` containing all keys\nfrom the map.\n\n"
+to:
+  opcode: 109
+  context:
+    - func
+  operations:
+    pre: [mapv, setofToType]
+    post: [res]
+  description: "Implements the TTCN-3 .to operation applied to mapv of \ntype: `type map from A to B MapT`. A setofToType is provided\nfor creation of the return value. \nReturn value is of type `set of B` containing all values\nfrom the map.\n\n"
+vardup:
+  opcode: 111
+  arg: imm
+  context:
+    - decl
+  operations:
+    pre: [type, init, name]
+    post: []
+  description: Create a variable with eager template evaluation.
+var:
+  opcode: 112
+  arg: imm
+  context:
+    - decl
+  operations:
+    pre: [type, name]
+    post: []
+  description: |+
+    Create a variable with the given type and name. Bind this
+    variable to the current function (control, altstep, testcase.)
+
+term:
+  opcode: 113
+  context:
+    - type_new
+  operations:
+    pre: [tval, name]
+    post: []
+  description: |+
+    Bind an integer value and name into an enumeration term
+    definition and then attach this to the owning enumeration
+    object.
+
+field:
+  opcode: 114
+  context:
+    - type_new
+  operations:
+    pre: [type, name]
+    post: []
+  description: |+
+    Build a field description from type and name and attach it to
+    the structured type object owning the current block.
+
+fieldo:
+  opcode: 115
+  context:
+    - type_new
+  operations:
+    pre: [type, name]
+    post: []
+  description: |+
+    Build an optional field description from type and name and
+    attach it to the structured type object owning the current
+    block.
+
+in:
+  opcode: 116
+  context:
+    - type_new
+  operations:
+    pre: [type, name]
+    post: []
+  description: |+
+    Bind a type and name into an input value parameter object and
+    then attach this to the owning function (altstep, testcase)
+    object.
+
+inout:
+  opcode: 117
+  context:
+    - type_new
+  operations:
+    pre: [type, name]
+    post: []
+  description: |+
+    Bind a type and name into an input/output value parameter
+    object and then attach this to the owning function (altstep,
+    testcase) object.
+
+out:
+  opcode: 118
+  context:
+    - type_new
+  operations:
+    pre: [type, name]
+    post: []
+  description: |+
+    Bind a type and name into an output value parameter object and
+    then attach this to the owning function (altstep, testcase)
+    object.
+
+permito:
+  opcode: 120
+  context:
+    - vm
+  operations:
+    pre: [type]
+    post: [type]
+  description: |+
+    Modifies a type object to allow it to have the special omit
+    value.
+
+permitt:
+  opcode: 121
+  context:
+    - vm
+  operations:
+    pre: [type]
+    post: [type]
+  description: |+
+    Modifies a type object to allow it to have template values.
+
+permitp:
+  opcode: 122
+  context:
+    - vm
+  operations:
+    pre: [type]
+    post: [type]
+  description: |+
+    Modifies a type object to allow it to have ifpresent values.
+
+altstep:
+  opcode: 128
+  arg: imm
+  context:
+    - beha_def
+  operations:
+    pre: [pblk, bblk, name]
+    post: []
+  description: |+
+    Define an altstep object from a block pblk containing its
+    parameters, bblk containing its behaviour and a name, and then
+    attach it to the module object owning the current block.
+
+altstepb:
+  opcode: 129
+  arg: imm
+  context:
+    - beha_def
+  operations:
+    pre: [comp, pblk, bblk, name]
+    post: []
+  description: |+
+    Define a bound altstep object from a component type comp, a
+    block pblk containing its parameters, bblk containing its
+    behaviour and a name, then attach it to the module object
+    owning the current block.
+
+altstepw:
+  opcode: 130
+  arg: imm
+  context:
+    - beha_def
+  operations:
+    pre: [ablk, pblk, bblk, name]
+    post: []
+  description: |+
+    Define an altstep object from a block pblk containing its
+    parameters, bblk containing its behaviour and a name, attach
+    the attributes from block ablk, and then attach it to the
+    module object owning the current block.
+
+altstepbw:
+  opcode: 131
+  arg: imm
+  context:
+    - beha_def
+  operations:
+    pre: [comp, ablk, pblk, bblk, name]
+    post: []
+  description: |+
+    Define a bound altstep object from a component type comp, a
+    block pblk containing its parameters, bblk containing its
+    behaviour and a name, attach the attributes from block ablk,
+    and then attach it to the module object owning the current
+    block.
+
+const:
+  opcode: 132
+  arg: imm
+  context:
+    - decl
+  operations:
+    pre: [vblk, type, name]
+    post: []
+  description: |+
+    Create a constant data definition from a block vblk containing
+    the statements of its value, a type type and a name.
+
+constw:
+  opcode: 133
+  arg: imm
+  context:
+    - decl
+  operations:
+    pre: [ablk, vblk, type, name]
+    post: []
+  description: |+
+    Create a constant data definition from a block vblk containing
+    the statements of its value, a type type and a name, applying
+    attributes from block ablk.
+
+control:
+  opcode: 134
+  arg: imm
+  context:
+    - beha_def
+  operations:
+    pre: [blk]
+    post: []
+  description: |+
+    Create a control part definition from a block blk containing
+    the statements of its behaviour.
+
+controlw:
+  opcode: 135
+  context:
+    - beha_def
+  operations:
+    pre: [blk]
+    post: []
+  description: |+
+    A control part definition with attributes attached.
+
+source:
+  opcode: 141
+  context:
+    - vm
+  operations:
+    pre: [mblk, name]
+    post: []
+  description: |+
+    Define a source file object with file name name and module
+    definitions contained in block mblk.
+
+module:
+  opcode: 142
+  context:
+    - vm
+  operations:
+    pre: [bblk, name]
+    post: []
+  description: |+
+    Define a module object and attach it to the source object
+    owning the current block. Parameters are a block dblk of
+    sub-definitions and the group name.
+
+modulew:
+  opcode: 143
+  context:
+    - vm
+  operations:
+    pre: [ablk, bblk, name]
+    post: []
+  description: |+
+    Define a module object with attributes.
+
+function:
+  opcode: 144
+  arg: imm
+  context:
+    - beha_def
+  operations:
+    pre: [pblk, bblk, name]
+    post: []
+  description: |+
+    Define a function object from a block pblk containing its
+    parameters, bblk containing its behaviour and a name, and then
+    attach it to the module object owning the current block.
+
+functionb:
+  opcode: 145
+  arg: imm
+  context:
+    - beha_def
+  operations:
+    pre: [comp, pblk, bblk, name]
+    post: []
+  description: |+
+    Define a bound function object from a component type comp, a
+    block pblk containing its parameters, bblk containing its
+    behaviour and a name, then attach it to the module object
+    owning the current block.
+
+functionv:
+  opcode: 148
+  arg: imm
+  context:
+    - beha_def
+  operations:
+    pre: [type, pblk, bblk, name]
+    post: []
+  description: |+
+    Define a value-returning function object from return type, a
+    block pblk containing its parameters, bblk containing its
+    behaviour and a name, and then attach it to the module object
+    owning the current block.
+
+functionvb:
+  opcode: 149
+  arg: imm
+  context:
+    - beha_def
+  operations:
+    pre: [type, comp, pblk, bblk, name]
+    post: []
+  description: |+
+    Define a value-returning bound function object from return
+    type, a component type comp, a block pblk containing its
+    parameters, bblk containing its behaviour and a name, then
+    attach it to the module object owning the current block.
+
+functionx:
+  opcode: 152
+  operations:
+    pre: [pblk, name]
+    post: []
+  description: |+
+    Define an external function object from a block pblk
+    containing its parameters and a name, and then attach it to
+    the module object owning the current block.
+
+functionxw:
+  opcode: 153
+  context:
+    - beha_def
+  operations:
+    pre: [ablk, pblk, name]
+    post: []
+  description: |+
+    Define an external function object from a block pblk
+    containing its parameters and a name, attach the attributes
+    from block ablk, and then attach it to the module object
+    owning the current block.
+
+functionxv:
+  opcode: 154
+  context:
+    - beha_def
+  operations:
+    pre: [type, pblk, name]
+    post: []
+  description: |+
+    Define a value-returning external function object from return
+    type, a block pblk containing its parameters and a name, and
+    then attach it to the module object owning the current block.
+
+functionxvw:
+  opcode: 155
+  context:
+    - beha_def
+  operations:
+    pre: [type, ablk, pblk, name]
+    post: []
+  description: |+
+    Define a value-returning external function object from return
+    type, a block pblk containing its parameters and a name,
+    attach the attributes from block ablk, and then attach it to
+    the module object owning the current block.
+
+mpar:
+  opcode: 160
+  arg: imm
+  context:
+    - decl
+  operations:
+    pre: [type, name]
+    post: []
+  description: |+
+    Create a module parameter definition from its type and a name.
+
+mpard:
+  opcode: 161
+  arg: imm
+  context:
+    - decl
+  operations:
+    pre: [vblk, type, name]
+    post: []
+  description: |+
+    Create a module parameter definition from a block vblk
+    containing the statements of its default value, its type and a
+    name.
+
+template:
+  opcode: 164
+  arg: imm
+  context:
+    - beha_def
+  operations:
+    pre: [type, pblk, bblk, name]
+    post: []
+  description: |+
+    Define a template object from return type, a block pblk
+    containing its parameters, bblk containing its behaviour and a
+    name, and then attach it to the module object owning the
+    current block.
+
+type:
+  opcode: 166
+  context:
+    - type_def
+  operations:
+    pre: [obj, name]
+    post: []
+  description: |+
+    Associate a type object and name into a type definition object
+    and then attach this to the owning module or group definition.
+
+typew:
+  opcode: 167
+  context:
+    - type_def
+  operations:
+    pre: [ablk, obj, name]
+    post: []
+  description: |+
+    Associate a type object and name into a type definition object
+    and then attach this to the owning module or group definition.
+    Attributes from block ablk are attached.
+
+testcase:
+  opcode: 168
+  arg: imm
+  context:
+    - beha_def
+  operations:
+    pre: [rcomp, pblk, bblk, name]
+    post: []
+  description: |+
+    Define a testcase object from a runs-on component type rcomp,
+    a block pblk containing its parameters, bblk containing its
+    behaviour and a name, and then attach it to the module object
+    owning the current block.
+
+testcases:
+  opcode: 169
+  arg: imm
+  context:
+    - beha_def
+  operations:
+    pre: [scomp, rcomp, pblk, bblk, name]
+    post: []
+  description: |+
+    Define a testcase object from a system component type scomp, a
+    runs-on component type rcomp, a block pblk containing its
+    parameters, bblk containing its behaviour and a name, and then
+    attach it to the module object owning the current block.
+
+testcasew:
+  opcode: 170
+  operations:
+    pre: [ablk, rcomp, pblk, bblk, name]
+    post: []
+  description: |+
+    Define a testcase object from a runs-on component type rcomp,
+    a block pblk containing its parameters, bblk containing its
+    behaviour and a name, and then attach it to the module object
+    owning the current block. Attach attributes from block ablk.
+
+testcasesw:
+  opcode: 171
+  operations:
+    pre: [ablk, scomp, rcomp, pblk, bblk, name]
+    post: []
+  description: |+
+    Define a testcase object from a system component type scomp, a
+    runs-on component type rcomp, a block pblk containing its
+    parameters, bblk containing its behaviour and a name, and then
+    attach it to the module object owning the current block.
+    Attach attributes from block ablk.
+
+encode:
+  opcode: 196
+  context:
+    - type_new
+  operations:
+    pre: [val]
+    post: []
+  description: |+
+    Attach the encode attribute val to the object owning the
+    current block.
+
+encodeo:
+  opcode: 198
+  context:
+    - type_new
+  operations:
+    pre: [val]
+    post: []
+  description: |+
+    Attach the overriding encode attribute val to the object
+    owning the current block.
+
+extension:
+  opcode: 200
+  context:
+    - type_new
+  operations:
+    pre: [val]
+    post: []
+  description: |+
+    Attach the extension attribute val to the object owning the
+    current block.
+
+extensiono:
+  opcode: 202
+  context:
+    - type_new
+  operations:
+    pre: [val]
+    post: []
+  description: |+
+    Attach the overriding extension attribute val to the object
+    owning the current block.
+
+variant:
+  opcode: 204
+  context:
+    - type_new
+  operations:
+    pre: [val]
+    post: []
+  description: |+
+    Attach the variant attribute val to the object owning the
+    current block.
+
+varianto:
+  opcode: 206
+  context:
+    - type_new
+  operations:
+    pre: [val]
+    post: []
+  description: |+
+    Attach the overriding variant attribute val to the object
+    owning the current block.
+
+activate:
+  opcode: 208
+  context:
+    - component_op
+  operations:
+    pre: [blk]
+    post: [default]
+  description: |+
+    Activate an altstep and return a default object. Block blk
+    shall contain an altstep call, including any required
+    parameters.
+
+deactivate:
+  opcode: 210
+  context:
+    - component_op
+  operations:
+    pre: [default]
+    post: []
+  description: |+
+    Deactivate default altstep default.
+
+deactivatea:
+  opcode: 211
+  context:
+    - component_op
+    - all
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Deactivate all altsteps activated on the current component.
+
+specplc:
+  opcode: 212
+  context:
+    - component_op
+  operations:
+    pre: [blk]
+    post: []
+  description: |+
+    Special place
+
+bitstring:
+  opcode: 224
+  context:
+    - type_ref
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Push the built-in bitstring type object.
+
+boolean:
+  opcode: 225
+  context:
+    - type_ref
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Push the built-in boolean type object.
+
+charstring:
+  opcode: 226
+  context:
+    - type_ref
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Push the built-in charstring type object.
+
+charstringu:
+  opcode: 227
+  context:
+    - type_ref
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Push the built-in universal charstring type object.
+
+float:
+  opcode: 228
+  context:
+    - type_ref
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Push the built-in float type object.
+
+hexstring:
+  opcode: 229
+  context:
+    - type_ref
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Push the built-in hexstring type object.
+
+integer:
+  opcode: 230
+  context:
+    - type_ref
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Push the built-in integer type object.
+
+octetstring:
+  opcode: 231
+  context:
+    - type_ref
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Push the built-in octetstring type object.
+
+verdicttype:
+  opcode: 232
+  context:
+    - type_ref
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Push the built-in verdicttype type object.
+
+closuretype:
+  opcode: 233
+  context:
+    - type_ref
+  operations:
+    pre: [type_ref]
+  description: ""
+address:
+  opcode: 234
+  context:
+    - type_ref
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    When a module defines a type named ‘address’ then this
+    definition is returned from the address operation.
+
+    When a module fails to define an address type then this
+    operation returns a built-in opaque address type object.
+
+    Each defined module has its own unique definition of address.
+
+default:
+  opcode: 236
+  context:
+    - type_ref
+  operations:
+    pre: []
+    post: [ref]
+  description: |+
+    Push the built-in default type object.
+
+timer:
+  opcode: 237
+  context:
+    - type_ref
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Push the built-in timer type object.
+
+array:
+  opcode: 238
+  context:
+    - type_new
+  operations:
+    pre: [type, dim]
+    post: [obj]
+  description: |+
+    Create an array type object from an element type type and a
+    dimension dim. Push the resulting type object on the stack.
+    The array dimension shall be either a positive integer or a
+    range of integers (positive, no infinities.)
+
+subtype:
+  opcode: 239
+  context:
+    - type_new
+  operations:
+    pre: [type, cons]
+    post: [res]
+  description: |+
+    Create a subtype from type applying constraint cons, pushing
+    the resulting type object on the stack. Constraint cons may be
+    a single object or a collection of objects.
+
+enumerated:
+  opcode: 240
+  context:
+    - type_new
+  operations:
+    pre: [blk]
+    post: [obj]
+  description: |+
+    Build an enumerated object from the terms described in block
+    blk. Push the resulting object onto the stack.
+
+component:
+  opcode: 242
+  context:
+    - type_new
+  operations:
+    pre: [iblk]
+    post: [ctype]
+  description: |+
+    Construct a component type object with initialisation from
+    block iblk and push on to the stack.
+
+componentx:
+  opcode: 243
+  context:
+    - type_new
+  operations:
+    pre: [coll, iblk]
+    post: [ctype]
+  description: |+
+    Construct a component type object with initialisation from
+    block iblk, extending components listed in collection coll and
+    push on to the stack.
+
+portm:
+  opcode: 244
+  context:
+    - type_new
+  operations:
+    pre: [iblk, oblk]
+    post: [ptype]
+  description: |+
+    Construct a message port type object push onto the stack.
+    Block iblk shall contain a list of types allowed in through
+    the port and block oblk shall contain a list of types allowed
+    out through the port. The same type may appear in both lists.
+
+    Refer to the TTCN-3 specification for the precise meaning of
+    the terms in and out under various circumstances.
+
+portma:
+  opcode: 246
+  context:
+    - type_new
+  operations:
+    pre: [in, out, address, map_params, unmap_params]
+    post: []
+  description: |+
+    Create message port type
+
+record:
+  opcode: 248
+  context:
+    - type_new
+  operations:
+    pre: [fblk]
+    post: [obj]
+  description: |+
+    Construct a record object from field definitions in block fblk
+    and push on to the stack.
+
+set:
+  opcode: 249
+  context:
+    - type_new
+  operations:
+    pre: [fblk]
+    post: [obj]
+  description: |+
+    Construct a set object from field definitions in block fblk
+    and push on to the stack.
+
+recordof:
+  opcode: 250
+  context:
+    - type_new
+  operations:
+    pre: [type]
+    post: [obj]
+  description: |+
+    Construct a record-of object with element of type type and
+    push on to the stack.
+
+setof:
+  opcode: 251
+  context:
+    - type_new
+  operations:
+    pre: [type]
+    post: [obj]
+  description: |+
+    Construct a set-of object with element of type type and push
+    on to the stack.
+
+mapt:
+  opcode: 252
+  context:
+    - type_new
+  operations:
+    pre: [typek, typev]
+    post: [obj]
+  description: |+
+    Construct a map type object with key typek and value typev
+    and push on to the stack.
+
+unmapfromto:
+  opcode: 253
+  context:
+    - value
+  operations:
+    pre: [mapval, key]
+    post: []
+  description: |+
+    remove key from mapval.
+
+union:
+  opcode: 255
+  context:
+    - type_new
+  operations:
+    pre: [fblk]
+    post: [obj]
+  description: |+
+    Construct a union object from field definitions in block fblk
+    and push on to the stack.
+
+action:
+  opcode: 256
+  context:
+    - func
+  operations:
+    pre: [str]
+    post: []
+  description: |+
+    Request the action described in str from the user.
+
+log:
+  opcode: 257
+  context:
+    - func
+  operations:
+    pre: [obj]
+    post: []
+  description: |+
+    Log the items in collection coll or log the single object obj.
+
+match:
+  opcode: 258
+  context:
+    - func
+  operations:
+    pre: [expr, tmpl]
+    post: [res]
+  description: |+
+    Perform template matching of expression expr against template
+    tmpl returning a boolean result on the stack.
+
+valueof:
+  opcode: 259
+  context:
+    - value
+  operations:
+    pre: [tmpl]
+    post: [value]
+  description: |+
+    Check template tmpl. If it has a single value then return this
+    on the stack otherwise raise a runtime error.
+
+getverdict:
+  opcode: 260
+  context:
+    - component_op
+  operations:
+    pre: []
+    post: [lver]
+  description: |+
+    Get the local verdict of the current component and push it on
+    the stack. Use within the control part is a runtime error.
+
+setverdict:
+  opcode: 261
+  context:
+    - component_op
+  operations:
+    pre: [lver]
+    post: []
+  description: |+
+    Set the local verdict of the current component from parameter
+    lver. Use within the control part is a runtime error.
+
+execute:
+  opcode: 262
+  context:
+    - testcase_new
+  operations:
+    pre: [blk]
+    post: [verdict]
+  description: |+
+    Execute testcase and return its verdict. The input parameter
+    is a block blk containing any actual parameters to the
+    testcase, followed by the invocation of the testcase itself.
+
+executel:
+  opcode: 263
+  context:
+    - testcase_new
+  operations:
+    pre: [limit, blk]
+    post: [verdict]
+  description: |+
+    Execute testcase and return its verdict. The input parameter
+    is a block blk containing any actual parameters to be supplied
+    to the testcase, followed by the invocation of the testcase
+    itself. Time limit limit shall be applied to the testcase
+    execution.
+
+connect:
+  opcode: 264
+  context:
+    - port_op
+  operations:
+    pre: [p1, p2]
+    post: []
+  description: |+
+    Connect ports p1 and p2.
+
+disconnect:
+  opcode: 265
+  context:
+    - port_op
+  operations:
+    pre: [p1, p2]
+    post: []
+  description: |+
+    Break the connection between port p1 and port p2.
+
+disconnecta:
+  opcode: 266
+  context:
+    - port_op
+    - all
+  operations:
+    pre: [comp]
+    post: []
+  description: |+
+    Break all connections from component comp.
+
+disconnectaa:
+  opcode: 267
+  context:
+    - port_op
+    - component_op
+    - all
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Break all connections on all components.
+
+map:
+  opcode: 268
+  context:
+    - port_op
+  operations:
+    pre: [p1, p2]
+    post: []
+  description: |+
+    Map port p1 to port p2.
+
+unmap:
+  opcode: 269
+  context:
+    - port_op
+  operations:
+    pre: [p1, p2]
+    post: []
+  description: |+
+    Break the mapping between port p1 and port p2.
+
+unmapa:
+  opcode: 270
+  context:
+    - port_op
+    - all
+  operations:
+    pre: [comp]
+    post: []
+  description: |+
+    Break all mappings from component comp.
+
+unmapaa:
+  opcode: 271
+  context:
+    - port_op
+    - component_op
+    - all
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Break all mappings on all components.
+
+alive:
+  opcode: 272
+  context:
+    - component_op
+  operations:
+    pre: [comp]
+    post: [res]
+  description: |+
+    Test the state of component comp for the alive condition. Push
+    the boolean result onto the stack.
+
+alive1:
+  opcode: 273
+  context:
+    - component_op
+    - any
+  operations:
+    pre: []
+    post: [res]
+  description: |+
+    Test the state of all parallel test components for any that
+    are alive. Push the boolean result onto the stack.
+
+alivea:
+  opcode: 274
+  context:
+    - component_op
+    - all
+  operations:
+    pre: []
+    post: [res]
+  description: |+
+    Test the state of all parallel test components checking that
+    all are alive. Push the boolean result onto the stack.
+
+done:
+  opcode: 276
+  context:
+    - component_op
+  operations:
+    pre: [comp]
+    post: []
+  description: |+
+    Test the state of component comp for the done condition,
+    contributing this to an enclosing alt or interleave statement.
+
+done1:
+  opcode: 277
+  context:
+    - component_op
+    - any
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Test the state of all parallel test components for any that
+    are done, contributing this to an enclosing alt or interleave
+    statement.
+
+donea:
+  opcode: 278
+  context:
+    - component_op
+    - all
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Test the state of all parallel test components checking that
+    all are done, contributing this to an enclosing alt or
+    interleave statement.
+
+create:
+  opcode: 280
+  context:
+    - component_new
+  operations:
+    pre: [ctype]
+    post: [cinst]
+  description: |+
+    Create an instance of a component of type ctype and push the
+    result onto the stack.
+
+createa:
+  opcode: 281
+  context:
+    - component_new
+  operations:
+    pre: [ctype]
+    post: [cinst]
+  description: |+
+    Create an alive-type instance of a component of type ctype and
+    push the result onto the stack.
+
+createn:
+  opcode: 282
+  context:
+    - component_new
+  operations:
+    pre: [name, ctype]
+    post: [cinst]
+  description: |+
+    Create a named instance of a component of type ctype and push
+    the result onto the stack. The component instance name is
+    taken from the name parameter.
+
+createan:
+  opcode: 283
+  context:
+    - component_new
+  operations:
+    pre: [name, ctype]
+    post: [cinst]
+  description: |+
+    Create a named alive-type instance of a component of type
+    ctype and push the result onto the stack. The component
+    instance name is taken from the name parameter.
+
+executeld:
+  opcode: 284
+  operations:
+    pre: [limit, blk]
+    post: [verdict]
+  description: |+
+    Same as executel, but with logging disabled.
+
+executed:
+  opcode: 285
+  context:
+    - testcase_new
+  operations:
+    pre: [blk]
+    post: [verdict]
+  description: |+
+    Same as execute, but with logging disabled.
+
+tcstop:
+  opcode: 286
+  operations:
+    pre: [reason]
+    post: []
+  description: |+
+    Stop testcase.
+
+closure:
+  opcode: 287
+  context:
+    - vm
+  operations:
+    pre: [ref]
+    post: [closure]
+  description: Wrap obj as closure
+running:
+  opcode: 288
+  context:
+    - timer_op
+    - component_op
+  operations:
+    pre: [obj]
+    post: [res]
+  description: |+
+    When called with a component reference comp, evaluate the
+    running state of the component and push the boolean result
+    onto the stack.
+
+    When called with a timer reference tmr, evaluate the running
+    state of the timer and push the boolean result onto the stack.
+
+running1c:
+  opcode: 289
+  context:
+    - component_op
+    - timer_op
+    - any
+  operations:
+    pre: []
+    post: [res]
+  description: |+
+    Evaluate the state of parallel test components to determine if
+    any are in the running state. Push the boolean result on the
+    stack.
+
+runningac:
+  opcode: 290
+  context:
+    - component_op
+    - timer_op
+    - all
+  operations:
+    pre: []
+    post: [res]
+  description: |+
+    Evaluate the state of parallel test components to determine if
+    all are in the running state. Push the boolean result on the
+    stack.
+
+killed:
+  opcode: 292
+  context:
+    - component_op
+  operations:
+    pre: [comp]
+    post: []
+  description: |+
+    Test the state of component comp for the killed condition,
+    contributing this to an enclosing alt or interleave statement.
+
+killed1:
+  opcode: 293
+  context:
+    - component_op
+    - any
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Test the state of all parallel test components for any that
+    are killed, contributing this to an enclosing alt or
+    interleave statement.
+
+killeda:
+  opcode: 294
+  context:
+    - component_op
+    - all
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Test the state of all parallel test components checking that
+    all are killed, contributing this to an enclosing alt or
+    interleave statement.
+
+start:
+  opcode: 296
+  context:
+    - port_op
+    - timer_op
+  operations:
+    pre: [obj]
+    post: []
+  description: |+
+    When called with a port reference port, start activity on the
+    port.
+
+    When called with a timer reference tmr, start the timer
+    running (or restart.)
+
+startc:
+  opcode: 297
+  context:
+    - component_op
+  operations:
+    pre: [blk, comp]
+    post: []
+  description: |+
+    Start behaviour on parallel test component comp. Block blk
+    contains the instructions to execute in the context of the
+    newly started component – the behaviour. This shall take the
+    form of any parameters followed by a function call.
+
+startd:
+  opcode: 298
+  context:
+    - timer_op
+  operations:
+    pre: [dur, tmr]
+    post: []
+  description: |+
+    Start timer tmr, with explicit duration dur.
+
+startap:
+  opcode: 299
+  context:
+    - port_op
+    - all
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Start activity on all ports.
+
+stop:
+  opcode: 300
+  context:
+    - timer_op
+    - component_op
+    - port_op
+  operations:
+    pre: [obj]
+    post: []
+  description: |+
+    When called with a component reference comp, stop behaviour on
+    the component.
+
+    When called with a port reference port, stop activity on the
+    port.
+
+    When called with a timer reference tmr, stop the timer.
+
+stopac:
+  opcode: 301
+  context:
+    - component_op
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Stop all parallel test components. Permitted only from the
+    master test component.
+
+stopap:
+  opcode: 302
+  context:
+    - port_op
+    - all
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Stop all ports.
+
+stopat:
+  opcode: 303
+  context:
+    - timer_op
+    - all
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Stop all timers on the current component.
+
+read:
+  opcode: 304
+  context:
+    - timer_op
+  operations:
+    pre: [tmr]
+    post: [rem]
+  description: |+
+    Read the remaining duration of timer tmr and push the float
+    result onto the stack.
+
+running1t:
+  opcode: 305
+  context:
+    - timer_op
+    - any
+  operations:
+    pre: []
+    post: [res]
+  description: |+
+    Evaluate the state of timers on the current component to
+    determine if any are in the running state. Push the boolean
+    result on the stack.
+
+timeout:
+  opcode: 306
+  context:
+    - timer_op
+  operations:
+    pre: [tmr]
+    post: []
+  description: |+
+    Create a timeout alternative bound to timer tmr and attach
+    this to the enclosing alt operation.
+
+timeout1:
+  opcode: 307
+  context:
+    - timer_op
+    - any
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Create a timeout alternative bound to the expiry of any
+    current timer and attach this to the enclosing alt operation.
+
+now:
+  opcode: 308
+  context:
+    - func
+  operations:
+    pre: []
+    post: [float]
+  description: ""
+wait:
+  opcode: 309
+  context:
+    - func
+  operations:
+    pre: [float]
+    post: []
+  description: Wait for float seconds.
+clear:
+  opcode: 312
+  context:
+    - port_op
+  operations:
+    pre: [p]
+    post: []
+  description: |+
+    Clear all contents from the input queue of port p.
+
+cleara:
+  opcode: 313
+  context:
+    - port_op
+    - all
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Clear all contents from the input queues of all ports on the
+    current component.
+
+halt:
+  opcode: 314
+  context:
+    - port_op
+  operations:
+    pre: [p]
+    post: []
+  description: |+
+    Instruct port p to accept no further input.
+
+halta:
+  opcode: 315
+  context:
+    - port_op
+    - all
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Instruct all ports on the current component to accept no
+    further input.
+
+kill:
+  opcode: 316
+  context:
+    - component_op
+  operations:
+    pre: [comp]
+    post: []
+  description: |+
+    Stop behaviour on component comp and move it to the killed
+    state.
+
+killa:
+  opcode: 317
+  context:
+    - component_op
+    - all
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Stop behaviour on all parallel test components, moving them to
+    the killed state.
+
+send:
+  opcode: 320
+  context:
+    - port_op
+  operations:
+    pre: [msg, port]
+    post: []
+  description: |+
+    Send message msg on port port with no explicit addressing.
+
+send1:
+  opcode: 321
+  context:
+    - port_op
+  operations:
+    pre: [dest, msg, port]
+    post: []
+  description: |+
+    Send message msg on port port to single destination dest
+    (unicast.)
+
+sendn:
+  opcode: 322
+  context:
+    - port_op
+  operations:
+    pre: [dblk, msg, port]
+    post: []
+  description: |+
+    Send message msg on port port to all destinations in block
+    dblk (multicast.)
+
+senda:
+  opcode: 323
+  context:
+    - port_op
+  operations:
+    pre: [msg, port]
+    post: []
+  description: |+
+    Send message msg on port port to all associated destinations
+    (broadcast.)
+
+receive:
+  opcode: 324
+  context:
+    - port_op
+  operations:
+    pre: [mblk, ablk, port]
+    post: []
+  description: |+
+    Create a receive condition on port port. Block mblk shall
+    contain code to perform the matching of input. When the
+    condition is true (matched) then the enclosing alt will
+    execute block ablk to perform variable assignments.
+
+receivec:
+  opcode: 325
+  context:
+    - port_op
+  operations:
+    pre: [mblk, ablk, port]
+    post: []
+  description: |+
+    Create a checked receive condition on port port. Block mblk
+    shall contain code to perform the matching of input. When the
+    condition is true (matched) then the enclosing alt will
+    execute block ablk to perform variable assignments.
+
+receive1:
+  opcode: 326
+  context:
+    - port_op
+  operations:
+    pre: [match, assign]
+    post: []
+  description: |+
+    Receive from any port
+
+receivec1:
+  opcode: 327
+  context:
+    - port_op
+    - any
+  operations:
+    pre: [match, assign]
+    post: []
+  description: ""
+trigger:
+  opcode: 328
+  context:
+    - port_op
+  operations:
+    pre: [mblk, ablk, port]
+    post: []
+  description: |+
+    Create a trigger condition on port port. Block mblk shall
+    contain code to perform the matching of input. When the
+    trigger condition is true (matched) then the enclosing alt
+    will execute block ablk to perform variable assignment.
+
+trigger1:
+  opcode: 329
+  context:
+    - port_op
+    - any
+  operations:
+    pre: [match, assign]
+    post: []
+  description: ""
+check:
+  opcode: 330
+  context:
+    - port_op
+  operations:
+    pre: [mblk, ablk, port]
+    post: []
+  description: |+
+    Create a pure check condition on port port. Block mblk shall
+    contain code to perform the matching of input. When the
+    condition is true (matched) then the enclosing alt will
+    execute block ablk to perform variable assignments.
+
+check1:
+  opcode: 331
+  context:
+    - port_op
+    - any
+  operations:
+    pre: [match, assign]
+    post: []
+  description: Any port check
+checkstate:
+  opcode: 376
+  context:
+    - port_op
+  operations:
+    pre: [port, string]
+    post: [bool]
+  description: ""
+checkstateal:
+  opcode: 377
+  context:
+    - port_op
+    - all
+  operations:
+    pre: [string]
+    post: [bool]
+  description: All port checkstate
+checkstatean:
+  opcode: 378
+  context:
+    - port_op
+    - any
+  operations:
+    pre: [string]
+    post: [bool]
+  description: Any port checkstate
+value:
+  opcode: 380
+  context:
+    - port_op
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Fetch the value of the current communication operation.
+
+    For receive and trigger operations this is the current
+    message.
+
+    For getreply this is the return value of the current
+    procedure.
+
+    For catch this is the exception of the current procedure.
+
+sender:
+  opcode: 382
+  operations:
+    pre: []
+    post: [obj]
+  description: |+
+    Fetch the sender (from) address of the current communication
+    operation.
+
+timestamp:
+  opcode: 383
+  context:
+    - port_op
+  operations:
+    pre: []
+    post: [timestamp_id]
+  description: ""
+int2char:
+  opcode: 384
+  context:
+    - func
+  operations:
+    pre: [int]
+    post: [res]
+  description: |+
+    Convert integer int into a single character string and push it
+    onto the stack.
+
+int2bit:
+  opcode: 386
+  context:
+    - func
+  operations:
+    pre: [int, len]
+    post: [res]
+  description: |+
+    Convert integer int into a bitstring and push it onto the
+    stack. len supplies a minimum length for the resulting string.
+
+int2hex:
+  opcode: 387
+  context:
+    - func
+  operations:
+    pre: [int, len]
+    post: [res]
+  description: |+
+    Convert integer int into a hexstring and push it onto the
+    stack. len supplies a minimum length for the resulting string.
+
+int2oct:
+  opcode: 388
+  context:
+    - func
+  operations:
+    pre: [int, len]
+    post: [res]
+  description: |+
+    Convert integer int into an octetstring and push it onto the
+    stack. len supplies a minimum length for the resulting string.
+
+int2str:
+  opcode: 389
+  context:
+    - func
+  operations:
+    pre: [int]
+    post: [res]
+  description: |+
+    Convert integer int into a charstring and push it onto the
+    stack.
+
+int2float:
+  opcode: 390
+  context:
+    - func
+  operations:
+    pre: [int]
+    post: [res]
+  description: |+
+    Convert integer int into a float and push it onto the stack.
+
+float2int:
+  opcode: 391
+  context:
+    - func
+  operations:
+    pre: [flt]
+    post: [res]
+  description: |+
+    Convert float flt into an integer and push it onto the stack.
+
+char2int:
+  opcode: 392
+  context:
+    - func
+  operations:
+    pre: [char]
+    post: [res]
+  description: |+
+    Convert single character string char into an integer and push
+    it onto the stack.
+
+char2oct:
+  opcode: 393
+  context:
+    - func
+  operations:
+    pre: [char]
+    post: [res]
+  description: |+
+    Convert charstring char into an octetstring and push it onto
+    the stack.
+
+bit2int:
+  opcode: 395
+  context:
+    - func
+  operations:
+    pre: [bit]
+    post: [res]
+  description: |+
+    Convert bitstring bit into an integer and push it onto the
+    stack.
+
+bit2hex:
+  opcode: 396
+  context:
+    - func
+  operations:
+    pre: [bit]
+    post: [res]
+  description: |+
+    Convert bitstring bit into a hexstring and push it onto the
+    stack.
+
+bit2oct:
+  opcode: 397
+  context:
+    - func
+  operations:
+    pre: [bit]
+    post: [res]
+  description: |+
+    Convert bitstring bit into an octetstring and push it onto the
+    stack.
+
+bit2str:
+  opcode: 398
+  context:
+    - func
+  operations:
+    pre: [bit]
+    post: [res]
+  description: |+
+    Convert bitstring bit into a charstring and push it onto the
+    stack.
+
+hex2int:
+  opcode: 399
+  context:
+    - func
+  operations:
+    pre: [hex]
+    post: [res]
+  description: |+
+    Convert hexstring hex into an integer and push it onto the
+    stack.
+
+hex2bit:
+  opcode: 400
+  context:
+    - func
+  operations:
+    pre: [hex]
+    post: [res]
+  description: |+
+    Convert hexstring hex into a bitstring and push it onto the
+    stack.
+
+hex2oct:
+  opcode: 401
+  context:
+    - func
+  operations:
+    pre: [hex]
+    post: [res]
+  description: |+
+    Convert hexstring hex into an octetstring and push it onto the
+    stack.
+
+hex2str:
+  opcode: 402
+  context:
+    - func
+  operations:
+    pre: [hex]
+    post: [res]
+  description: |+
+    Convert hexstring hex into a charstring and push it onto the
+    stack.
+
+oct2int:
+  opcode: 403
+  context:
+    - func
+  operations:
+    pre: [oct]
+    post: [res]
+  description: |+
+    Convert octetstring oct into an integer and push it onto the
+    stack.
+
+oct2bit:
+  opcode: 404
+  context:
+    - func
+  operations:
+    pre: [oct]
+    post: [res]
+  description: |+
+    Convert octetstring oct into a bitstring and push it onto the
+    stack.
+
+oct2hex:
+  opcode: 405
+  context:
+    - func
+  operations:
+    pre: [oct]
+    post: [res]
+  description: |+
+    Convert octetstring oct into a hexstring and push it onto the
+    stack.
+
+oct2str:
+  opcode: 406
+  context:
+    - func
+  operations:
+    pre: [oct]
+    post: [res]
+  description: |+
+    Convert octetstring oct into a charstring and push it onto the
+    stack.
+
+oct2chr:
+  opcode: 407
+  context:
+    - func
+  operations:
+    pre: [oct]
+    post: [charstring]
+  description: ""
+str2int:
+  opcode: 408
+  context:
+    - func
+  operations:
+    pre: [char]
+    post: [res]
+  description: |+
+    Convert charstring char into an integer, and push it onto the
+    stack.
+
+str2oct:
+  opcode: 409
+  context:
+    - func
+  operations:
+    pre: [char]
+    post: [res]
+  description: |+
+    Convert charstring char into an octetstring, and push it onto
+    the stack.
+
+str2float:
+  opcode: 410
+  context:
+    - func
+  operations:
+    pre: [char]
+    post: [res]
+  description: |+
+    Convert charstring char into a float, and push it onto the
+    stack.
+
+lengthof:
+  opcode: 411
+  context:
+    - func
+  operations:
+    pre: [str]
+    post: [len]
+  description: |+
+    Takes the length of the string-type object str and pushes it
+    onto the stack.
+
+sizeof:
+  opcode: 412
+  context:
+    - func
+  operations:
+    pre: [obj]
+    post: [size]
+  description: |+
+    Pushes the number of elements in obj onto the stack as an
+    integer value.
+
+ispresent:
+  opcode: 414
+  context:
+    - func
+  operations:
+    pre: [obj]
+    post: [res]
+  description: |+
+    Tests the presence of object obj and pushes the boolean
+    result. obj must reference an optional field of a record or
+    set.
+
+ischosen:
+  opcode: 415
+  context:
+    - func
+  operations:
+    pre: [obj]
+    post: [res]
+  description: |+
+    Tests the object obj to determine if it is the selected field
+    of a union and pushes the boolean result. obj must reference a
+    field of a union.
+
+regexp:
+  opcode: 416
+  context:
+    - func
+  operations:
+    pre: [str, expr, gno]
+    post: [res]
+  description: |+
+    Perform a regular expression match of str against expr.
+    Returns the gno-th matching bracketed sub-expression or an
+    empty string if no match.
+
+substr:
+  opcode: 417
+  context:
+    - func
+  operations:
+    pre: [str, idx, len]
+    post: [res]
+  description: |+
+    Return the substring of str, from index idx, for length len.
+
+replace:
+  opcode: 418
+  context:
+    - func
+  operations:
+    pre: [str, idx, len, rep]
+    post: [res]
+  description: |+
+    Replace the substring of str, from index idx, for length len,
+    with the string rep and return the resulting string.
+
+rnd:
+  opcode: 419
+  context:
+    - func
+  operations:
+    pre: []
+    post: [num]
+  description: |+
+    Compute a random float in the range 0 and 1 exclusive, and
+    return the result.
+
+enum2int:
+  opcode: 421
+  context:
+    - func
+  operations:
+    pre: [enum]
+    post: [res]
+  description: |+
+    Convert enumerated enum into an integer and push it onto the
+    stack.
+
+isvalue:
+  opcode: 422
+  context:
+    - func
+  operations:
+    pre: [obj]
+    post: [res]
+  description: |+
+    Tests the object obj to determine is it is concrete value
+    (defined, not a template) and pushes the boolean result.
+
+encvalue:
+  opcode: 423
+  context:
+    - func
+  operations:
+    pre: [value]
+    post: [res]
+  description: |+
+    Encode value value returning bitstring res holding the encoded
+    result.
+
+decvalue:
+  opcode: 424
+  context:
+    - func
+  operations:
+    pre: [enc, dec]
+    post: [res]
+  description: |+
+    Decode encoded bitstring enc placing the result in dec and
+    returning integer res holding the outcome of the operation: 0
+    indicates success, 1 indicates unspecified failure and 2
+    indicates insufficient data (retry after adding bits to enc.)
+
+testcasename:
+  opcode: 425
+  context:
+    - testcase_op
+  operations:
+    pre: []
+    post: [name]
+  description: |+
+    Retrieve the current testcase name and push onto the stack.
+    Returns an empty string if called outside any executing
+    testcase.
+
+int2enum:
+  opcode: 426
+  context:
+    - func
+  operations:
+    pre: [a]
+    post: [res]
+  description: ""
+str2hex:
+  opcode: 428
+  context:
+    - func
+  operations:
+    pre: [string]
+    post: [hex]
+  description: ""
+isbound:
+  opcode: 429
+  context:
+    - func
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Stack operations might be dynamic.
+
+val2str:
+  opcode: 430
+  context:
+    - func
+  operations:
+    pre: [val]
+    post: [string]
+  description: |+
+    Return a printable representation of val.
+
+ref_int2char:
+  opcode: 464
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_int2bit:
+  opcode: 466
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_int2hex:
+  opcode: 467
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_int2oct:
+  opcode: 468
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_int2str:
+  opcode: 469
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_int2float:
+  opcode: 470
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_float2int:
+  opcode: 471
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_char2int:
+  opcode: 472
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_char2oct:
+  opcode: 473
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_bit2int:
+  opcode: 475
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_bit2hex:
+  opcode: 476
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_bit2oct:
+  opcode: 477
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_bit2str:
+  opcode: 478
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_hex2int:
+  opcode: 479
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_hex2bit:
+  opcode: 480
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_hex2oct:
+  opcode: 481
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_hex2str:
+  opcode: 482
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_oct2int:
+  opcode: 483
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_oct2bit:
+  opcode: 484
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_oct2hex:
+  opcode: 485
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_oct2str:
+  opcode: 486
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_oct2chr:
+  opcode: 487
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_str2int:
+  opcode: 488
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_str2oct:
+  opcode: 489
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_str2float:
+  opcode: 490
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_val2str:
+  opcode: 493
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_ispresent:
+  opcode: 494
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_regexp:
+  opcode: 496
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_enum2int:
+  opcode: 501
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_isvalue:
+  opcode: 502
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_encvalue:
+  opcode: 503
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_decvalue:
+  opcode: 504
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_testcasename:
+  opcode: 505
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_int2enum:
+  opcode: 506
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_str2hex:
+  opcode: 508
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+ref_isbound:
+  opcode: 509
+  operations:
+    pre: [ref]
+    post: []
+  description: ""
+at_default:
+  opcode: 513
+  context:
+    - vm
+  operations:
+    pre: [obj]
+    post: []
+  description: ""
+altnd:
+  opcode: 514
+  operations:
+    pre: [blk]
+    post: []
+  description: |
+    Same as `alt` with disabled defaults (`@nodefault`)
+
+decmatch:
+  opcode: 515
+  context:
+    - value
+  operations:
+    pre: [enc, decTemplate]
+    post: [res]
+  description: |+
+    The encoded value enc is decoded and the decoded content
+    will be matched against the provided decTemplate returning
+    a boolean value res on the stack
+
+interleavestep:
+  opcode: 516
+  context:
+  - beha_def
+  operations:
+    pre: [pblk, bblk, name]
+    post: []
+  description: |+
+    Define an interleavestep object from a block pblk containing its
+    parameters, bblk containing its behaviour and a name, and then
+    attach it to the module object owning the current block.
+
+interleavestepb:
+  opcode: 517
+  context:
+  - beha_def
+  operations:
+    pre: [comp, pblk, bblk, name]
+    post: []
+  description: |+
+    Define a bound interleavestep object from a component type comp, a
+    block pblk containing its parameters, bblk containing its
+    behaviour and a name, then attach it to the module object
+    owning the current block.
+
+interleavestepw:
+  opcode: 518
+  context:
+  - beha_def
+  operations:
+    pre: [ablk, pblk, bblk, name]
+    post: []
+  description: |+
+    Define an interleavestep object from a block pblk containing its
+    parameters, bblk containing its behaviour and a name, attach
+    the attributes from block ablk, and then attach it to the
+    module object owning the current block.
+
+interleavestepbw:
+  opcode: 519
+  context:
+  - beha_def
+  operations:
+    pre: [comp, ablk, pblk, bblk, name]
+    post: []
+  description: |+
+    Define a bound interleavestep object from a component type comp, a
+    block pblk containing its parameters, bblk containing its
+    behaviour and a name, attach the attributes from block ablk,
+    and then attach it to the module object owning the current
+    block.
+
+
+jt:
+  opcode: 600
+  arg: imm
+  context:
+    - vm
+  operations:
+    pre: [cond]
+    post: []
+  description: |+
+    Jumps over next instruction if the boolean on the stack is true.
+
+jnt:
+  opcode: 601
+  arg: imm
+  context:
+    - vm
+  operations:
+    pre: [cond]
+    post: []
+  description: |+
+    Jumps over next instruction if the boolean on the stack is not true.
+
+trap:
+  opcode: 700
+  context:
+    - vm
+  operations:
+    pre: []
+    post: []
+  description: |+
+    Trap the current execution. This is used to debug or test the runtime. 

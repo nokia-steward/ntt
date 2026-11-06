@@ -1,0 +1,5 @@
+module test {
+    control {
+        log("Hello World!");
+    }
+}

@@ -1,0 +1,74 @@
+// Code generated from opcode.tmpl.go and by 'go generate'; DO NOT EDIT.
+
+// Package opcode defines the opcodes used in T3XF.
+package opcode
+
+const (
+	REF               Opcode = 0b00_0000000000000000000000000000_00
+	GOTO              Opcode = 0b00_0000000000000000000000000000_01
+	LINE              Opcode = 0b00_0000000000000000000000000000_10
+	instrMask         Opcode = 0b00_0000000000000000000000000000_11
+
+	reserved4         Opcode = 0b01_0000000000000000000000000000_00
+	CALL              Opcode = 0b01_0000000000000000000000000000_01
+	reseved6          Opcode = 0b01_0000000000000000000000000000_10
+	reseved7          Opcode = 0b01_0000000000000000000000000000_11
+
+	FROZEN_REF        Opcode = 0b10_0000000000000000000000000000_00
+	ISCAN             Opcode = 0b10_0000000000000000000000000000_01
+	reseved10         Opcode = 0b10_0000000000000000000000000000_10
+	reseved11         Opcode = 0b10_0000000000000000000000000000_11
+
+	reseved12         Opcode = 0b11_0000000000000000000000000000_00
+	reseved13         Opcode = 0b11_0000000000000000000000000000_01
+	reseved14         Opcode = 0b11_0000000000000000000000000000_10
+	reseved15         Opcode = 0b11_0000000000000000000000000000_11
+
+	{{ range $name, $op := . }}
+
+	{{ comment $op.Description }}
+	//
+	// 	{{ $op.Operations.Pre }} {{ uc $name }} {{ $op.Operations.Post }}
+	//
+	{{ uc $name }} Opcode = {{ encode $op.Opcode }}{{ end }}
+)
+
+var Descriptions = map[Opcode]*Descriptor{
+	{{ range $name, $op := . }}
+		{{ uc $name }}: {
+			Opcode: {{ encode $op.Opcode }},
+			{{- if $op.Arg }}
+			Arg: {{ arg $op.Arg }},
+			{{- end }}
+			Description: {{ quote $op.Description }},
+			Context: []string{ {{ range $ctx := $op.Context }}{{ quote $ctx }},{{ end }} },
+			Operations: Operation{
+				Pre: []string{ {{ range $pre := $op.Operations.Pre }}{{ quote $pre }},{{ end }} },
+				Post: []string{ {{ range $post := $op.Operations.Post }}{{ quote $post }},{{ end }} },
+			},
+		},
+
+	{{ end }}
+}
+
+var opcodeStrings = map[Opcode]string{
+	REF:        "ref",
+	LINE:       "line",
+	GOTO:       "goto",
+	FROZEN_REF: "frozen_ref",
+	CALL: "call",
+	ISCAN: "iscan",
+	{{ range $name, $op := . }}
+	{{ uc $name }}: "{{ $name }}",{{ end }}
+}
+
+var opcodeNames = map[string]Opcode{
+	"ref":        REF,
+	"line":       LINE,
+	"goto":       GOTO,
+	"frozen_ref": FROZEN_REF,
+	"iscan": ISCAN,
+	"call": CALL,
+	{{ range $name, $op := . }}
+	"{{ $name }}": {{ uc $name }},{{ end }}
+}

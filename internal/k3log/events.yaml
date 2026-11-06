@@ -1,0 +1,963 @@
+"acfg":
+  Name: AssemblyConfigEvent
+  Description: Assembly Configuration Info
+  Fields:
+  - Key
+  - Value
+
+"alen":
+  Name: AltEnter
+  Description: Alt enter
+
+"allv":
+  Name: AltLeave
+  Description: Alt leave
+
+"alrp":
+  Name: AltRepeat
+  Description: Alt repeat
+
+"alwt":
+  Name: AltWait
+  Description: 'Alternation wait: no alternative ready'
+  Fields:
+  - Time at which to wake unless an alternative becomes ready
+
+"asen":
+  Name: AltstepEnter
+  Description: Altstep enter
+  Fields:
+  - Altstep name + parameters
+
+"aslv":
+  Name: AltstepLeave
+  Description: Altstep leave
+  Fields:
+  - Altstep name + parameters
+
+"bctr":
+  Name: Backtrace
+  Description: Backtrace event tracks frames visited by components
+  Fields:
+  - Component name and tracked frames
+
+"coal":
+  Name: AliveReport
+  Description: alive operation
+  Fields:
+  - Component name
+  - "Result: alive/killed"
+
+"cocr":
+  Name: Created
+  Description: Component created
+  Fields:
+  - Component name
+  - "Alive-type indicator: alive/once"
+
+"codo":
+  Name: EvalDone
+  Description: Evaluate component.done()
+  Fields:
+  - Component name
+  - Outcome
+
+"cofi":
+  Name: Finished
+  Description: Component finished executing behaviour
+  Fields:
+  - Final verdict of component
+
+"cokd":
+  Name: EvalKilled
+  Description: Evaluate component.killed()
+  Fields:
+  - Component name
+  - Outcome
+
+"coki":
+  Name: KillReport
+  Description: Component killed
+  Fields:
+  - Component name
+
+"coru":
+  Name: RunningReport
+  Description: running operation on component
+  Fields:
+  - Component name
+  - "Result: running/stopped"
+
+"cosp":
+  Name: StopComponentReport
+  Description: Component stopped
+  Fields:
+  - Component name
+
+"cost":
+  Name: Started
+  Description: Component started
+  Fields:
+  - Name of behaviour function
+
+"cpen":
+  Name: ControlEnter
+  Description: Control part enter
+  Fields:
+  - Control part name
+
+"cplv":
+  Name: ControlLeave
+  Description: Control part leave
+  Fields:
+  - Control part name
+
+"dbg1":
+  Name: Debug1
+  Description: Debug1
+  Fields:
+  - message
+
+"dbg2":
+  Name: Debug2
+  Description: Debug2
+  Fields:
+  - message
+
+"dbg3":
+  Name: Debug3
+  Description: Debug3
+  Fields:
+  - message
+
+"deco":
+  Name: Decode
+  Description: Decoded a message
+  Fields:
+  - Type of message
+  - Encode attribute
+  - Variant attribute
+  - Extension attribute
+
+"decv":
+  Name: DecValue
+  Description: decvalue
+  Fields:
+  - decoded value
+
+"dtac":
+  Name: Activate
+  Description: Default activate
+  Fields:
+  - Altstep invocation
+
+"dtde":
+  Name: Deactivate
+  Description: Default deactivate
+  Fields:
+  - Altstep invocation
+
+"dten":
+  Name: DefaultEnter
+  Description: Default enter
+  Fields:
+  - Default name + parameters
+
+"dtlv":
+  Name: DefaultLeave
+  Description: Default leave
+  Fields:
+  - Default name + parameters
+
+"dump":
+  Name: DumpReport
+  Description: Catalog item dump
+  Fields:
+  - item name
+  - item detail
+
+"else":
+  Name: EvalElse
+  Description: Evaluation of else clause
+  Fields:
+  - Always ready
+
+"enco":
+  Name: Encode
+  Description: Encoded a message
+  Fields:
+  - Type of message
+  - Encode attribute
+  - Variant attribute
+  - Extension attribute
+
+"fnen":
+  Name: FunctionEnter
+  Description: Function enter
+  Fields:
+  - Function name + parameters
+
+"fnlv":
+  Name: FunctionLeave
+  Description: Function leave
+  Fields:
+  - Function name + parameters + optional return value
+
+"fxen":
+  Name: ExtFuncEnter
+  Description: External function enter
+  Fields:
+  - External function name + parameters
+
+"fxlv":
+  Name: ExtFuncLeave
+  Description: External function leave
+  Fields:
+  - External function name + parameters + optional return value
+
+"getv":
+  Name: GetVerdict
+  Description: getverdict operation
+  Fields:
+  - Current verdict
+
+"ilen":
+  Name: InterleaveEnter
+  Description: Interleave enter
+
+"illv":
+  Name: InterleaveLeave
+  Description: Interleave leave
+
+"matc":
+  Name: MatchResult
+  Description: Left-hand-side:value
+  Fields:
+  - "Right-hand-side:template"
+  - List of mismatches (empty means matched)
+
+"mpar":
+  Name: ModuleParameter
+  Description: module parameter
+  Fields:
+  - name
+  - value
+
+"mprq":
+  Name: ModuleParameterRequest
+  Description: module parameter request
+  Fields:
+  - request id
+  - name
+
+"paon":
+  Name: ParamsOn
+  Description: produces no log-line. To be used for switching on parameter logging for functions, altsteps, testcases
+
+"perf":
+  Name: Perf
+  Description: Performance Measurement
+  Fields:
+  - key
+  - value
+
+"pllg":
+  Name: PluginLog
+  Description: plugin related log message
+
+"plod":
+  Name: PluginLoaded
+  Description: Plugin loaded
+  Fields:
+  - Path to plugin
+  - Plugin name
+  - Plugin type
+
+"ptck":
+  Name: EvalCheck
+  Description: Evaluate port.check()
+  Fields:
+  - Port name
+  - Match template
+  - Outcome
+
+"ptcl":
+  Name: ClearReport
+  Description: Port cleared
+  Fields:
+  - Port name
+
+"ptcn":
+  Name: ConnectReport
+  Description: Port connected
+  Fields:
+  - First port name
+  - Second port name
+
+"ptdi":
+  Name: Disconnected
+  Description: Port disconnected
+  Fields:
+  - First port name or all
+  - Optional second port name
+
+"ptds":
+  Name: DiscardReport
+  Description: Item discarded at port
+  Fields:
+  - Port name
+  - Item detail (message, call, reply, exception) + value
+  - Reason for discard
+
+"ptha":
+  Name: HaltReport
+  Description: Port halted
+  Fields:
+  - Port name
+
+"ptmp":
+  Name: MapReport
+  Description: Port mapped
+  Fields:
+  - Component port name
+  - System port name
+
+"ptpu":
+  Name: PublishReport
+  Description: Port published to external connector
+  Fields:
+  - Port name
+
+"ptqu":
+  Name: QueueReport
+  Description: Item queued to port
+  Fields:
+  - Port name
+  - Item detail (message, call, reply, exception) + value
+
+"ptre":
+  Name: EvalReceiveEmpty
+  Description: Evaluate port.receive() on empty queue
+  Fields:
+  - '[parameter name->]Port name'
+  - Match template
+
+"ptrx":
+  Name: EvalReceive
+  Description: Evaluate port.receive()
+  Fields:
+  - '[parameter name->]Port name'
+  - Match template
+  - Outcome
+
+"ptsd":
+  Name: SendReport
+  Description: Port send
+  Fields:
+  - Component port
+  - System port
+  - Message type name
+  - Message value
+
+"ptsp":
+  Name: StopReport
+  Description: Port stopped
+  Fields:
+  - Port name
+
+"ptst":
+  Name: StartReport
+  Description: Port started
+  Fields:
+  - Port name
+
+"pttr":
+  Name: EvalTrigger
+  Description: Evaluate port.trigger()
+  Fields:
+  - Port name
+  - Match template
+  - Outcome
+
+"ptun":
+  Name: Unmapped
+  Description: Port unmapped
+  Fields:
+  - Component port name or all
+  - Optional system port name
+
+"rvon":
+  Name: ReturnValueOn
+  Description: produces value return. To be used for switching on return value logging for functions
+
+"sdbg":
+  Name: SnapDebug
+  Description: SnapDebug
+  Fields:
+  - message
+
+"setv":
+  Name: SetVerdict
+  Description: setverdict operation
+  Fields:
+  - Previous verdict
+  - New verdict
+  - Reason
+
+"tcen":
+  Name: TestcaseCaseEnter
+  Description: Testcase enter
+  Fields:
+  - Testcase name + parameters
+
+"tcfi":
+  Name: TestcaseCaseFinished
+  Description: Testcase finished
+  Fields:
+  - testcase name
+  - verdict
+  - reason
+
+"tclv":
+  Name: TestcaseCaseLeave
+  Description: Testcase leave
+  Fields:
+  - Testcase name + parameters
+
+"tcst":
+  Name: TestcaseCaseStarted
+  Description: Testcase start
+  Fields:
+  - testcase name
+  - guard duration
+
+"tmrd":
+  Name: Read
+  Description: read operation
+  Fields:
+  - Timer name
+  - Expired duration
+
+"tmru":
+  Name: Running
+  Description: running operation for timer
+  Fields:
+  - Timer name
+  - "Result: false/true"
+
+"tmsp":
+  Name: Stop
+  Description: Timer stop
+  Fields:
+  - Timer name
+
+"tmst":
+  Name: Start
+  Description: Timer start
+  Fields:
+  - Timer name
+  - Timer duration
+
+"tmto":
+  Name: EvalTimeout
+  Description: Evaluate timer.timeout()
+  Fields:
+  - Timer name
+  - Outcome
+
+"tycr":
+  Name: TypeCreated
+  Description: Type created
+  Fields:
+  - Type name
+  - Encode attribute
+  - Variant attribute
+  - Extension attribute
+  - Type kind
+  - Constructor kind
+  - Object pointer
+  - Instance sequence
+  - Reference count
+  - Thread id
+
+"tyde":
+  Name: TypeDestroyed
+  Description: Type destroyed
+  Fields:
+  - Type name
+  - Encode attribute
+  - Variant attribute
+  - Extension attribute
+  - Type kind
+  - Trigger
+  - Object pointer
+  - Instance sequence
+  - Reference count
+  - Thread id
+
+"tyrs":
+  Name: TypeResolved
+  Description: Type resolved
+  Fields:
+  - Type name
+  - Encode attribute
+  - Variant attribute
+  - Extension attribute
+  - Type kind
+  - Resolve method
+  - Object pointer
+  - Instance sequence
+  - Reference count
+  - Thread id
+
+"uact":
+  Name: UserAction
+  Description: User action
+  Fields:
+  - User message
+
+"ulog":
+  Name: UserLog
+  Description: User action
+  Fields:
+  - User log
+
+"vach":
+  Name: ValueChanged
+  Description: Value changed
+  Fields:
+  - Type name
+  - Value name
+  - New value
+
+"vrsn":
+  Name: Version
+  Description: Program version information
+  Fields:
+  - version number as X.Y.Z
+
+"wait":
+  Name: Wait
+  Description: Wait (real-time)
+  Fields:
+  - Time at which to wake
+
+"ARRV":
+  IsError: true
+  Name: ArrayBoundViolation
+  Description: Array bounds violation
+  Fields:
+  - Value name
+  - Erroneous array index
+
+"ARTE":
+  IsError: true
+  Name: AmbiguousRoute
+  Description: More than one route possible for transmit operation (ambiguous)
+
+"ARUN":
+  IsError: true
+  Name: AlreadyRunning
+  Description: Already running
+  Fields:
+  - Identity of already running thread
+
+"BREF":
+  IsError: true
+  Name: BrokenReference
+  Description: 'Broken reference: indicates a reportable runtime bug'
+  Fields:
+  - Erroneous offset
+
+"CONE":
+  IsError: true
+  Name: ConnectionError
+  Description: Connection error
+  Fields:
+  - First port name
+  - Second port name
+  - Error detail
+
+"CONV":
+  IsError: true
+  Name: ConstraintViolation
+  Description: Constraint violation
+  Fields:
+  - Type name
+  - Constraint
+  - Value name
+  - Erroneous value
+
+"DEAD":
+  IsError: true
+  Name: Deadlock
+  Description: 'Deadlock: no alternative available'
+
+"DIRE":
+  IsError: true
+  Name: DiscardReportError
+  Description: Discard report at port
+  Fields:
+  - Port name
+  - Error detail
+
+"DIV0":
+  IsError: true
+  Description: Divide by zero
+  Name: DivideByZero
+  Fields:
+  - Value name
+
+"DKEY":
+  IsError: true
+  Name: DuplicatedKeyError
+  Description: Duplicated map key value inside assignment list
+  Fields:
+  - Partial assignment list
+  - Key Value
+
+"DOME":
+  IsError: true
+  Name: DomainError
+  Description: Domain error
+  Fields:
+  - Value name
+
+"DTDE":
+  IsError: true
+  Name: DeactivateError
+  Description: Default deactivate error
+  Fields:
+  - Default state
+
+"EMIS":
+  IsError: true
+  Name: ErrorMismatch
+  Description: Error mismatch
+  Fields:
+  - Expected error category
+  - Actual error category
+
+"FILE":
+  IsError: true
+  Name: CannotOpenFile
+  Description: Failed to open a file
+  Fields:
+  - Named of file
+
+"FLOW":
+  IsError: true
+  Name: ControlFlowError
+  Description: 'Control flow error: indicates a reportable bug'
+  Fields:
+  - Erroneous operation
+
+"FOEX":
+  IsError: true
+  Name: ForeignException
+  Description: 'Report a foreign exception during operation: indicates a bug to be reported'
+  Fields:
+  - C++ RTTI information when available
+  - Error detail
+
+"ICST":
+  IsError: true
+  Name: InvalidCharstringTemplate
+  Description: Content of the template
+  Fields:
+  - Error detail
+
+"IGRP":
+  IsError: true
+  Name: InvalidGroup
+  Description: Invalid group number in pattern match
+  Fields:
+  - Description of pattern
+  - Requested invalid group number
+
+"INOP":
+  IsError: true
+  Name: InvalidOperation
+  Description: Invalid operation
+  Fields:
+  - Operation detail
+
+"LENE":
+  IsError: true
+  Name: LengthMismatch
+  Description: Length mismatch
+  Fields:
+  - Left value name
+  - Left value length
+  - Right value name
+  - Right value length
+
+"LIDE":
+  IsError: true
+  Name: LiteralDataError
+  Description: Literal data error
+  Fields:
+  - Data type
+  - Data in error
+
+"LKUP":
+  IsError: true
+  Name: LookupError
+  Description: 'Lookup error (plugin system): no plugin offered requested service'
+  Fields:
+  - Type of lookup that failed
+  - First (or only) part of requested service
+  - Second (optional) part of requested service
+
+"MANY":
+  IsError: true
+  Name: ManyValued
+  Description: Many valued
+  Fields:
+  - Value name
+
+"MAPE":
+  IsError: true
+  Name: MappingError
+  Description: Mapping error
+  Fields:
+  - Component port name
+  - System port name
+  - Error detail
+
+"NAME":
+  IsError: true
+  Name: BrokenName
+  Description: 'Broken name: indicates a reportable runtime bug'
+  Fields:
+  - Erroneous name
+
+"NOIM":
+  IsError: true
+  Name: NotImplemented
+  Description: Feature not implemented
+  Fields:
+  - Feature detail
+
+"NRTE":
+  IsError: true
+  Name: NoRoute
+  Description: No route found for transmit operation
+  Fields:
+  - Missing destination
+
+"NSPR":
+  IsError: true
+  Name: NoSystemPortReference
+  Description: No system port reference in unmap statement with parameters
+
+"NULL":
+  IsError: true
+  Name: NullValue
+  Description: Null value
+  Fields:
+  - Value name
+
+"OMIS":
+  IsError: true
+  Name: OutputMismatch
+  Description: Output mismatch
+  Fields:
+  - Expected output
+  - Actual output
+
+"OMIT":
+  IsError: true
+  Name: OmittedValue
+  Description: Omitted value
+  Fields:
+  - Value name
+
+"OSUF":
+  IsError: true
+  Name: ObjectStackUnderflow
+  Description: Object stack underflow (bug)
+
+"PABV":
+  IsError: true
+  Name: ParamBoundViolation
+  Description: Parameter bound violation, probably from Codec
+  Fields:
+  - Erroneous index
+
+"PAOV":
+  IsError: true
+  Name: ParamOutViolation
+  Description: 'Parameter ''out'' violation: out or inout parameter not allowed'
+  Fields:
+  - Name of erroneous parameter
+
+"PARE":
+  IsError: true
+  Name: ParseError
+  Description: Parse error (read value from string)
+  Fields:
+  - Value name
+  - Erroneous input
+
+"PATE":
+  IsError: true
+  Name: PatternError
+  Description: Pattern error during parsing
+  Fields:
+  - Erroneous pattern
+  - Error detail
+
+"PLEX":
+  IsError: true
+  Name: PluginException
+  Description: 'Report a exception during plugin invocation: indicates a bug to be reported'
+  Fields:
+  - Error context
+  - Error detail
+
+"PLOD":
+  IsError: true
+  Name: PluginLoadError
+  Description: Plugin load error
+  Fields:
+  - Path to plugin
+  - Plugin name
+
+"RMIS":
+  IsError: true
+  Name: ReasonMismatch
+  Description: Reason mismatch
+  Fields:
+  - Testcase
+  - Expected reason
+  - Actual reason
+
+"RNGE":
+  IsError: true
+  Name: RangeError
+  Description: Range error
+  Fields:
+  - Erroneous value
+
+"SIZE":
+  IsError: true
+  Name: SizeError
+  Description: 'T3XF file size error: size not exact multiple of instruction width (bug)'
+  Fields:
+  - Name of erroneous file
+
+"SNAC":
+  IsError: true
+  Name: StartingNonAliveComponent
+  Description: Starting behaviour on non-alive (killed) component
+  Fields:
+  - Component name
+
+"SNAP":
+  IsError: true
+  Name: SnapshotViolation
+  Description: Invalid operation during snapshot
+
+"SRUN":
+  IsError: true
+  Name: StartRunning
+  Description: Start already running
+  Fields:
+  - Identity of already running thread
+
+"SYSE":
+  IsError: true
+  Name: SystemError
+  Description: 'Report a std::system_error exception during operation: indicates a bug to be reported'
+  Fields:
+  - error code
+  - error description
+
+"TIME":
+  IsError: true
+  Name: TimeLimit
+  Description: Testcase execution time limit exceeded
+
+"TSTP":
+  IsError: true
+  Name: TestcaseStop
+  Description: Test stopped by the testcase.stop operation
+  Fields:
+  - Detail
+
+"TYPE":
+  IsError: true
+  Name: TypeMismatch
+  Description: Type mismatch (bug)
+  Fields:
+  - Expected type
+  - Given type
+
+"UBLK":
+  IsError: true
+  Name: UnterminatedBlock
+  Description: Unterminated block in input file (corrupt file or compiler bug)
+  Fields:
+  - Offset of start of block
+  - Offset of scan limit
+
+"UNAS":
+  IsError: true
+  Name: Unassignable
+  Description: Unassignable
+  Fields:
+  - Value name
+
+"UNDF":
+  IsError: true
+  Name: UndefinedValue
+  Description: Undefined value
+  Fields:
+  - Value name
+
+"UNOP":
+  IsError: true
+  Name: UnknownOperation
+  Description: 'Unkown operation: invalid operation encountered (corrupt file?)'
+
+"UTOB":
+  IsError: true
+  Name: UnboundToBound
+  Description: Attempt to call a bound (runs on) behaviour from an unbound behaviour
+
+"VMIS":
+  IsError: true
+  Name: VerdictMismatch
+  Description: Verdict mismatch
+  Fields:
+  - Testcase
+  - Expected verdict
+  - Actual verdict
+
+"VRSN":
+  IsError: true
+  Name: VersionError
+  Description: Input file version error
+  Fields:
+  - Erroneous version
+
+"WAIT":
+  IsError: true
+  Name: Expired
+  Description: Time for a wait operation has already passed
+
+"WCPA":
+  IsError: true
+  Name: WrongCheckstateParameter
+  Description: The parameter passed to checkstate is not valid
+  Fields:
+  - Passed parameter value
+
+"WPAC":
+  IsError: true
+  Name: WrongParameterCount
+  Description: Wrong number of parameters passed to paramaterized map or unmap statement
+  Fields:
+  - Expected number of parameters
+  - Received number of parameters

@@ -16,6 +16,19 @@ builds:
       - goos: windows
         goarch: arm64
 
+  - id: k3
+    binary: k3
+    main: ./k3
+    dir: .
+    goos:
+      - linux
+      - darwin
+      - windows
+    ignore:
+      - goarch: '386'
+      - goos: windows
+        goarch: arm64
+
 
 nfpms:
   - file_name_template: '{{ .ProjectName }}.{{ .Arch }}{{ if .Arm }}v{{ .Arm }}{{ end }}'

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/nokia/ntt/commands/run"
 	"github.com/nokia/ntt/internal/env"
 	"github.com/nokia/ntt/internal/log"
 	"github.com/nokia/ntt/internal/proc"
@@ -130,6 +131,7 @@ func init() {
 	root.AddCommand(ReportCommand)
 	root.AddCommand(ShowCommand)
 	root.AddCommand(TagsCommand)
+	root.AddCommand(run.Command)
 
 	ShowCommand.PersistentFlags().BoolVarP(&ShSetup, "sh", "", false, "output test suite data for shell consumption")
 	ShowCommand.PersistentFlags().BoolVarP(&dumb, "dumb", "", false, "do not evaluate testcase configuration")
