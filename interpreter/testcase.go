@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/nokia/ntt/builtins"
@@ -3011,6 +3012,7 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		// state.
 		var elseClause *syntax.CommClause
 		var matchedClause *syntax.CommClause
+		var guardErr runtime.Object
 		altExec := runtime.FindTestcaseExec(env)
 		if lexec != nil {
 			lexec.TLScanBegin(currentCompID(lexec), waiting)
@@ -3044,9 +3046,15 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			// guard entirely). This lets a snapshot discriminate branches
 			// that differ only by their guard, e.g. a server accepting from
 			// `[v_client1 == null] getcall ... sender v_client1` vs the
-			// already-bound second client.
+			// already-bound second client. A guard ending in an error
+			// ends the alt with it.
 			if cc.X != nil {
-				if gv, ok := eval(cc.X, env).(runtime.Bool); ok && !bool(gv) {
+				gv := eval(cc.X, env)
+				if runtime.IsError(gv) {
+					guardErr = gv
+					break
+				}
+				if b, ok := gv.(runtime.Bool); ok && !bool(b) {
 					continue
 				}
 			}
@@ -3055,9 +3063,15 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 				defaultBranchFire() // no-op unless inside a runDefaults sweep
 				break
 			}
+			if guardErr = takeGuardError(); guardErr != nil {
+				break
+			}
 		}
 		if freeze {
 			altExec.EndAltRound(goroutineID())
+		}
+		if guardErr != nil {
+			return guardErr
 		}
 		if matchedClause != nil {
 			waiting = false
@@ -4246,9 +4260,9 @@ func prePopulateRedirects(g syntax.Node, env runtime.Scope) {
 // commGuardMatches reports whether the guard of an alt CommClause
 // would succeed against the current testcase state. A guard succeeds
 // when its embedded port.receive / port.check operation produced a
-// truthy outcome (Bool true). Anything else - Undefined, Errors,
-// non-comm guards - is treated as "no decision yet" and the caller
-// proceeds to the next ranking pass.
+// truthy outcome (Bool true). An operation ending in an error does not
+// succeed, and leaves its error for the scan to take (takeGuardError);
+// anything else - Undefined, non-comm guards - is no decision yet.
 func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 	if g == nil {
 		return false
@@ -4257,18 +4271,19 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 	defer altCtx.leave()
 	// `[] p.receive { ... }` parses as a bare SelectorExpr (no
 	// parentheses, no template arg). Treat it as a no-template
-	// receive that consumes the head of the queue if non-empty.
+	// receive that consumes the head of the queue if non-empty. The
+	// port is a name or a port array's element, `p[0].receive`.
 	if es, ok := g.(*syntax.ExprStmt); ok {
 		if sel, ok := es.Expr.(*syntax.SelectorExpr); ok {
-			if portIdent, ok := sel.X.(*syntax.Ident); ok {
-				if op, ok := sel.Sel.(*syntax.Ident); ok {
+			if op, ok := sel.Sel.(*syntax.Ident); ok && isBarePortGuardOp(op.String()) {
+				if portName, ok := commPortName(sel.X, env); ok {
 					switch op.String() {
 					case "receive":
-						return evalPortReceiveBare(sel, portIdent.String(), env, true)
+						return evalPortReceiveBare(sel, portName, env, true)
 					case "check":
-						return evalPortReceiveBare(sel, portIdent.String(), env, false)
+						return evalPortReceiveBare(sel, portName, env, false)
 					case "trigger":
-						return evalPortReceiveBare(sel, portIdent.String(), env, true)
+						return evalPortReceiveBare(sel, portName, env, true)
 					case "getreply", "getcall", "catch":
 						// Procedure-based comm (TTCN-3 22.3): a
 						// bare `[] p.getreply` matches when a
@@ -4279,7 +4294,7 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 							if exec := runtime.FindTestcaseExec(env); exec != nil {
 								// `any port.getreply` (22.5) looks at each of
 								// the component's own ports in turn.
-								ports := []string{portIdent.String()}
+								ports := []string{portName}
 								if ports[0] == "any port" {
 									ports = exec.CurrentComponentPortNames()
 								}
@@ -4339,7 +4354,60 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 	if b, ok := v.(runtime.Bool); ok {
 		return bool(b)
 	}
+	if runtime.IsError(v) {
+		storeGuardError(v)
+	}
 	return false
+}
+
+// isBarePortGuardOp reports whether op is a port operation a guard may
+// name bare, without parentheses: `[] p.receive`.
+func isBarePortGuardOp(op string) bool {
+	switch op {
+	case "receive", "check", "trigger", "getreply", "getcall", "catch":
+		return true
+	}
+	return false
+}
+
+// guardErrors holds, per goroutine, the error an alternative's guard
+// ended in, for the alt or interleave evaluating it: an error ends the
+// testcase as one in a statement does, it is no non-match. Errors are
+// rare and alternatives scanned often, so guardErrorsPending counts the
+// stored ones and a scan with none asks no goroutine id.
+var (
+	guardErrors        sync.Map
+	guardErrorsPending atomic.Int64
+)
+
+func storeGuardError(err runtime.Object) {
+	if _, loaded := guardErrors.Swap(goroutineID(), err); !loaded {
+		guardErrorsPending.Add(1)
+	}
+}
+
+// takeGuardError returns and forgets the error the alternative just
+// evaluated ended in, or nil.
+func takeGuardError() runtime.Object {
+	if guardErrorsPending.Load() == 0 {
+		return nil
+	}
+	if v, ok := guardErrors.LoadAndDelete(goroutineID()); ok {
+		guardErrorsPending.Add(-1)
+		r, _ := v.(runtime.Object)
+		return r
+	}
+	return nil
+}
+
+// guardErrorPending reports whether an alternative evaluated on this
+// goroutine ended in an error not yet taken.
+func guardErrorPending() bool {
+	if guardErrorsPending.Load() == 0 {
+		return false
+	}
+	_, ok := guardErrors.Load(goroutineID())
+	return ok
 }
 
 // waitForAltCombined parks a component on an alt that waits for
@@ -5042,6 +5110,8 @@ func altstepAlternativeMatches(fn *runtime.Function, ce *syntax.CallExpr, env ru
 	for _, s := range fn.Body.Stmts {
 		if _, ok := s.(*syntax.CommClause); !ok {
 			if r := eval(s, fenv); runtime.IsError(r) {
+				// An error is the alt's around it, which takes it.
+				storeGuardError(r)
 				return false
 			}
 		}
@@ -5062,13 +5132,22 @@ func altstepAlternativeMatches(fn *runtime.Function, ce *syntax.CallExpr, env ru
 			continue
 		}
 		if cc.X != nil {
-			if gv, ok := eval(cc.X, fenv).(runtime.Bool); ok && !bool(gv) {
+			gv := eval(cc.X, fenv)
+			if runtime.IsError(gv) {
+				storeGuardError(gv)
+				return false
+			}
+			if b, ok := gv.(runtime.Bool); ok && !bool(b) {
 				continue
 			}
 		}
 		if commGuardMatches(cc.Comm, fenv) {
 			taken = cc
 			break
+		}
+		// An error is the alt's around it, which takes it.
+		if guardErrorPending() {
+			return false
 		}
 	}
 	if taken == nil {

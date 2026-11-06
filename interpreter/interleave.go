@@ -246,13 +246,20 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) (result runt
 			lexec.TLScanBegin(currentCompID(lexec), waiting)
 		}
 		matchedIdx := -1
+		var guardErr runtime.Object
 		for i, cc := range clauses {
 			if taken[i] {
 				continue
 			}
-			// Boolean guard (ETSI 20.2): eligible only when it holds.
+			// Boolean guard (ETSI 20.2): eligible only when it holds;
+			// one ending in an error ends the interleave with it.
 			if cc.X != nil {
-				if gv, ok := eval(cc.X, env).(runtime.Bool); ok && !bool(gv) {
+				gv := eval(cc.X, env)
+				if runtime.IsError(gv) {
+					guardErr = gv
+					break
+				}
+				if b, ok := gv.(runtime.Bool); ok && !bool(b) {
 					continue
 				}
 			}
@@ -261,9 +268,15 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) (result runt
 				defaultBranchFire() // no-op unless inside a runDefaults sweep
 				break
 			}
+			if guardErr = takeGuardError(); guardErr != nil {
+				break
+			}
 		}
 		if freeze {
 			altExec.EndAltRound(goroutineID())
+		}
+		if guardErr != nil {
+			return guardErr
 		}
 		if matchedIdx >= 0 {
 			// An altstep is no alternative of an interleave (20.4); what

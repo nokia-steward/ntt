@@ -362,6 +362,17 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **An alternative whose guard ends in an error ends the testcase with
+  it,** in an alt and in an interleave, as an error in a statement does:
+  its operation (`[] any component.done` on a PTC), its boolean guard
+  (`[1 / z > 0]`), or, for an altstep taken as an alternative, the
+  altstep's local definitions. The operation's error read as an
+  alternative that doesn't match, the boolean guard's as one that holds,
+  and the definitions' as an altstep with nothing to take. A bare guard
+  operation (`[] p.receive`) on a port array's element takes that
+  element's queue, where it ended in such an error, and on a port passed
+  as a parameter that port's, where it never matched; so does the
+  statement `pa[1].receive;`, an error before.
 - **`any component` and `all component` ask the PTCs the standard
   names, and only the MTC asks** (21.3.9, table 21). With `alive` and
   `killed` they ask every PTC, one created but never started too: it is
@@ -369,9 +380,8 @@ single functional test doubles as a performance probe. See
   `all component.done` keep to the PTCs ever started (21.3.6, 21.3.7),
   and `any component.done` also matches a PTC that never started but
   was stopped or killed. `all component.kill` kills every PTC, inactive
-  ones too. On a PTC each of them, as a statement or in an expression,
-  is an error; they left out the asking PTC and acted on the other
-  started ones (in an alt guard, an error still reads as no match).
+  ones too. On a PTC each of them is an error; they left out the asking
+  PTC and acted on the other started ones.
 - **A wait for a PTC that never ran waits for it.** A standalone
   `all component.killed` with an inactive PTC, `any component.done` or
   `.killed` with inactive PTCs only, and on the real clock `v.done` or
