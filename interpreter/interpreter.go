@@ -1377,6 +1377,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		if n.KindTok.Kind() == syntax.ALTSTEP {
 			f.IsAltstep = true
 			f.Kind = "altstep"
+			if n.Interleave != nil {
+				f.Body = interleaveAltstepBody(n.Body, n.Interleave)
+			}
 		}
 		if n.Modif != nil && n.Modif.Kind() != syntax.ILLEGAL {
 			f.Kind = n.Modif.String() + " " + f.Kind
@@ -8870,6 +8873,63 @@ func forceThunk(v runtime.Object) runtime.Object {
 		}
 	}
 	return val
+}
+
+// interleaveAltstepBody is the body of a normal altstep that the
+// interleave altstep with body stands for (ETSI 16.2.0): each top
+// alternative, once taken, goes on as an interleave of all of them with
+// that one taken and its block begun (interleaveStarted), so that the
+// rest of its block is interleaved with the others after each reception
+// in it (20.4), whether the altstep is called, taken as an alternative or
+// activated as a default. tok is the declaration's own interleave
+// keyword, which makes the nested statements interleaves.
+func interleaveAltstepBody(body *syntax.BlockStmt, tok syntax.Token) *syntax.BlockStmt {
+	if body == nil {
+		return nil
+	}
+	// Once per declaration: modules are evaluated anew for each
+	// testcase.
+	if v, ok := expandedFrom.Load(body); ok {
+		return v.(*syntax.BlockStmt)
+	}
+	var defs, alts []syntax.Stmt
+	for _, s := range body.Stmts {
+		if _, ok := s.(*syntax.CommClause); ok {
+			alts = append(alts, s)
+		} else {
+			defs = append(defs, s)
+		}
+	}
+	if len(alts) < 2 {
+		return body
+	}
+	out := &syntax.BlockStmt{LBrace: body.LBrace, Stmts: defs, RBrace: body.RBrace}
+	for _, s := range alts {
+		cc := s.(*syntax.CommClause)
+		rest := &syntax.AltStmt{Tok: tok, Body: &syntax.BlockStmt{Stmts: alts}}
+		interleaveStarted.Store(rest, cc)
+		taken := *cc
+		taken.Body = &syntax.BlockStmt{Stmts: []syntax.Stmt{rest}}
+		out.Stmts = append(out.Stmts, &taken)
+	}
+	if v, loaded := expandedFrom.LoadOrStore(body, out); loaded {
+		return v.(*syntax.BlockStmt)
+	}
+	expandedBodies.Store(out, body)
+	return out
+}
+
+// expandedBodies maps the body interleaveAltstepBody made to the body
+// declared, and expandedFrom the other way.
+var expandedBodies, expandedFrom sync.Map // *syntax.BlockStmt -> *syntax.BlockStmt
+
+// declaredBody is the body a behaviour's declaration has, which body
+// stands for.
+func declaredBody(body *syntax.BlockStmt) *syntax.BlockStmt {
+	if v, ok := expandedBodies.Load(body); ok {
+		return v.(*syntax.BlockStmt)
+	}
+	return body
 }
 
 // evalAltstepBody runs an altstep's body using the same best-effort

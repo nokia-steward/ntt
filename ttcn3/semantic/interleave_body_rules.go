@@ -18,16 +18,8 @@ import (
 
 func (a *Analyzer) checkInterleaveBodyRules(mod *syntax.Module) []Diagnostic {
 	var diags []Diagnostic
-	syntax.Inspect(mod, func(n syntax.Node) bool {
-		alt, ok := n.(*syntax.AltStmt)
-		if !ok || alt == nil || alt.Tok == nil ||
-			alt.Tok.String() != "interleave" {
-			return true
-		}
-		if alt.Body == nil {
-			return true
-		}
-		for _, s := range alt.Body.Stmts {
+	forEachInterleaveBody(mod, func(body *syntax.BlockStmt) {
+		for _, s := range body.Stmts {
 			cc, ok := s.(*syntax.CommClause)
 			if !ok || cc == nil {
 				continue
@@ -51,7 +43,25 @@ func (a *Analyzer) checkInterleaveBodyRules(mod *syntax.Module) []Diagnostic {
 				})
 			}
 		}
-		return true
 	})
 	return diags
+}
+
+// forEachInterleaveBody calls fn with the body of each interleave
+// statement in mod and of each interleave altstep, whose top
+// alternatives are an interleave's (ETSI 16.2.0 g).
+func forEachInterleaveBody(mod *syntax.Module, fn func(*syntax.BlockStmt)) {
+	syntax.Inspect(mod, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.AltStmt:
+			if n.Tok != nil && n.Tok.Kind() == syntax.INTERLEAVE && n.Body != nil {
+				fn(n.Body)
+			}
+		case *syntax.FuncDecl:
+			if n.KindTok != nil && n.KindTok.Kind() == syntax.ALTSTEP && n.Interleave != nil && n.Body != nil {
+				fn(n.Body)
+			}
+		}
+		return true
+	})
 }

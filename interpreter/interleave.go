@@ -50,6 +50,11 @@ type ilEvent struct {
 // ilGiveUp unwinds a waiting body the interleave no longer resumes.
 type ilGiveUp struct{}
 
+// interleaveStarted maps the interleave an interleave altstep's top
+// alternative continues with to that alternative, already taken
+// (interleaveAltstepBody).
+var interleaveStarted sync.Map // *syntax.AltStmt -> *syntax.CommClause
+
 // ilBranches maps a body's goroutine to its branch.
 var ilBranches sync.Map // map[uint64]*ilBranch
 
@@ -176,8 +181,14 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) (result runt
 			panic(ev.panicked)
 		}
 		// `break` ends the interleave (20.4 d), and only it; `repeat` is
-		// not permitted in one (20.4); ignore it.
+		// not permitted in one (20.4); ignore it. The interleave an
+		// interleave altstep goes on with is the altstep's top
+		// alternative: a break there leaves the altstep and the alt
+		// around it too, its block not run (19.12).
 		if ev.res == runtime.Break {
+			if _, ok := interleaveStarted.Load(n); ok {
+				return runtime.Break, true, true
+			}
 			return nil, true, true
 		}
 		if ev.res != runtime.Repeat && needBreak(ev.res) {
@@ -197,6 +208,25 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) (result runt
 	}
 	waiting := false
 	waitAt := new(byte) // this interleave's wait, for one it is a body of
+	// The interleave an interleave altstep continues with has the
+	// alternative it was entered by taken already, its block begun.
+	if v, ok := interleaveStarted.Load(n); ok {
+		for i, cc := range clauses {
+			if cc != v.(*syntax.CommClause) {
+				continue
+			}
+			taken[i] = true
+			if cc.Body == nil {
+				remaining--
+				break
+			}
+			br, ev := startInterleaveBranch(cc.Body, env)
+			if res, leave, _ := settle(i, br, ev); leave {
+				return res
+			}
+			break
+		}
+	}
 	const maxRounds = 1 << 20
 	for round := 0; round < maxRounds && remaining > 0; round++ {
 		// Alt-local declarations are re-evaluated each round (ETSI 20.2).

@@ -28,14 +28,9 @@ func (a *Analyzer) checkInterleaveGotoRules(mod *syntax.Module) []Diagnostic {
 		return nil
 	}
 	var diags []Diagnostic
-	syntax.Inspect(mod, func(n syntax.Node) bool {
-		alt, ok := n.(*syntax.AltStmt)
-		if !ok || alt == nil || alt.Tok == nil ||
-			alt.Tok.Kind() != syntax.INTERLEAVE || alt.Body == nil {
-			return true
-		}
-		inside := collectLabelNames(alt.Body)
-		for _, stmt := range alt.Body.Stmts {
+	forEachInterleaveBody(mod, func(body *syntax.BlockStmt) {
+		inside := collectLabelNames(body)
+		for _, stmt := range body.Stmts {
 			cc, ok := stmt.(*syntax.CommClause)
 			if !ok || cc == nil || cc.Body == nil {
 				continue
@@ -65,7 +60,6 @@ func (a *Analyzer) checkInterleaveGotoRules(mod *syntax.Module) []Diagnostic {
 				}
 			}
 		}
-		return true
 	})
 	return diags
 }

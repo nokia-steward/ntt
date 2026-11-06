@@ -73,17 +73,10 @@ func (a *Analyzer) checkInterleaveRestrictions(mod *syntax.Module) []Diagnostic 
 		}
 	}
 
-	syntax.Inspect(mod, func(n syntax.Node) bool {
-		if n == nil {
-			return true
-		}
-		alt, ok := n.(*syntax.AltStmt)
-		if !ok || alt.Tok == nil || alt.Tok.Kind() != syntax.INTERLEAVE {
-			return true
-		}
-		// Walk every node in the interleave body and flag the
-		// forbidden constructs.
-		syntax.Inspect(alt.Body, func(m syntax.Node) bool {
+	// checkBody walks every node of an interleave's body and flags the
+	// forbidden constructs; outer is the interleave itself, if any.
+	checkBody := func(body, outer syntax.Node) {
+		syntax.Inspect(body, func(m syntax.Node) bool {
 			if m == nil {
 				return true
 			}
@@ -181,7 +174,7 @@ func (a *Analyzer) checkInterleaveRestrictions(mod *syntax.Module) []Diagnostic 
 				}
 			case *syntax.AltStmt:
 				// Skip the outer interleave itself.
-				if x == alt {
+				if outer != nil && m == outer {
 					return true
 				}
 				// Only `interleave` nested in another
@@ -194,6 +187,24 @@ func (a *Analyzer) checkInterleaveRestrictions(mod *syntax.Module) []Diagnostic 
 			}
 			return true
 		})
+	}
+	syntax.Inspect(mod, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.AltStmt:
+			if n.Tok != nil && n.Tok.Kind() == syntax.INTERLEAVE {
+				checkBody(n.Body, n)
+			}
+		case *syntax.FuncDecl:
+			// The top alternatives of an interleave altstep are an
+			// interleave's (ETSI 16.2.0 g).
+			if n.KindTok != nil && n.KindTok.Kind() == syntax.ALTSTEP && n.Interleave != nil && n.Body != nil {
+				for _, st := range n.Body.Stmts {
+					if cc, ok := st.(*syntax.CommClause); ok {
+						checkBody(cc, nil)
+					}
+				}
+			}
+		}
 		return true
 	})
 	return diags

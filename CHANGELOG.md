@@ -362,6 +362,17 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **An interleave altstep interleaves** (16.2.0): `altstep interleave
+  a()` takes each of its top alternatives once, as the interleave
+  statement does, the rest of a block interleaved with the others after
+  each reception in it, whether it is called, taken as an alternative or
+  activated as a default; it took one, as a normal altstep does. A
+  `break` in a branch leaves the altstep, and the alt around it when it
+  is taken as an alternative (19.12). Its top
+  alternatives follow the interleave statement's restrictions (16.2.0 g,
+  20.4): `ntt check` rejects in one a guard, an `[else]`, a `repeat`, a
+  loop or `goto` in a branch that receives, and the other constructs it
+  rejects in an interleave.
 - **An alternative whose guard ends in an error ends the testcase with
   it,** in an alt and in an interleave, as an error in a statement does:
   its operation (`[] any component.done` on a PTC), its boolean guard

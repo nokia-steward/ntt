@@ -1925,7 +1925,7 @@ func annotateDef(env runtime.Scope, d *syntax.ModuleDef, module string) {
 		}
 		others = append(others, n.Name.String())
 		if v, ok := env.Get(n.Name.String()); ok {
-			if f, ok := v.(*runtime.Function); ok && f.Body == n.Body {
+			if f, ok := v.(*runtime.Function); ok && declaredBody(f.Body) == n.Body {
 				f.Module = module
 			}
 		}
