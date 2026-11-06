@@ -362,6 +362,14 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **`isvalue` is false for a template that is no specific value**
+  (7.1.8.3): a value list `("ABCD", "EFGH")`, a complement, subset,
+  superset or permutation, an `ifpresent`, a bit, hex or octet string
+  with wildcards, or a record, record of or set of with a matching
+  mechanism in a field or element; it answered true. A parenthesised
+  single value, `("ABCD")`, and `null` stay values. `.value` of a value
+  list or of a structure with a matching mechanism in it is the error
+  15.15 a) asks for, where it gave the template.
 - **A return in an altstep taken as an alternative leaves the altstep,
   not the behaviour around the alt** (19.10): the alternative's own
   block runs and the alt is left; it ended the testcase, or the function

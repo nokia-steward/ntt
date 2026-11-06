@@ -14594,7 +14594,7 @@ func evalPresencePred(name string, n *syntax.CallExpr, env runtime.Scope) runtim
 		// still carries a matching mechanism (`?`, `*`, a
 		// charstring pattern, a value range, a length
 		// restriction) is a template, not a concrete value, so
-		// isvalue is false (ETSI 16.1.2). `null` is a bona fide
+		// isvalue is false (ETSI 7.1.8.3). `null` is a bona fide
 		// value and stays true.
 		present = present && isConcreteValue(val)
 	}
@@ -15399,9 +15399,10 @@ func hasMatchingMechanism(o runtime.Object) bool {
 
 // isConcreteValue reports whether o is a fully-initialised concrete
 // value rather than a template still carrying a matching mechanism.
-// Used by `isvalue` (ETSI 16.1.2): `?`, `*`, charstring patterns,
-// value ranges and length restrictions are templates, not values;
-// `null` and ordinary scalars / structures are values.
+// Used by `isvalue` (ETSI 7.1.8.3) and `.value` (15.15): `?`, `*`,
+// charstring patterns, value ranges, length restrictions and the other
+// matching mechanisms are templates, not values; `null` and ordinary
+// scalars / structures are values.
 func isConcreteValue(o runtime.Object) bool {
 	if o == nil || o == runtime.Undefined || o == runtime.Omit || o == runtime.Any || o == runtime.AnyOrNone {
 		return false
@@ -15417,14 +15418,15 @@ func isConcreteValue(o runtime.Object) bool {
 		// A record/set value (field-name metadata present) is a
 		// concrete value only when every declared field is supplied;
 		// a missing trailing field makes it partially initialised and
-		// therefore not a value (ETSI 16.1.2, Sem_1901_002). Plain
-		// lists / record-of keep the lenient default.
+		// therefore not a value (ETSI 7.1.8.3, Sem_1901_002).
 		if len(v.FieldNames) > 0 && len(v.Elements) < len(v.FieldNames) {
 			return false
 		}
-		return true
 	}
-	return true
+	// Nor is a value list, complement, subset, superset or permutation,
+	// an ifpresent, a bit, hex or octet string with wildcards, an enum
+	// template, or a structure with a matching mechanism in it (7.1.8.3).
+	return !hasMatchingMechanism(o)
 }
 
 // evalMapUnmap handles the TTCN-3 6.2.15.3 data-structure form of
