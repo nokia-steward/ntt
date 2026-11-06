@@ -16,6 +16,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"github.com/nokia/ntt/builtins"
 	"github.com/nokia/ntt/runtime"
@@ -271,7 +272,8 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			if lit, ok := n.X.(*syntax.ValueLiteral); ok && lit.Tok != nil && lit.Tok.Kind() == syntax.STRING {
 				raw := unquotePatternLiteral(lit.Tok.String())
 				complex := patternHasComplexMechanism(raw)
-				return &runtime.String{Value: []rune(expandPatternRefs(raw, env)), IsPattern: true, NoCase: nocase, PatternComplex: complex}
+				src, refs := expandPatternRefSpans(raw, env)
+				return &runtime.String{Value: []rune(src), IsPattern: true, NoCase: nocase, PatternComplex: complex, Refs: refs}
 			}
 			v := eval(n.X, env)
 			if runtime.IsError(v) {
@@ -279,15 +281,15 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			}
 			if s, ok := v.(*runtime.String); ok && s != nil {
 				complex := patternHasComplexMechanism(string(s.Value))
-				src := expandPatternRefs(string(s.Value), env)
-				return &runtime.String{Value: []rune(src), IsPattern: true, NoCase: nocase, PatternComplex: complex}
+				src, refs := expandPatternRefSpans(string(s.Value), env)
+				return &runtime.String{Value: []rune(src), IsPattern: true, NoCase: nocase, PatternComplex: complex, Refs: refs}
 			}
 			if lr, ok := v.(*runtime.LengthRestricted); ok && lr != nil {
 				if s, ok := lr.Inner.(*runtime.String); ok && s != nil {
 					complex := patternHasComplexMechanism(string(s.Value))
-					src := expandPatternRefs(string(s.Value), env)
+					src, refs := expandPatternRefSpans(string(s.Value), env)
 					newLR := *lr
-					newLR.Inner = &runtime.String{Value: []rune(src), IsPattern: true, NoCase: nocase, PatternComplex: complex}
+					newLR.Inner = &runtime.String{Value: []rune(src), IsPattern: true, NoCase: nocase, PatternComplex: complex, Refs: refs}
 					return &newLR
 				}
 			}
@@ -1420,6 +1422,8 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				return evalTestcasename(env)
 			case "int2enum":
 				return evalInt2Enum(n, env)
+			case "substr":
+				return evalSubstr(n, env)
 			case "log":
 				return evalLog(n, env)
 			case "action":
@@ -2169,7 +2173,7 @@ func unquotePatternLiteral(raw string) string {
 	return b.String()
 }
 
-// expandPatternRefs substitutes TTCN-3 pattern reference expressions in
+// expandPatternRefSpans substitutes TTCN-3 pattern reference expressions in
 // a pattern body (Annex B.1.5):
 //
 //	{ref}     - insert the referenced charstring value as pattern text
@@ -2187,10 +2191,14 @@ func unquotePatternLiteral(raw string) string {
 // Substitution is single-level: inserted text is NOT re-scanned (each
 // referenced template/const is already expanded at its own definition
 // site, so nested references compose).
-func expandPatternRefs(src string, env runtime.Scope) string {
+//
+// It also returns the rune spans the {references} outside a set
+// expression were expanded to, each one indexable item (table B.1).
+func expandPatternRefSpans(src string, env runtime.Scope) (string, [][2]int) {
 	if strings.IndexByte(src, '{') < 0 {
-		return src
+		return src, nil
 	}
+	var refs [][2]int
 	var b strings.Builder
 	b.Grow(len(src))
 	inSet := false // inside a [...] set expression
@@ -2241,7 +2249,11 @@ func expandPatternRefs(src string, env runtime.Scope) string {
 					if literal {
 						rep = escapePatternLiteral(rep)
 					}
+					start := utf8.RuneCountInString(b.String())
 					b.WriteString(rep)
+					if rep != "" {
+						refs = append(refs, [2]int{start, start + utf8.RuneCountInString(rep)})
+					}
 					i = i + 1 + cl + 1
 					continue
 				}
@@ -2250,14 +2262,14 @@ func expandPatternRefs(src string, env runtime.Scope) string {
 		b.WriteByte(c)
 		i++
 	}
-	return b.String()
+	return b.String(), refs
 }
 
 // patternHasComplexMechanism reports whether a pattern source uses a
 // matching mechanism beyond literal characters and the `?` / `*`
 // metacharacters - i.e. a set [..], reference {ref}/\N{}, quadruple
 // \q{}, repetition #/+, alternation/group |() or a char-class escape.
-// substr (16.1.2) is only defined for `?`/`*` patterns.
+// substr indexes such a pattern by its items (15.6.1).
 func patternHasComplexMechanism(src string) bool {
 	for i := 0; i < len(src); i++ {
 		switch src[i] {
@@ -3090,6 +3102,8 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 		// pattern meaning so Sem_1511_*_006 stays passing.
 		if rs, ok := ret.(*runtime.String); ok && (xs.IsPattern || ys.IsPattern) {
 			rs.IsPattern = true
+			rs.PatternComplex = xs.PatternComplex || ys.PatternComplex
+			rs.Refs = concatRefs(xs, len(xs.Value), ys)
 		}
 		return ret
 
@@ -3268,6 +3282,208 @@ func evalInt2Enum(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 		return r
 	}
 	return nil
+}
+
+// evalSubstr is substr (C.4.2) on a value or a template: on a template of
+// a string type the result keeps an ifpresent, drops a length
+// restriction, and for AnyValue or AnyValueOrNone is count AnyElements of
+// the template's declared type (`?`s of a pattern, of a binary string
+// value), with ifpresent for AnyValueOrNone.
+func evalSubstr(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
+	if n.Args == nil || len(n.Args.List) != 3 {
+		return runtime.Errorf("substr: expected 3 arguments")
+	}
+	// The actuals, by position or by name (inpar, index, count).
+	exprs := make([]syntax.Expr, 3)
+	for k, a := range n.Args.List {
+		if b, ok := a.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.ASSIGN {
+			at := map[string]int{"inpar": 0, "index": 1, "count": 2}[syntax.Name(b.X)]
+			if name := syntax.Name(b.X); name != "inpar" && name != "index" && name != "count" {
+				return runtime.Errorf("substr: no parameter %q", name)
+			}
+			exprs[at] = b.Y
+			continue
+		}
+		exprs[k] = a
+	}
+	args := make([]runtime.Object, 3)
+	for k, a := range exprs {
+		if a == nil {
+			return runtime.Errorf("substr: expected 3 arguments")
+		}
+		args[k] = forceThunk(eval(a, env))
+		if runtime.IsError(args[k]) {
+			return args[k]
+		}
+	}
+	v, ifpresent := args[0], false
+	if ip, ok := v.(*runtime.IfPresent); ok {
+		v, ifpresent = ip.Inner, true
+	}
+	maxLen := -1
+	if lr, ok := v.(*runtime.LengthRestricted); ok {
+		v, maxLen = lr.Inner, lr.Max
+	}
+	if v == runtime.Any || v == runtime.AnyOrNone {
+		index, iok := args[1].(runtime.Int)
+		count, cok := args[2].(runtime.Int)
+		switch {
+		case !iok || !index.IsInt64() || index.Int64() < 0:
+			return runtime.Errorf("substr: index is less than zero or not an integer (ETSI C.4.2)")
+		case !cok || !count.IsInt64() || count.Int64() < 0:
+			return runtime.Errorf("substr: count is less than zero or not an integer (ETSI C.4.2)")
+		case maxLen >= 0 && index.Int64()+count.Int64() > int64(maxLen):
+			// A length restriction bounds what can be referenced
+			// (15.6.1 g).
+			return runtime.Errorf("substr: index + count exceeds the template's maximum length %d (ETSI 15.6.1)", maxLen)
+		case count.Int64() > 1<<20:
+			return runtime.Errorf("substr: count %d is too large", count.Int64())
+		}
+		elems := strings.Repeat("?", int(count.Int64()))
+		var res runtime.Object
+		switch kind := stringKindOf(exprs[0], env); kind {
+		case "charstring":
+			res = &runtime.String{Value: []rune(elems), IsPattern: true}
+		case "B", "H", "O":
+			bs, err := runtime.NewBinarystring("'" + elems + "'" + kind)
+			if err != nil {
+				return runtime.Errorf("substr: %v", err)
+			}
+			res = bs
+		default:
+			return runtime.Errorf("substr: AnyValue of a type that is no string type")
+		}
+		if ifpresent || v == runtime.AnyOrNone {
+			res = &runtime.IfPresent{Inner: res}
+		}
+		return res
+	}
+	res := builtins.Substr(v, args[1], args[2])
+	if ifpresent && !runtime.IsError(res) {
+		res = &runtime.IfPresent{Inner: res}
+	}
+	return res
+}
+
+// stringKindOf is the string kind of the type the variable, template or
+// field e is declared of: "charstring" for a character string, "B", "H"
+// or "O" for a bit, hex or octet string, "" otherwise.
+func stringKindOf(e syntax.Expr, env runtime.Scope) string {
+	var name string
+	scope := env
+	switch x := e.(type) {
+	case *syntax.Ident:
+		if name = declaredTypeName(env, x.String()); name == "" {
+			name, scope = formalTypeName(env, x.String())
+		}
+	case *syntax.ParenExpr:
+		if len(x.List) == 1 {
+			return stringKindOf(x.List[0], env)
+		}
+	case *syntax.SelectorExpr:
+		if f, parent := lvalueField(x, env); f != nil && len(f.ArrayDef) == 0 {
+			name, scope = syntax.Name(f.Type), typeHome(parent, env)
+		} else if mod, ok := x.X.(*syntax.Ident); ok {
+			// A module's template, `A.mw_a`: what that module declares
+			// it of.
+			if v, home, ok := resolveTypeName(mod.String()+"."+syntax.Name(x.Sel), env); ok {
+				if fn, ok := v.(*runtime.Function); ok && fn.Result != nil {
+					name, scope = syntax.Name(fn.Result), fn.Home
+				} else {
+					name, scope = declaredTypeName(home, syntax.Name(x.Sel)), home
+				}
+			}
+		}
+	case *syntax.BinaryExpr:
+		// An inline template, `charstring:?`.
+		if x.Op != nil && x.Op.Kind() == syntax.COLON {
+			name = syntax.Name(x.X)
+		}
+	case *syntax.CallExpr:
+		// An invoked template, `mw_a(1)` or `A.mw_a(1)`: the type it is
+		// declared of.
+		if v, _, ok := resolveTypeName(syntax.Name(x.Fun), env); ok {
+			if fn, ok := v.(*runtime.Function); ok && fn.Result != nil {
+				name, scope = syntax.Name(fn.Result), fn.Home
+			}
+		}
+	case *syntax.IndexExpr:
+		// An element: of an array variable, its declared type; of a
+		// record of or set of, its element type.
+		if id, ok := x.X.(*syntax.Ident); ok {
+			if kind := stringKindNamed(declaredTypeName(env, id.String()), env); kind != "" {
+				return kind
+			}
+		}
+		if lt := listTypeDesc(lvalueTypeDesc(x.X, env), env); lt != nil {
+			if ls, ok := lt.Spec.(*syntax.ListSpec); ok && ls.ElemType != nil {
+				name, scope = syntax.Name(ls.ElemType), typeHome(lt, env)
+			}
+		}
+	}
+	if scope == nil {
+		scope = env
+	}
+	return stringKindNamed(name, scope)
+}
+
+// stringKindNamed is stringKindOf for the type named name in scope,
+// through its synonyms.
+func stringKindNamed(name string, scope runtime.Scope) string {
+	if scope == nil {
+		return ""
+	}
+	for depth := 0; name != "" && depth < 8; depth++ {
+		switch name {
+		case "charstring", "universal charstring":
+			return "charstring"
+		case "bitstring":
+			return "B"
+		case "hexstring":
+			return "H"
+		case "octetstring":
+			return "O"
+		}
+		v, home, ok := resolveTypeName(name, scope)
+		if !ok {
+			return ""
+		}
+		td, ok := v.(*runtime.TypeDesc)
+		if !ok || td.Underlying == "" {
+			return ""
+		}
+		name, scope = td.Underlying, typeHome(td, home)
+	}
+	return ""
+}
+
+// formalTypeName is the type name the formal parameter name of the
+// behaviour running in env is declared of, with the scope it resolves
+// in, or "".
+func formalTypeName(env runtime.Scope, name string) (string, runtime.Scope) {
+	e, ok := env.(*runtime.Env)
+	if !ok {
+		return "", env
+	}
+	o := e.Owner(name)
+	if o == nil || !o.Binds(currentFunctionKey) {
+		return "", env
+	}
+	v, _ := o.Get(currentFunctionKey)
+	fn, ok := v.(*runtime.Function)
+	if !ok || fn.Params == nil {
+		return "", env
+	}
+	for _, p := range fn.Params.List {
+		if p != nil && p.Name != nil && p.Name.String() == name && p.Type != nil && len(p.ArrayDef) == 0 {
+			home := fn.Home
+			if home == nil {
+				home = o
+			}
+			return syntax.Name(p.Type), home
+		}
+	}
+	return "", env
 }
 
 // lvalueEnumType is the enumerated type the variable, field or element lx
@@ -9116,7 +9332,29 @@ func concatCharstringPattern(x, y runtime.Object) (runtime.Object, bool) {
 			nocase = true
 		}
 	}
-	return &runtime.String{Value: []rune(xf + yf), IsPattern: true, NoCase: nocase}, true
+	res := &runtime.String{Value: []rune(xf + yf), IsPattern: true, NoCase: nocase}
+	// A pattern operand taken as it is keeps its references (15.6.1).
+	xs, _ := x.(*runtime.String)
+	ys, _ := y.(*runtime.String)
+	if xs != nil && xs.IsPattern && string(xs.Value) == xf {
+		res.PatternComplex = xs.PatternComplex
+		res.Refs = append(res.Refs, xs.Refs...)
+	}
+	if ys != nil && ys.IsPattern && string(ys.Value) == yf {
+		res.PatternComplex = res.PatternComplex || ys.PatternComplex
+		res.Refs = concatRefs(&runtime.String{Refs: res.Refs}, len([]rune(xf)), ys)
+	}
+	return res, true
+}
+
+// concatRefs are the reference spans of x followed by y, y's from rune
+// offset n on.
+func concatRefs(x *runtime.String, n int, y *runtime.String) [][2]int {
+	refs := append([][2]int(nil), x.Refs...)
+	for _, r := range y.Refs {
+		refs = append(refs, [2]int{r[0] + n, r[1] + n})
+	}
+	return refs
 }
 
 // isStringOperand reports whether o is a charstring/universal charstring
@@ -14837,11 +15075,15 @@ func evalIndexRead(n *syntax.IndexExpr, left runtime.Object, env runtime.Scope) 
 		// An element of a pattern is one of its items, a character or
 		// a metacharacter (ETSI 15.6.1 b, table B.1).
 		if s.IsPattern {
-			items := patternItems(s.Value)
+			items, isRef := builtins.PatternItems(s.Value, s.Refs)
 			if i >= int64(len(items)) {
 				return runtime.Undefined
 			}
-			return &runtime.String{Value: items[i], IsPattern: true, NoCase: s.NoCase, PatternComplex: s.PatternComplex}
+			el := &runtime.String{Value: items[i], IsPattern: true, NoCase: s.NoCase, PatternComplex: s.PatternComplex}
+			if isRef[i] {
+				el.Refs = [][2]int{{0, len(items[i])}}
+			}
+			return el
 		}
 		if i >= int64(s.Len()) {
 			return runtime.Errorf("element %d of a string of length %d (ETSI 6.1.1.1)", i, s.Len())
@@ -15269,8 +15511,9 @@ func innermost(o runtime.Object) runtime.Object {
 // pattern of more than one item becomes one group.
 func withPatternItem(s *runtime.String, i int, r *runtime.String) runtime.Object {
 	var items [][]rune
+	var isRef []bool
 	if s.IsPattern {
-		items = patternItems(s.Value)
+		items, isRef = builtins.PatternItems(s.Value, s.Refs)
 	} else {
 		for _, c := range s.Value {
 			items = append(items, escapePatternRune(c))
@@ -15281,7 +15524,7 @@ func withPatternItem(s *runtime.String, i int, r *runtime.String) runtime.Object
 	}
 	var item []rune
 	if r.IsPattern {
-		parts := patternItems(r.Value)
+		parts, _ := builtins.PatternItems(r.Value, r.Refs)
 		item = append([]rune(nil), r.Value...)
 		if len(parts) > 1 {
 			item = append(append([]rune{'('}, item...), ')')
@@ -15299,12 +15542,17 @@ func withPatternItem(s *runtime.String, i int, r *runtime.String) runtime.Object
 	} else {
 		items = append(items, item)
 	}
+	// The references among the items left stay one item each.
 	var out []rune
-	for _, it := range items {
+	var refs [][2]int
+	for k, it := range items {
+		if k != i && k < len(isRef) && isRef[k] {
+			refs = append(refs, [2]int{len(out), len(out) + len(it)})
+		}
 		out = append(out, it...)
 	}
 	return &runtime.String{Value: out, IsPattern: true, NoCase: s.NoCase || r.NoCase,
-		PatternComplex: s.PatternComplex || r.PatternComplex || r.IsPattern && len(item) > 1}
+		PatternComplex: s.PatternComplex || r.PatternComplex || r.IsPattern && len(item) > 1, Refs: refs}
 }
 
 // escapePatternRune is c as a pattern matches it alone.
@@ -15313,97 +15561,6 @@ func escapePatternRune(c rune) []rune {
 		return []rune{'\\', c}
 	}
 	return []rune{c}
-}
-
-// patternItems splits a pattern's source into the items indexing counts
-// (ETSI ES 201 873-1 15.6.1, table B.1): a character, an escape such as
-// `\d` or `\q{...}`, a set `[...]`, a reference `{...}` or a group
-// `(...)`, each with the repetition `+` or `#...` that follows it.
-func patternItems(src []rune) [][]rune {
-	var items [][]rune
-	// setEnd is the position of the `]` closing the set at i.
-	setEnd := func(i int) int {
-		j := i + 1
-		if j < len(src) && src[j] == '^' {
-			j++
-		}
-		if j < len(src) && src[j] == ']' {
-			j++
-		}
-		for j < len(src) && src[j] != ']' {
-			if src[j] == '\\' {
-				j++
-			}
-			j++
-		}
-		return j
-	}
-	// closing is the position of what closes the open at i, sets and
-	// escapes skipped, or i when nothing does: the character is then a
-	// literal (B.1.5).
-	closing := func(i int, open, close rune) int {
-		depth := 0
-		for j := i; j < len(src); j++ {
-			switch src[j] {
-			case '\\':
-				j++
-			case '[':
-				if open != '[' {
-					j = setEnd(j)
-				}
-			case open:
-				depth++
-			case close:
-				depth--
-				if depth == 0 {
-					return j
-				}
-			}
-		}
-		return i
-	}
-	for i := 0; i < len(src); {
-		j := i
-		switch src[i] {
-		case '\\':
-			j = i + 1
-			if j+1 < len(src) && (src[j] == 'N' || src[j] == 'q') && src[j+1] == '{' {
-				j = closing(j+1, '{', '}')
-			}
-		case '[':
-			j = setEnd(i)
-		case '{':
-			j = closing(i, '{', '}')
-		case '(':
-			j = closing(i, '(', ')')
-		}
-		if j >= len(src) {
-			j = len(src) - 1
-		}
-		j++
-		// A repetition belongs to the item before it.
-		for j < len(src) {
-			if src[j] == '+' {
-				j++
-				continue
-			}
-			if src[j] == '#' && j+1 < len(src) {
-				if src[j+1] == '(' {
-					j = closing(j+1, '(', ')') + 1
-				} else {
-					j += 2
-				}
-				continue
-			}
-			break
-		}
-		if j > len(src) {
-			j = len(src)
-		}
-		items = append(items, append([]rune(nil), src[i:j]...))
-		i = j
-	}
-	return items
 }
 
 // extractTemplateValue is `t.value` (ETSI 15.15): the string of a pattern

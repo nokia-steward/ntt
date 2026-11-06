@@ -1014,10 +1014,12 @@ type String struct {
 	NoCase bool
 	// PatternComplex marks a pattern whose source used a matching
 	// mechanism beyond literal characters / `?` / `*` (a set [..],
-	// reference {ref}/\N{}, quadruple \q{}, repetition #/+, etc.).
-	// substr (16.1.2) is only allowed on `?`/`*` patterns, so it
-	// rejects a complex one.
+	// reference {ref}/\N{}, quadruple \q{}, repetition #/+, etc.);
+	// substr indexes such a pattern by its items (15.6.1).
 	PatternComplex bool
+	// Refs are the rune spans of Value a pattern's {references} were
+	// expanded to: each is one indexable item (table B.1).
+	Refs [][2]int
 	// Interned signals that this *String is shared from
 	// asciiSingleRuneCache and MUST be copy-on-write before any
 	// mutation. The cache exists to avoid the per-call malloc that

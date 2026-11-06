@@ -70,3 +70,39 @@ func TestCharacterPatterns(t *testing.T) {
 		}
 	}
 }
+
+// A pattern is indexed by its items (15.6.1, table B.1): a metacharacter
+// with what it includes, a reference's expansion, each with its
+// repetition; `|`, which the table gives no indexing, is one.
+func TestPatternItems(t *testing.T) {
+	for _, tt := range []struct {
+		pat  string
+		refs [][2]int
+		want []string
+	}{
+		{`ab?c*`, nil, []string{"a", "b", "?", "c", "*"}},
+		{`abc[a-z]+`, nil, []string{"a", "b", "c", "[a-z]+"}},
+		{`x\d#(2,3)(ab)#2\q{0,0,1,113}`, nil, []string{"x", `\d#(2,3)`, "(ab)#2", `\q{0,0,1,113}`}},
+		{`abc?def?x`, [][2]int{{0, 8}}, []string{"abc?def?", "x"}},
+		{`[]a]\[`, nil, []string{"[]a]", `\[`}},
+		{`ab|c`, nil, []string{"a", "b", "|", "c"}},
+		{`{unresolved}x`, nil, []string{"{unresolved}", "x"}},
+		{`a{b`, nil, []string{"a", "{", "b"}},
+	} {
+		items, _ := PatternItems([]rune(tt.pat), tt.refs)
+		got := make([]string, len(items))
+		for k, it := range items {
+			got[k] = string(it)
+		}
+		if len(got) != len(tt.want) {
+			t.Errorf("%q: items %q, want %q", tt.pat, got, tt.want)
+			continue
+		}
+		for k := range got {
+			if got[k] != tt.want[k] {
+				t.Errorf("%q: items %q, want %q", tt.pat, got, tt.want)
+				break
+			}
+		}
+	}
+}

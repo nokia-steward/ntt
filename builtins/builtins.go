@@ -509,13 +509,25 @@ func Substr(args ...runtime.Object) runtime.Object {
 	i, n := int(idx.Int64()), int(count.Int64())
 	switch v := args[0].(type) {
 	case *runtime.String:
-		// TTCN-3 16.1.2: substr on a charstring template is only
-		// permitted when the template uses AnyElement (?) or
-		// AnyElementsOrNone (*) matching; a pattern with any other
-		// mechanism (set, reference, quadruple, repetition, ...)
-		// must be rejected.
-		if v.IsPattern && v.PatternComplex {
-			return runtime.Errorf("substr: argument is a pattern with a matching mechanism other than ? or *")
+		// A pattern counts its indexable items (15.6.1, table B.1): a
+		// metacharacter is one, with what it includes. One of only `?`
+		// and `*` gives its characters as a value, as an earlier
+		// edition defined and the ETSI suite expects.
+		if v.IsPattern && (v.PatternComplex || len(v.Refs) > 0 || strings.ContainsAny(string(v.Value), `[]#+|(){}\`)) {
+			items, isRef := PatternItems(v.Value, v.Refs)
+			if i < 0 || n < 0 || i+n > len(items) {
+				return runtime.Errorf("substr: out of range")
+			}
+			// The references among the items taken stay one item each.
+			var out []rune
+			var refs [][2]int
+			for k := i; k < i+n; k++ {
+				if isRef[k] {
+					refs = append(refs, [2]int{len(out), len(out) + len(items[k])})
+				}
+				out = append(out, items[k]...)
+			}
+			return &runtime.String{Value: out, IsPattern: true, NoCase: v.NoCase, PatternComplex: true, Refs: refs}
 		}
 		if i < 0 || n < 0 || i+n > v.Len() {
 			return runtime.Errorf("substr: out of range")

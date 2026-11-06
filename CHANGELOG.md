@@ -362,6 +362,20 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **`substr` takes templates as C.4.2 defines** (V4.17.1). A pattern is
+  indexed by its items (15.6.1, table B.1: a set expression, an escape, a
+  `{reference}`, a group, each with its repetition, is one item), where
+  it was an error for anything but `?` and `*`, also for a pattern built
+  by concatenation and for an element read `t[i]`, which use the same
+  items; `?` gives count AnyElements of the template's type (of a
+  variable, field, parameter, array or record of element, inline,
+  invoked or module-qualified template), a pattern of `?`s or a binary
+  string of AnyElements, and `*` those with `ifpresent`; a length
+  restriction goes, with index + count within its maximum (15.6.1 g),
+  and an `ifpresent` stays. A negative index is an error, and the
+  actuals may be named (`substr(inpar := ..., index := ..., count := ...)`).
+  A pattern of only `?` and `*` keeps giving its characters as a value,
+  as an earlier edition defined and the ETSI suite expects.
 - **Character patterns follow table B.1 and B.1.5.1 to B.1.5.3.**
   - `\w` is `[0-9a-zA-Z]`, without `_`; `\n` matches LF, VT, FF and CR;
     `\s` also VT and the space characters.

@@ -525,6 +525,100 @@ func ttcnPatternToRegex(s string) (string, error) {
 	return b.String(), nil
 }
 
+// PatternItems splits a character pattern into the items it is indexed
+// by (15.6.1, table B.1): a character, `?`, `*` or `|`; a `\` with what
+// it includes, a \q{...} or \N{...}; a set expression; a group; what a
+// {reference} was expanded to, the rune span refs gives, or an
+// unexpanded {...}; each with the repetition (`#`, `+`) following it.
+// isRef tells the references among them.
+func PatternItems(rs []rune, refs [][2]int) (items [][]rune, isRef []bool) {
+	paired := patternGroups(rs)
+	refAt := map[int]int{}
+	for _, r := range refs {
+		refAt[r[0]] = r[1]
+	}
+	for i := 0; i < len(rs); {
+		start := i
+		ref := false
+		switch c := rs[i]; {
+		case refAt[i] > i:
+			i, ref = refAt[i], true
+		case c == '{':
+			// Up to its `}`; one without is a literal.
+			i++
+			for j, depth := i, 1; j < len(rs); j++ {
+				if rs[j] == '{' {
+					depth++
+				} else if rs[j] == '}' {
+					if depth--; depth == 0 {
+						i = j + 1
+						break
+					}
+				}
+			}
+		case c == '\\' && i+1 < len(rs):
+			i += 2
+			if (rs[i-1] == 'q' || rs[i-1] == 'N') && i < len(rs) && rs[i] == '{' {
+				for i < len(rs) && rs[i] != '}' {
+					i++
+				}
+				if i < len(rs) {
+					i++
+				}
+			}
+		case c == '[':
+			if _, n, ok := patternSet(rs[i:]); ok {
+				i += n
+			} else {
+				i++
+			}
+		case c == '(' && paired[i]:
+			depth := 0
+			for ; i < len(rs); i++ {
+				if rs[i] == '\\' {
+					i++
+					continue
+				}
+				if rs[i] == '[' {
+					if _, n, ok := patternSet(rs[i:]); ok {
+						i += n - 1
+						continue
+					}
+				}
+				if rs[i] == '(' && paired[i] {
+					depth++
+				}
+				if rs[i] == ')' && paired[i] {
+					depth--
+					if depth == 0 {
+						i++
+						break
+					}
+				}
+			}
+		default:
+			i++
+		}
+		// The repetition is the item's.
+		for i < len(rs) {
+			if rs[i] == '+' {
+				i++
+				continue
+			}
+			if rs[i] == '#' {
+				if _, n, ok := patternCount(rs[i+1:]); ok {
+					i += 1 + n
+					continue
+				}
+			}
+			break
+		}
+		items = append(items, append([]rune(nil), rs[start:i]...))
+		isRef = append(isRef, ref)
+	}
+	return items, isRef
+}
+
 // patternGroups reports which of the parentheses of rs, outside set
 // expressions and escapes, pair up as a group; one without a partner
 // keeps its literal value (B.1.5.0).
