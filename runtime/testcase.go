@@ -840,12 +840,15 @@ func (t *TestcaseExec) SeedRnd(seed int64) {
 // resolve where the user wrote `activate(a())`. Id is a monotonic
 // handle the deactivate operation uses to remove the entry. Owner is the
 // component that activated it: a default belongs to that component alone
-// (ETSI 20.5), and only that component's alts may invoke it.
+// (ETSI 20.5), and only that component's alts may invoke it. A
+// suspended default keeps its place in the list, but is not invoked
+// until it is re-activated (20.5.0, 20.5.3).
 type Default struct {
-	Id    int
-	Body  Object
-	Env   Scope
-	Owner int64
+	Id        int
+	Body      Object
+	Env       Scope
+	Owner     int64
+	Suspended bool
 }
 
 // AddDefault registers an activated altstep and returns the handle
@@ -873,6 +876,22 @@ func (t *TestcaseExec) RemoveDefaultOf(owner int64, id int) bool {
 		}
 	}
 	return false
+}
+
+// SuspendDefaultOf marks the default with the given id that component
+// owner activated as suspended (suspend) or active again, and returns it,
+// whether there was one and whether it was suspended before (ETSI ES 201
+// 873-1 20.5.2, 20.5.3).
+func (t *TestcaseExec) SuspendDefaultOf(owner int64, id int, suspend bool) (d Default, found, was bool) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	for i, d := range t.defaults {
+		if d.Id == id && d.Owner == owner {
+			t.defaults[i].Suspended = suspend
+			return d, true, d.Suspended
+		}
+	}
+	return Default{}, false, false
 }
 
 // RemoveDefault drops the activation with the given id, if any, whichever

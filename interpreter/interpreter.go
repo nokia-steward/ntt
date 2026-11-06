@@ -9902,7 +9902,7 @@ func endScopeTimers(env runtime.Scope) {
 	if st == nil || len(st.timers) == 0 {
 		return
 	}
-	held := defaultsTimers(activeDefaults(env))
+	held := defaultsTimers(listedDefaults(env))
 	exec := runtime.FindTestcaseExec(env)
 	var kept, ended []*runtime.TimerHandle
 	for _, th := range st.timers {
@@ -9919,8 +9919,8 @@ func endScopeTimers(env runtime.Scope) {
 }
 
 // endOutlivedTimers ends the timers of component id whose scope ended
-// while a default held them (endScopeTimers), and that none of its active
-// defaults holds now.
+// while a default held them (endScopeTimers), and that none of its
+// defaults, suspended ones included, holds now.
 func endOutlivedTimers(exec *runtime.TestcaseExec, id int64) {
 	ths := exec.TakeOutlivedTimers(id)
 	if len(ths) == 0 {
@@ -13103,6 +13103,9 @@ func evalActivate(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 		return runtime.Undefined
 	}
 	callExpr := n.Args.List[0]
+	if !activatesAltstep(callExpr, env) {
+		return evalReactivate(n, callExpr, env)
+	}
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil {
 		if c := controlDefaultsOf(env); c != nil {
@@ -13128,6 +13131,88 @@ func evalActivate(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 		})
 	}
 	return runtime.NewInt(id)
+}
+
+// activatesAltstep reports whether the argument of activate is an altstep
+// invocation, not an ObjectReference: a value reference or a function
+// instance, a function returning the default (ETSI ES 201 873-1 20.5.2,
+// A.1 ObjectReference).
+func activatesAltstep(arg syntax.Expr, env runtime.Scope) bool {
+	call, ok := arg.(*syntax.CallExpr)
+	if !ok {
+		return false
+	}
+	switch call.Fun.(type) {
+	case *syntax.Ident, *syntax.SelectorExpr:
+		if fn, ok := eval(call.Fun, env).(*runtime.Function); ok && !fn.IsAltstep && !fn.IsTemplate {
+			return false
+		}
+	}
+	return true
+}
+
+// evalReactivate is activate(ref): the suspended default ref refers to
+// is active again, in its place in the list of defaults, and ref is the
+// result (ETSI ES 201 873-1 20.5.2). A default that is not suspended is an
+// error (20.5.2 e).
+func evalReactivate(n *syntax.CallExpr, ref syntax.Expr, env runtime.Scope) runtime.Object {
+	exec := runtime.FindTestcaseExec(env)
+	c := controlDefaultsOf(env)
+	if exec == nil && c == nil {
+		return runtime.Undefined
+	}
+	v := eval(ref, env)
+	if runtime.IsError(v) {
+		return v
+	}
+	id, err := defaultRef("activate", v)
+	if err != nil {
+		return err
+	}
+	var found, was bool
+	var d runtime.Default
+	if exec == nil {
+		d, found, was = c.suspend(id, false)
+	} else {
+		d, found, was = exec.SuspendDefaultOf(currentCompID(exec), id, false)
+	}
+	// Un-suspending an active default changes nothing; it is an error.
+	if !found || !was {
+		return runtime.Errorf("activate of a default that is not suspended (ETSI ES 201 873-1 20.5.2 e)")
+	}
+	if lexec := tlExec(env); exec != nil && lexec != nil {
+		tlEmitLazy(lexec, n, "tliAActivate", func() []tl.Arg {
+			var mod, name string
+			if ast, ok := d.Body.(*astNode); ok && ast != nil {
+				if call, ok := ast.n.(syntax.Expr); ok {
+					mod, name = tlQualified(call, d.Env)
+				}
+			}
+			return []tl.Arg{
+				tlArg("name", tl.QualifiedName(mod, name)),
+				tlArg("ref", tl.Value{Kind: "default", Text: strconv.Itoa(id)}.AsValue()),
+			}
+		})
+	}
+	return v
+}
+
+// defaultRef is the handle of the default reference v that operation op
+// takes, or the error of one that is none (ETSI ES 201 873-1 20.5.2,
+// 20.5.3).
+func defaultRef(op string, v runtime.Object) (int, runtime.Object) {
+	clause := "20.5.3"
+	if op == "activate" {
+		clause = "20.5.2"
+	}
+	i, ok := v.(runtime.Int)
+	if !ok || i.Int == nil || !i.IsInt64() {
+		if v == runtime.Undefined {
+			return 0, runtime.Errorf("%s of an uninitialised default reference (ETSI ES 201 873-1 %s)", op, clause)
+		}
+		return 0, runtime.Errorf("%s of %s, which is no default reference (ETSI ES 201 873-1 %s)", op, v.Inspect(), clause)
+	}
+	return int(i.Int64()), nil
 }
 
 // snapshotActivateArgs returns a child scope of env in which every
@@ -13162,9 +13247,10 @@ func snapshotActivateArgs(callExpr syntax.Expr, env runtime.Scope) runtime.Scope
 	return defEnv
 }
 
-// evalDeactivate accepts an integer handle (returned by activate) or
-// a literal `null` / Undefined (no-op). Removes the matching entry
-// from the testcase's defaults stack.
+// evalDeactivate is deactivate(ref) and deactivate(ref, suspend): the
+// default ref refers to is removed from the list of defaults, or with
+// suspend true is suspended in it (ETSI ES 201 873-1 20.5.3). null has no
+// effect.
 func evalDeactivate(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	exec := runtime.FindTestcaseExec(env)
 	c := controlDefaultsOf(env)
@@ -13178,30 +13264,49 @@ func evalDeactivate(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	// null has no effect; a reference to no default active on the
 	// component, deactivated already or never initialised, is an error
 	// (ETSI ES 201 873-1 20.5.3).
+	// The suspend expression is a boolean value, false when absent
+	// (20.5.3 b, c). It is evaluated even for null.
+	suspend := false
+	if len(n.Args.List) > 1 {
+		s := eval(n.Args.List[1], env)
+		if runtime.IsError(s) {
+			return s
+		}
+		b, ok := s.(runtime.Bool)
+		if !ok {
+			if s == runtime.Undefined {
+				return runtime.Errorf("deactivate with an uninitialised suspend expression (ETSI ES 201 873-1 20.5.3 c)")
+			}
+			return runtime.Errorf("deactivate with suspend expression %s, which is no boolean value (ETSI ES 201 873-1 20.5.3 b)", s.Inspect())
+		}
+		suspend = bool(b)
+	}
 	if v == runtime.Null {
 		return runtime.Undefined
 	}
-	i, ok := v.(runtime.Int)
-	if !ok || i.Int == nil || !i.IsInt64() {
-		if v == runtime.Undefined {
-			return runtime.Errorf("deactivate of an uninitialised default reference (ETSI ES 201 873-1 20.5.3)")
-		}
-		return runtime.Errorf("deactivate of %s, which is no default reference (ETSI ES 201 873-1 20.5.3)", v.Inspect())
+	id, err := defaultRef("deactivate", v)
+	if err != nil {
+		return err
 	}
-	var removed bool
-	if exec == nil {
-		removed = c.remove(int(i.Int64()))
-	} else {
-		removed = exec.RemoveDefaultOf(currentCompID(exec), int(i.Int64()))
+	var found bool
+	switch {
+	case suspend && exec == nil:
+		_, found, _ = c.suspend(id, true)
+	case suspend:
+		_, found, _ = exec.SuspendDefaultOf(currentCompID(exec), id, true)
+	case exec == nil:
+		found = c.remove(id)
+	default:
+		found = exec.RemoveDefaultOf(currentCompID(exec), id)
 	}
-	if !removed {
+	if !found {
 		return runtime.Errorf("deactivate of a default that is not active on the component (ETSI ES 201 873-1 20.5.3)")
 	}
-	if exec != nil {
+	if exec != nil && !suspend {
 		endOutlivedTimers(exec, currentCompID(exec))
 	}
 	if lexec := tlExec(env); exec != nil && lexec != nil {
-		tlEmit(lexec, n, "tliADeactivate", tlArg("ref", tl.Value{Kind: "default", Text: i.Int.String()}.AsValue()))
+		tlEmit(lexec, n, "tliADeactivate", tlArg("ref", tl.Value{Kind: "default", Text: strconv.Itoa(id)}.AsValue()))
 	}
 	return runtime.Undefined
 }
@@ -13313,7 +13418,26 @@ func runDefaults(env runtime.Scope) (runtime.Object, bool) {
 // components', so without the filter one component's defaults ran in
 // another's alts — once timer-only defaults stopped being skipped, an
 // MTC's safety-net timer could end a PTC's alt and consume the timer.
+// A suspended default is not active (20.5.3).
 func activeDefaults(env runtime.Scope) []runtime.Default {
+	defs := listedDefaults(env)
+	for i, d := range defs {
+		if d.Suspended {
+			out := append([]runtime.Default(nil), defs[:i]...)
+			for _, d := range defs[i+1:] {
+				if !d.Suspended {
+					out = append(out, d)
+				}
+			}
+			return out
+		}
+	}
+	return defs
+}
+
+// listedDefaults is activeDefaults with the suspended defaults, which keep
+// their place in the list of defaults, and the timers passed to them.
+func listedDefaults(env runtime.Scope) []runtime.Default {
 	if exec := runtime.FindTestcaseExec(env); exec != nil {
 		return exec.DefaultsOf(currentCompID(exec))
 	}

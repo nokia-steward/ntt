@@ -3171,7 +3171,7 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		// In an interleave branch body the interleave runs them, after
 		// its branches not yet taken (20.4, 20.5).
 		if !defaultsSuppressed(n) && currentInterleaveBranch() == nil {
-			if lexec != nil && !waiting && len(lexec.DefaultsOf(currentCompID(lexec))) > 0 {
+			if lexec != nil && !waiting && len(activeDefaults(env)) > 0 {
 				tlEmit(lexec, n, "tliADefaults")
 			}
 			if ctl, fired := runDefaults(env); fired {

@@ -1707,6 +1707,13 @@ reading; "fixing" the negative would just flip which side fails (a wash).
   because the operators are now right.
 - **`NegSem_2707_OptionalAttributes_002`**: ETSI's own comment says it is
   not actually forbidden.
+- **`Sem_200500_general_001`** (2026-11-06): it states its purpose as the
+  order of a re-activated *suspended* default, but deactivates with
+  `deactivate(v_default)`, which removes the default, and then calls
+  `activate(v_default)`. Re-activating a default that is not suspended is
+  an error (20.5.2 restriction e, kept by the V5 working text), so ntt
+  gives `error` where the test expects `pass`. With
+  `deactivate(v_default, true)` the test would check what it says.
 
 ---
 

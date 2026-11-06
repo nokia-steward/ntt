@@ -174,6 +174,19 @@ func (c *controlDefaults) remove(id int) bool {
 	return false
 }
 
+// suspend is SuspendDefaultOf for a control part's defaults.
+func (c *controlDefaults) suspend(id int, suspend bool) (d runtime.Default, found, was bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for i, d := range c.list {
+		if d.Id == id {
+			c.list[i].Suspended = suspend
+			return d, true, d.Suspended
+		}
+	}
+	return runtime.Default{}, false, false
+}
+
 func (c *controlDefaults) clear() {
 	c.mu.Lock()
 	defer c.mu.Unlock()

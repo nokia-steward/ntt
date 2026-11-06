@@ -362,6 +362,17 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **`deactivate(d, true)` suspends a default** (20.5.3): it keeps its place
+  in the list of defaults, is not invoked, and `activate(d)` re-activates
+  it there and returns `d` (20.5.2). The second argument was ignored, so
+  the default was removed, and `activate(d)` was no re-activation.
+  A function returning a default reference is an ObjectReference too:
+  `activate(f())` re-activates the default it returns, where it was
+  rejected. Re-activating a default that is not suspended, and a suspend
+  expression that is uninitialised or no boolean value, are errors. The
+  ETSI suite's `Sem_200500_general_001` re-activates a default it removed
+  rather than suspended, and so ends in an error (see
+  docs/conformance/remaining-work.md).
 - **`start`, `stop` and `halt` act on the port's queue** as 22.5.2 to
   22.5.4 and figures F.7 and F.8 define; they only recorded the state
   `checkstate` answers. `start` clears the queue and a halted port's

@@ -197,6 +197,11 @@ func checkActivateInBody(body *syntax.BlockStmt, funcs map[string]*syntax.FuncDe
 				})
 			}
 		case syntax.FUNCTION, syntax.TESTCASE:
+			// A function returning a default reference is an
+			// ObjectReference: activate re-activates that default.
+			if decl.KindTok.Kind() == syntax.FUNCTION && decl.Return != nil && syntax.Name(decl.Return.Type) == "default" {
+				break
+			}
 			diags = append(diags, Diagnostic{
 				Code:     "activate-non-altstep",
 				Severity: SeverityError,
