@@ -1,0 +1,26 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for lazy variables.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060504_references_003 {
+
+type component GeneralComp {}
+
+function verifyType(inout universal charstring uc) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_060504_references_003() runs on GeneralComp {
+	var @lazy v1 := "üniversal charstrüng";
+	{
+		var charstring v2 := "charstring";
+		v1 := v2;
+	}
+	var v3 := v1;
+	verifyType(v3);
+}
+
+control {
+	execute(TC_Sem_060504_references_003());
+}
+
+}

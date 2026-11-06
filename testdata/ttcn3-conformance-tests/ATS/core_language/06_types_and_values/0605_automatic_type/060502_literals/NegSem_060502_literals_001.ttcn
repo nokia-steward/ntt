@@ -1,0 +1,8 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for *.
+// @verdict  pass reject
+module NegSem_060502_literals_001 {
+
+modulepar template mpar := *;
+
+}

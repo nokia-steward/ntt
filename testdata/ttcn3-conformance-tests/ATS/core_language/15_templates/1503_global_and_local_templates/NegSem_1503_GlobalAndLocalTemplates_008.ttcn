@@ -19,9 +19,9 @@ module NegSem_1503_GlobalAndLocalTemplates_008 {
 
 
 	template p_NegSem_1503_GlobalAndLocalTemplates_008_SignatureTemplate s_notToUseInCallTemplate := {
-		p_in := 1, //NotUsedSymbol?
+		p_in := -, //NotUsedSymbol?
 		p_inout := 2,
-		p_out := 3
+		p_out := -
 	}
 
 

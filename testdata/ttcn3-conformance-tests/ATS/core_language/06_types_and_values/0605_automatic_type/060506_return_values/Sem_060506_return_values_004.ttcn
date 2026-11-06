@@ -1,0 +1,20 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for ischosen.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060506_return_values_004 {
+
+type component GeneralComp {}
+
+testcase TC_Sem_060506_return_values_004() runs on GeneralComp {
+	var anytype a := { integer := 23 };
+	var v := ischosen(a.integer);
+	if (v) {
+		setverdict(pass);
+	}
+}
+
+control {
+	execute(TC_Sem_060506_return_values_004());
+}
+
+}

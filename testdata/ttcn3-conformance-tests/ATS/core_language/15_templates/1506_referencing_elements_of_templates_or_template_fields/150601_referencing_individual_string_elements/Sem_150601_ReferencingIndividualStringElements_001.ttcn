@@ -1,0 +1,39 @@
+/*****************************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.6.1, Ensure that the referencing of individual string elements inside templates or template fields is allowed on the right hand side.
+ ** @verdict  pass accept
+ *****************************************************************/
+
+module Sem_150601_ReferencingIndividualStringElements_001 {
+
+type component GeneralComp { }
+
+testcase TC_Sem_150601_ReferencingIndividualStringElements_001() runs on GeneralComp {
+	var template charstring v_char1 := "MYCHAR1";
+	var template charstring v_char2;
+	var template charstring v_char3 := pattern "abc?[a-z]";
+
+	v_char2 := v_char1[1];
+
+	if (valueof(v_char2) == "Y") {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+
+	v_char2 := v_char3[4]; // v_char2 will be equal to pattern "[a-z]" after the assignment
+
+	if (match("a", v_char2) and match("z", v_char2) and not match("A", v_char2)) { //not matching all, just the boundaries and an outside value
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+
+}
+
+control{
+    execute(TC_Sem_150601_ReferencingIndividualStringElements_001());
+}
+
+}

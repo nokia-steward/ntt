@@ -1,0 +1,38 @@
+/*****************************************************************
+ ** @author   STF 409
+ ** @version  0.0.1
+ ** @purpose  1:15.8, Ensure that a template(omit) can be assigned to a template(present) variable.
+ ** @verdict  pass reject
+ *****************************************************************/
+
+module Sem_1508_TemplateRestrictions_007 {
+
+type component GeneralComp { }
+
+type record ExampleType {
+	integer a,
+	boolean b optional
+}
+
+template(omit) ExampleType exampleOmit := {1, omit};
+
+testcase TC_Sem_1508_TemplateRestrictions_007() runs on GeneralComp {
+	var template(present) ExampleType v_present;
+
+	v_present := exampleOmit;
+
+	if (match(valueof(v_present.a), 1) and
+	    match(ispresent(v_present.b), false)
+	   ) {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+}
+
+control{
+    execute(TC_Sem_1508_TemplateRestrictions_007());
+}
+
+
+}

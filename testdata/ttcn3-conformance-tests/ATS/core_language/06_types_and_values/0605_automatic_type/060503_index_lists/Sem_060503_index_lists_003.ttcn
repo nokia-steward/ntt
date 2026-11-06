@@ -1,0 +1,19 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure index list with common key type keys is a map.
+// @verdict  pass accept
+module Sem_060503_index_lists_003 {
+
+type component GeneralComp {}
+
+type map from universal charstring to integer M;
+
+testcase TC_Sem_060503_index_lists_003() runs on GeneralComp {
+	var v := { ["Hello"] := 5, ["Wörld"] := 23 };
+	var M m := v;
+}
+
+control {
+	execute(TC_Sem_060503_index_lists_003());
+}
+
+}

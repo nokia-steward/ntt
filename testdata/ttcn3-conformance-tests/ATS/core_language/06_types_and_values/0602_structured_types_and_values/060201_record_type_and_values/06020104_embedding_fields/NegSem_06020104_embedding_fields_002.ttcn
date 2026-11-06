@@ -1,0 +1,23 @@
+// @author   TTF T023
+// @purpose  1:6.2.1.4, Ensure embedded fields cannot be used as field names for assignment notations.
+// @verdict  pass reject
+module NegSem_06020104_embedding_fields_002 {
+
+type component GeneralComp {}
+
+type record A {
+	B
+}
+
+type record B {
+	integer b
+}
+
+const A OK := { B := { b := 1 } }
+const A notOK := { b := 1 }
+
+control {
+	execute(TC_NegSem_06020104_embedding_fields_002());
+}
+
+}

@@ -1,0 +1,51 @@
+/*****************************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:15.6.6, Expanding map containing ifpresent on the RHS
+ ** @verdict  pass reject
+ *****************************************************************/
+
+// The following requirements are tested:
+// Ifpresent attribute: referencing an element within a map template or field to which
+// the ifpresent attribute is attached, shall cause an error (irrespective of the value or
+// the matching mechanism to which ifpresent is appended).
+
+module NegSem_150606_Referencing_map_elements_007 {
+
+    type record ProductInfo {
+        charstring producer,
+        charstring model,
+        charstring description optional
+    };
+
+    type map from charstring to ProductInfo TMap;
+
+    type record TRec {
+        integer a,
+        TMap b optional
+    }
+
+    type component GeneralComp {
+    }
+
+    testcase TC_NegSem_150606_Referencing_map_elements_007() runs on GeneralComp {
+        var template TRec v_template := {
+            a := 1,
+            b := {
+                ["XS125"] := {
+                    producer := "Yoomstick Tec",
+                    model := ?,
+                    description := *
+                }
+            } ifpresent
+        };
+        // expanding ifpresent on the RHS
+        var template ProductInfo v_productTemplate := v_template.b["XS125"]; // shall cause an error
+        log (v_productTemplate);
+        setverdict(pass);
+    }
+
+    control{
+        execute(TC_NegSem_150606_Referencing_map_elements_007());
+    }
+}
