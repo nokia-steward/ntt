@@ -25,7 +25,7 @@ func (p *PlainPrinter) Print(ev control.Event) {
 		c := Colors(ev.Verdict)
 		c.Printf("%s\t%s\t%.2f\n", ev.Verdict, ev.Name, ev.Time().Sub(ev.Begin).Seconds())
 	case control.ErrorEvent:
-		msg := fmt.Sprintf("error: ")
+		msg := "error: "
 		if job := control.UnwrapJob(ev); job != nil {
 			msg += fmt.Sprintf("%s: ", job.Name)
 		}

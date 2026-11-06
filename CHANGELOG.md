@@ -1,0 +1,1323 @@
+# Changelog
+
+All notable changes to this project are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+Releases before 0.24.0 predate this file; see the
+[git tags](https://github.com/nokia/ntt/tags) and GitHub releases for their history.
+
+## [0.24.0] - unreleased
+
+Live testing and performance profiling: the same strict TTCN-3 engine can now
+drive a real system under test over the network and measure how it behaves —
+functional testing *and* profiling on one engine, with the deterministic
+conformance path untouched. It realizes the approach from Peuster et al.,
+["Joint testing and profiling of microservice-based network services using
+TTCN-3"](https://doi.org/10.1016/j.icte.2019.02.001) (ICT Express, 2019): a
+single functional test doubles as a performance probe. See
+[docs/live-testing-and-profiling.md](docs/live-testing-and-profiling.md).
+
+### Added
+
+- **A module can be written in the next major release of the core
+  language (V5)** — by its language clause, `language "TTCN-3:5"`
+  (the release defines none yet; this one names the major version, as a
+  year could yet name a V4 release), or for the modules whose
+  clause names no TTCN-3 edition by the project's `language` (or
+  `NTT_LANGUAGE`). V4 stays the default, and a suite can mix both. A V5
+  module takes enumerators of integer expressions and ranges open to
+  `infinity`, an integer of a label's own in `Label(n)` and `Label(?)`,
+  and labels compared alone; an enumerator no integer is left for, an
+  integer not of its label, a label of several integers or of several
+  types written alone, and a label a definition hides are errors. Its
+  `sizeof` counts a list's elements, uninitialised ones included; its
+  `default` and `verdicttype` variables start `null` and `none`; and
+  implicit omit completes a modified template's modification. A range
+  loop iterating into a variable declared outside it takes no
+  uninitialised element. See
+  [docs/v5-migration-notes.md](docs/v5-migration-notes.md). The language
+  server reads each suite's `language`, whatever directory it was started
+  in.
+- **The line log follows the event catalogue of the format** — a receive,
+  trigger or check that finds its queue empty is a `ptre` (one `(any)` for
+  `any port` and all its queues), with the template's type, a predefined
+  one's too, evaluated for the log only when that runs no function; an
+  interleave enters and leaves as `ilen` and `illv`; an altstep run as an
+  activated default enters and leaves as `dten` and `dtlv` at the alt or
+  interleave that invokes it; map and unmap name the component's port
+  before the system's. `ptre`, `ilen` and `illv` have no TCI-TL operation,
+  and the XML and JSON Lines logs leave them out.
+- **`ntt run` builds and runs a suite, printing its line log** — `ntt run
+  [ <path>... ] [ -- <test id>... ]`, also `ntt run2`, takes the command
+  line of the suite runners its structured line log comes from: it runs
+  the test ids given, or every control part, or every testcase when the
+  suite declares none, or the testcases the baskets `-r/--regex`,
+  `-x/--exclude`, `-R/--tags-regex`, `-X/--tags-exclude` and
+  `NTT_LIST_BASKETS` select. Every event goes to `-o/--output FILE`;
+  `-a/--activate`, `-d/--deactivate` (an event-id regular expression,
+  `Module:pattern` for one module), `-A/--activate-all` and
+  `-D/--deactivate-all` choose those on the console, colored by
+  `--format auto|plain|color`. A testcase ending in fail or error fails
+  the run (exit 1), and so does one whose `@verdict` tag (`// @verdict:
+  error`, or a module's `@verdict pass accept, ttcn3verdict:<v>` or `pass
+  reject`) expects another verdict, after a `VMIS` error line. The Go and
+  C++ backends run with `ntt run --target go|cpp FILE`, as `ntt run FILE`
+  did before.
+
+- **Structured test logging, as the TTCN-3 standard defines it** — `ntt exec
+  --log FILE` records every TTCN-3 operation of a run as an event of the
+  TCI-TL logging interface (ETSI ES 201 873-6, clause 7.3.4.1): messages
+  sent, arriving, received and failing to match (with the template), timers,
+  component lifecycle, port configuration, verdicts and alt steps, each with
+  a timestamp, the component and the source line. The file is the
+  standard's XML format (Annex B), or JSON Lines with `--log-format=jsonl`.
+  113 of the 125 operations are logged: procedure-based communication
+  (call, getcall, reply, getreply, raise, catch, and a call's timeout),
+  function, altstep and testcase entry and exit with their parameters and
+  result, assignments, module parameters, `@lazy` evaluation, `encvalue` /
+  `decvalue`, `match`, `rnd`, `action`, and the control part. Logs validate against the Annex B schemas:
+  the whole conformance corpus was run with logging on, every event valid
+  and every verdict unchanged. The published schemas do not compile as
+  printed; the seven corrections needed are documented. See
+  [`docs/test-logging.md`](docs/test-logging.md).
+- **`ntt log diff`** — compares two test logs and reports, per testcase and
+  per component, where the components' actions first differ, exiting 0, 1
+  or 2 as `diff(1)` does. Built to check that a suite behaves the same on the virtual and
+  the real clock: it compares actions — sends and receives with their
+  values and templates, verdicts, timers, component, port and alt
+  operations — and leaves out what legitimately differs between correct
+  runs, the arrival of messages and the alt rounds that found nothing.
+- **`ntt log profile`** — the per-port performance profile of a logged run:
+  the sends, receives, throughput and send→receive latency percentiles that
+  `ntt exec --profile` measures live, computed from the log's timestamps
+  and reported in the same table or JSON.
+- **`ntt exec --live`** — run the strict engine on the real clock with real
+  concurrency, so timers pace real I/O against a live SUT. The virtual-clock
+  default (reproducible, deterministic) is unchanged; bound a live run with
+  `--timeout`.
+- **Real-clock `t.read`** — measures actual wall-clock elapsed under `--live`,
+  so a testcase can time an operation (`t.start; <request/response>; t.read`).
+  Virtual-clock semantics (ETSI 23.4) are unchanged.
+- **Built-in TCP test port** (`runtime/port/tcpport`) — bind a TTCN-3 message
+  port to a live TCP endpoint with no user C code and no cgo. Newline framing
+  (charstring) or length-prefix framing (octetstring, binary-safe). A peer
+  hang-up mid-test is reported rather than left as a silence a suite cannot
+  distinguish from a slow answer: always as a stderr warning, and — opt-in via
+  `report_disconnect` — as an inbound `Disconnected` value it can match on.
+- **Config-driven test ports** — declare the TCP port in a `.cfg`
+  `[TESTPORT_PARAMETERS]` block (`transport := "tcp"`, `host`/`port` or
+  `address`, `dial_timeout`, `framing`); no Go code required. A `*`
+  (any-component) entry supplies defaults that a specific-component entry
+  inherits and overrides, so one port name can reach different SUTs on
+  different components.
+- **Performance profiling** — `ntt exec --profile` captures per-port send /
+  receive counts, send→receive round-trip latency (min / p50 / p90 / p99) and
+  throughput. Report it as a table with `--format=profile`, as a metrics
+  section in `--format=json`, or as a **Performance profile** table in the
+  self-contained `--format=html` report (handy as a CI artefact).
+- **Built-in HTTP test port** (`runtime/port/httpport`) — drive a REST service
+  with no user code: `map` binds a base URL, `p.send` issues the request, and
+  the response arrives at `p.receive` as a `{status, body}` record. Wired from
+  a `.cfg` with `transport := "http"`, supports per-component base URLs, and
+  surfaces a failed request as a separate `TransportError` inbound type with
+  a machine-matchable `reason` (`refused`, `unreachable`, `timeout`, `dns`,
+  `tls`, `other`, `reset`, `oversize`) plus a `detail` string for logging — so a suite can branch
+  on "the pod is restarting" versus "the pod is wedged" instead of
+  substring-matching an error message, and a failure is never a silent
+  timeout. A 4xx/5xx stays an ordinary response.
+- **TLS and mutual TLS for the HTTP port** — an `https://` base URL verifies
+  against the system roots by default, or against a supplied `ca_cert`;
+  `client_cert` + `client_key` enable mTLS, and `server_name` overrides SNI
+  when dialling by IP. Certificate files are read at map time, so a bad path
+  fails the map operation naming the file. `insecure_skip_verify` is
+  supported for self-signed test endpoints and warns on stderr each run.
+  No gRPC.
+- **Second runnable example** —
+  [`examples/https-testing/`](examples/https-testing/): four testcases
+  driving a REST/JSON service over HTTPS, with a self-contained TLS
+  stand-in in its README, `TransportError` handling and a per-request
+  budget timed with `rtt.read`. Exercised by CI like the TCP one.
+- **Runnable example** — [`examples/live-testing/`](examples/live-testing/):
+  a TTCN-3 module plus `.cfg` that drive a real TCP SUT and report its
+  latency, with a copy-pasteable stand-in server. Exercised by CI so it
+  cannot rot.
+
+- **A test log of lines** — `ntt exec --log run.lines` (or
+  `--log-format=lines`) writes the run's events as text, one per line:
+  `timestamp|event|identity=file:line|fields`, in the layout, with the
+  four-letter event codes (`tcst`, `ptsd`, `ptrx`, `setv`, `tcfi`, …), the
+  fields and the compact notation of values of a structured line log long
+  used by TTCN-3 runtimes, so that scripts and viewers made for that log
+  read this one: identities `MTC`, `SYSTEM`, a PTC's name, and for the
+  test system the runtime's own, unique to the process (`ntt-` and 16
+  random characters, or `NTT_RUNTIME_ID`), so that logs of runtimes run in
+  parallel or streamed to one place tell whose a testcase is; behaviours entered at their call site with their in
+  parameters and left with their out parameters and result; ports,
+  variables and timers named after their component or behaviour; a
+  message's arrival logged as its sender (`?` for what a test port hands
+  in), with its value, sender and time; messages sent and received of their
+  declared types, or of the one type the port's `in` list gives a value of
+  their structure, a record's fields in the order its type declares them;
+  an encode or decode with its type's encode, variant and extension
+  attributes; a receive's outcome with the message it took; a module
+  parameter the first time a testcase reads it; a backtrace before a
+  setverdict to inconc or fail. Against the expected logs of such a
+  runtime's own regression suite, a third of the runs give identical logs;
+  the rest differ in its classified runtime errors, which ntt does not
+  have, and in what the two engines do. To read in a pager and split with
+  awk; the TCI-TL XML and JSON Lines logs stay the standard and complete
+  record. See [`docs/test-logging.md`](docs/test-logging.md).
+- **JSON encoding and decoding** — `encvalue`, `encvalue_o` and
+  `encvalue_unichar` of a value whose type has `with { encode "JSON" }` (or
+  with "JSON" as the dynamic encoding) give its JSON text, and `decvalue*`
+  into a variable of such a type decode JSON text by the type (ES 201
+  873-11): a record or set as an object, its fields in declaration order and
+  an omitted optional left out, a record of as an array, a union as its one
+  alternative, an enumerated value by name, an octetstring as hex digits.
+  Decoding text from elsewhere — a service's response body — ignores members
+  the type does not declare, omits an absent optional field, and returns 1
+  for text that is malformed or does not fit the type: more than one value,
+  a member given twice, a digit string that is not whole octets. A float's
+  special values are `"infinity"`, `"-infinity"` and `"not_a_number"`, and a
+  value with an unbound mandatory field cannot be encoded. The type is told
+  from a variable, a parameter, a component variable, a function's result,
+  `valueof`, or an element or field of one — each as its own declaration
+  gives it — and may be qualified (`A.R`); its field types are the
+  declaring module's. A value wrapped in an object naming its type,
+  `{"M.T": value}`, decodes too; a value is encoded without that wrapper,
+  as `variant "noType"` has it. The encoding instructions of the
+  standard's Annex B apply: `name as` (a name, or `capitalized`,
+  `uncapitalized`, `lowercased`, `uppercased`, and `name all as` for every
+  field), `omit as null`, `asValue` for a union, `default (...)` for a
+  field the text leaves out, `fractionDigits`, `escape as` (`short`,
+  `usi`, `transparent`), `useMinus`, `noType` and the `JSON:array`,
+  `integer`, `number` and `string` identifications. A field's instruction
+  is the type's own, or an enclosing scope's naming the type (`variant
+  (T.f) "..."`); a default's value is the declaring module's. A type
+  with `useOrder`, `normalize`, `errorbehavior`, `JSON:literal`,
+  `JSON:object` or `JSON:objectMember`, an instruction qualified by a field
+  of a field, or by a name two fields share but for its case, or with a
+  `name as` that names two members alike, is left to
+  the round-trip placeholder codec, as before; an instruction qualified by
+  another codec (`variant "XER"."..."`) is that codec's. A float is
+  written with a fraction or an exponent, `1.0`, so it is no integer;
+  empty octet, hex and bit strings decode as `''O`, `''H`, `''B`.
+- **`[EXECUTE] Module.control`** — a `.cfg` may name a module's control
+  part, as `Module.control` or the module's bare name, and so may
+  `--pattern Module.control`; `ntt exec` then runs it as one case: its
+  testcases in the order it executes them, with the arguments it computes,
+  their verdicts merged. `--timeout` bounds each of those testcases, and
+  separately what the control part does itself: a control part that loops
+  for good ends with `error` when that time is up.
+- **Streaming HTTP responses** — with `stream := "sse"` (or `"lines"`) the
+  HTTP port delivers a response as it arrives: its status as soon as the
+  headers come, then each server-sent event (or line) as its own inbound
+  value, then an end-of-stream value; over https too. The timeout bounds the
+  wait for the headers, not the stream, which unmapping the port ends.
+- **HTTP headers** — an HTTP port request may carry headers, an
+  `Authorization` header say, in an optional `headers` field (a `record of
+  { charstring name, charstring val }`); with `response_headers := "true"`
+  the response carries its headers too, sorted by name. Suites that declare
+  neither are unchanged.
+- **TLS for the built-in TCP port** — `tls := "true"` makes a configured TCP
+  port a TLS client over the same framing, verifying the server against the
+  system roots or a `ca_cert`, with `client_cert`/`client_key` for mutual
+  TLS, `server_name` and `insecure_skip_verify` — the HTTP port's TLS
+  settings, now shared by both (`runtime/port/tlsconf`). A hang-up is
+  reported as on plain TCP, so a long-lived line stream can run over TLS.
+
+- **First features of TTCN-3 V5** (ETSI TR 104 081 V5.1.1, the migration
+  guide to it), those that leave what a module of an earlier edition means
+  as it is:
+  - a port type may be declared without its kind, `type port P { inout
+    integer }`, and is then a message port type;
+  - a module's `with { template "dynamic" }` makes every template of the
+    module evaluated at each use, as one with a parameter list is; with
+    "static", the default, a template without one is evaluated once, where
+    it is declared. `ntt check` reports the attribute on anything but a
+    module, and a value other than these two;
+  - `int2unistr`, `bit2unistr`, `hex2unistr`, `unistr2int`, `unistr2hex`,
+    `unistr2oct` and `unistr2float` convert to and from the universal
+    charstring as the charstring functions do. A module's own definition
+    of one of these names is still the one it calls.
+
+### Changed
+
+- **The parser is master's, with what the engine added to it** — master's
+  error-resilient parser of 2026-11-01 (template repetition, `implies`,
+  `except`, variadic parameters, `@deterministic`, embedded fields, nested
+  types, init statements, import aliases, related encodings) now parses
+  for the engine too, keeping what the engine needs beside it: `objid`
+  values, `-> verdict`, the `raise` statement, exception, `catch` and
+  `finally` clauses of behaviours, constructor super-calls, external
+  classes, `select class`, ports and timers in classes. The engine binds a
+  variadic parameter to the record of the remaining actuals (its default
+  for none or `-`, the record itself in assignment notation), gives a
+  variable an `if`, `while` or `select` header declares its own scope,
+  takes an embedded field for a field named by its type (the fields of
+  the embedded type are not reached through the embedding one yet), and
+  rejects a variadic parameter not last, not the only one or not `in`, an
+  assignment-notation actual expanded with `...`, a field an embedded
+  field's type has, a type-less declaration of `?`, `*` or `omit`, and a
+  reference to a lazy or fuzzy entity in a restricted context (16.1.4 m).
+  ntt matches 4984 conformance tests, 96.91% (4957 before). `ntt compile`
+  writes the sources as JSON for other tools as master's does, and with
+  `--target go|cpp|ir` lowers a file through the IR as before.
+- **The ETSI conformance suite is upstream's of 2024-03-28** (`fdc17d2c`;
+  it was `99ac02bc` of 2022-09-07): 5164 files, 216 more. ntt matches
+  4916, 95.59% (4803 of 4948 before, 97.52%). It gives every test the two
+  share unchanged the outcome it gave; upstream changed 24 of those that
+  matched (the expected outcome of 22, the test of 2), and most of the new
+  tests' 91 misses are features not implemented yet: embedded fields,
+  variadic parameters, map index notation, more forms of the automatic
+  type. The baseline CI holds ntt to is the new measurement. With the
+  V4.17.1 rules above ntt matches 4953 (96.31%), every one of the 24
+  upstream changed among them.
+- **`ntt check` holds a module to the template restriction tables of
+  V4.17.1** (ES 201 873-1 15.8): what may be assigned or passed to a
+  restricted template, template variable or formal template parameter
+  (table 13; a value always may, a template only with a restriction as
+  strict), the fields, alternatives and elements of a restricted template
+  (13c: of a `template(value)` value, or omit where optional; of a
+  `template(present)` present where mandatory), the restriction a modified
+  template may have given its base's, global or local (13b: none if the
+  base has none, 15.5 f) and that of its formal parameters (13a). A
+  restriction is judged where it is known: a reference to a template, a
+  template variable or parameter, a call of a template or of a function
+  returning one, `t.present`. Also reported now, as V4.17.1 has them: the
+  current module's name prefixing what is not one of its module-level
+  definitions (8.2.3.1), a signature parameter or return type that is not a
+  data type — a default, timer, port or component (14 b), a `connect`
+  neither of whose ports can send and a `map` that can carry nothing
+  (21.1.1 b.3, c.3). Upstream changed 24 of its tests to these rules;
+  each was checked against the standard and found right. **Upgrade
+  note:** passing an unrestricted template where a restricted one is
+  declared is an error; convert it with `.present`, or declare it with the
+  restriction. Run over the local suites at hand (some 1,600 files
+  besides the ETSI suite), the new checks reported one case, in a test
+  that expects it to fail.
+- **No longer reported, as V4.17.1 allows them:** `sizeof` on a record of
+  or set of (deprecated, G.4: now a warning); a `goto` out of an
+  `interleave`, under a condition or not, and one within a block of a
+  branch that does not receive (20.4 d); `substr` of a binary string
+  template with a matching mechanism inside its value (15.6.1); an `mtc`
+  clause on a function (16.1) — what is an error is the control part
+  calling, directly or through others, a function with an `mtc` or
+  `system` clause (restriction c), and that is now reported; and a call
+  qualified by its module's name, `M.f()`, which was taken for a
+  function named without its parentheses. The port of `mtc` is no longer
+  judged by the type a function runs on unless it is a testcase's or the
+  function has an `mtc` clause, and `refers(f)` is not taken for `f`
+  named without its parentheses.
+- **Linting runs golangci-lint v2** (2.14, built with Go 1.27), which can
+  type-check this code where v1.60 could not, and **fails the job** on a
+  finding. It runs the standard linters (errcheck, govet, ineffassign,
+  staticcheck, unused) and a few that find mistakes rather than style
+  (dupword, errorlint, goprintffuncname, makezero, misspell, unconvert,
+  wastedassign); what they found is fixed or removed: errors that went
+  unchecked — restoring a file `ntt format` failed to write, the
+  baskets of `ntt list`, the bash completion — dead code, wrapped errors
+  compared with `==`, misspellings.
+- **A `setverdict` reason is reported for every verdict, not just fail and
+  error.** `setverdict(inconc, "why")` lost its message even though CI counts
+  inconc as a failure, and `setverdict(pass, "label")` lost it too. The reason
+  is also no longer rendered as a quoted TTCN-3 literal, so a JUnit
+  `<failure message="...">` now reads as written.
+- **`ntt exec --pattern` fails when the pattern matches nothing**, instead of
+  falling through and running the entire suite. The glob is deliberately
+  narrow — `*` matches within one name component and does not cross a `.` —
+  so `--pattern "*tc_smoke"` never matches `mod.tc_smoke` and `**tc_smoke`
+  is required. The error names the pattern, how many testcases were known,
+  and that rule. Running with no selector at all is unchanged.
+  **Upgrade note:** a pipeline whose pattern silently matched nothing was
+  running everything and will now fail instead; fix the pattern, usually by
+  replacing `*` with `**`.
+- **`ntt exec` exits non-zero when the suite does not pass.** It previously
+  exited `0` even for a failing suite, so a CI pipeline treated red as green.
+  Severity follows the JUnit mapping already used by the reports: `inconc`,
+  `fail` and `error` exit non-zero; `pass` and `none` exit `0`. The report
+  itself is written first and is byte-identical — only the exit status
+  changed.
+- **`comp.done` / `.killed` block on both clocks** (ETSI 21.3.7/21.3.8)
+  instead of answering a non-blocking snapshot, so a forked PTC's body
+  actually runs and its verdict is recorded — a failing PTC can no longer
+  leave the testcase `pass`.
+- **`.done` / `.killed` used as a value is an error.** `if (c.done)`,
+  `x := c.killed` and the `all/any component` forms are not TTCN-3: the
+  grammar has these operations only as a statement and as an `alt` guard
+  (ES 201 873-1 BNF 268/507). They were answered anyway, and the answer
+  could be wrong — `false` for a finished component, and for a while `true`
+  for one still running. The error says what to use instead.
+  **Upgrade note:** write `c.running` / `c.alive` in an expression, or check
+  without blocking with `alt { [] c.done {...} [else] {...} }`.
+- **A default belongs to the component that activated it** (ETSI 20.5). The
+  activated defaults were one list per testcase, so one component's `alt`
+  could invoke another component's default, and a bare `deactivate;`
+  cleared every component's defaults rather than its own (20.5.3).
+- Conformance baseline moved **4747 → 4754 (96.53%)**, net **+7 with zero
+  per-file regressions**. The baseline is a measurement, not a high-water
+  mark; the `--regress` gate is the ratchet.
+
+### Fixed
+
+- **Assigning a field of a template field holding `?`, `*` or omit
+  expands it** (15.6.2, 15.6.5): `?` for each mandatory field, `*` for
+  each optional one, down to the field assigned; a union's alternative
+  referenced becomes the chosen one. The other fields were left unbound,
+  so the template matched nothing. Reading a field of a template field
+  holding `*`, omit, a template list or a complemented list, or with
+  `ifpresent`, and assigning one of a template or complemented list, are
+  errors; reading one of a template list gave an alternative of the list.
+  A value's omitted field is not expanded, nor one of a template
+  restricted to `value` or `omit`, which is referenced as a value is
+  (15.6.0). The same holds through an out or inout parameter, a
+  redirect and an index into the field, and for a component's template
+  variables; the actual of an out parameter is no longer evaluated before
+  the call, as the parameter starts uninitialised (5.4.1). A signature template of `?`
+  modified expands to `?` for each parameter (15.6.4 b).
+- **`deactivate(d, true)` suspends a default** (20.5.3): it keeps its place
+  in the list of defaults, is not invoked, and `activate(d)` re-activates
+  it there and returns `d` (20.5.2). The second argument was ignored, so
+  the default was removed, and `activate(d)` was no re-activation.
+  A function returning a default reference is an ObjectReference too:
+  `activate(f())` re-activates the default it returns, where it was
+  rejected. Re-activating a default that is not suspended, and a suspend
+  expression that is uninitialised or no boolean value, are errors. The
+  ETSI suite's `Sem_200500_general_001` re-activates a default it removed
+  rather than suspended, and so ends in an error (see
+  docs/conformance/remaining-work.md).
+- **`start`, `stop` and `halt` act on the port's queue** as 22.5.2 to
+  22.5.4 and figures F.7 and F.8 define; they only recorded the state
+  `checkstate` answers. `start` clears the queue and a halted port's
+  marker; at a stopped port the receiving operations match nothing; at a
+  halted one they match what was queued before the halt, `clear` putting
+  the marker at the top and `stop` removing it. `send`, `call`, `reply`
+  and `raise` on a stopped or halted port are errors.
+- **A port passed as a parameter is the actual port for `call`, `reply`,
+  `raise`, `getcall`, `getreply` and `catch`** too, as it was for `send`
+  and `receive`: they used a queue named after the formal parameter. An
+  element of a port array can be passed as a port parameter (it was an
+  error), and a PTC's `trigger` takes from the PTC's own queue, where it
+  took from the MTC's port of the same name.
+- **`substr` takes templates as C.4.2 defines** (V4.17.1). A pattern is
+  indexed by its items (15.6.1, table B.1: a set expression, an escape, a
+  `{reference}`, a group, each with its repetition, is one item), where
+  it was an error for anything but `?` and `*`, also for a pattern built
+  by concatenation and for an element read `t[i]`, which use the same
+  items; `?` gives count AnyElements of the template's type (of a
+  variable, field, parameter, array or record of element, inline,
+  invoked or module-qualified template), a pattern of `?`s or a binary
+  string of AnyElements, and `*` those with `ifpresent`; a length
+  restriction goes, with index + count within its maximum (15.6.1 g),
+  and an `ifpresent` stays. A negative index is an error, and the
+  actuals may be named (`substr(inpar := ..., index := ..., count := ...)`).
+  A pattern of only `?` and `*` keeps giving its characters as a value,
+  as an earlier edition defined and the ETSI suite expects.
+- **Character patterns follow table B.1 and B.1.5.1 to B.1.5.3.**
+  - `\w` is `[0-9a-zA-Z]`, without `_`; `\n` matches LF, VT, FF and CR;
+    `\s` also VT and the space characters.
+  - A top-level `abc|xyz` is anchored as a whole; it matched anything
+    starting with `abc` or ending with `xyz`.
+  - In a set, a `]` first or right after the negating `^` is literal, a
+    `^` followed by `]` lists both (`[^]a]` is `^`, `]` or `a`), a `-`
+    right after the negating `^` is literal, and lists don't nest
+    (`[ab[r-z]]`); `\d`, `\w`, `\s`, `\n`, `\q{}` and `\N{}` work
+    inside one.
+  - `#n` takes one digit (`a#12` is `a` twice, then `2`), and `#(n, m)`
+    may have spaces.
+  - `\q{Uxxxx, ...}` is the sequence of those characters, and a `\q{}`
+    is a literal character, `\q{0,0,0,42}` a `*` and not "any".
+  - `\N{ref}` (B.1.5.4) inserts its set escaped: a value's character
+    literally, a subtype's range, and `charstring` or `universal
+    charstring` any character (NOTE 2), each inside a set expression too
+    (`[\N{Lower}5]`). A subtype of a list of values isn't expanded yet.
+  - A metacharacter symbol that forms no metacharacter is literal, as
+    the clause says: a `+` or `#` with nothing to repeat or after
+    another repetition, a parenthesis without a partner, an unclosed
+    `[`. A pattern Go's regexp still can't take (a count above 1000, a
+    reversed range) matches nothing.
+  - Every character pattern matches by character, so `?` takes one
+    universal character, and keeps case, where a pattern of only `?` and
+    `*` compared bytes and ignored case. Concatenating a `@nocase` pattern
+    gives a `@nocase` one (15.11).
+- **`int2enum` converts into the declared type of its target** (C.1.4)
+  when the target has no value yet: a field (also of a record type's
+  synonym, or an element of an array field), a record of element or an
+  array element, and a variable or field whose enumerated type is
+  written module-qualified or through a type synonym. Before, only an
+  unbound plain variable of an enumerated type worked; the others gave
+  the error "second argument must be an enum value".
+- **`isvalue` is false for a template that is no specific value**
+  (7.1.8.3): a value list `("ABCD", "EFGH")`, a complement, subset,
+  superset or permutation, an `ifpresent`, a bit, hex or octet string
+  with wildcards, or a record, record of or set of with a matching
+  mechanism in a field or element; it answered true. A parenthesised
+  single value, `("ABCD")`, and `null` stay values. `.value` of a value
+  list or of a structure with a matching mechanism in it is the error
+  15.15 a) asks for, where it gave the template.
+- **A return in an altstep taken as an alternative leaves the altstep,
+  not the behaviour around the alt** (19.10): the alternative's own
+  block runs and the alt is left; it ended the testcase, or the function
+  the alt was in.
+- **An interleave altstep interleaves** (16.2.0): `altstep interleave
+  a()` takes each of its top alternatives once, as the interleave
+  statement does, the rest of a block interleaved with the others after
+  each reception in it, whether it is called, taken as an alternative or
+  activated as a default; it took one, as a normal altstep does. A
+  `break` in a branch leaves the altstep, and the alt around it when it
+  is taken as an alternative (19.12). Its top
+  alternatives follow the interleave statement's restrictions (16.2.0 g,
+  20.4): `ntt check` rejects in one a guard, an `[else]`, a `repeat`, a
+  loop or `goto` in a branch that receives, and the other constructs it
+  rejects in an interleave.
+- **An alternative whose guard ends in an error ends the testcase with
+  it,** in an alt and in an interleave, as an error in a statement does:
+  its operation (`[] any component.done` on a PTC), its boolean guard
+  (`[1 / z > 0]`), or, for an altstep taken as an alternative, the
+  altstep's local definitions. The operation's error read as an
+  alternative that doesn't match, the boolean guard's as one that holds,
+  and the definitions' as an altstep with nothing to take. A bare guard
+  operation (`[] p.receive`) on a port array's element takes that
+  element's queue, where it ended in such an error, and on a port passed
+  as a parameter that port's, where it never matched; so does the
+  statement `pa[1].receive;`, an error before.
+- **`any component` and `all component` ask the PTCs the standard
+  names, and only the MTC asks** (21.3.9, table 21). With `alive` and
+  `killed` they ask every PTC, one created but never started too: it is
+  alive, and it has not ceased to exist (21.3.5, 21.3.8). `running` and
+  `all component.done` keep to the PTCs ever started (21.3.6, 21.3.7),
+  and `any component.done` also matches a PTC that never started but
+  was stopped or killed. `all component.kill` kills every PTC, inactive
+  ones too. On a PTC each of them is an error; they left out the asking
+  PTC and acted on the other started ones.
+- **A wait for a PTC that never ran waits for it.** A standalone
+  `all component.killed` with an inactive PTC, `any component.done` or
+  `.killed` with inactive PTCs only, and on the real clock `v.done` or
+  `v.killed` of an inactive `v`, wait for it: until another component
+  stops or kills it, or starts it and that behaviour ends, ending in an
+  error when nothing will (on the real clock, at the run's timeout);
+  they passed it over. A stop or kill of such a PTC by another component
+  ends the wait at once; on the virtual clock it ended when that
+  component did. On the real clock, a wait that began while another
+  component was starting a behaviour on the PTC, still evaluating its
+  arguments, waits for that behaviour; `v.done` returned at once and
+  `any component.killed` waited for the starting component.
+- **A component call's `catch(stop)` block runs when the called
+  behaviour was stopped or killed, and only then** (21.3.10); it ran
+  after every call, and a stop during the behaviour's last statement
+  counted as completion, writing back its inout arguments. The call and
+  its catch clauses are now one statement, as master's parser reads
+  them.
+- **`checkstate` answers what the port is** (22.5.5). It takes exactly
+  "Started", "Halted", "Stopped", "Connected", "Mapped" and "Linked";
+  "Linked" was always true and is now connected or mapped. Any other
+  value is an error when the operation runs; states the standard
+  doesn't define ("Unconnected", "started") used to answer. `ntt check`
+  rejects a literal argument that isn't one of the six
+  (`checkstate-invalid-state`) and a receiver it can tell isn't a port.
+  `any port.checkstate` and `all port.checkstate` ask each of the
+  component's ports, inherited ones and each element of a port array
+  included; `any port` answered nothing and `all port` asked no port.
+  `all port.stop`, `.start`, `.halt` and `.clear` reach each of those
+  ports too (22.6); the first three changed none.
+- **A component created of another module's type is of that type.**
+  `B.C.create` in a module A that declares a `C` of its own made a
+  component whose ports and variables were looked up as A's `C`; the
+  component type now records the module declaring it. A component of a
+  component type synonym (`type C CS`, 6.4) has the variables and ports
+  of the type the synonym names; it had none.
+- **`ntt check` says where.** Each error and warning is one line, its
+  span then its code and message (`src/A.ttcn3:8:5-8:11: const-reassign:
+  ...`; a syntax error has no code), in the `-v` listing and in the JSON
+  `errors` lists. Warnings were only counted and are now listed too
+  (`warning_messages` in JSON, `warning:` lines under `WARN` in `-v`),
+  and each syntax error is its own line. Without paths, `check` checks
+  the project's `sources` and resolves imports against its `imports`,
+  instead of refusing to run; a missing path or a non-TTCN-3 file in the
+  project is skipped.
+- **`ntt show -- KEY` prints one value per line**, so
+  `$(ntt show -- sources)` works as `ntt list --help` shows; a list was
+  printed as `[a b]`, and the `NTT_SOURCES`/`NTT_IMPORTS` lines of
+  `ntt show` with it (an empty list now gives `NTT_IMPORTS=""`). A map,
+  like `variables`, gives one `'key=value'` per line.
+- **The analyzer no longer rejects valid code** in some 60 cases, among
+  them: an index under `isbound`/`ispresent`/`isvalue` (7.1.8.0), an out
+  argument, an array of a ranged dimension (6.2.7) or a template whose
+  permutation or `* length(n)` gives its size (15.6.3), read as out of
+  bounds; reading an attribute, `v.f.encode` (27.8), read as an
+  uninitialised read; a field named like a constant in assignment
+  notation, taken for the constant; a template body, an out parameter's
+  call and an altstep branch's declarations held to the 16.1.4
+  restrictions; a standalone `???;` (16.1.6); an omitted out parameter in
+  assignment notation (5.4.2, 21.3.2); `-> param(v)` not taken as
+  assigning `v`; a component reached twice through `extends` (6.2.10.2),
+  one structurally compatible with a runs on clause (6.3.3), or a
+  function's system clause without a runs on one; a union of whose
+  alternatives one is the target's (6.3.2.4); a map after a `disconnect`
+  or a connect after an `unmap` (21.1); `p.start` on a port, taken for a
+  component's; getreply, catch and raise checked against the wrong list
+  of the port type (6.2.9); a port type synonym (6.3.6); a sender
+  redirect without a from clause held to the runs on type; `any from
+  v.done` in a function never called; `all from` a template with `*`
+  inside a permutation (B.1.3.3). An altstep without runs on activating
+  one with it is now rejected (16.2.0 d), and calling a behaviour whose
+  system clause the caller's system type lacks a port of (6.3.3).
+- **`and4b`, `or4b` and `xor4b` keep the length of their operands**,
+  leading zeros included: `'1001'B and4b '0101'B` is `'0001'B`, not
+  `'1'B`; operands of different lengths are an error (7.1.5).
+- **Binary strings are equal only of one length**: `'0'B` is not `'00'B`,
+  as fields of records and keys of maps too; they compared by their
+  digits' value alone.
+- **`isbound` of an optional field set to omit is true** (7.1.8.4).
+- **Rotate takes character strings, records of, sets of and arrays**
+  (7.1.7), by characters or elements.
+- **`v++` and `v--`** (19.1.2) run; they were an unknown node.
+- **A select case matches by template** (19.3.1): `case (t)` with `t :=
+  (5..10)` selects 7.
+- **`testcasename()` names the running testcase** (C.6.2), on any of its
+  components; it was always the empty string.
+- **`__SCOPE__` is the name of the scope unit around it in the source**
+  (D.5): the module, a template, a component or other type, "control";
+  outside testcases and functions it was unknown.
+- **`execute()` runs an imported testcase**, named bare or `M.tc`, and one
+  inside a group (8.2.3, 26.1), in the module that defines it.
+- **`int2enum` assigns a new value** (C.1.4): it changed the value its out
+  parameter held in place, and with it every variable and constant
+  sharing it; an unbound variable takes its declared type's value.
+- **`hostid()`** is the loopback address of the kind asked for (C.6.3);
+  it was "localhost". **`str2oct` of an odd number of digits** puts a 0
+  in front (C.1.28). **`bit2str`, `hex2str`, `oct2str` of an empty
+  string** are the empty string, and the literals `''B`, `''H`, `''O` are
+  values, no longer taken for strings with wildcards.
+- **Two ports of one component connected to each other deliver to each
+  other** (9.1, figure 6): a message one sends, the other's receive or
+  check matches with a template, on either clock. A receive dropped any
+  message its own component had sent when the port had a peer — a guard
+  from the model that looped messages back to the sender, which a send on
+  a connected port no longer does.
+- **`check` takes `getcall`** as it takes the other receiving operations
+  (22.4), with a template or bare; it never matched.
+- **Implicit omit sets a template's optional fields to omit** that it gives
+  no value, at any depth (27.7); it was applied to variables only. A field
+  written as a reference to a template with an optional attribute of its
+  own keeps what that one gives, unless the attribute is given with override, and an
+  outer override wins over an inner attribute (27.1.2). A modified
+  template is as it was: what it has of its base it keeps.
+- **An enumerator's integers may name constants** (6.2.4), of any module,
+  and `-K`; and `Label(n)` naming no integer of the label is an error, not
+  an uninitialised value.
+- **A unary minus leaves its operand alone** — `-K` negated the constant
+  `K` itself, so the next `-K` was `K`.
+- **Integer division truncates towards zero** — `-5/2` is `-2` (ETSI
+  ES 201 873-1 7.1.1); it was rounded down to `-3`.
+- **An out parameter is uninitialised when the function is entered**, and
+  an actual the function assigned nothing to keeps its value (3.1, 5.4.2);
+  the formal held the actual's value, and an unassigned one was written
+  back. Testcases bind their out parameters uninitialised too.
+- **A value assigned whole replaces its target** — what it leaves
+  uninitialised becomes uninitialised there (19.1, EXAMPLE 3); only
+  assignment notation, or a value list of every field, keeps what it does
+  not mention or gives `-`, now also when assigned to a field or an
+  element that ntt can tell is of a record, set or list type, and whether
+  the record was written by name or positionally. A union's is chosen
+  anew, its type reached through a synonym too.
+- **`testcase.stop` stops the entire testcase** with the verdict error,
+  from any component, its arguments the reason (21.2.1): it was an unknown
+  identifier whose error happened to give the verdict, and the MTC went on
+  when a PTC stopped. The line log writes it as `TSTP`.
+- **A variadic parameter is a record of its declared type** (5.4.3): value
+  list actuals take the record's field names, and `lengthof` of an
+  `integer a[3]...` parameter is the number of arrays passed.
+- **`lengthof` counts `* length(n)` in a list template as n elements**
+  (C.2.1), in a permutation too.
+
+- **A behaviour's entry and leaving are logged together** — an alt that
+  waits and scans again leaves out what it repeats; it could leave out an
+  altstep's entry and log its leaving, so the line log placed what followed
+  in the wrong behaviour. A leaving is now logged when its entry was, and
+  not when it was not.
+
+- **A control part's own statements are in the test log**: its `log`,
+  `action`, assignments, timers and the functions it calls were not
+  logged, only the testcases it executed.
+- **Template lists, complements, subsets, supersets and permutations are
+  logged as matching symbols**, not as list values; a value is logged with
+  its type where it is declared — a variable's, a parameter's, a log
+  statement's argument's — a union and a set as such; an enumerated value
+  names its type; a variable declared with a value logs the assignment.
+- **`u.alt.f := x` chooses a union's alternative** and drops the one it
+  held, as `u.alt := x` does (6.2.5); the union held both.
+- **`replace(s, i, n, ''H)` and `''H & s`** keep `s`: the empty string,
+  whose representation a template's shares, made them negative. And
+  `substr(s, i, 0)` is the empty string, equal to `''H`; it was `'0'H`.
+- **`istemplatekind` tells the kind of a template** (ES 201 873-1 C.3.5):
+  it answered `true` for every kind, so the 22 suite tests that use it
+  checked nothing. It now answers for each kind of table C.1 — of the
+  template itself, inside its value on the first level, or as an attribute
+  attached to it — and an unknown kind is an error. Three of those tests
+  then failed for what the answer had hidden, now fixed: a template that
+  `modifies ?` has its base expanded into the type's fields (`?` where
+  mandatory, `*` where optional, 15.5 c) before the modification, and an
+  element of a map template holding `?` is `*` (15.6.6 c).
+- **Referencing elements of string and record of templates** (15.6.1,
+  15.6.3): an element of a pattern is one of its items, a metacharacter,
+  set or group with its repetition, as table B.1 counts them, and of a
+  binary string template one symbol; assigning one makes the template a
+  pattern, past its end after `?`s, a pattern of several items as one
+  group. A record of template holding `?` or `*` expands when an element
+  is assigned (`{?, ?, 2, *}`); `* length(n)` counts as n elements; an
+  element at or past `*`, sheltered by a permutation, or of a template
+  list, complement, subset, superset or `*` is an error; a length
+  attribute bounds the index and is kept. All the examples of 15.6.3 give
+  what the standard says, except its example 4, which contradicts rule g
+  and is taken as an erratum. Strings follow 6.1.1.1: one element is
+  assigned, at most just past the end, and an element is read within it
+  (it padded with spaces, and read `undefined`). Conformance test
+  `Sem_150601_ReferencingIndividualStringElements_003` expects no `?`
+  where rule g puts one, and still fails. A record of template with a
+  permutation and a `* length(n)` matches: the `* length(n)` was taken
+  for one element.
+- **A template list with `omit` matches an omitted field**: `{ a := 1, b
+  := (1, omit) }` did not match `{ a := 1, b := omit }` (B.1.2.1); nor did
+  `* length(1)`, a length restricting a present value only (B.1.4.1).
+- **Behaviour types**: `type function F() runs on C mtc C` parses, as a
+  function may have an `mtc` clause, and `refers(f)` and `v.apply(...)`
+  evaluate, an altstep's in `activate` and as an `alt` branch too;
+  `refers` was an unknown identifier at run time.
+- **`t.value` and `t.present`** (15.15, 15.14): the value extraction of a
+  pattern or a template holding a value, and the presentness conversion;
+  `.present` did not parse and `.value` was undefined.
+- **`substr` of a binary string template with matching inside its value**
+  counts each `?` and `*` as one item: `substr('00101*'B, 1, 2)` is
+  `'01'B`, it was `'11'B`.
+- **`encvalue` and `encvalue_o` agree** (C.5.5) on a bitstring, and on a
+  record of the field types `encvalue_o` encodes: the octetstring is the
+  bitstring left-aligned into octets. `encvalue` of these gave an empty
+  bitstring.
+
+Most of what follows is one family: the real clock (`--live`, and anything
+that implies it) reached code paths written with only the cooperative
+scheduler in mind. The conformance corpus runs on the virtual clock, so no
+fixture could catch any of them, and the regression gate stayed green
+throughout.
+
+**If you run suites under `--live` — or with a networked test port, which
+turns it on for you — read this section.** Two of these could report a
+`pass` that nothing earned, so a suite that was green may now correctly
+fail. That is the fix working, not a new defect.
+
+- **`p.send(v) to c`, `p.call(...) to (...)`, `p.reply(...) to c` and
+  `p.raise(...) to c` no longer broadcast under `--live`.** The
+  per-component routing was gated on the scheduler, so on the real clock
+  the `to` address was silently ignored and every connected peer received
+  the value or caught the exception — a sibling PTC could consume traffic
+  meant for another component, with nothing reporting it.
+- **A forked PTC's verdict is no longer lost under `--live`.** `comp.done`
+  did not block, so the main component ran on and teardown stopped a PTC
+  before it reached its `setverdict`. A testcase could report `pass` while
+  the component it started would have reported `fail`.
+- **A PTC whose body waits on a timer and also uses a port now runs under
+  `--live`.** Such bodies were never started at all — not even statements
+  before the timer — and the testcase died on its own guard timer with no
+  indication why. "Wait, then act" is an ordinary shape for pacing a live
+  SUT. A body that waits on a timer and uses *no* port is still not run, on
+  either clock; see Known issues.
+- **`comp.done` on a component whose body does no port communication waits
+  for its modelled completion under `--live`**, rather than reporting it
+  as unfinished while the virtual clock reports it as done.
+- **A PTC that answers requests runs under `--live`.** A body such as
+  `alt { [] p.receive(req) { p.send(rsp) } }` was run inline on the MTC,
+  which then waited in the PTC's alt for the request it had not sent, and
+  the testcase ended with no verdict. A finished non-alive PTC is also now
+  `killed` as well as `done` on both clocks, so `c.killed` no longer waits
+  forever.
+- **An activated default whose branch re-asserts an already-set verdict is
+  detected under `--live`.** Only a verdict *change* was noticed there, so
+  the `alt` never learned the default had fired and waited out its guard.
+
+Independent of the two clocks:
+
+- **`p.clear` and `all port.clear` empty the queue** (ETSI 22.5.1). They
+  did nothing, so a message they should have discarded was still received
+  afterwards.
+- **`c.running` is false for a component that was never started** (ETSI
+  21.3.5); it answered true from the moment the component was created.
+- **The alt guards `[] any port.getcall`, `getreply` and `catch` match**
+  (ETSI 22.5). The guard looked in a queue named `any port`, found
+  nothing, and waited for good.
+- **A receiving operation used as a statement waits** (ETSI 20.1).
+  `p.receive(t);` with nothing queued yet returned at once and ended the
+  behaviour, so a plain exchange — the MTC sends, a PTC receives and
+  answers, the MTC receives — ended with verdict `none`, on either clock.
+  It is now the alt with that one alternative the standard defines, and
+  the active defaults apply. What this took, each wrong before:
+  - a component whose body communicates runs as that component; a
+    responder (`getcall; reply`) was replayed inline by its caller, which
+    a waiting `getcall` would block;
+  - a `call` with no response block is sent — a `noblock` signature's as
+    well as one with `nowait` (22.3.1); the former did nothing;
+  - `p.check` with no receiving operation sees a call, reply or exception
+    at the head of the queue, not only a message (22.4);
+  - `any port` is the component's own ports (22.5), not every component's;
+  - a default whose timer is its altstep's parameter (`altstep a(timer
+    t)`, positional or named) fires: the alt waiting for it looked the
+    timer up by the wrong name;
+  - `@nodefault p.receive(t)` is the alt `alt @nodefault { ... }`; the
+    parser dropped the modifier;
+  - a receive in the branch of a default that matched waits, as in any
+    behaviour; the default's sweep made it conclude at once;
+  - `mtc.stop` from a PTC ends a waiting MTC; nothing woke it.
+- **Starting a component whose behaviour still runs is an error** (ETSI
+  21.3.2), where it went ahead.
+- **A started behaviour runs, on either clock** (ETSI 21.3.2). On the
+  default clock a PTC body that waited on a timer and used no port, or ran
+  a `while (true)` loop that breaks, was not executed but modelled: none
+  of its statements ran, a `setverdict(fail)` in it was lost, and a loop
+  that ends was taken for one that does not. Every started body now runs.
+  On the virtual clock computing takes no time, so a component in a long
+  loop lets the others run now and then — those woken by an event first,
+  then the others computing, in turn — and time does not pass while it
+  computes. Only a long one takes time: each million or so iterations
+  with no wait, and each hundred thousand turns at one instant — about
+  fifty thousand message round trips — count as a second of virtual time
+  (less when a timer is due sooner, which then fires first), so a
+  component that computes for good — a busy wait, a spin, two components
+  exchanging messages for good — does not hold every timer, or an
+  `execute()` limit, still; nor do two components keeping each other busy
+  keep a third from running. A PTC started just before the MTC's behaviour ends
+  runs until it waits or finishes, a finite computation included, before
+  the PTCs still running are stopped. Passing an object reference to a started
+  behaviour, or a value holding one, is an error (ETSI ES 203 790
+  5.1.2.2). On `--live`, a started PTC holds up its starter only when it
+  maps or sends through an external driver.
+- **`c.call(f())` runs f as component c and waits for it** (ETSI 21.3.10),
+  on either clock. A body that waited on a timer was modelled, not run,
+  and one run inline could not wait for anything another component does.
+  `c.call(f(), d) catch(timeout) { ... }` waits at most d seconds: the
+  block runs only when f did not end in time, and then c is stopped;
+  without the clause, a call that times out is a testcase error. The
+  block used to run whether or not the call timed out.
+- **`execute(tc(), d)` bounds the testcase in the test system's time**
+  (ETSI 26.1): virtual time on the virtual clock, where it was real time,
+  so a testcase whose timers ran past d finished in a moment and was not
+  stopped. `ntt exec` runs testcases directly and now takes the timeout
+  from the control part, as it takes the arguments. A testcase cut off by
+  its time limit — the harness budget, `--live --timeout`, an `execute()`
+  timeout — ends with `error` (it did not terminate), not the verdict it
+  had reached; it terminates when the MTC does, so stopping the PTCs
+  afterwards does not count.
+- **Values have value semantics** (ETSI 6): an assignment, an
+  initialisation, a parameter (its default and a `@lazy` one included), a
+  component variable's initial value, a sent message, a redirect and the
+  arguments of `start` and `activate` each hold a value of their own. `var R r2 :=
+  r; r.a := 3` changed `r2`; a server changing the parameter it received
+  changed its caller's argument; one PTC's change to a component variable
+  initialised from a constant changed the constant, and every other
+  component's copy, and under `--live` could crash the run on a concurrent
+  map write.
+- **A field of a record initialised positionally can be assigned**
+  (`var R r := {1, 2}; r.a := 3` left `r.a` at 1), and `-> param (x)`
+  binds the parameter, not the parameter list.
+- **Each element of a port array is a port of its own** (ETSI 21.1):
+  `connect(self:pa[1], c:p)` connects that element only, what c sends
+  arrives on `pa[1]`, and `any from pa.receive(...) -> @index value i`
+  binds i. Every element was connected under the array's name.
+- **An altstep can be an alternative of an alt** (`[] a()`), with its
+  parameters, guards and `[else]`; it deadlocked on the virtual clock.
+- **`p.call(...) to c { ... }`** sends the call and waits in its response
+  block; the call was never sent.
+- **`action()`** (ETSI 22.6) writes its text, free text and values joined
+  by `&`, and is logged as `tliAction`; it was not implemented.
+- **`system` is a component reference**: what arrives on a mapped port
+  from the SUT comes from it, so `from system`, `-> sender s; s == system`
+  and `from s` with `s := system` match (22.2.2). None did.
+- **Evaluated once:** a port index (`pa[f()].send`) and a `to` clause
+  (`send(v) to f()`) ran `f()` twice.
+- **`c.done -> value v;` as a statement waits** for c, as `c.done;` does.
+- **`any port.getcall(S:{...})` takes the call it matches**, with its
+  redirects; a bare `any port.getcall` guard no longer consumes a message.
+- **An inline `[false] T.timeout` guard** no longer livelocks the virtual
+  clock, as expired default timers did before.
+- **A call's signature no longer reaches a PTC** for the unqualified
+  `getreply` / `catch` rule (22.3.1 h).
+- **`any from` over a PTC's port array matches** (ETSI 22.2.2, 22.3.2).
+  A PTC's queues are its own, and `any from p.getcall` or `any from
+  p.receive` looked in none of them, so it never matched there; five
+  conformance fixtures now pass.
+- **A getreply, getcall or catch qualified by a signature takes nothing of
+  another** (22.3.4). With the reply to `S1` at the head of the queue,
+  `p.getreply(S2:{} value ?)` took it, so of two calls in a row the second
+  could take the first's reply.
+- **`-> value v param (x)` binds both.** The parser read `v param (x)` as
+  one value target, as map's parameters are written, and neither was
+  bound.
+- **`any from cs.done -> value v @index value i` waits and binds** (21.3.7).
+  As a statement it did not wait, as an alt's only alternative it was not
+  taken for an event, and the verdict was never bound.
+- **An alt its `[else]` repeats is a loop.** A stop and the testcase's
+  time limit end it, as they end a loop, and on the virtual clock time
+  passes in it as in any computation; it ended after about a million
+  rounds as if it had finished. An `[else] { repeat }` that does nothing
+  else, beside a timer, waits for its events and the timer as it would
+  without the `[else]`, so on the virtual clock the timer fires at once.
+- **A `repeat` in an `if` or a loop repeats the alt** (20.2). Unless it
+  was a branch's last statement, the statements after it ran and the alt
+  ended.
+- **`for (x in a)` runs** (ETSI 19.4.2). The range-based loop was parsed
+  and then refused as an unknown statement. It iterates a record of, set
+  of, array or string, evaluating the range once; a variable declared in
+  its header is a new one in each iteration, one declared outside keeps
+  the last element, and each element is assigned as `var T x := e` or `x
+  := e` would assign it. A map's keys and values, `m.from` and `m.to`
+  (6.2.15.5, 6.2.15.6), are `set of` values.
+- **Two `set of` values are equal in any order**, a `set of` being an
+  unordered collection (ETSI 6.2.3.0; 6.2.15.6 matches a map's values
+  with `{0, 1, 0}` in an order left unspecified). They were equal only
+  when all their elements were one value, and a value list `{...}`
+  compared or matched with a `set of` was taken in order.
+- **Matching a `set of`, a `superset` or a `subset` changes neither side**
+  (B.1.2.6, B.1.2.7). The value lost an element for each template element
+  it matched, so an alternative whose template did not match a queued
+  message left the message without them, for the next to fail on; the
+  template of a `subset` lost its own. An element is now paired with
+  another when the first it matched leaves one without a partner.
+- **An element of a timer array runs for the time it is started with**
+  (ETSI 23.2). `ta[0].start(3.0)` started the timer for its default
+  duration, none when the array declares none, so it timed out at once.
+- **`any from ta.timeout` takes the first timer of the array, in index
+  order, that has timed out** (ETSI 23.6), not the one due first by the
+  wall clock, which on the virtual clock may not be the one due first.
+  As an alt guard it wakes the alt when the first of them times out; the
+  alt waited for its other guards.
+- **In an interleave branch body, `any from ta.timeout` waits as the
+  body**, the other branches going on (ETSI 20.4); it waited as the whole
+  component. A timer another branch starts meanwhile counts, and a body's
+  timeout or alt with no timer of its own running yet waits for one; it
+  went on.
+- **`break` leaves the innermost alt or interleave, and only it** (ETSI
+  19.12, 20.4 d). In an alternative's body it ended the loop around the
+  alt, or the behaviour; in an interleave branch body, the behaviour. One
+  an altstep's top alternative ends in leaves the alt around the altstep,
+  as before.
+- **A component type's `template` members are bound** (ETSI 6.2.10):
+  plain, modified, parameterised, inherited through `extends`, for the
+  MTC and each PTC. Naming one was `identifier not found`.
+- **The methods of a class declared `runs on` a component type see the
+  component's variables** (ES 203 790 5.1.1), of whichever component
+  runs them, as a function with `runs on` does; they read and wrote a
+  copy of the module's. A subclass of such a class has them too.
+- **Inside a class, its members are named without `this.`** (ES 203 790
+  5.1.1, 5.1.1.9): a field, constant or method by its name alone, a
+  parameter or local of the method hiding it and it hiding a like-named
+  definition of the module. A method sees its own class's members and
+  those it inherits, not a private one of a base class nor a subclass's;
+  a method called by its name is the object's most specific one, but a
+  private one, which is its class's own (5.1.1.10), with `this.` too. Each was
+  `identifier not found`. A field's initialiser may name a field declared
+  after it (5.1.1.6).
+- **A method called through `super` runs on the object itself**: a
+  method it calls, with `this.` or without, is the object's most specific
+  one (5.1.1.8); it was the base class's.
+- **A module's names resolve through its imports** (ETSI 8.2.3): a name
+  the module does not define is the definition it imports — by `all`, by
+  kind and name, by group, less what it excepts — where it was whichever
+  like-named definition of any module the run loaded last, so a module
+  importing `c` from A could read B's `c`. A private definition is not
+  imported, and a friend one only into a module its module declares a
+  friend. A name no import statement names resolves as before, in every
+  module of the run. A module
+  parameter set by its qualified name in a `.cfg` (`A.p := 11`) is A's
+  only, and is what a module importing A's `p` reads.
+- **A testcase run on its own takes its arguments and time limit as its
+  control part computes them.** Where they name anything (`var float x :=
+  1.0; execute(tc(k), x)`), the control part runs, on a clock of its own,
+  up to its `execute()` of the testcase: a helper setting an `inout`
+  argument, a loop, a condition count, its timers wait for nothing, what
+  it logs is not written, and the testcases it executes are not run,
+  each giving `none`. It runs once for the module, for all its
+  testcases, and for at most 100000 iterations of its loops; an actual
+  that is an object, a function or a reference is made in the
+  testcase's own run, from the control part's declarations. A limit in a variable was
+  not applied. The control part's statements before the `execute()` used
+  to run in the testcase, its timers' timeouts included, so a testcase
+  whose control part waited 30 s before executing it waited 30 s too, and
+  a `stop` in a helper stopped it. An `execute()` anywhere in a statement
+  — assigned, in a condition, an argument — counts, and `-` as an actual
+  takes the formal's default, there and in a control part; it was left
+  unbound.
+- **A control part's alt waits for its timers on the real clock**; it
+  returned at once, taking no branch. **And a control part's timer wait
+  ends when the control part's time is up** (`--timeout`), as its loops
+  did: it waited the timer out.
+- **`decvalue` reads a bitstring of whole octets as JSON text**, as
+  `encvalue` gives it, unless the testcase's own `encvalue` gave it; it
+  read only octetstrings and character strings.
+- **The analyzer rejects a constant or module parameter of class type**,
+  or of a type with a field or element of one (ES 203 790 5.1.1 d), and a
+  `@fuzzy` or `@lazy` template referenced in the actual of a
+  `@deterministic` parameter (ETSI 16.1.4 m), as it rejected such a
+  variable; a method's local constant counts. Both fixtures had been rejected only for the engine failing
+  on something else.
+- **A declaration may define its type** (ETSI 11.2, `TypeOrNestedTypeDef`):
+  `var record of integer v := {1, 2, 3}`, and so constants, template
+  variables, module parameters, component variables, formal parameters,
+  return types and a signature's exceptions. None of these parsed. The
+  type is the one a named definition would give: a record written
+  positionally has its fields, an enumerated type's values are known. A
+  template definition takes a named type, as before (15.3).
+- **`ntt list modulepars` lists the module parameters.** It listed none,
+  and panicked on a `modulepar { ... }` group.
+- **An altstep alternative without a block may precede a guarded one**
+  (ES 201 873-1 A.1.6.8.2, `GuardStatement`). In `[] as1() [g] t.timeout
+  {}` the parser read `[g]` as an index of the altstep's result, and the
+  run panicked.
+- **A call made with a template passed as a parameter gets its reply.**
+  An unqualified getreply in its block (22.3.1 h) compared the
+  parameter's name with the reply's signature and refused it.
+- **An error in a PTC's behaviour makes the testcase verdict `error`.** An
+  unknown identifier, say, in a started behaviour ended the component with
+  verdict `none`, so the testcase passed on the MTC's verdict alone. The
+  component now ends with `error` — `c.done -> value v` reads it — the
+  testcase takes it on, and the test log's `tliCTerminated` gives the error
+  as its reason.
+- **A killed component cannot be started again** (ETSI 21.3.2). A
+  non-alive component is killed when its behaviour ends or is stopped, and
+  any component by `kill`; starting it again ran the new behaviour, and is
+  now an error. An alive component stays alive after a `call`, to be
+  called or started again; `c.alive` said false.
+- **A blocking call has a response and exception handling part** (ETSI
+  22.3.1 j). `p.call(S:{...});` on a signature that is not `noblock`, with
+  neither that part nor `nowait`, was sent and the caller went on as if it
+  had said `nowait`; it is now an error.
+- **An index-range array declared without an initialiser starts at its
+  lower bound.** After `var charstring a[2..3]` — or a variable of `type
+  integer T[1..2]` — `a[2] := "x"` stored the element third, after two
+  unbound ones, and `lengthof(a)` was 4.
+- **A block's declarations are its own** (ETSI 5.2.2). An `if` branch or
+  a plain `{ }` block declared into the scope around it, so two branches
+  of an interleave — running between each other's statements — that each
+  declared `var integer v` shared one `v`, and the second's value was the
+  first's. A block that declares anything now has a scope of its own —
+  so a `do { var integer x ... } while (x < 2)` condition no longer sees
+  the body's `x`, which it may not.
+  (And a scope makes its table at its first binding: an exchange on the
+  real clock runs about twice as fast.)
+- **Long charstrings and large parameters cost what they should.** A
+  charstring was copied on every assignment and call, and `s := s & c`
+  copied the whole of it each time; a record or list passed to a `runs
+  on` function was copied on every call. A scanner building a
+  100000-character string and calling a helper per character, and per
+  element of a 20000-element list, ran past a minute; it now takes under
+  one second. A charstring is never changed in place — an element
+  assignment makes a new one — so copies share it, and appending to one
+  extends it in place when nothing else did; an `in` parameter of a
+  function that changes nothing but its own variables, calls none of the
+  suite's functions and does not wait is the actual itself.
+- **On the real clock, idle components no longer slow an exchange.** A
+  message woke one waiting component of all, whichever came first; with
+  others parked in an alt on a long timer it was seldom the one it was
+  for, which then waited for the 2 ms backstop. An MTC/echo ping-pong ran
+  about 29000 round trips a second alone and 640 beside 20 idle PTCs; it
+  now runs about 23000. A message wakes the component it is queued for,
+  and only it; a stop wakes them all.
+- **Idle components cost nothing on the real clock.** An alt waiting
+  for a message or for its own timers also looked again every 2 ms, so
+  twenty idle PTCs used half a processor between them and slowed an
+  exchange by a third: 20000 MTC/echo round trips took 0.86 s beside
+  them and 0.55 s alone. An alt now waits for what can end it — a
+  message for its component, its timers, a stop — and looks again on its
+  own only for a guard that no event announces: one that calls a
+  function, reads a timer or a component's state, waits for a
+  component's end, or for a call's timeout or a timer in an altstep it
+  calls. The same round trips take 0.57 s with the idle PTCs or without,
+  and the idle PTCs use no processor time. A component waiting for a timer
+  (`t.timeout`) no longer wakes for every message sent to anyone.
+- **Starting a component that first waits no longer holds its starter.**
+  On the real clock, `c.start(f())` with an `f` that maps a port waits
+  until it has, so that components map in the order they were started;
+  one whose `f` first waits for a message — from its starter, perhaps —
+  held the starter for 50 ms each time, or 2 s with an external port
+  driver until it sent. The start now ends when the component waits
+  for a message or another component, and for no timer, default or
+  altstep that could let it go on by itself: twenty such starts took
+  1 s, and take 3 ms.
+- **A record written positionally has its field names wherever it is
+  bound.** `var RR rr := {{1, 2}}` gave `rr[0].a` no value, and
+  `rr[0].a := 5` went nowhere; so too in an array, a map's value, a
+  union's alternative, a component variable, a parameter given `{1, 2}`,
+  an `out` parameter assigned so, and a value redirected into a field.
+  The value now takes its declared type's field names at any depth.
+- **A record written positionally compares and matches by its fields'
+  names.** `{{1, 2}}` and `{{a := 1, b := 2}}` were never equal, nor did
+  a positional value match a template written with names; a value
+  literal compared with a variable (`n == {{1, 2}}`) is now of the
+  variable's type. Values of compatible record types, whose fields have
+  other names, compare by their fields' order (ETSI 6.3.2.2, 7.1.3), and
+  a field a value with implicit omit leaves out equals omit. And a value
+  takes the shape of the declaration its
+  name stands for where it is written — an inner block's variable, a
+  parameter — not of a like-named array or component variable it hides.
+- **A standalone timeout tries the active defaults** (ETSI 23.6): it
+  stands for an alt with that one alternative, so a default that matches
+  while `t.timeout` waits ends it; `@nodefault t.timeout` waits for the
+  timer alone, as every standalone timeout did.
+- **A timeout of a timer that is not running waits** (ETSI 23.6, 20.1):
+  one never started, stopped, or whose timeout was taken. Nothing can
+  satisfy the alt it stands for, so it waits for good — for a stop, or a
+  default that an event makes match — as a `receive` with nothing to come
+  does: on the virtual clock the testcase ends in `error`, the test system
+  deadlocked; under `--live`, at its time limit. It used to go on at once,
+  stand-alone or in an alt, as `any timer.timeout` and `any from
+  ta.timeout`, and so did an alt whose only branches were guarded
+  `[false]`. A control part waiting so waits until its time is up, and
+  ends in `error`. An alt now waits for a timer an array's element names
+  (`[] ta[i].timeout`) as for a named one: it ended with no verdict, on
+  either clock.
+- **A value has its declared type's shape wherever it is made.** A
+  function's or method's result, `T:v`, a class member — initialised,
+  assigned in a method or given to the implicit constructor — and an
+  anytype's field, written positionally (`return {1, 2}`), now have
+  their type's field names, and a value literal compared with one, by
+  `==` or as a `select` case, is of its type: `f() == {1, 2}` was false
+  when `f` built its result field by field. A constant or module
+  parameter of a type another module declares has its shape whatever
+  order the modules come in; it had only when that module came first.
+  A record of a compatible type returned as a function's result or
+  written `T:v` takes T's field names by position, as an assignment
+  gives them, and one matched against a positional template pairs the
+  fields in its fields' order, not in their names' alphabetical one.
+- **A value of a `set of` type is unordered however it is made**
+  (ETSI 7.1.3): built element by element, a function's result, a
+  record's field. `var SC s := {"a", "b"}` and `s == {"b", "a"}` was
+  false, and so was `a == b` for two sets filled in another order.
+- **A module definition may name one declared after it** (ETSI 8.2.0,
+  5.3): in its module, or in a module it imports from, whatever order
+  the modules come in. Each is evaluated when first named, if it has not
+  been yet: `const integer x := y + 1; const integer y := 1;` failed
+  with `identifier not found: y`, and so did a constant naming another
+  module's constant when that module came later in the run, or a
+  function there that names one, or a module parameter declared in a
+  `modulepar { ... }` group. A definition that names itself, through
+  others or a function, is an error, not another module's like-named
+  definition.
+- **A default activated in a control part applies there** (ETSI 20.5.2,
+  table 16): to its alts and stand-alone timeouts, as a component's does
+  to its own, until deactivated. It never fired, and a control part
+  waiting with no timer of its own running, for one, ended in `error`.
+  It is the control part's alone: a testcase it executes does not see
+  it, nor deactivates one of its own with its handle. `any timer` and
+  `all timer` in a default's altstep name the control part's timers.
+- **A module parameter set in a configuration file has that value in
+  what is computed from it.** A constant, a template or another module
+  parameter's default computed from it took the in-source default, since
+  the file's values were applied after the definitions were evaluated:
+  `template charstring t_url := "http://" & mp_host` matched the default
+  host, and in `modulepar integer a := 1, b := a + 1` so did `b`. A
+  parameter declared in a `modulepar { ... }` group could not be set from
+  the file at all ("unknown module parameter"). A value of the wrong type
+  for its parameter (`"x"` for an integer) is still bound as it is, so a
+  definition computed from it now fails the module's initialisation.
+- **`getverdict` gives the running component's own verdict** (ETSI
+  24.3), not the testcase's, which every component's verdict moves: an
+  MTC that had set `pass` read `fail` once a PTC failed, and a PTC read
+  the MTC's.
+- **A timer declared in a function, altstep or block ends with it**
+  (ETSI 12). It stayed one `any timer` and `all timer` name, so `any
+  timer.timeout` after a call could take the called function's timer
+  instead of the caller's own. One passed to an activated default lives
+  as long as the default (20.5.2).
+- **`deactivate` of a default that is not active is an error** (ETSI
+  20.5.3): one deactivated already, an uninitialised reference, another
+  component's. It was ignored. `deactivate(null)` still has no effect.
+- **`lengthof` follows the declared type of its argument** (ETSI C.2.1).
+  A record of or set of value's length is the index of its last
+  initialized element plus 1, and no less than the minimal length its
+  type, or a field's own `length(...)`, restricts it to:
+  `lengthof({1, 2, -, -})` was 4 and is 2. An array's is the fixed size
+  of its type: `var integer a[4]; a[0] := 1` gave 1 and gives 4. The list
+  type of a synonym is the one where the synonym is declared, not one of
+  the same name where it is used.
+- **`ntt check` reports a declaration named after a predefined function**
+  (ETSI A.1.5): a `function rnd()`, a field `replace`, an enumerated value
+  `substr`, a label `lengthof`. The names of table 15 are reserved words.
+  A module defining its own `rnd()` passed the check, and the predefined
+  one ran in its place.
+- **A variable an `out` argument sets is bound, for `ntt check`.** Passed
+  to a function's `out` parameter, as `decvalue`'s decoded value or as
+  `int2enum`'s result, and then to an `in` parameter, it was reported
+  statically unbound, so `decvalue_unichar(u, j); f(j)` failed the check.
+  A function the module does not declare - imported, named with its
+  module, a method - is taken to set what it is passed. An `inout`
+  parameter, whose actual has to be bound already (5.4.2), and a port or
+  timer operation are not.
+- **A `@fuzzy` template is evaluated at each use** (ETSI 15.3), as a
+  `@fuzzy` parameter is. A global one was evaluated once.
+- **A modified template has its base's fields where it does not change
+  them** (ETSI 15.5). A base written positionally (`{1, 1.0}`) was lost,
+  as was every field of the base of a modified template with parameters
+  (`template R t2(integer p) modifies t1`), which was its modification
+  alone; and `-` in a modification written positionally changed the
+  field. A base with parameters is given the modified template's actuals
+  of the same names, or its defaults. A modification of a union or record
+  of template replaces the base's value; one of a union kept the base's
+  alternative beside its own.
+- **An altstep named with its module is an alternative too.** `[] M.a()`
+  in an alt was never taken when its timer ran out, nor was a default
+  activated as `activate(M.a())`, where `a()` was.
+- **On the virtual clock, a control part's `all timer.timeout` waits for
+  its last timer.** With one timer due and one running, it never ended.
+- **Records, lists and maps are shared until changed.** Assigning,
+  declaring, sending, receiving or passing one copied the whole of it.
+  A value is now shared by its holders and never changed in place: a
+  write copies only what lies on its way, once, and the holder it was
+  given to or taken from keeps what it had (ETSI 6). A loop declaring a
+  copy of a record holding a 2000-element list and changing one field
+  of it, twenty thousand times, took 0.49 s and takes 0.13 s.
+- **A record's fields are written in their declaration order** — by
+  `log()`, in a verdict's reason and in the test log, where Annex B lists
+  them so. A record held its fields in a map and wrote them as the map
+  went: `{field2 := 4, field1 := 3}`, and in another order on another run,
+  which alone made one in two of the corpus files whose logs differ
+  between the two clocks differ.
+- **`interleave` interleaves** (ETSI 20.4). A branch body ran to its end
+  once its guard matched, and a receive in it did not wait, so two
+  branches that depend on each other deadlocked — the first one's body
+  waiting for what only the second one's sends. A body that reaches a
+  receiving statement, an alt, a timeout or a `done` now waits there while
+  the other branches go on, as the standard's expansion of interleave into
+  nested alts has it: each started body runs as a coroutine of the
+  component, and the interleave waits, as the component, for the earliest
+  of what its branches wait for. Interleaves nest, and run in PTCs alike;
+  the activated defaults come after the branches not yet taken, as 20.5
+  has them. Sem_2004_InterleaveStatement_001 and _002 now pass.
+- **A default whose branch ends in `repeat` re-evaluates the alt that
+  invoked it** (ETSI 20.5.2). It repeated its own altstep, which then
+  found nothing, and the alt ended as if the default had taken over: a
+  default skipping keepalives (`[] p.receive(KeepAlive:?) { repeat }`)
+  ended the very alt waiting for the answer.
+- **`T.running` reads the clock.** It counted how often it was asked, and
+  after four times answered false: `while (t_window.running) { ... }`
+  around a function waiting on a timer of its own ended after a few
+  iterations, the window not half over, on either clock; `any
+  timer.running` alike. A timer now runs until its deadline. On the
+  virtual clock, where computing takes no time, a loop that polls a timer
+  a thousand times at one virtual instant is taken to be busy-waiting, and
+  told the timer runs no more, so `while (t.running) {}` still ends; one
+  that lets virtual time pass between its polls runs to the deadline. Asking an expired
+  timer whether it runs no longer discards its timeout, which a later
+  `T.timeout` takes (ETSI 23.6), and an expired timer reads 0 (23.4).
+- **A control part's timers run on a clock of its own** on the virtual
+  clock, which each testcase it executes moves on by the virtual time that
+  testcase took: `while (t.running) { execute(tc()) }` runs as many
+  testcases as fit, and a control part's `t.timeout`, or an `alt` on its
+  timers, no longer waits in real time or never fires.
+- **Choosing another alternative of a union drops the one it carried**:
+  `u.i := 1; u.s := "x"` left both, so `u == { s := "x" }` was false — in
+  a variable, a parameter, a field, a list element or an `anytype`.
+- **A function writing a field of its component's unbound record writes
+  the component's**: `cr.n := 5` in a `runs on` function made a record of
+  the function's own, and the component's stayed unbound.
+- **A module resolves its own names first.** All modules of a run shared
+  one flat scope, so a module's constant, function or template could be
+  shadowed by a like-named one of another module — imported or not —
+  loaded after it: `line == c_closed` compared with another module's
+  record. Each module's definitions now resolve in a scope of its own,
+  inside the shared one; the test log names a function's variables by the
+  function's module, not the testcase's; a component type extends the
+  type its own module means, though another module declares a like-named
+  one, and its members' initialisers name what that module sees. A
+  qualified reference — `A.c_x`, `A.f()` — names module A's definition. A
+  module parameter set by its bare name in a `.cfg` is set in every module
+  declaring it, and one set by its qualified name too takes that value in
+  its module, whichever comes first in the file. And the modules of a run are loaded in the order their
+  files were given, where it used to vary from run to run.
+- **A typed template matches only values of its type** (ETSI 22.2.2):
+  `p.receive(charstring:?)` took any value — a record the built-in TCP
+  port reports a disconnection with, say, so an alt listing the
+  charstring alternative first never reached the one for the record —
+  and `integer:?` took a charstring. A value of another kind, or a record
+  with a field the record type does not declare, now goes to the
+  alternative of its own type.
+- **`and` and `or` short-circuit** (ETSI 7.1.4): the right operand ran
+  even when the left decided the result, so `n > 0 and s[n - 1] == c`
+  read `s[-1]` of an empty string and ended in an error.
+- **An `inout` or `out` parameter after an `in` one writes back into its
+  own argument.** An `in` parameter declared without the word `in` was
+  not counted, so `f(R r, inout S s)` wrote `s` into the caller's first
+  argument — `r`, or a module parameter passed there — and left the
+  actual for `s` unchanged.
+- **`?` and `*` in a pattern match a line end too** (ETSI B.1.5), in
+  `regexp()` and in the patterns `match()` hands to its regular
+  expressions: a value ending in a newline — a JSON body as an HTTP
+  service writes it — made every `regexp()` over it return "".
+- **Each component has its own variables** (ETSI 6.2.10.4), on either
+  clock: a function that runs on a component, however it is reached —
+  called from the behaviour a PTC was started with, from a default, from
+  another such function — reads and writes that component's variables,
+  timers and ports. Only the started function itself used to; anything it
+  called shared one module-wide copy with every other component, so two
+  PTCs running the same helpers counted into the same variable. A
+  component's variables are initialised when it is created, in the MTC
+  too, where one initialised from a constant was undefined; an extended
+  component type's members are inherited (6.2.10.2); and a function
+  running on a PTC no longer sees the names its starter had in scope.
+- **A stopped `alive` component can be started again** (ETSI 21.3.3), on
+  either clock. The new behaviour did not run: `start` left the component
+  `done`, so the next `c.done` was satisfied at once; and the stopped
+  behaviour, finishing, finished the new one too. The restart now waits
+  for the stopped behaviour to end, and the defaults a behaviour activated
+  end with it (21.3.2).
+
+- **`any timer.timeout` / `all timer.timeout` block when used as a
+  statement** (ETSI 23.7), as the named `T.timeout` always has. Outside an
+  `alt` they previously did nothing at all: no wait, no timeout consumed,
+  and the timer left running.
+- **A timer-only default can fire** (ETSI 20.5.1). The classic "if this
+  hangs longer than N seconds, fail" safety net never fired, because an
+  activated default's timer was invisible to the `alt`'s block step.
+- **Defaults are not invoked inside a `call` response block** (ETSI
+  22.3.1), which was never implemented. Only in that block: an `alt`
+  nested in one of its branches, and other components, keep their defaults.
+- **Resolving a source position is safe for concurrent use.** The lookup's
+  cache could be read half-updated from another goroutine and return the
+  wrong line.
+
+- An injected message now reaches a **driver-bound PTC** — an external test
+  port's inbound traffic is delivered to a PTC's `receive`, not just the MTC's.
+- **`alt` and `interleave` take a per-round snapshot** (ETSI 20.2): a message
+  arriving mid-evaluation can no longer let a later catch-all clause jump ahead
+  of an earlier, more specific one — the race a live socket exposed.
+- **`p.send(...) to c`, `p.reply(...) to c` and `p.raise(...) to c`** unicast to
+  only the addressed component(s) instead of broadcasting to every connected
+  peer, so a sibling PTC no longer receives a value or catches an exception
+  meant for another.
+- A **bare** `p.getreply` / `p.getcall` / `p.catch` guard reads the running
+  PTC's own per-component queue, so a reply/exception routed to it is no longer
+  invisible to the PTC's own `catch`.
+- **Documentation defects found by running the docs through `ntt check`.**
+  The getting-started walkthrough used an invalid `package.yml` field
+  (`source_dir` instead of `sources`), a testcase with `runs on system`
+  (`system` is a keyword, not a component type), and showed `ntt exec` output
+  that the tool never produced; `cabi-ports.md` used the keyword `port` as a
+  record field name; and the `t.read` stopwatch snippet started a timer with
+  no default duration (invalid per ETSI 12). Every TTCN-3 snippet in the docs
+  now passes `ntt check`, and the walkthrough was replayed verbatim to confirm
+  its commands and output.
+
+### Known issues
+
+These are older than this release and are recorded, with their diagnosis,
+in [`docs/conformance/remaining-work.md`](docs/conformance/remaining-work.md)
+§1s.
+
+- `match(v, t)` with `v` or `t` unbound answers, where ETSI 15.9 b makes
+  it an error. Making it one turns 26 conformance fixtures from pass to
+  error: in each, a value the engine should have bound is left undefined
+  — fields of modified and parameterised templates, elements of a
+  record-of template, a field set to `omit`, a map's keys, a testcase's
+  parameters when it runs on its own, a check's redirects, attribute
+  values — and `match` takes it for a wildcard.
+
+[0.24.0]: https://github.com/nokia/ntt/compare/v0.23.2...ntt-titan

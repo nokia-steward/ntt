@@ -2,7 +2,6 @@ package lsp
 
 import (
 	"encoding/json"
-	"fmt"
 	"time"
 
 	"github.com/nokia/ntt/internal/fs"
@@ -98,16 +97,4 @@ func marshalRaw(vs ...interface{}) ([]json.RawMessage, error) {
 		ret = append(ret, b)
 	}
 	return ret, nil
-}
-
-func unmarshalRaw(bs []json.RawMessage, vs ...interface{}) error {
-	if len(bs) != len(vs) {
-		return fmt.Errorf("unexpected number of arguments")
-	}
-	for i, b := range bs {
-		if err := json.Unmarshal(b, &vs[i]); err != nil {
-			return err
-		}
-	}
-	return nil
 }

@@ -1,0 +1,10 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure ArrayDef part is omitted for variables with automatic type inference.
+// @verdict  pass reject
+module NegSem_0605_automatic_type_001 {
+
+function f() {
+	var x[2] := {1, 2};
+}
+
+}

@@ -8,10 +8,10 @@ jobs:
   goreleaser:
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Fetch history
         run:  git fetch --prune --unshallow
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: stable
       - name: Release via goreleaser
@@ -29,7 +29,7 @@ jobs:
       - name: Support longpaths
         run: git config --system core.longpaths true
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
       - name: Install hub
         run: |
           Invoke-WebRequest https://github.com/github/hub/releases/download/v2.14.2/hub-windows-amd64-2.14.2.zip -OutFile hub.zip

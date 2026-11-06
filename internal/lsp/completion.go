@@ -1090,7 +1090,7 @@ func selectorTarget(sel *syntax.SelectorExpr, pos int) syntax.Expr {
 	if sel == nil {
 		return nil
 	}
-	var tgt syntax.Expr = sel.X
+	tgt := sel.X
 	if sel.Sel != nil && sel.Sel.LastTok() != nil && sel.Sel.LastTok().Pos() < pos {
 		tgt = sel
 	}

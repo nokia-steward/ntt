@@ -1,0 +1,32 @@
+/***************************************************
+ ** @author   STF T003
+ ** @version  0.0.1
+ ** @purpose  1:16.1.2, Ensure that the IUT recognizes predefined functions and correctly evaluates them (as specified by Annex C)
+ ** @verdict  pass accept, ttcn3verdict:pass
+ ***************************************************/
+
+// The following requirement is tested:
+// C.2.2 In addition to the general error causes in clause 16.1.2, error causes are:
+// 	the template passed to the inpar parameter is not of a record or set type.
+
+module NegSem_160102_predefined_functions_062 {
+
+    type component GeneralComp {
+	}
+
+
+    type record of integer MyROItype;
+
+    template MyROItype MyROI := {1,2,3};
+
+    testcase TC_NegSem_160102_predefined_functions_062() runs on GeneralComp {
+	var integer v_i;
+
+ 	v_i:=sizeof(MyROI);		// deprecated feature (G.4): template is a record of integers
+ 	setverdict(pass, v_i);
+	}
+
+	control {
+		execute(TC_NegSem_160102_predefined_functions_062());
+	}
+}

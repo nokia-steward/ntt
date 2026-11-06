@@ -1,0 +1,16 @@
+// @author   TTF T023
+// @purpose  1:16.1.6, Ensure ??? can be used as stand-alone statement (direct use)
+// @verdict  pass accept, ttcn3verdict:error
+module NegSem_160106_the_not_implemented_function_005 {
+
+type component GeneralComp {}
+
+testcase TC_NegSem_160106_the_not_implemented_function_005() runs on GeneralComp {
+	???
+}
+
+control {
+	execute(TC_NegSem_160106_the_not_implemented_function_005());
+}
+
+}

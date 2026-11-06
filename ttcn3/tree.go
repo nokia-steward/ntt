@@ -21,6 +21,22 @@ type Tree struct {
 	parentsMu sync.Mutex
 	scopes    map[syntax.Node]*Scope
 	scopesMu  sync.Mutex
+
+	memo sync.Map // key -> *memoEntry
+}
+
+type memoEntry struct {
+	once sync.Once
+	val  interface{}
+}
+
+// Memo returns what f gives for key, f called once for the tree: what a
+// tool derives from the tree, kept as long as the tree is.
+func (t *Tree) Memo(key string, f func() interface{}) interface{} {
+	e, _ := t.memo.LoadOrStore(key, &memoEntry{})
+	m := e.(*memoEntry)
+	m.once.Do(func() { m.val = f() })
+	return m.val
 }
 
 // Filename returns the filename of the file that was parsed.

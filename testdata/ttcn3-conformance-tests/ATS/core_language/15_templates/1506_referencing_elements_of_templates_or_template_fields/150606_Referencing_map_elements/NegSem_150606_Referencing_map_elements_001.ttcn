@@ -1,0 +1,44 @@
+/*****************************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:15.6.6, Expanding map containing omit on the RHS
+ ** @verdict  pass reject
+ *****************************************************************/
+
+// The following requirements are tested:
+// Omit: referencing an element within a map to which omit is assigned shall follow the rules
+// specified in clause 6.2.15.7.
+
+module NegSem_150606_Referencing_map_elements_001 {
+
+    type record ProductInfo {
+        charstring producer,
+        charstring model,
+        charstring description optional
+    };
+
+    type map from charstring to ProductInfo TMap;
+
+    type record TRec {
+        integer a,
+        TMap b optional
+    }
+
+    type component GeneralComp {
+    }
+
+    testcase TC_NegSem_150606_Referencing_map_elements_001() runs on GeneralComp {
+        var template TRec v_template := {
+            a := 1,
+            b := omit
+        };
+        // expanding ? on the RHS
+        var template ProductInfo v_productTemplate := v_template.b["XS125"]; // shall cause an error
+        log (v_productTemplate);
+        setverdict(pass);
+    }
+
+    control{
+        execute(TC_NegSem_150606_Referencing_map_elements_001());
+    }
+}

@@ -9,7 +9,7 @@ import (
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
-var builtins map[string]*Builtin
+var builtins, fallbackBuiltins map[string]*Builtin
 
 // AddBuiltin adds a builtin function to the runtime environment.
 //
@@ -22,6 +22,20 @@ func AddBuiltin(id string, fn func(args ...Object) Object) error {
 	if builtins == nil {
 		builtins = make(map[string]*Builtin)
 	}
+	return addBuiltin(builtins, id, fn)
+}
+
+// AddFallbackBuiltin adds a builtin function a definition of the same name
+// hides, as AddBuiltin's do not: one whose name an earlier edition of
+// TTCN-3 leaves free for a module's own definitions.
+func AddFallbackBuiltin(id string, fn func(args ...Object) Object) error {
+	if fallbackBuiltins == nil {
+		fallbackBuiltins = make(map[string]*Builtin)
+	}
+	return addBuiltin(fallbackBuiltins, id, fn)
+}
+
+func addBuiltin(builtins map[string]*Builtin, id string, fn func(args ...Object) Object) error {
 	if i := strings.Index(id, "("); i >= 0 {
 		name, params, err := parseFunction(id)
 		if err != nil {
@@ -56,12 +70,22 @@ func parseFunction(name string) (string, *syntax.FormalPars, error) {
 }
 
 func checkArgs(pars *syntax.FormalPars, args ...Object) error {
+	// Allow too few args as long as every missing formal parameter has
+	// an `:=` default in its declaration or is the variadic one, and
+	// allow too many args silently (the conformance suite hits cases
+	// where the same name has multiple arities, e.g. `rnd()` vs
+	// `rnd(seed)`); a variadic last parameter takes all that remain.
 	n := len(pars.List)
 	variadic := n > 0 && pars.List[n-1].Variadic != nil
-	if len(args) != n && !(variadic && len(args) >= n-1) {
-		return ErrInvalidArgCount
+	for i := len(args); i < n; i++ {
+		if pars.List[i].Value == nil && !(variadic && i == n-1) {
+			return ErrInvalidArgCount
+		}
 	}
 	for i := range args {
+		if i >= n && !variadic {
+			break
+		}
 		par := pars.List[n-1]
 		if i < n {
 			par = pars.List[i]

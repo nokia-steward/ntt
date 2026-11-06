@@ -22,8 +22,8 @@ module Sem_05040102_parameters_of_kind_template_004 {
 
     type record R
     {
-        integer field1,
-        integer field2
+        integer field1 optional,
+        integer field2 optional
     }
 
 	testcase TC_Sem_05040102_parameters_of_kind_template_004() runs on GeneralComp {

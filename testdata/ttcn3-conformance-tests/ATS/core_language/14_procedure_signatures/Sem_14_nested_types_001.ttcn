@@ -1,0 +1,20 @@
+// @author   TTF T023
+// @purpose  1:14, Ensure signatures accept nested types.
+// @verdict  pass accept
+module Sem_14_nested_types_001 {
+
+type component GeneralComp {}
+
+signature A() return record of integer;
+signature B(record of integer p);
+signature C() exception (record {});
+
+testcase TC_Sem_14_nested_types_001() runs on GeneralComp {
+	setverdict(pass);
+}
+
+control {
+	execute(TC_Sem_14_nested_types_001());
+}
+
+}

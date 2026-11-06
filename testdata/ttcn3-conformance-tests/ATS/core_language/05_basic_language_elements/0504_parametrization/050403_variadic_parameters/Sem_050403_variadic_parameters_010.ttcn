@@ -1,0 +1,38 @@
+// @author   TTF T023
+// @purpose  1:5.4.3, Ensure an actual record of parameter with ... is passed directly to the formal variadic parameter.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_050403_variadic_parameters_010 {
+
+type record of integer RoI;
+type component GeneralComp {}
+
+function len(in integer args...) return integer {
+	return lengthof(args);
+}
+
+testcase TC_Sem_050403_variadic_parameters_010() runs on GeneralComp {
+	if (len({}...) == 0) {
+		setverdict(pass);
+	} else {
+		setverdict(fail, "len({}...) != 0");
+	}
+
+	if (len({1, 2, 3}...) == 3) {
+		setverdict(pass);
+	} else {
+		setverdict(fail, "len({1,2,3}...) != 3");
+	}
+
+	var RoI r := {1, 2, 3};
+	if (len(r...) == 3) {
+		setverdict(pass);
+	} else {
+		setverdict(fail, "len(r...) != 3");
+	}
+}
+
+control {
+	execute(TC_Sem_050403_variadic_parameters_010());
+}
+
+}

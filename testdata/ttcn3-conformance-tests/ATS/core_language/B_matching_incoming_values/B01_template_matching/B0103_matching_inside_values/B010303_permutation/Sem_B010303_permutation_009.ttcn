@@ -27,7 +27,7 @@ type component GeneralComp {
 }
 
 	template SoI t_source := { 1, 2 ,?};
-	template RoI t_perm1 := { permutation (all from t_source), 5 };    //using all from with ?
+	template(present) RoI t_perm1 := { permutation (all from t_source), 5 };    //using all from with ?
 
 	testcase TC_Sem_B010303_permutation_009() runs on GeneralComp {
 

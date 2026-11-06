@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -14,6 +15,7 @@ import (
 	"github.com/nokia/ntt/internal/log"
 	"github.com/nokia/ntt/internal/proc"
 	"github.com/nokia/ntt/project"
+	"github.com/nokia/ntt/ttcn3/syntax"
 	"github.com/spf13/cobra"
 )
 
@@ -53,7 +55,7 @@ var (
 			// Skip opening the project if we're running a custom command or version.
 			if cmd.Use == "ntt" || cmd.Use == "version" || cmd.Use == "stdout" || strings.HasPrefix(cmd.Use, "help") || cmd.Use == "docs" || cmd.Use == "objdump" || cmd.Use == "t3xfasm" {
 				// first arg is either an external subkommand of the form
-				// k3-Arg[0] or ntt-Arg[0] or unknown
+				// plugin-Arg[0] or ntt-Arg[0] or unknown
 				return nil
 			}
 
@@ -63,11 +65,25 @@ var (
 				return err
 			}
 			Project = p
+			// The edition of the modules that name none.
+			syntax.DefaultLanguage = p.Language
 
 			return nil
 		},
 
 		RunE: func(cmd *cobra.Command, args []string) error {
+			// Catch the conventional version flags up front so they
+			// don't fall through to the help text. The root command
+			// has DisableFlagParsing on (to forward unknown
+			// subcommands to external ntt-foo binaries), so cobra's
+			// auto-generated --version flag never gets a chance to
+			// run.
+			for _, a := range args {
+				if a == "--version" || a == "-V" {
+					fmt.Println(versionString())
+					return nil
+				}
+			}
 			if len(args) > 0 && args[0][0] != '-' {
 				if path, err := exec.LookPath("ntt-" + args[0]); err == nil {
 					return proc.Exec(path, args[1:]...)
@@ -98,7 +114,6 @@ var (
 	outputPlain    bool
 	outputProgress bool
 	outputTAP      bool
-	testsFiles     []string
 	chdir          string
 
 	version = "devel"
@@ -195,16 +210,17 @@ func PrintError(w io.Writer, err error) {
 }
 
 func fatal(err error) {
-	switch err := err.(type) {
-	case *exec.ExitError:
-		waitStatus := err.Sys().(syscall.WaitStatus)
+	var exitErr *exec.ExitError
+	if errors.As(err, &exitErr) {
+		waitStatus := exitErr.Sys().(syscall.WaitStatus)
 		if waitStatus.ExitStatus() == -1 {
 			PrintError(os.Stderr, err)
 		}
 		os.Exit(waitStatus.ExitStatus())
-	default:
-		fmt.Fprintln(os.Stderr, err.Error())
 	}
-
+	// A command whose output has said why it failed exits with no message.
+	if msg := err.Error(); msg != "" {
+		fmt.Fprintln(os.Stderr, msg)
+	}
 	os.Exit(1)
 }

@@ -14,7 +14,7 @@ type record MyRecord {
  boolean field2,
  address field3,
  MyEnumeratedType field4,
- integer field5
+ integer field5 optional
 }
 
 template MyRecord m_parametrizedTemplate

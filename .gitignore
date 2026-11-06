@@ -6,6 +6,12 @@
 
 # Build directory
 bin/*
+_output/
+
+# Developer-local cabicgo build shim. The file links a developer's
+# checkout of a downstream test-suite repo into a custom ntt binary;
+# the path is hardcoded so the file is kept out of the main repo.
+main_timesync_ports.go
 
 # Test binary, build with `go test -c`
 *.test
@@ -19,3 +25,7 @@ bin/*
 # VS code
 .vscode/*
 .devcontainer/**
+
+# CLI tooling artifacts
+.antigravitycli/
+cursor-context.txt

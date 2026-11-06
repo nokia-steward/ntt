@@ -1,0 +1,33 @@
+// @author   TTF T023
+// @purpose  1:6.2.1.4, Ensure embedded field is promoted when its name is unique.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_06020104_embedding_fields_002 {
+
+type component GeneralComp {}
+
+type record A {
+	B
+}
+
+type record B {
+	integer b;
+}
+
+testcase TC_Sem_06020104_embedding_fields_002() runs on GeneralComp {
+	var A a;
+
+	a.b := 1;
+	a.B.b := 2;
+
+	if (a.b == a.B.b) {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+}
+
+control {
+	execute(TC_Sem_06020104_embedding_fields_002());
+}
+
+}

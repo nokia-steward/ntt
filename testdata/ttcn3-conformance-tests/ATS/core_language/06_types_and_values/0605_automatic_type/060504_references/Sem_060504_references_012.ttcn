@@ -1,0 +1,26 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for field references.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060504_references_012 {
+
+type component GeneralComp {}
+
+type record R {
+	record { integer i, float f, } nr;
+}
+
+function verifyType(inout R.nr nr) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_060504_references_012() runs on GeneralComp {
+	var R r := { nr := { i := 1, f := 1.0 } };
+	var v := r.nr;
+	verifyType(v);
+}
+
+control {
+	execute(TC_Sem_060504_references_012());
+}
+
+}

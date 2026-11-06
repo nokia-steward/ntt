@@ -33,7 +33,7 @@
 NTT Tests
 --------
 
-This module provides functions to help use the NTT/K3 Test infrastructure. It
+This module provides functions to help use the NTT test infrastructure. It
 provides function :command:`add_ttcn3_suite` for generating a test suite
 manifest.
 

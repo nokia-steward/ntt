@@ -1,0 +1,21 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for bitstring literals.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060502_literals_004 {
+
+type component GeneralComp {}
+
+// inout parameters require strong typing and can be used to type verification.
+function verifyType(inout bitstring bs) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_060502_literals_004() runs on GeneralComp {
+	{ var v := '1'B; verifyType(v) }
+}
+
+control {
+	execute(TC_Sem_060502_literals_004());
+}
+
+}

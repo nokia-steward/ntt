@@ -1,0 +1,39 @@
+/*****************************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:7.1.3, Comparison of different map values (different values)
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+// The following requirements are tested:
+// Two maps are equal if and only if they are mutually compatible with the type of the other operand
+// (see clause 6.3.8), they have the same number of key-value pairs and for each key-value pair in both
+// maps there’s a key value pair in the other map where the key from one pair is equal to the key from
+// the other pair and the value from one pair is equal to the value from the other pair.
+
+module Sem_070103_RelationalOperators_057 {
+
+type map from charstring to charstring TMap;
+
+type component GeneralComp {
+}
+
+testcase TC_Sem_070103_RelationalOperators_057() runs on GeneralComp {
+	var TMap v_map1 := {
+        ["first_name"] := "John",
+        ["surname"] := "Doe"
+    }, v_map2;
+	v_map2["surname"] := "Doe";
+    v_map2["first_name"] := "Joe";
+
+	if ( v_map1 != v_map2 ) {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+}
+
+control{
+    execute(TC_Sem_070103_RelationalOperators_057());
+}
+
+}

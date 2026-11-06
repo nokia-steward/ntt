@@ -23,16 +23,16 @@ module Sem_B010303_permutation_006 {
 type component GeneralComp {
 	  port loopbackPort messagePort
 }
-
+type record of integer RoI;
 testcase TC_Sem_B010303_permutation_006() runs on GeneralComp {
 
     var MessageType v_testMessage;
-    var template integer mw_field1 [4] := { permutation ( 1, 2, 3 ), 5 };
-    var template integer mw_field2 [4] := { permutation ( 1, 2, ? ), 5 };
-    var template integer mw_field3 [4] := { permutation ( 1, 2, 3 ), * };
-    var template integer mw_field4 [4] := { permutation ( (1,2,3), 2, 3 ), 5 };
+    var template(present) integer mw_field1 [4] := { permutation ( 1, 2, 3 ), 5 };
+    var template(present) integer mw_field2 [4] := { permutation ( 1, 2, ? ), 5 };
+    var template(present) integer mw_field3 [4] := { permutation ( 1, 2, 3 ), * };
+    var template(present) integer mw_field4 [4] := { permutation ( (1,2,3), 2, 3 ), 5 };
 
- template MessageType mw_matchingTemplate:=
+ template MessageType mw_matchingTemplate :=
  {
   mw_field1,
   mw_field2,

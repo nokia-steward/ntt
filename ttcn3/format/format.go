@@ -43,13 +43,13 @@ type CanonicalPrinter struct {
 	// Indent is the level of indentation at which to start.
 	Indent int
 
-	w                io.Writer
-	out              io.Writer
-	src              []byte
-	lastPos, currPos syntax.Position
-	whiteBuf         string
-	firstToken       bool
-	stack            []frame
+	w          io.Writer
+	out        io.Writer
+	src        []byte
+	lastPos    syntax.Position
+	whiteBuf   string
+	firstToken bool
+	stack      []frame
 
 	// lineIndent is the indent level of the current output line.
 	// lineInToken is set when the current line starts inside a

@@ -1,0 +1,17 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:A.1.2a, Ensure that the IUT properly evaluates trailing commas
+ ** @verdict  pass  accept, noexecution
+ ***************************************************/
+module Syn_A0102_TrailingCommas_001 {
+
+    type record MyRecord {
+     integer field1,
+     record {
+	  integer innerField1,
+	  boolean innerField2,   // allow trailing comma
+     } field2,               // allow trailing comma
+    }
+
+}

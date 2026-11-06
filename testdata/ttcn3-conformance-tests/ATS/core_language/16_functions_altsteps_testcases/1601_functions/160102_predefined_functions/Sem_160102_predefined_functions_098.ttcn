@@ -16,7 +16,7 @@ type component GeneralComp {
 
 
     testcase TC_Sem_160102_predefined_functions_098 () runs on GeneralComp {
-        var template I v_test := 0;
+        var template(value) I v_test := 0;
 		var bitstring v_enc := encvalue(v_test, "encoding_info_text");
 
        if (match(decvalue(v_enc,v_test,"decoding_info_text"), 0)){

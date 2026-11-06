@@ -1,0 +1,47 @@
+/***************************************************
+ ** @author   STF 487
+ ** @version  0.0.1
+ ** @purpose  1:20.5.2, local timer as a parameter of activated altstep in module control
+ ** @verdict  pass accept, ttcn3verdict:pass
+ ***************************************************/
+
+// The following requirement is tested:
+// For altsteps activated in module control or in functions or altsteps invoked
+// directly or indirectly from module control, all timer instances in the actual
+// parameter list shall be declared in the highest scope of the module control
+// part (see clause 26.2). Timers from lower scopes of the module control part
+// (i.e. from the nested statement blocks) are not allowed to occur in the actual
+// parameter list.
+
+module NegSem_200502_the_activate_operation_006 {
+
+	type port P message {
+		inout integer;
+	}
+
+	type component GeneralComp {
+		port P p;
+	}
+
+	altstep a(timer t_tmr) {
+		[] t_tmr.timeout { log ("Timeout in default"); }
+	}
+
+	testcase TC_NegSem_200502_the_activate_operation_006() runs on GeneralComp {
+        setverdict(pass);
+	}
+
+    function f_test() {
+        timer t_tmr := 1.0, t_tmr2;
+        t_tmr.start;
+        activate(a(t_tmr));
+        alt {
+            [] t_tmr2.timeout { }
+        }
+    }
+
+	control{
+        f_test();
+		execute(TC_NegSem_200502_the_activate_operation_006());
+	}
+}

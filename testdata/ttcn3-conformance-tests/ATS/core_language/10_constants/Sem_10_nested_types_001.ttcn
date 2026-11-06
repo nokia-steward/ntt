@@ -1,0 +1,18 @@
+// @author   TTF T023
+// @purpose  1:10, Ensure constants accept nested types.
+// @verdict  pass accept
+module Sem_10_nested_types_001 {
+
+const record of integer := { 1, 2, 3 };
+
+type component GeneralComp {}
+
+testcase TC_Sem_10_nested_types_001() runs on GeneralComp {
+	setverdict(pass);
+}
+
+control {
+	execute(TC_Sem_10_nested_types_001());
+}
+
+}
