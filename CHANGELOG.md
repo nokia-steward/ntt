@@ -380,7 +380,10 @@ single functional test doubles as a performance probe. See
   error when nothing will (on the real clock, at the run's timeout);
   they passed it over. A stop or kill of such a PTC by another component
   ends the wait at once; on the virtual clock it ended when that
-  component did.
+  component did. On the real clock, a wait that began while another
+  component was starting a behaviour on the PTC, still evaluating its
+  arguments, waits for that behaviour; `v.done` returned at once and
+  `any component.killed` waited for the starting component.
 - **A component call's `catch(stop)` block runs when the called
   behaviour was stopped or killed, and only then** (21.3.10); it ran
   after every call, and a stop during the behaviour's last statement

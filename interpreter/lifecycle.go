@@ -548,14 +548,11 @@ func componentStatePredicate(op string) func(*runtime.ComponentRef, runtime.Scop
 //   - a PTC that has exited but is not in the state — an `alive` one whose
 //     behaviour ended is done but not killed: nothing announces a later
 //     kill, so a slow poll rather than a spin on the closed channel;
-//   - a PTC that never ran: another component stopping or killing it,
-//     which wakes the waiters (WakeChan).
+//   - a PTC with no behaviour running (never started, or started and
+//     not yet registered): another component starting, stopping or
+//     killing it, which wakes the waiters (WakeChan).
 //
-// A started ref that contributes nothing (never forked, nothing
-// modelled) cannot change, so it does not stop the wait on the others;
-// only when no ref contributes anything does the wait give up and leave
-// the caller the non-blocking answer rather than hang. The waiter's own
-// stop signal and the testcase being stopped abort it.
+// The waiter's own stop signal and the testcase being stopped abort it.
 func waitPTCDoneRealClock(exec *runtime.TestcaseExec, refs []*runtime.ComponentRef,
 	done func() bool, stop <-chan struct{}, env runtime.Scope,
 	pred func(*runtime.ComponentRef, runtime.Scope) bool) {
@@ -580,12 +577,6 @@ func waitPTCDoneRealClock(exec *runtime.TestcaseExec, refs []*runtime.ComponentR
 			if r == nil || pred(r, env) {
 				continue
 			}
-			// A PTC that never ran changes only when another component
-			// stops or kills it, which wakes the waiters.
-			if !r.IsStarted() {
-				idle = true
-				continue
-			}
 			if exit := exec.PTCExit(r.ID); exit != nil {
 				select {
 				case <-exit.DoneChan:
@@ -597,9 +588,17 @@ func waitPTCDoneRealClock(exec *runtime.TestcaseExec, refs []*runtime.ComponentR
 				}
 				continue
 			}
-			if d := modelledRemaining(r); d > 0 && (soonest == 0 || d < soonest) {
-				soonest = d
+			if d := modelledRemaining(r); d > 0 {
+				if soonest == 0 || d < soonest {
+					soonest = d
+				}
+				continue
 			}
+			// No behaviour runs on it yet: it changes when another
+			// component starts, stops or kills it, each of which wakes
+			// the waiters (WakeChan). A started one whose behaviour is
+			// not yet registered is in the same case.
+			idle = true
 		}
 		var t *time.Timer
 		if soonest > 0 {

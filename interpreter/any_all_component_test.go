@@ -151,3 +151,41 @@ func TestWaitForAPTCStartedByAThirdParty(t *testing.T) {
 		}
 	}
 }
+
+// A wait that begins while another component is starting a behaviour on
+// the PTC, the arguments still being evaluated, waits for that behaviour,
+// on either clock.
+func TestWaitWhileAPTCIsBeingStarted(t *testing.T) {
+	for _, op := range []string{"v.done", "any component.killed"} {
+		src := parse(t, `module M {
+			type component C {}
+			function f_short(integer i) runs on C { timer s := 0.1; s.start; s.timeout }
+			function slow() runs on C return integer { timer w := 0.4; w.start; w.timeout; return 1 }
+			function f_starter(C v) runs on C {
+				v.start(f_short(slow()));
+				timer z := 3.0; z.start; z.timeout;
+			}
+			testcase tc() runs on C {
+				var C v := C.create, k := C.create alive;
+				k.start(f_starter(v));
+				timer d := 0.1; d.start; d.timeout;
+				timer g := 2.0; g.start;
+				`+op+`;
+				if (not g.running) { setverdict(fail, "woken only when the starter ended") }
+				else {
+					alt {
+						[] v.done { setverdict(pass) }
+						[else] { setverdict(fail, "the wait ended before v was done") }
+					}
+				}
+				k.kill;
+			}
+		}`)
+		for _, k := range clocks {
+			v, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{src}, "M.tc", k.opts)
+			if err != nil || v != runtime.PassVerdict {
+				t.Errorf("%s, %s clock: %s (%s) %v", op, k.name, v, reason, err)
+			}
+		}
+	}
+}
