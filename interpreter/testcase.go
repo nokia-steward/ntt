@@ -5162,7 +5162,14 @@ func altstepAlternativeMatches(fn *runtime.Function, ce *syntax.CallExpr, env ru
 		restore := altCtx.suspend()
 		res = evalAltClauseBody(taken.Body, fenv)
 		restore()
-		altstepResults.Store(goroutineID(), res)
+		// A return leaves the altstep, for the alternative's own block,
+		// which runs before the alt is left (19.10); it is no return
+		// from the behaviour around the alt.
+		left := res
+		if rv, ok := res.(*runtime.ReturnValue); ok && !rv.Stopped {
+			left = nil
+		}
+		altstepResults.Store(goroutineID(), left)
 	}
 	// The altstep was invoked: its inout and out parameters go back to
 	// the actuals, unless its behaviour was stopped.

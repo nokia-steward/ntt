@@ -362,6 +362,10 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **A return in an altstep taken as an alternative leaves the altstep,
+  not the behaviour around the alt** (19.10): the alternative's own
+  block runs and the alt is left; it ended the testcase, or the function
+  the alt was in.
 - **An interleave altstep interleaves** (16.2.0): `altstep interleave
   a()` takes each of its top alternatives once, as the interleave
   statement does, the rest of a block interleaved with the others after
