@@ -9,15 +9,28 @@ on:
 jobs:
   test:
     name: Tests
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
     steps:
+      # The TTCN-3 conformance test suite under
+      # testdata/ttcn3-conformance-tests/ has paths > 260 chars,
+      # which trips Windows' MAX_PATH limit during checkout. This
+      # config must run BEFORE actions/checkout so the clone itself
+      # can write the long paths.
+      - name: Enable Git long paths (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: git config --system core.longpaths true
       - uses: actions/checkout@v4
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
           go-version: stable
       - name: Test
-        run: go test -race -v ./...
+        run: go test -race ./...
 
   lint:
     name: Linting
