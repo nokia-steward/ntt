@@ -1,77 +1,79 @@
+version: "2"
 run:
-  tests: false
   issues-exit-code: 0
+  tests: false
   allow-parallel-runners: true
-  concurrency: 0
-  timeout: 10m
-
-output:
-  sort-results: true
-
 linters:
   enable:
-    - gocritic
     - dupl
     - dupword
     - errname
     - errorlint
     - exhaustive
-    - exhaustruct
-    - exportloopref
+    - exhaustruct_v5
     - forcetypeassert
     - gocognit
     - goconst
+    - gocritic
     - godot
     - godox
-    - mnd
     - goprintffuncname
     - gosec
     - ireturn
     - maintidx
     - makezero
     - misspell
+    - mnd
     - nestif
     - prealloc
     - revive
-    - stylecheck
-    - tenv
+    - staticcheck
     - unconvert
     - usestdlibvars
     - varnamelen
     - wastedassign
     - wrapcheck
-
-linters-settings:
-  tagliatelle:
-    case:
-      rules:
-        json: snake
-        yaml: snake
-
+  settings:
+    tagliatelle:
+      case:
+        rules:
+          json: snake
+          yaml: snake
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    paths:
+      - .*_gen.go$
+      - internal/env
+      - internal/fs
+      - internal/loc
+      - internal/lsp/fakenet
+      - internal/lsp/helper
+      - internal/lsp/jsonrpc2
+      - internal/lsp/protocol
+      - internal/lsp/span
+      - internal/lsp/telemetry
+      - internal/lsp/xcontext
+      - internal/memoize
+      - internal/session/flock
+      - ttcn3/syntax/internal/gen
+      - ttcn3/printer
+      - third_party$
+      - builtin$
+      - examples$
 issues:
-  exclude-dirs:
-    - internal/env
-    - internal/fs
-    - internal/loc
-    - internal/lsp/fakenet
-    - internal/lsp/helper
-    - internal/lsp/jsonrpc2
-    - internal/lsp/protocol
-    - internal/lsp/span
-    - internal/lsp/telemetry
-    - internal/lsp/xcontext
-    - internal/memoize
-    - internal/session/flock
-    - ttcn3/syntax/internal/gen
-    - ttcn3/printer
-
-  exclude-files:
-    - ".*_gen.go$"
-
-  exclude-use-default: true
-  exclude-case-sensitive: true
-  exclude-dirs-use-default: true
   max-issues-per-linter: 50
   max-same-issues: 3
   new: false
   fix: false
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
