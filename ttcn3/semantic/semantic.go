@@ -209,6 +209,7 @@ func (a *Analyzer) Analyze(tree *ttcn3.Tree) []Diagnostic {
 		out = append(out, a.checkObjectKinds(tree, mod)...)
 		out = append(out, a.checkDeclKinds(tree, mod)...)
 		out = append(out, a.checkModuleDefs(tree, mod)...)
+		out = append(out, a.checkRunsOnCompatibility(tree, mod)...)
 		out = append(out, a.checkModRemRules(mod)...)
 		out = append(out, a.checkSendPartialTemplateRules(mod)...)
 		out = append(out, a.checkUninitReadRules(mod)...)

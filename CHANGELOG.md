@@ -362,6 +362,15 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **`ntt check` rejects a call of a function on a component it may not
+  run on** (6.3.3, 16.1.1 d, f): one whose runs on type has a definition
+  the caller's component type has none of, of its name and kind, through
+  extends, or a port of another port type; and one whose mtc or system
+  type has a port the caller's mtc or system has not. Types other than
+  port types, initial values and durations are not compared: written
+  differently (`M.T` and `T`, `(0)` and `0`), they may be the same. A behaviour started on another component or activated is checked
+  by their own rules, and a caller's mtc or system type that is not
+  known (a function without the clause, 16.1.0) is let be.
 - **`ntt check` rejects more misuses of the module definitions part**: a
   module parameter as the target of an assignment (8.2.1 a); a module
   parameter, constant or other value declared twice, also within one
