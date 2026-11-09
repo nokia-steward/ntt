@@ -884,6 +884,9 @@ func Unichar2Oct(args ...runtime.Object) runtime.Object {
 			enc = e.String()
 		}
 	}
+	if !ucsEncoding(enc) {
+		return runtime.Errorf("unichar2oct: string encoding %q is none of the seven allowed (ETSI C.1.32)", enc)
+	}
 	raw := encodeUnichar(s.Value, enc)
 	return newOctetstringFromBytes(raw)
 }
@@ -902,11 +905,41 @@ func Oct2Unichar(args ...runtime.Object) runtime.Object {
 			enc = e.String()
 		}
 	}
+	if !ucsEncoding(enc) {
+		return runtime.Errorf("oct2unichar: string encoding %q is none of the seven allowed (ETSI C.1.31)", enc)
+	}
 	runes, err := decodeUnichar(raw, enc)
 	if err != nil {
 		return runtime.Errorf("oct2unichar: %v", err)
 	}
+	// The octets do not begin with a byte order mark (C.1.31): the
+	// signature of UTF-8, UTF-16 and UTF-32. The schemes of one byte
+	// order have none; U+FEFF first in them is a character.
+	if len(runes) > 0 && runes[0] == 0xFEFF && hasSignature(enc) {
+		return runtime.Errorf("oct2unichar: the octetstring begins with a byte order mark (ETSI C.1.31)")
+	}
 	return runtime.NewUniversalString(string(runes))
+}
+
+// hasSignature reports whether the UCS encoding scheme enc has the
+// optional signature (ISO/IEC 10646 clause 10): UTF-8, UTF-16, UTF-32.
+func hasSignature(enc string) bool {
+	switch normaliseEncoding(enc) {
+	case "UTF-8", "UTF-16", "UTF-32":
+		return true
+	}
+	return false
+}
+
+// ucsEncoding reports whether enc names one of the UCS encoding schemes
+// oct2unichar and unichar2oct take (ETSI C.1.31, C.1.32): UTF-8, UTF-16,
+// UTF-16LE, UTF-16BE, UTF-32, UTF-32LE or UTF-32BE.
+func ucsEncoding(enc string) bool {
+	switch normaliseEncoding(enc) {
+	case "UTF-8", "UTF-16", "UTF-16LE", "UTF-16BE", "UTF-32", "UTF-32LE", "UTF-32BE":
+		return true
+	}
+	return false
 }
 
 // encodeUnichar serialises a slice of code points using the requested
@@ -1125,7 +1158,14 @@ func Any2Unistr(args ...runtime.Object) runtime.Object {
 }
 
 func Float2Int(args ...runtime.Object) runtime.Object {
-	return runtime.NewInt(int(args[0].(runtime.Float)))
+	f := float64(args[0].(runtime.Float))
+	// infinity, -infinity and not_a_number have no integer (ETSI C.1.9).
+	if math.IsInf(f, 0) || math.IsNaN(f) {
+		return runtime.Errorf("float2int of %v, which is no number (ETSI C.1.9)", args[0].Inspect())
+	}
+	// The fractional part removed, of any magnitude.
+	i, _ := big.NewFloat(f).Int(nil)
+	return runtime.Int{Int: i}
 }
 
 // Int2Enum is the value int2enum (ETSI C.1.4) assigns to its out

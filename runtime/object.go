@@ -156,6 +156,10 @@ type TimerHandle struct {
 	// earlier `.start(M)` override does NOT persist into a later
 	// bare `.start`.
 	DefaultDuration float64
+	// HasDefault reports whether the declaration gave a default
+	// duration: started without one, a timer that has none is an
+	// error (ETSI 23.2).
+	HasDefault bool
 	// StartedAtVirtual is the per-testcase virtual-clock reading at
 	// the moment `.start` was called. `.read` reports the virtual
 	// elapsed time (VirtualClock - StartedAtVirtual) so a sibling

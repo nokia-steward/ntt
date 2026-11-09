@@ -1,6 +1,7 @@
 package builtins
 
 import (
+	"fmt"
 	"math/big"
 	"regexp"
 	"strconv"
@@ -368,28 +369,32 @@ const maxRegexCache = 4096
 // parenthesised group (0-based; group 0 is the first `(...)`). ok is
 // false when the pattern does not match or the group index is out of
 // range, in which case the caller yields the empty string.
-func RegexpMatch(instr, pattern string, groupno int, nocase bool) (string, bool) {
+func RegexpMatch(instr, pattern string, groupno int, nocase bool) (string, bool, error) {
 	if groupno < 0 {
-		return "", false
+		return "", false, fmt.Errorf("regexp group number %d is negative (ETSI C.4.1)", groupno)
 	}
 	re, err := ttcnPatternToRegex(pattern)
 	if err != nil {
-		return "", false
+		return "", false, nil
 	}
 	if nocase {
 		re = "(?i)" + re
 	}
 	rx, err := compileTTCNRegex(re)
 	if err != nil {
-		return "", false
+		return "", false, nil
+	}
+	// The expression has no group of that number (C.4.1).
+	if groupno >= rx.NumSubexp() {
+		return "", false, fmt.Errorf("regexp group number %d, where the expression has %d groups (ETSI C.4.1)", groupno, rx.NumSubexp())
 	}
 	m := rx.FindStringSubmatch(instr)
 	// m[0] is the whole match; TTCN group 0 is the first capture, so
 	// the requested group is at m[groupno+1].
 	if m == nil || groupno+1 >= len(m) {
-		return "", false
+		return "", false, nil
 	}
-	return m[groupno+1], true
+	return m[groupno+1], true, nil
 }
 
 func compileTTCNRegex(re string) (*regexp.Regexp, error) {

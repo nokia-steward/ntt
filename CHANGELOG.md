@@ -362,6 +362,15 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **Predefined functions and the timer start raise the errors the
+  standard gives them**: float2int of infinity, -infinity or
+  not_a_number (C.1.9), and it truncates any finite float exactly, where
+  large ones overflowed; regexp of a negative group number or one the
+  expression has no group for (C.4.1); oct2unichar of octets that begin
+  with a byte order mark, and oct2unichar and unichar2oct of an encoding
+  none of the seven they take (C.1.31, C.1.32); sizeof and the
+  conversion functions of an uninitialised value (16.1.2 a 3); a timer
+  started without a duration that has no default (23.2).
 - **The connections clause 9.1 forbids are test case errors** when
   connect or map makes them (9.1 a, b; 21.1.1 b, c, e): a port connected
   to a second port of one component, its own included; a port mapped to a

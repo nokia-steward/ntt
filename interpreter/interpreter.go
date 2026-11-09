@@ -1822,6 +1822,14 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			}
 		}
 
+		// The in and inout actual parameters of a predefined function
+		// are initialised (16.1.2 a 3).
+		if _, ok := f.(*runtime.Builtin); ok {
+			if err := predefinedArgError(n, args); err != nil {
+				return err
+			}
+		}
+
 		// `rnd(...)` reads / seeds the testcase-local random
 		// stream so parallel jobs don't race on math/rand's global
 		// state (Sem_050401_top_level_025/026 depend on this).
@@ -3766,6 +3774,41 @@ func unboundRHSError(rhs syntax.Expr, v runtime.Object, env runtime.Scope) runti
 		return nil
 	}
 	return runtime.Errorf("the right-hand side %s is uninitialised (ETSI 19.1.1 c)", syntax.Name(rhs))
+}
+
+// predefinedArgError is the error of a call n of a predefined function
+// whose in or inout actual parameter, a reference, is uninitialised (ETSI
+// ES 201 873-1 16.1.2 a 3), or nil. sizeof and the conversion functions
+// (x2y) are looked at: of the others, matching and lengthof among them,
+// the interpreter may give no value for a template or attribute it does
+// not model, which would read as uninitialised.
+func predefinedArgError(n *syntax.CallExpr, args []runtime.Object) runtime.Object {
+	id, ok := n.Fun.(*syntax.Ident)
+	if !ok || n.Args == nil {
+		return nil
+	}
+	name := id.String()
+	if name != "sizeof" && !isConversionFunction(name) {
+		return nil
+	}
+	for i, e := range n.Args.List {
+		if i < len(args) && args[i] == runtime.Undefined && isValueReference(e) {
+			return runtime.Errorf("%s of %s, which is uninitialised (ETSI 16.1.2 a)", name, syntax.Name(e))
+		}
+	}
+	return nil
+}
+
+// isConversionFunction reports whether name is a predefined conversion
+// function of C.1 (int2char, oct2str, ...): x2y, but any2unistr, whose
+// parameter may be uninitialised (16.1.2 a 3), and int2enum, whose second
+// is out.
+func isConversionFunction(name string) bool {
+	if name == "any2unistr" || name == "int2enum" {
+		return false
+	}
+	i := strings.Index(name, "2")
+	return i > 0 && i < len(name)-1 && !strings.ContainsAny(name, "_")
 }
 
 // isValueReference reports whether e is a reference to a variable, a field
@@ -6868,6 +6911,7 @@ func newTimerObject(decl *syntax.Declarator, env runtime.Scope) (val runtime.Obj
 				case runtime.Float:
 					val.(*runtime.TimerHandle).Duration = float64(x)
 					val.(*runtime.TimerHandle).DefaultDuration = float64(x)
+					val.(*runtime.TimerHandle).HasDefault = true
 				case *runtime.TimerHandle:
 					// `var timer t := t_ref` - timer assignment is
 					// by reference, so the alias shares the handle.
@@ -6928,6 +6972,7 @@ func buildTimerArrayDims(name string, dims []*syntax.ParenExpr, init runtime.Obj
 			if f, ok := elemInit.(runtime.Float); ok {
 				th.Duration = float64(f)
 				th.DefaultDuration = float64(f)
+				th.HasDefault = true
 			}
 			elems[i] = th
 		} else {
@@ -10594,7 +10639,12 @@ func evalTimerSelector(th *runtime.TimerHandle, n *syntax.SelectorExpr, env runt
 		th.StartedAt = time.Now()
 		th.StartedAtVirtual, _ = virtualNow(env)
 		// Bare `T.start;` restores the declared
-		// default duration; see ETSI 23.2.
+		// default duration; see ETSI 23.2. A timer with none
+		// cannot be started so.
+		if !th.HasDefault {
+			th.Running = false
+			return runtime.Errorf("timer %s started without a duration, and it has no default (ETSI 23.2)", th.Name)
+		}
 		th.Duration = th.DefaultDuration
 		registerStartedTimer(th, env)
 		return runtime.Undefined
@@ -10620,6 +10670,10 @@ func evalTimerOp(th *runtime.TimerHandle, sel syntax.Expr, n *syntax.CallExpr, e
 		// timer's declared default duration. A previous
 		// `T.start(M)` override does not persist.
 		th.Duration = th.DefaultDuration
+		if (n.Args == nil || len(n.Args.List) == 0) && !th.HasDefault {
+			th.Running = false
+			return runtime.Errorf("timer %s started without a duration, and it has no default (ETSI 23.2)", th.Name)
+		}
 		if n.Args != nil && len(n.Args.List) > 0 {
 			v := eval(n.Args.List[0], env)
 			if runtime.IsError(v) {
@@ -14043,7 +14097,10 @@ func evalRegexpExpr(n *syntax.RegexpExpr, env runtime.Scope) runtime.Object {
 	if !ok1 || !ok2 || !ok3 {
 		return runtime.Undefined
 	}
-	res, _ := builtins.RegexpMatch(instr, pat, int(grp.Int64()), n.NoCase != nil)
+	res, _, err := builtins.RegexpMatch(instr, pat, int(grp.Int64()), n.NoCase != nil)
+	if err != nil {
+		return runtime.Errorf("%s", err)
+	}
 	return runtime.NewUniversalString(res)
 }
 
