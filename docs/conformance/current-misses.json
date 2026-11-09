@@ -1,11 +1,11 @@
 {
- "summary": "ran 5164 files: 5017 matched, 21 skipped (97.55% match rate)",
+ "summary": "ran 5164 files: 5020 matched, 18 skipped (97.55% match rate)",
  "source": "etsi.json",
- "miss_count": 147,
+ "miss_count": 144,
  "outcomes": {
   "reject->pass": 53,
   "reject->none": 24,
-  "->": 21,
+  "->": 18,
   "pass->error": 13,
   "pass->fail": 13,
   "pass->parse-error": 13,
@@ -103,13 +103,6 @@
    }
   },
   {
-   "chapter": "core_language/08_modules",
-   "misses": 2,
-   "outcomes": {
-    "->": 2
-   }
-  },
-  {
    "chapter": "core_language/09_test_configurations",
    "misses": 2,
    "outcomes": {
@@ -118,18 +111,18 @@
    }
   },
   {
-   "chapter": "core_language/11_variables",
-   "misses": 2,
-   "outcomes": {
-    "->": 2
-   }
-  },
-  {
    "chapter": "core_language/27_specifying_attributes",
    "misses": 2,
    "outcomes": {
     "->": 1,
     "reject->none": 1
+   }
+  },
+  {
+   "chapter": "core_language/08_modules",
+   "misses": 1,
+   "outcomes": {
+    "->": 1
    }
   },
   {
@@ -787,14 +780,6 @@
    "message": ""
   },
   {
-   "chapter": "core_language/08_modules",
-   "expected": "",
-   "actual": "",
-   "outcome": "->",
-   "relpath": "core_language/08_modules/0802_module_definitions_part/080201_module_parameters/NegSyn_080201_ModuleParameters_002.ttcn",
-   "message": ""
-  },
-  {
    "chapter": "core_language/09_test_configurations",
    "expected": "reject",
    "actual": "none",
@@ -817,22 +802,6 @@
    "outcome": "pass->parse-error",
    "relpath": "core_language/10_constants/Sem_10_nested_types_001.ttcn",
    "message": "2 errors occurred:\n\t* testdata/ttcn3-conformance-tests/ATS/core_language/10_constants/Sem_10_nested_types_001.ttcn:6:25-6:27: expected 'IDENT', found :=\n\t* testdata/ttcn3-conformance-tests/ATS/core_la..."
-  },
-  {
-   "chapter": "core_language/11_variables",
-   "expected": "",
-   "actual": "",
-   "outcome": "->",
-   "relpath": "core_language/11_variables/1101_value_variables/NegSyn_1101_ValueVars_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/11_variables",
-   "expected": "",
-   "actual": "",
-   "outcome": "->",
-   "relpath": "core_language/11_variables/1102_template_variables/NegSyn_1102_TemplateVars_001.ttcn",
-   "message": ""
   },
   {
    "chapter": "core_language/15_templates",

@@ -2,14 +2,14 @@
 
 Generated from `etsi.json` using the current workspace runner.
 
-- Summary: `ran 5164 files: 5017 matched, 21 skipped (97.55% match rate)`
-- Misses: `147`
+- Summary: `ran 5164 files: 5020 matched, 18 skipped (97.55% match rate)`
+- Misses: `144`
 
 ## Misses By Outcome
 
 - `reject->pass`: `53`
 - `reject->none`: `24`
-- `->`: `21`
+- `->`: `18`
 - `pass->error`: `13`
 - `pass->fail`: `13`
 - `pass->parse-error`: `13`
@@ -28,10 +28,9 @@ Generated from `etsi.json` using the current workspace runner.
 - `core_language/07_expressions`: `6` (`pass->semantic-error`=4, `reject->pass`=2)
 - `core_language/26_module_control`: `3` (`->`=3)
 - `oo/501_classes_and_objects`: `3` (`pass->parse-error`=2, `reject->pass`=1)
-- `core_language/08_modules`: `2` (`->`=2)
 - `core_language/09_test_configurations`: `2` (`pass->error`=1, `reject->none`=1)
-- `core_language/11_variables`: `2` (`->`=2)
 - `core_language/27_specifying_attributes`: `2` (`->`=1, `reject->none`=1)
+- `core_language/08_modules`: `1` (`->`=1)
 - `core_language/10_constants`: `1` (`pass->parse-error`=1)
 - `core_language/20_statement_and_operations_for_alt`: `1` (`pass->error`=1)
 - `core_language/C_predefined_functions`: `1` (`pass->none`=1)
