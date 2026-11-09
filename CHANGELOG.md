@@ -362,6 +362,14 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **`ntt check` rejects a declaration of a type it may not have**: a
+  module parameter of, or holding at any level of nesting, a component,
+  port, timer or default type (8.2.1 b); a template's parameter of, or
+  holding, a component type (5.4.1.1 m); a control function's parameter
+  or return type of, or holding, a port or default type, and a control
+  function running on a component type that declares a port (16.1.5 b,
+  c, d). Types are resolved by ntt's lookup, through aliases and list
+  types.
 - **`ntt check` rejects an operation on an object of the wrong kind**
   (21.3.2-21.3.6 a, 22.2.1 g, 22.3.1 n, 22.5.1-22.5.4 a): a port
   operation on a timer or a value, a component operation on a port, a
