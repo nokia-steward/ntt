@@ -14,7 +14,7 @@ module Sem_05040101_parameters_of_kind_value_028 {
         boolean field2,
         address field3,
         MyEnumeratedType field4,
-        integer field5
+        integer field5 optional
     }
 
     type port TestPort message {

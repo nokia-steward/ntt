@@ -1,0 +1,24 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for valueof.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060506_return_values_003 {
+
+type component GeneralComp {}
+
+type integer Alias;
+template Alias t := 1;
+
+function verifyType(inout Alias a) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_060506_return_values_003() runs on GeneralComp {
+	var v := valueof(t);
+	verifyType(v);
+}
+
+control {
+	execute(TC_Sem_060506_return_values_003());
+}
+
+}

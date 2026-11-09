@@ -2,7 +2,7 @@
  * @author TTF 014
  * @version 0.0.1
  * @purpose 1:15.3, Ensure that signature templates with restriction e) are accepted.
- * @verdict pass reject
+ * @verdict pass accept, ttcn3verdict:pass
  *****************************************************************/
 /* The following requirements are tested:
  * Signature templates that do not contain the @abstract modifier and fulfil the following condition:

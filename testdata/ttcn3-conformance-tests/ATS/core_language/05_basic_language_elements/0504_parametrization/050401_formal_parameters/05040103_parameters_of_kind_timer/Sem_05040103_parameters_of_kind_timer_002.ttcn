@@ -20,8 +20,9 @@ module Sem_05040103_parameters_of_kind_timer_002 {
 
     testcase TC_Sem_05040103_parameters_of_kind_timer_001() runs on C {
     	timer t_tmr := 0.1;
+		var timer v_tmr := t_tmr;
         t_tmr.start;
-        f_test(t_tmr);
+        f_test(v_tmr);
     }
 
     control {

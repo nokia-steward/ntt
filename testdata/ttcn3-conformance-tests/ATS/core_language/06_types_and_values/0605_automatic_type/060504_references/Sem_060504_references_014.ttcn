@@ -1,0 +1,27 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for references to union default variants.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060504_references_014 {
+
+type component GeneralComp {}
+
+type union U {
+	@default universal charstring ucs,
+	integer i
+}
+
+function verifyType(inout U u) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_060504_references_014() runs on GeneralComp {
+	var U u := "hello";
+	var v := u;
+	verifyType(v);
+}
+
+control {
+	execute(TC_Sem_060504_references_014());
+}
+
+}

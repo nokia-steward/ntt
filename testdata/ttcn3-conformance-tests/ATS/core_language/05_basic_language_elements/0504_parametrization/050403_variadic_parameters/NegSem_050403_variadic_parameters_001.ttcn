@@ -1,0 +1,8 @@
+// @author   TTF T023
+// @purpose  1:5.4.3, Ensure variadic formal parameters are at the end of the formal parameter list.
+// @verdict  pass reject
+module NegSem_050403_variadic_parameters_001 {
+
+function f(in integer i..., in integer max) {}
+
+}

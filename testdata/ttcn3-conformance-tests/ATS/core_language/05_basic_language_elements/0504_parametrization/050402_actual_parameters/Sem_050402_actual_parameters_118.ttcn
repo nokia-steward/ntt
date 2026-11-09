@@ -16,7 +16,7 @@ module Sem_050402_actual_parameters_118 {
     }
 
     type record R {
-        integer field1
+        integer field1 optional
     }
 
     function f_test(out template integer p_val) {

@@ -1,0 +1,33 @@
+/*****************************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.8.2, Ensure that referenced element of templates(omit) are not allowed to implicite restrict to template(omit)
+ ** @verdict  pass reject
+ *****************************************************************/
+
+/*
+ * Reference element of a 'record of' template with omit restriction.
+ * (see Table 13C: Implicit restrictions)
+ *
+ */
+module NegSem_150802_ImplicitRestrictions_019 {
+
+type component GeneralComp { }
+
+type record of integer RecordOfInt;
+
+testcase TC_NegSem_150802_ImplicitRestrictions_019() runs on GeneralComp {
+
+	template (omit) RecordOfInt m_exampleOmit := omit;
+
+	var template(omit) integer  v_omit := m_exampleOmit[2]; //not allowed
+
+	setverdict(fail);
+}
+
+control{
+	execute(TC_NegSem_150802_ImplicitRestrictions_019());
+}
+
+
+}

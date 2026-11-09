@@ -1,0 +1,26 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure record fields have the same order as specified.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060505_field_assignment_lists_001 {
+
+type component GeneralComp {}
+
+type record Point {
+	integer x,
+	integer y
+}
+
+testcase TC_Sem_060505_field_assignment_lists_001() runs on GeneralComp {
+	var v := { x := 1, y := 2 }
+	if (match(v, Point:{x := 1, y := 2})) {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+}
+
+control {
+	execute(TC_Sem_060505_field_assignment_lists_001());
+}
+
+}
