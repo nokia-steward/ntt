@@ -36,9 +36,16 @@ func TestRunSuite(t *testing.T) {
 	if err := cmd.Flags().Parse([]string{"--backend=eval", "--format=plain", "-o", out, "-r", "tc", "-D", "-a", "tcfi", src}); err != nil {
 		t.Fatal(err)
 	}
+	// The command is the process's one. Its flags go back to their
+	// defaults afterwards; the logging filter's rules, which no flag
+	// value holds, stay, so a later test must not rely on them.
 	defer func() {
 		cmd.Flags().Visit(func(f *pflag.Flag) {
-			_ = f.Value.Set(f.DefValue)
+			if s, ok := f.Value.(pflag.SliceValue); ok {
+				_ = s.Replace(nil)
+			} else {
+				_ = f.Value.Set(f.DefValue)
+			}
 			f.Changed = false
 		})
 	}()
