@@ -1534,7 +1534,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				// configuration graph (port form only) so a
 				// `p.checkstate("Mapped")` reflects it. This
 				// is independent of whether a driver is bound.
-				recordPortMapState(name.String(), n, env)
+				if _, err := recordPortMapState(name.String(), n, env); err != nil {
+					return err
+				}
 				if res, ok := evalPortMap(name.String(), n, env); ok {
 					return res
 				}
@@ -14679,6 +14681,10 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 		if err := portSendError(exec, op, port); err != nil {
 			return err
 		}
+		// Without a to clause (the forms with one route elsewhere).
+		if err := sendReceiverError(op, exec, port, nil); err != nil {
+			return err
+		}
 	}
 	bareName := port          // pre-qualification instance name, for the connect graph
 	port = exec.PortKey(port) // real-scheduler: per-PTC port identity (no-op by default)
@@ -16587,6 +16593,10 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 		}
 		return runtime.Undefined
 	}
+	// A one-to-many connection takes a to clause (22.2.1 d).
+	if err := sendReceiverError("send", exec, bareName, dest); err != nil {
+		return err
+	}
 	// A send on a CONNECTED port is delivered to the connected peer(s)'
 	// queue(s) via the connect graph, not the sender's own queue, and
 	// tagged with the actual sending component so the receiver's `from`
@@ -16631,6 +16641,20 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 	}
 	exec.EnqueueMessageFrom(port, payload, sender)
 	return runtime.Undefined
+}
+
+// sendReceiverError is the error of the sending operation op on port, of
+// the running component, with the to clause dest (nil when none): a port
+// connected to several others is sent on with a to clause (ETSI 22.2.1 d,
+// 22.3.1 e, 22.3.3 d, 22.3.5 c). A port neither connected nor mapped is
+// let be: the MTC's ports are the test system interface of a testcase
+// without a system clause (16.3), whose loopback stands in for the SUT.
+func sendReceiverError(op string, exec *runtime.TestcaseExec, port string, dest syntax.Expr) runtime.Object {
+	ep := runtime.PortEndpoint{Comp: currentComponentID(exec), Port: port}
+	if peers := livePeers(exec, ep, false); dest == nil && len(peers) > 1 {
+		return runtime.Errorf("%s on port %s, connected to %d ports, without a to clause (ETSI 22.2.1 d)", op, port, len(peers))
+	}
+	return nil
 }
 
 // systemSender is the sender of what a mapped port receives from the

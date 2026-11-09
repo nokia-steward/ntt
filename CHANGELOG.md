@@ -362,6 +362,19 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **The connections clause 9.1 forbids are test case errors** when
+  connect or map makes them (9.1 a, b; 21.1.1 b, c, e): a port connected
+  to a second port of one component, its own included; a port mapped to a
+  second system port, or a system port to a second port of one
+  component; a port both connected and mapped; a connect of a system
+  port, also through a reference to the system; a map of no or two
+  system ports; a port of a component not created, or that has ended.
+  The connections of a component that has ended, killed or not
+  alive-type and done, are released (21.3.3, 21.3.4). A connection or
+  mapping made again does nothing (F.6), and a port connected to itself
+  is one connection. A send, call, reply or raise without a to clause on
+  a port connected to several others is an error (22.2.1 d, 22.3.1 e,
+  22.3.3 d, 22.3.5 c).
 - **Using an uninitialised value where a value is needed is an error**,
   where it went on with no value: an operand of an operator, unary ones
   included, or an omitted field anywhere but in a comparison; a variable

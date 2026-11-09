@@ -1582,6 +1582,17 @@ func (t *TestcaseExec) ClearAllMappings() {
 	t.mapEdges = nil
 }
 
+// MappedPeers returns the endpoints endpoint a is mapped to.
+func (t *TestcaseExec) MappedPeers(a PortEndpoint) []PortEndpoint {
+	t.connMu.Lock()
+	defer t.connMu.Unlock()
+	out := make([]PortEndpoint, 0, len(t.mapEdges[a]))
+	for b := range t.mapEdges[a] {
+		out = append(out, b)
+	}
+	return out
+}
+
 // IsMapped reports whether endpoint a currently has at least one
 // mapping edge.
 func (t *TestcaseExec) IsMapped(a PortEndpoint) bool {

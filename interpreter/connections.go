@@ -142,7 +142,9 @@ func resolveComponentID(e syntax.Expr, env runtime.Scope, exec *runtime.Testcase
 	}
 	if v := eval(e, env); !runtime.IsError(v) {
 		if ref, ok := v.(*runtime.ComponentRef); ok && ref != nil {
-			return ref.ID, false
+			// A reference to the system component, as a parameter holds
+			// it, is the system's.
+			return ref.ID, ref.ID == systemEndpointID
 		}
 	}
 	return currentComponentID(exec), false
@@ -172,9 +174,15 @@ func evalConnectOp(op string, n *syntax.CallExpr, env runtime.Scope) runtime.Obj
 		if len(args) < 2 {
 			return runtime.Undefined
 		}
-		a, _, okA := resolvePortEndpoint(args[0], env)
-		b, _, okB := resolvePortEndpoint(args[1], env)
+		if err := uncreatedComponentError("connect", args, env); err != nil {
+			return err
+		}
+		a, aSys, okA := resolvePortEndpoint(args[0], env)
+		b, bSys, okB := resolvePortEndpoint(args[1], env)
 		if okA && okB {
+			if err := connectError(exec, a, b, aSys, bSys); err != nil {
+				return err
+			}
 			exec.ConnectPorts(a, b)
 			tlPortConfig(exec, n, "tliPConnect", a, b)
 		}
@@ -219,28 +227,37 @@ func evalConnectOp(op string, n *syntax.CallExpr, env runtime.Scope) runtime.Obj
 // endpoints (not the `system` side) are recorded, so a subsequent
 // `p.checkstate("Mapped")` on that component answers true. It reports
 // whether the call looked like the port form (so the caller can avoid
-// the data-structure `unmap(M, k)` interpretation).
-func recordPortMapState(op string, n *syntax.CallExpr, env runtime.Scope) bool {
+// the data-structure `unmap(M, k)` interpretation), and the error of a
+// map the configuration rules forbid.
+func recordPortMapState(op string, n *syntax.CallExpr, env runtime.Scope) (bool, runtime.Object) {
 	exec := runtime.FindTestcaseExec(env)
 	if exec == nil || n.Args == nil || len(n.Args.List) == 0 {
-		return false
+		return false, nil
 	}
 	if !isPortMapForm(n.Args.List[0]) {
-		return false
+		return false, nil
 	}
 	args := n.Args.List
-	a, _, okA := resolvePortEndpoint(args[0], env)
+	if op == "map" {
+		if err := uncreatedComponentError("map", args, env); err != nil {
+			return true, err
+		}
+	}
+	a, aSys, okA := resolvePortEndpoint(args[0], env)
 	if !okA {
-		return false
+		return false, nil
 	}
 	if op == "map" {
 		if len(args) >= 2 {
-			if b, _, okB := resolvePortEndpoint(args[1], env); okB {
+			if b, bSys, okB := resolvePortEndpoint(args[1], env); okB {
+				if err := mapError(exec, a, b, aSys, bSys); err != nil {
+					return true, err
+				}
 				exec.MapPorts(a, b)
 				tlPortConfig(exec, n, "tliPMap", a, b)
 			}
 		}
-		return true
+		return true, nil
 	}
 	// unmap: two-argument form removes the specific edge; the
 	// one-argument form (`unmap(system:p)` / `unmap(self:p)`) removes
@@ -258,7 +275,132 @@ func recordPortMapState(op string, n *syntax.CallExpr, env runtime.Scope) bool {
 	} else {
 		exec.UnmapAll(a)
 	}
-	return true
+	return true, nil
+}
+
+// uncreatedComponentError is the error of op on a port of a component
+// that is not created: its reference null or uninitialised (ETSI 21.1.1),
+// or nil.
+func uncreatedComponentError(op string, args []syntax.Expr, env runtime.Scope) runtime.Object {
+	for _, a := range args {
+		be, ok := a.(*syntax.BinaryExpr)
+		if !ok || be.X == nil {
+			continue
+		}
+		switch x := be.X.(type) {
+		case *syntax.Ident:
+			switch x.String() {
+			case "self", "system", "mtc", "all component", "all":
+				continue
+			}
+		case *syntax.SelectorExpr, *syntax.IndexExpr:
+		default:
+			// A function instance (ObjectReference) is not evaluated
+			// twice.
+			continue
+		}
+		v := eval(be.X, env)
+		if v == runtime.Null || v == runtime.Undefined {
+			return runtime.Errorf("%s of a port of %s, which refers to no component created (ETSI 21.1.1)", op, syntax.Name(be.X))
+		}
+		if ref, ok := v.(*runtime.ComponentRef); ok && componentEnded(ref) {
+			return runtime.Errorf("%s of a port of %s, a component that has ended (ETSI 21.1.1, 21.3.3, 21.3.4)", op, syntax.Name(be.X))
+		}
+	}
+	return nil
+}
+
+// componentEnded reports whether ref is a component that is no more:
+// killed, or one not alive-type whose behaviour is done (ETSI 21.3.3,
+// 21.3.4). Its connections are released.
+func componentEnded(ref *runtime.ComponentRef) bool {
+	if ref == nil || ref.ID == mtcEndpointID || ref.ID == systemEndpointID {
+		return false
+	}
+	return !ref.IsAlive() || ref.IsDone() && !ref.AliveModifier
+}
+
+// livePeers returns what endpoint e is connected to (map false) or mapped
+// to (map true), but the ports of components that have ended.
+func livePeers(exec *runtime.TestcaseExec, e runtime.PortEndpoint, mapped bool) []runtime.PortEndpoint {
+	peers := exec.ConnectedPeers(e)
+	if mapped {
+		peers = exec.MappedPeers(e)
+	}
+	ended := map[int64]bool{}
+	for _, ref := range exec.AllComponents() {
+		if componentEnded(ref) {
+			ended[ref.ID] = true
+		}
+	}
+	if len(ended) == 0 {
+		return peers
+	}
+	out := peers[:0:0]
+	for _, p := range peers {
+		if !ended[p.Comp] {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// connectError is the error of connecting a and b that clauses 9.1 a and
+// 21.1.1 b forbid, or nil. Connecting ports already connected to each
+// other does nothing (figure F.6).
+func connectError(exec *runtime.TestcaseExec, a, b runtime.PortEndpoint, aSys, bSys bool) runtime.Object {
+	if aSys || bSys {
+		return runtime.Errorf("connect of a port of the test system interface; it is mapped (ETSI 21.1.1 b, 9.1 a)")
+	}
+	for _, p := range livePeers(exec, a, false) {
+		if p == b {
+			return nil
+		}
+	}
+	for _, e := range []runtime.PortEndpoint{a, b} {
+		if len(livePeers(exec, e, true)) > 0 {
+			return runtime.Errorf("connect of port %s, which is mapped (ETSI 9.1 a)", e.Port)
+		}
+	}
+	for _, pair := range [][2]runtime.PortEndpoint{{a, b}, {b, a}} {
+		for _, p := range livePeers(exec, pair[0], false) {
+			if p.Comp == pair[1].Comp && p != pair[1] {
+				return runtime.Errorf("connect of port %s to a second port of one component, %s and %s (ETSI 9.1 a)", pair[0].Port, p.Port, pair[1].Port)
+			}
+		}
+	}
+	return nil
+}
+
+// mapError is the error of mapping a and b that clauses 9.1 a and 21.1.1
+// c forbid, or nil: one of them is a port of the test system interface,
+// the other a component's. Mapping ports already mapped to each other
+// does nothing (figure F.6).
+func mapError(exec *runtime.TestcaseExec, a, b runtime.PortEndpoint, aSys, bSys bool) runtime.Object {
+	if aSys == bSys {
+		return runtime.Errorf("map of two ports of which one is to be of the test system interface (ETSI 21.1.1 c)")
+	}
+	c, s := a, b
+	if aSys {
+		c, s = b, a
+	}
+	if peers := livePeers(exec, c, true); len(peers) > 0 {
+		for _, p := range peers {
+			if p == s {
+				return nil
+			}
+		}
+		return runtime.Errorf("map of port %s, which is mapped already (ETSI 9.1 a)", c.Port)
+	}
+	if len(livePeers(exec, c, false)) > 0 {
+		return runtime.Errorf("map of port %s, which is connected (ETSI 9.1 a)", c.Port)
+	}
+	for _, p := range livePeers(exec, s, true) {
+		if p.Comp == c.Comp {
+			return runtime.Errorf("map of system port %s to a second port of one component, %s and %s (ETSI 9.1 a)", s.Port, p.Port, c.Port)
+		}
+	}
+	return nil
 }
 
 // isAllPortRef reports whether a port name denotes the `all port`
