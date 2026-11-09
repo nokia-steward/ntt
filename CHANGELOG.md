@@ -376,7 +376,9 @@ single functional test doubles as a performance probe. See
   timer operation on a component, any of them on a value (`v_i.clear`),
   and a test component operation on a template (`vt_ptc.start(f())`).
   The object is resolved by ntt's own lookup; one it cannot resolve, and
-  a field named like an operation (`r.done`), are let be.
+  a field named like an operation (`r.done`), are let be. An element of
+  a list of components, ports or timers is of their kind; a union with a
+  default alternative, anytype and the members of classes are let be.
 - **Predefined functions and the timer start raise the errors the
   standard gives them**: float2int of infinity, -infinity or
   not_a_number (C.1.9), and it truncates any finite float exactly, where

@@ -90,14 +90,15 @@ func (a *Analyzer) checkObjectKinds(tree *ttcn3.Tree, mod *syntax.Module) []Diag
 			return true
 		}
 		x := sel.X
+		indexed := false
 		if ix, ok := x.(*syntax.IndexExpr); ok {
-			x = ix.X // an element of an array is of its kind
+			x, indexed = ix.X, true // an element of an array is of its kind
 		}
 		id, ok := x.(*syntax.Ident)
-		if !ok {
+		if !ok || inClass(tree, sel) {
 			return true
 		}
-		kind, template, fields := referenceKind(tree, db, id)
+		kind, template, fields := referenceKind(tree, db, id, indexed)
 		if kind == kindUnknown || fields[op] {
 			return true
 		}
@@ -132,23 +133,29 @@ func (a *Analyzer) checkObjectKinds(tree *ttcn3.Tree, mod *syntax.Module) []Diag
 // template, and, of a value of a record, set or union type, the names of
 // its fields (`v.done` may read one). kindUnknown when id resolves to no
 // declaration, or to one of a type not known.
-func referenceKind(tree *ttcn3.Tree, db *ttcn3.DB, id *syntax.Ident) (objectKind, bool, map[string]bool) {
+func referenceKind(tree *ttcn3.Tree, db *ttcn3.DB, id *syntax.Ident, indexed bool) (objectKind, bool, map[string]bool) {
 	defs := tree.LookupWithDB(id, db)
 	if len(defs) != 1 {
 		return kindUnknown, false, nil
 	}
 	def := defs[0]
+	// A class's members are in sight of the module scope's lookup, the
+	// component a class runs on is not followed: a member found may not
+	// be what id refers to.
+	if inClass(def.Tree, def.Node) {
+		return kindUnknown, false, nil
+	}
 	var typ syntax.Expr
-	template := false
+	var template bool
 	switch d := def.Node.(type) {
 	case *syntax.Declarator:
 		vd, ok := def.ParentOf(d).(*syntax.ValueDecl)
 		if !ok {
 			return kindUnknown, false, nil
 		}
-		return valueDeclKind(def.Tree, db, vd)
+		return valueDeclKind(def.Tree, db, vd, indexed)
 	case *syntax.ValueDecl:
-		return valueDeclKind(def.Tree, db, d)
+		return valueDeclKind(def.Tree, db, d, indexed)
 	case *syntax.FormalPar:
 		typ, template = d.Type, d.TemplateRestriction != nil
 	case *syntax.TemplateDecl:
@@ -156,11 +163,21 @@ func referenceKind(tree *ttcn3.Tree, db *ttcn3.DB, id *syntax.Ident) (objectKind
 	default:
 		return kindUnknown, false, nil
 	}
-	k, fields := objectTypeKind(def.Tree, db, typ)
+	k, fields := objectTypeKind(def.Tree, db, typ, indexed)
 	return k, template, fields
 }
 
-func valueDeclKind(tree *ttcn3.Tree, db *ttcn3.DB, vd *syntax.ValueDecl) (objectKind, bool, map[string]bool) {
+// inClass reports whether n is inside a class type definition.
+func inClass(tree *ttcn3.Tree, n syntax.Node) bool {
+	for p := tree.ParentOf(n); p != nil; p = tree.ParentOf(p) {
+		if _, ok := p.(*syntax.ClassTypeDecl); ok {
+			return true
+		}
+	}
+	return false
+}
+
+func valueDeclKind(tree *ttcn3.Tree, db *ttcn3.DB, vd *syntax.ValueDecl, indexed bool) (objectKind, bool, map[string]bool) {
 	if vd.KindTok != nil {
 		switch vd.KindTok.Kind() {
 		case syntax.TIMER:
@@ -169,13 +186,18 @@ func valueDeclKind(tree *ttcn3.Tree, db *ttcn3.DB, vd *syntax.ValueDecl) (object
 			return kindPort, false, nil
 		}
 	}
-	k, fields := objectTypeKind(tree, db, vd.Type)
+	k, fields := objectTypeKind(tree, db, vd.Type, indexed)
 	return k, vd.TemplateRestriction != nil, fields
 }
 
-// objectTypeKind is the kind of the values of the type t, and the field names
-// of a record, set or union type.
-func objectTypeKind(tree *ttcn3.Tree, db *ttcn3.DB, t syntax.Expr) (objectKind, map[string]bool) {
+// objectTypeKind is the kind of the values of the type t, or of their
+// elements when indexed, and the field names of a record, set or union
+// type. A union with a default alternative, and anytype, are of a kind
+// not known: their fields are also those of their alternatives.
+func objectTypeKind(tree *ttcn3.Tree, db *ttcn3.DB, t syntax.Node, indexed bool) (objectKind, map[string]bool) {
+	if r, ok := t.(*syntax.RefSpec); ok {
+		t = r.X
+	}
 	if t == nil {
 		return kindUnknown, nil
 	}
@@ -183,15 +205,31 @@ func objectTypeKind(tree *ttcn3.Tree, db *ttcn3.DB, t syntax.Expr) (objectKind, 
 		switch name := id.String(); {
 		case name == "timer":
 			return kindTimer, nil
+		case name == "anytype":
+			return kindUnknown, nil
 		case basicTypes[name]:
 			return kindData, nil
 		}
 	}
-	switch t.(type) {
-	case *syntax.ListSpec, *syntax.StructSpec, *syntax.EnumSpec:
+	switch x := t.(type) {
+	case *syntax.ListSpec:
+		if indexed {
+			return objectTypeKind(tree, db, x.ElemType, false)
+		}
+		return kindData, nil
+	case *syntax.StructSpec:
+		return structObjectKind(x.Fields)
+	case *syntax.EnumSpec:
 		return kindData, nil
 	}
-	defs := tree.LookupWithDB(t, db)
+	if indexed {
+		return kindUnknown, nil
+	}
+	e, ok := t.(syntax.Expr)
+	if !ok {
+		return kindUnknown, nil
+	}
+	defs := tree.LookupWithDB(e, db)
 	if len(defs) != 1 {
 		return kindUnknown, nil
 	}
@@ -203,13 +241,23 @@ func objectTypeKind(tree *ttcn3.Tree, db *ttcn3.DB, t syntax.Expr) (objectKind, 
 	case *syntax.EnumTypeDecl:
 		return kindData, nil
 	case *syntax.StructTypeDecl:
-		fields := map[string]bool{}
-		for _, f := range d.Fields {
-			if f != nil && f.Name != nil {
-				fields[f.Name.String()] = true
-			}
-		}
-		return kindData, fields
+		return structObjectKind(d.Fields)
 	}
 	return kindUnknown, nil
+}
+
+// structObjectKind is the kind of a record, set or union of the fields, with
+// their names; of a union with a default alternative, a kind not known.
+func structObjectKind(fields []*syntax.Field) (objectKind, map[string]bool) {
+	names := map[string]bool{}
+	for _, f := range fields {
+		if f == nil {
+			continue
+		}
+		if f.DefaultTok != nil || f.Name == nil {
+			return kindUnknown, nil
+		}
+		names[f.Name.String()] = true
+	}
+	return kindData, names
 }

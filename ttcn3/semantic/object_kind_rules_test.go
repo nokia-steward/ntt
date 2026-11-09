@@ -10,6 +10,7 @@ const objectKindDecls = `
 	type port P message { inout integer }
 	type component C { port P p; timer t := 1.0 }
 	type record R { integer done, integer start }
+	type union U { @default C comp, integer id }
 	function f() runs on C {}
 `
 
@@ -44,13 +45,19 @@ func TestObjectKinds(t *testing.T) {
 // is let be.
 func TestObjectKindsAllowed(t *testing.T) {
 	tree := parse(t, `module M {`+objectKindDecls+`
-		function h(C pc, timer pt) runs on C { pc.kill; pt.start(1.0); pt.timeout }
+		function h(C pc, timer pt, record of C pcs) runs on C { pc.kill; pt.start(1.0); pt.timeout; pcs[0].kill }
+		type class K runs on C { function m() { p.send(1); t.start(1.0) } }
+		type class K2 { var integer p; var integer t }
 		testcase tc() runs on C {
 			var C c := C.create;
 			c.start(f()); c.done; c.kill; if (c.alive or c.running) {}
 			p.send(1); p.clear; p.halt; p.start; p.stop;
 			t.start; t.timeout; if (t.running) {} var float x := t.read;
 			var R r := {1, 2}; var integer d := r.done + r.start;
+			var record of C cs := {C.create}; cs[0].start(f()); cs[0].done;
+			var U u := c; u.done;
+			var record { boolean checkstate } w := {true}; if (w.checkstate) {}
+			var anytype a; a.integer := 1;
 			unknown.send(1);
 			all component.done; any port.receive;
 		}
