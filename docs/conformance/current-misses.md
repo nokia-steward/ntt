@@ -2,13 +2,13 @@
 
 Generated from `etsi.json` using the current workspace runner.
 
-- Summary: `ran 5164 files: 5007 matched, 21 skipped (97.36% match rate)`
-- Misses: `157`
+- Summary: `ran 5164 files: 5017 matched, 21 skipped (97.55% match rate)`
+- Misses: `147`
 
 ## Misses By Outcome
 
-- `reject->pass`: `60`
-- `reject->none`: `27`
+- `reject->pass`: `53`
+- `reject->none`: `24`
 - `->`: `21`
 - `pass->error`: `13`
 - `pass->fail`: `13`
@@ -20,16 +20,16 @@ Generated from `etsi.json` using the current workspace runner.
 ## Misses By Chapter
 
 - `core_language/06_types_and_values`: `55` (`->`=8, `pass->error`=7, `pass->fail`=4, `pass->none`=1, `pass->parse-error`=6, `pass->semantic-error`=2, `reject->none`=13, `reject->pass`=14)
-- `core_language/22_communication_operations`: `20` (`reject->none`=1, `reject->pass`=19)
 - `core_language/15_templates`: `17` (`->`=2, `pass->error`=2, `pass->fail`=4, `reject->none`=3, `reject->pass`=6)
 - `core_language/05_basic_language_elements`: `16` (`->`=2, `pass->parse-error`=2, `reject->none`=1, `reject->pass`=11)
+- `core_language/22_communication_operations`: `16` (`reject->none`=1, `reject->pass`=15)
 - `core_language/B_matching_incoming_values`: `10` (`pass->error`=2, `pass->fail`=5, `reject->none`=2, `reject->pass`=1)
 - `core_language/16_functions_altsteps_testcases`: `9` (`->`=1, `error->parse-error`=1, `pass->parse-error`=2, `pass->semantic-error`=1, `reject->none`=1, `reject->pass`=3)
-- `core_language/09_test_configurations`: `8` (`pass->error`=1, `reject->none`=4, `reject->pass`=3)
 - `core_language/07_expressions`: `6` (`pass->semantic-error`=4, `reject->pass`=2)
 - `core_language/26_module_control`: `3` (`->`=3)
 - `oo/501_classes_and_objects`: `3` (`pass->parse-error`=2, `reject->pass`=1)
 - `core_language/08_modules`: `2` (`->`=2)
+- `core_language/09_test_configurations`: `2` (`pass->error`=1, `reject->none`=1)
 - `core_language/11_variables`: `2` (`->`=2)
 - `core_language/27_specifying_attributes`: `2` (`->`=1, `reject->none`=1)
 - `core_language/10_constants`: `1` (`pass->parse-error`=1)
@@ -63,29 +63,6 @@ Generated from `etsi.json` using the current workspace runner.
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_002.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_003.ttcn`: `reject -> pass`
 - ... `35` more in `current-misses.json`
-
-### `core_language/22_communication_operations`
-
-- `core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/NegSem_220201_SendOperation_005.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/NegSem_220201_SendOperation_011.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2202_message_based_communication/220202_receive_operation/NegSem_220202_ReceiveOperation_006.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2202_message_based_communication/220202_receive_operation/NegSem_220202_ReceiveOperation_023.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2202_message_based_communication/220203_trigger_operation/NegSem_220203_TriggerOperation_006.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2202_message_based_communication/220203_trigger_operation/NegSem_220203_TriggerOperation_023.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_012.ttcn`: `reject -> pass` - Both replies received
-- `core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_020.ttcn`: `reject -> none`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_012.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_017.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220303_reply_operation/NegSem_220303_ReplyOperation_008.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220303_reply_operation/NegSem_220303_ReplyOperation_010.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_009.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_014.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_016.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_020.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/NegSem_220305_raise_operation_004.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/NegSem_220305_raise_operation_009.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2203_procedure_based_communication/220306_catch_operation/NegSem_220306_catch_operation_014.ttcn`: `reject -> pass`
-- `core_language/22_communication_operations/2204_the_check_operation/NegSem_2204_the_check_operation_005.ttcn`: `reject -> pass`
 
 ### `core_language/15_templates`
 
@@ -127,6 +104,25 @@ Generated from `etsi.json` using the current workspace runner.
 - `core_language/05_basic_language_elements/0504_parametrization/0504_toplevel/NegSyn_0504_forbidden_parametrization_001.ttcn`: `reject -> none`
 - `core_language/05_basic_language_elements/0505_cyclic_definitions/NegSem_0505_cyclic_definitions_001.ttcn`: ` -> `
 - `core_language/05_basic_language_elements/05_toplevel/NegSyn_05_TopLevel_001.ttcn`: ` -> `
+
+### `core_language/22_communication_operations`
+
+- `core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/NegSem_220201_SendOperation_011.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2202_message_based_communication/220202_receive_operation/NegSem_220202_ReceiveOperation_006.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2202_message_based_communication/220202_receive_operation/NegSem_220202_ReceiveOperation_023.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2202_message_based_communication/220203_trigger_operation/NegSem_220203_TriggerOperation_006.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2202_message_based_communication/220203_trigger_operation/NegSem_220203_TriggerOperation_023.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_020.ttcn`: `reject -> none`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_012.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_017.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220303_reply_operation/NegSem_220303_ReplyOperation_010.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_009.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_014.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_016.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_020.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/NegSem_220305_raise_operation_009.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2203_procedure_based_communication/220306_catch_operation/NegSem_220306_catch_operation_014.ttcn`: `reject -> pass`
+- `core_language/22_communication_operations/2204_the_check_operation/NegSem_2204_the_check_operation_005.ttcn`: `reject -> pass`
 
 ### `core_language/B_matching_incoming_values`
 

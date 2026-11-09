@@ -1,10 +1,10 @@
 {
- "summary": "ran 5164 files: 5007 matched, 21 skipped (97.36% match rate)",
+ "summary": "ran 5164 files: 5017 matched, 21 skipped (97.55% match rate)",
  "source": "etsi.json",
- "miss_count": 157,
+ "miss_count": 147,
  "outcomes": {
-  "reject->pass": 60,
-  "reject->none": 27,
+  "reject->pass": 53,
+  "reject->none": 24,
   "->": 21,
   "pass->error": 13,
   "pass->fail": 13,
@@ -29,14 +29,6 @@
    }
   },
   {
-   "chapter": "core_language/22_communication_operations",
-   "misses": 20,
-   "outcomes": {
-    "reject->pass": 19,
-    "reject->none": 1
-   }
-  },
-  {
    "chapter": "core_language/15_templates",
    "misses": 17,
    "outcomes": {
@@ -55,6 +47,14 @@
     "pass->parse-error": 2,
     "reject->none": 1,
     "->": 2
+   }
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "misses": 16,
+   "outcomes": {
+    "reject->pass": 15,
+    "reject->none": 1
    }
   },
   {
@@ -77,15 +77,6 @@
     "pass->parse-error": 2,
     "->": 1,
     "pass->semantic-error": 1
-   }
-  },
-  {
-   "chapter": "core_language/09_test_configurations",
-   "misses": 8,
-   "outcomes": {
-    "reject->none": 4,
-    "reject->pass": 3,
-    "pass->error": 1
    }
   },
   {
@@ -116,6 +107,14 @@
    "misses": 2,
    "outcomes": {
     "->": 2
+   }
+  },
+  {
+   "chapter": "core_language/09_test_configurations",
+   "misses": 2,
+   "outcomes": {
+    "reject->none": 1,
+    "pass->error": 1
    }
   },
   {
@@ -800,47 +799,7 @@
    "expected": "reject",
    "actual": "none",
    "outcome": "reject->none",
-   "relpath": "core_language/09_test_configurations/0901_communication_ports/NegSem_0901_Communication_ports_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/09_test_configurations",
-   "expected": "reject",
-   "actual": "none",
-   "outcome": "reject->none",
    "relpath": "core_language/09_test_configurations/0901_communication_ports/NegSem_0901_Communication_ports_002.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/09_test_configurations",
-   "expected": "reject",
-   "actual": "none",
-   "outcome": "reject->none",
-   "relpath": "core_language/09_test_configurations/0901_communication_ports/NegSem_0901_Communication_ports_003.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/09_test_configurations",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/09_test_configurations/0901_communication_ports/NegSem_0901_Communication_ports_005.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/09_test_configurations",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/09_test_configurations/0901_communication_ports/NegSem_0901_Communication_ports_006.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/09_test_configurations",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/09_test_configurations/0901_communication_ports/NegSem_0901_Communication_ports_007.ttcn",
    "message": ""
   },
   {
@@ -850,14 +809,6 @@
    "outcome": "pass->error",
    "relpath": "core_language/09_test_configurations/0901_communication_ports/Sem_0901_Communication_ports_004.ttcn",
    "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/09_test_configurations",
-   "expected": "reject",
-   "actual": "none",
-   "outcome": "reject->none",
-   "relpath": "core_language/09_test_configurations/0902_test_system_interface/NegSem_0902_Communication_ports_001.ttcn",
-   "message": ""
   },
   {
    "chapter": "core_language/10_constants",
@@ -1104,14 +1055,6 @@
    "expected": "reject",
    "actual": "pass",
    "outcome": "reject->pass",
-   "relpath": "core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/NegSem_220201_SendOperation_005.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
    "relpath": "core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/NegSem_220201_SendOperation_011.ttcn",
    "message": ""
   },
@@ -1150,14 +1093,6 @@
   {
    "chapter": "core_language/22_communication_operations",
    "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_012.ttcn",
-   "message": "Both replies received"
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "reject",
    "actual": "none",
    "outcome": "reject->none",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220301_call_operation/NegSem_220301_CallOperation_020.ttcn",
@@ -1177,14 +1112,6 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_017.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220303_reply_operation/NegSem_220303_ReplyOperation_008.ttcn",
    "message": ""
   },
   {
@@ -1225,14 +1152,6 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_020.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220305_raise_operation/NegSem_220305_raise_operation_004.ttcn",
    "message": ""
   },
   {
