@@ -1,9 +1,9 @@
 {
- "summary": "ran 5164 files: 5020 matched, 18 skipped (97.55% match rate)",
+ "summary": "ran 5164 files: 5021 matched, 18 skipped (97.57% match rate)",
  "source": "etsi.json",
- "miss_count": 144,
+ "miss_count": 143,
  "outcomes": {
-  "reject->pass": 53,
+  "reject->pass": 52,
   "reject->none": 24,
   "->": 18,
   "pass->error": 13,
@@ -69,10 +69,10 @@
   },
   {
    "chapter": "core_language/16_functions_altsteps_testcases",
-   "misses": 9,
+   "misses": 8,
    "outcomes": {
     "reject->none": 1,
-    "reject->pass": 3,
+    "reject->pass": 2,
     "error->parse-error": 1,
     "pass->parse-error": 2,
     "->": 1,
@@ -953,14 +953,6 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/NegSem_160102_predefined_functions_039.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/16_functions_altsteps_testcases",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160105_explicit_control_functions/NegSem_160105_explicit_control_functions_009.ttcn",
    "message": ""
   },
   {
