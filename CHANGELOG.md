@@ -362,6 +362,22 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **Using an uninitialised value where a value is needed is an error**,
+  where it went on with no value: an operand of an operator, unary ones
+  included, or an omitted field anywhere but in a comparison; a variable
+  as a condition (11.1 d); an operand of a binary operator, which is
+  completely initialised (7.1.0 a, 7.1.3: every field of a record or set,
+  the alternative of a union, every element; an omitted optional field,
+  and one implicit omit leaves out, are initialised), but a list
+  concatenation's, which need only be partially (7.1.2 a); the
+  right-hand side of an assignment or an initialisation, a function's
+  result too (19.1.1 c, 11.1 i, 10 d, 16.1.1 g); a field of an omitted
+  or uninitialised field of a value (6.2.1.1). A function with a return
+  clause that ends without a return statement is an error (16.1.0).
+  Passing, returning and calling as a statement stay allowed, and a
+  function waiting when its component is stopped does not end without a
+  return. A record of a compatible type assigned in a declaration takes
+  the declared type's field names (6.3.2.2), as an assignment's did.
 - **Assigning a field of a template field holding `?`, `*` or omit
   expands it** (15.6.2, 15.6.5): `?` for each mandatory field, `*` for
   each optional one, down to the field assigned; a union's alternative

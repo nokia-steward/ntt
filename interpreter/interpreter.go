@@ -466,6 +466,11 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			if runtime.IsError(val) {
 				return val
 			}
+			if _, lazy := lazyDecls.Load(n); !lazy {
+				if err := unboundRHSError(n.Value, val, env); err != nil {
+					return err
+				}
+			}
 			// An indexed initialiser `{[0] := a, [1] := b}` parses
 			// into a Map. For typed record-of / set-of variables we
 			// want a List so later positional comparisons and
@@ -698,6 +703,13 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		}
 
 		left := eval(n.X, env)
+		// An attribute (`v.f.encode`) is its type's: a field not there
+		// to read does not keep it from being retrieved (27.8).
+		if runtime.IsError(left) && isAnnexEAttr(syntax.Name(n.Sel)) {
+			if _, ok := n.X.(*syntax.SelectorExpr); ok {
+				left = runtime.Undefined
+			}
+		}
 		if runtime.IsError(left) {
 			// `ModuleName.def` qualified reference (ETSI 8.2.3.1):
 			// a definition may be prefixed with the name of the
@@ -792,6 +804,15 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		if !isAnnexEAttr(syntax.Name(n.Sel)) {
 			if err := templateFieldReadError(left, n.X, env); err != nil {
 				return err
+			}
+			// A field of an omitted or uninitialised field of a value
+			// is an error on the right-hand side (6.2.1.1).
+			if (left == runtime.Omit || left == runtime.Undefined) && structDeclOf(lvalueTypeDesc(n.X, env)) != nil {
+				what := "uninitialised"
+				if left == runtime.Omit {
+					what = "omitted"
+				}
+				return runtime.Errorf("referencing field %s of %s, which is %s (ETSI 6.2.1.1)", syntax.Name(n.Sel), syntax.Name(n.X), what)
 			}
 		}
 
@@ -2631,6 +2652,13 @@ func evalUnary(n *syntax.UnaryExpr, env runtime.Scope) runtime.Object {
 		return val
 	}
 	if val == runtime.Undefined {
+		// The operand of + - not not4b is a value (ETSI 7.1.0 a).
+		switch n.Op.Kind() {
+		case syntax.ADD, syntax.SUB, syntax.NOT, syntax.NOT4B:
+			if isValueReference(n.X) {
+				return runtime.Errorf("operand %s of %s is uninitialised (ETSI 7.1.0 a)", syntax.Name(n.X), n.Op.Kind())
+			}
+		}
 		return runtime.Undefined
 	}
 
@@ -2908,10 +2936,20 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 		y = runtime.Undefined
 	}
 
-	// Either operand being Undefined (the phantom value for
-	// unmodelled types) or Omit (an absent optional field) is treated
-	// as "the result is also unmodelled" rather than an error - same
-	// pattern as the selector path.
+	// The operands of an operator are completely initialised values
+	// (ETSI 7.1.0 a, 7.1.3); a list concatenation's at least partially
+	// (7.1.2 a).
+	if isValueOperator(op) {
+		if err := operandInitError(op, x, n.X, env); err != nil {
+			return err
+		}
+		if err := operandInitError(op, y, n.Y, env); err != nil {
+			return err
+		}
+	}
+
+	// Either operand being Omit (an absent optional field) is compared
+	// as absent, and otherwise gives nothing.
 	if x == runtime.Undefined || y == runtime.Undefined || x == runtime.Omit || y == runtime.Omit {
 		// Equality between an uninitialised value and the `null`
 		// reference is undefined behaviour in TTCN-3 (7.1.3:
@@ -3672,6 +3710,182 @@ func evalRotate(x runtime.Object, n runtime.Int, op syntax.Kind) (runtime.Object
 		return out, true
 	}
 	return nil, false
+}
+
+// hasAnyField reports whether r holds a field named as one of st's.
+func hasAnyField(r *runtime.Record, st *syntax.StructTypeDecl) bool {
+	for _, f := range st.Fields {
+		if f != nil {
+			if _, ok := r.Fields[fieldName(f)]; ok {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// lazyDecls holds the declarators of @lazy and @fuzzy variables, whose
+// initialiser is evaluated at first use (11.1), not checked when declared.
+var lazyDecls sync.Map // map[*syntax.Declarator]bool
+
+// unboundRHSError is the error of an assignment or initialisation whose
+// right-hand side rhs evaluated to v, a completely uninitialised value
+// (ETSI ES 201 873-1 19.1.1 c, 11.1 i, 10 d, 16.1.1 g), or nil. A
+// reference and a call of a function with a body are looked at: an
+// expression the interpreter does not model may give no value.
+func unboundRHSError(rhs syntax.Expr, v runtime.Object, env runtime.Scope) runtime.Object {
+	if v != runtime.Undefined {
+		return nil
+	}
+	switch x := rhs.(type) {
+	case *syntax.SelectorExpr:
+		// An attribute retrieved (27.8) is no value of the variable.
+		if isAnnexEAttr(syntax.Name(x.Sel)) {
+			return nil
+		}
+	case *syntax.Ident, *syntax.IndexExpr:
+	case *syntax.CallExpr:
+		// A function named, or module-qualified: evaluating the name
+		// again has no effect.
+		switch f := x.Fun.(type) {
+		case *syntax.Ident:
+		case *syntax.SelectorExpr:
+			if _, ok := f.X.(*syntax.Ident); !ok {
+				return nil
+			}
+		default:
+			return nil
+		}
+		fn, ok := eval(x.Fun, env).(*runtime.Function)
+		if !ok || fn.IsExternal || fn.Body == nil {
+			return nil
+		}
+	default:
+		return nil
+	}
+	return runtime.Errorf("the right-hand side %s is uninitialised (ETSI 19.1.1 c)", syntax.Name(rhs))
+}
+
+// isValueReference reports whether e is a reference to a variable, a field
+// or an element: what the interpreter gives no value only when it is
+// uninitialised, unlike an expression it does not model. An attribute
+// (27.8) is none.
+func isValueReference(e syntax.Expr) bool {
+	switch x := e.(type) {
+	case *syntax.Ident, *syntax.IndexExpr:
+		return true
+	case *syntax.SelectorExpr:
+		return !isAnnexEAttr(syntax.Name(x.Sel))
+	case *syntax.ParenExpr:
+		return len(x.List) == 1 && isValueReference(x.List[0])
+	}
+	return false
+}
+
+// isValueOperator reports whether op is an operator of table 5 whose
+// operands are values (ETSI 7.1.0): arithmetic, list, relational, logical,
+// bitwise, shift and rotate.
+func isValueOperator(op syntax.Kind) bool {
+	switch op {
+	case syntax.ADD, syntax.SUB, syntax.MUL, syntax.DIV, syntax.MOD, syntax.REM,
+		syntax.CONCAT,
+		syntax.EQ, syntax.NE, syntax.LT, syntax.LE, syntax.GT, syntax.GE,
+		syntax.AND, syntax.OR, syntax.XOR,
+		syntax.AND4B, syntax.OR4B, syntax.XOR4B,
+		syntax.SHL, syntax.SHR, syntax.ROL, syntax.ROR:
+		return true
+	}
+	return false
+}
+
+// operandInitError is the error of v, the value of operand e of op, when it
+// is not initialised as op requires (ETSI 7.1.0 a, 7.1.2 a, 7.1.3), or nil:
+// an operand is completely initialised, a list concatenation's at least
+// partially. An omitted optional field is initialised.
+func operandInitError(op syntax.Kind, v runtime.Object, e syntax.Expr, env runtime.Scope) runtime.Object {
+	compare := op == syntax.EQ || op == syntax.NE
+	// A field reference compared is equal to another omitted (7.1.3); an
+	// optional field implicit omit left out of the value reads as one.
+	if compare && v == runtime.Undefined {
+		if sel, ok := e.(*syntax.SelectorExpr); ok && isOptionalStructField(lvalueTypeDesc(sel.X, env), syntax.Name(sel.Sel)) {
+			return nil
+		}
+	}
+	if v == runtime.Undefined {
+		return runtime.Errorf("operand %s of %s is uninitialised (ETSI 7.1.0 a)", syntax.Name(e), op)
+	}
+	// An omitted field is an operand only of a comparison.
+	if v == runtime.Omit && !compare {
+		return runtime.Errorf("operand %s of %s is omitted (ETSI 7.1.0 a)", syntax.Name(e), op)
+	}
+	if op == syntax.CONCAT {
+		return nil
+	}
+	if !completelyInitialised(v, lvalueTypeDesc(e, env), env) {
+		return runtime.Errorf("operand %s of %s is not completely initialised (ETSI 7.1.0 a, 7.1.3)", syntax.Name(e), op)
+	}
+	return nil
+}
+
+// completelyInitialised reports whether no field or element of v, of the
+// type td, is uninitialised at any depth (ETSI 3.1): every field of a
+// record or set, the alternative a union holds, every element of a list.
+// Of a type not known, the fields and elements v holds are looked at.
+func completelyInitialised(v runtime.Object, td *runtime.TypeDesc, env runtime.Scope) bool {
+	switch x := v.(type) {
+	case *runtime.Record:
+		st := structDeclOf(td)
+		if st == nil || st.KindTok == nil {
+			for _, f := range x.Fields {
+				if !completelyInitialised(f, nil, env) {
+					return false
+				}
+			}
+			return true
+		}
+		if st.KindTok.Kind() == syntax.UNION {
+			for _, f := range st.Fields {
+				if f == nil {
+					continue
+				}
+				if fv, ok := x.Fields[fieldName(f)]; ok {
+					return completelyInitialised(fv, fieldTypeDesc(f, env), env)
+				}
+			}
+			return len(x.Fields) > 0
+		}
+		// A value of a compatible type keeps its own field names
+		// (6.3.2.2): its fields are then taken by position.
+		positional := len(x.Order) == len(st.Fields) && !hasAnyField(x, st)
+		// An optional field not in the value is taken as omitted:
+		// implicit omit, of the type or of where the value is declared
+		// (27.7), leaves it out, and equality reads it as omit.
+		for i, f := range st.Fields {
+			if f == nil {
+				continue
+			}
+			fv, ok := x.Fields[fieldName(f)]
+			if positional {
+				fv, ok = x.Fields[x.Order[i]]
+			}
+			if !ok && f.Optional != nil {
+				continue
+			}
+			if !ok || !completelyInitialised(fv, fieldTypeDesc(f, env), env) {
+				return false
+			}
+		}
+		return true
+	case *runtime.List:
+		et := elemTypeDesc(td, env)
+		for _, e := range x.Elements {
+			if !completelyInitialised(e, et, env) {
+				return false
+			}
+		}
+		return true
+	}
+	return v != runtime.Undefined
 }
 
 // evalBinaryStringShift handles `bitstring << integer` / `bitstring >> integer`
@@ -4816,6 +5030,10 @@ func evalBoolExpr(n syntax.Expr, env runtime.Scope) (bool, runtime.Object) {
 	// real boolean answer, but it lets the testcase reach its
 	// setverdict instead of synthesising an Error verdict.
 	if val == runtime.Undefined {
+		// An uninitialised variable is no condition (ETSI 11.1 d).
+		if isValueReference(n) {
+			return false, runtime.Errorf("condition %s is uninitialised (ETSI 11.1 d)", syntax.Name(n))
+		}
 		return false, nil
 	}
 
@@ -4886,6 +5104,9 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 	val := runtime.Share(eval(rhs, env))
 	if runtime.IsError(val) {
 		return val
+	}
+	if err := unboundRHSError(rhs, val, env); err != nil {
+		return err
 	}
 	if runtime.TLActive() {
 		if lexec := tlExec(env); lexec != nil {
@@ -5576,7 +5797,12 @@ func storeReceiver(recv syntax.Expr, val runtime.Object, env runtime.Scope) runt
 		env.Set(r.String(), val)
 	case *syntax.SelectorExpr:
 		// Changed, a shared value is a copy, which the chain puts back.
+		// A container not there yet reads as an error (6.2.1.1): it is
+		// made here, as one uninitialised is.
 		parent := runtime.Unshare(eval(r.X, env))
+		if runtime.IsError(parent) {
+			parent = runtime.Undefined
+		}
 		if parent == nil || parent == runtime.Undefined || parent == runtime.Omit || parent == runtime.Any || parent == runtime.AnyOrNone {
 			rec := runtime.NewRecord()
 			if st := structDeclOf(lvalueTypeDesc(r.X, env)); st != nil {
@@ -5590,6 +5816,9 @@ func storeReceiver(recv syntax.Expr, val runtime.Object, env runtime.Scope) runt
 		return storeReceiver(r.X, parent, env)
 	case *syntax.IndexExpr:
 		container := runtime.Unshare(eval(r.X, env))
+		if runtime.IsError(container) {
+			container = runtime.Undefined
+		}
 		if container == nil || container == runtime.Undefined || container == runtime.Omit || container == runtime.Any || container == runtime.AnyOrNone {
 			container = &runtime.List{ListType: listKindOf(lvalueTypeDesc(r.X, env), env)}
 		}
@@ -6743,6 +6972,11 @@ func evalValueDecl(vd *syntax.ValueDecl, env runtime.Scope) runtime.Object {
 			markTemplate(env, syntax.Name(decl.Name))
 		}
 	}
+	if vd.Modif != nil && (vd.Modif.String() == "@lazy" || vd.Modif.String() == "@fuzzy") {
+		for _, decl := range vd.Decls {
+			lazyDecls.Store(decl, true)
+		}
+	}
 	if vd.Type != nil {
 		if id, ok := vd.Type.(*syntax.Ident); ok && id.Tok.Kind() == syntax.TIMER {
 			// `timer t;` / `timer t := 5.0;` / `timer t[N] := {...}`
@@ -6797,6 +7031,9 @@ func evalValueDecl(vd *syntax.ValueDecl, env runtime.Scope) runtime.Object {
 							if runtime.IsError(v) {
 								return v
 							}
+							if err := unboundRHSError(decl.Value, v, env); err != nil {
+								return err
+							}
 							if l := mapToList(v); l != nil {
 								v = l
 							}
@@ -6806,7 +7043,10 @@ func evalValueDecl(vd *syntax.ValueDecl, env runtime.Scope) runtime.Object {
 							} else if isUnion {
 								val = coerceToType(coerceToUnionDefault(v, n, env), n, env)
 							} else {
-								val = coerceToStruct(v, n, env)
+								// A value of a compatible type takes the
+								// type's field names (6.3.2.2), as an
+								// assignment's and a result do.
+								val = coerceToStruct(relabelCompatible(v, n), n, env)
 							}
 						}
 						env.Set(syntax.Name(decl.Name), val)
@@ -9048,7 +9288,31 @@ func applyFunctionStopped(fn *runtime.Function, args []runtime.Object) (runtime.
 	if rv, ok := raw.(*runtime.ReturnValue); ok && rv.Stopped {
 		stopped = true
 	}
+	if err := endWithoutReturn(fn, raw, fenv); err != nil {
+		return err, fenv, false
+	}
 	return shapeResult(unwrap(raw), fn, fenv), fenv, stopped
+}
+
+// endWithoutReturn is the error of a function with a return clause whose
+// body ended without executing a return statement (ETSI ES 201 873-1
+// 16.1.0), or nil. A stop, an error or an exception does not end it so.
+func endWithoutReturn(fn *runtime.Function, raw runtime.Object, env runtime.Scope) runtime.Object {
+	if fn.Result == nil || fn.IsAltstep || fn.IsTemplate || fn.IsExternal || fn.Body == nil {
+		return nil
+	}
+	// A component stopped while the body waited, in an alt, ends it.
+	if exec := runtime.FindTestcaseExec(env); exec != nil && (exec.Stopped() || componentStopRequested(exec)) {
+		return nil
+	}
+	switch raw.(type) {
+	case *runtime.ReturnValue, *runtime.RaisedValue:
+		return nil
+	}
+	if runtime.IsError(raw) {
+		return nil
+	}
+	return runtime.Errorf("function %s ended without a return statement (ETSI 16.1.0)", fn.Name)
 }
 
 // shapeResult gives a value fn returns the shape of its declared result
