@@ -68,7 +68,7 @@ help:
 	@perl -ne 'printf("\t%-10s\t%s\n", $$1, $$2)  if /^\.PHONY:\s*(.*)\s*##\s*(.*)$$/' <$(MAKEFILE_LIST)
 
 .PHONY: build ## build everything
-build: bin/ntt
+build: bin/ntt bin/k3
 
 .PHONY: check ## run tests
 check:
@@ -78,18 +78,23 @@ check:
 install: build
 	install -d -m 755 $(DESTDIR)$(BINDIR)
 	install -m 755 bin/ntt $(DESTDIR)$(BINDIR)/ntt
+	install -m 755 bin/k3 $(DESTDIR)$(BINDIR)/k3
 	install -d -m 755 $(DESTDIR)$(DATADIR)/cmake
 	install -m 644 cmake/FindNTT.cmake $(DESTDIR)$(DATADIR)/cmake
 
 
 .PHONY: clean ## delete build artifacts
 clean:
-	rm -f bin/ntt
+	rm -f bin/ntt bin/k3
 	rmdir bin
 
 .PHONY: bin/ntt ## build ntt CLI
 bin/ntt:
 	$(GO_BUILD) -ldflags="$(NTT_LDFLAGS)" -o $@ .
+
+.PHONY: bin/k3 ## build k3 CLI (VM-based run)
+bin/k3:
+	$(GO_BUILD) -ldflags="$(NTT_LDFLAGS)" -o $@ ./k3
 
 .PHONY: generate ## run code generators
 generate:

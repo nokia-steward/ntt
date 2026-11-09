@@ -1,0 +1,4 @@
+sources:
+  - .
+imports:
+  - extfunc

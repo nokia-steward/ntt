@@ -14,11 +14,26 @@ linters:
     - unconvert
     - wastedassign
   settings:
+    errcheck:
+      # The T3XF compiler collects its errors in Compiler.err (errorf);
+      # what these return is always nil.
+      exclude-functions:
+        - (*github.com/nokia/ntt/internal/t3xf.Compiler).compile
+        - (*github.com/nokia/ntt/internal/t3xf.Compiler).compileFunction
+        - (*github.com/nokia/ntt/internal/t3xf.Compiler).compileExtFunc
+        - (*github.com/nokia/ntt/internal/t3xf.Compiler).compileTestcase
+        - (*github.com/nokia/ntt/internal/t3xf.Compiler).compileAltstep
+        - (*github.com/nokia/ntt/internal/t3xf.Compiler).compileTemplate
+        - (*github.com/nokia/ntt/internal/t3xf.Compiler).compileVar
+        - (*github.com/nokia/ntt/internal/t3xf.Compiler).compileConst
+        - (*github.com/nokia/ntt/internal/t3xf.Compiler).compileModulePar
     misspell:
       ignore-rules:
-        # `thn` names a branch's then-block, `forhead` a for loop's head.
+        # `thn` names a branch's then-block, `forhead` a for loop's head,
+        # `CREATEN` a T3XF opcode.
         - thn
         - forhead
+        - createn
     govet:
       disable:
         # Suggests inlining deprecated wrappers; a modernisation, not a

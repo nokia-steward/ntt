@@ -145,6 +145,9 @@ func init() {
 	root.AddCommand(ReportCommand)
 	root.AddCommand(ShowCommand)
 	root.AddCommand(TagsCommand)
+	// `ntt run` is RunCommand (run.go), the interpreter's run; the
+	// VM-based commands/run is not registered beside it under the
+	// same name.
 
 	ShowCommand.PersistentFlags().BoolVarP(&ShSetup, "sh", "", false, "output test suite data for shell consumption")
 	ShowCommand.PersistentFlags().BoolVarP(&dumb, "dumb", "", false, "do not evaluate testcase configuration")
