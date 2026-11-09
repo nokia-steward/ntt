@@ -8,11 +8,9 @@ import (
 	"time"
 
 	"github.com/nokia/ntt/internal/backend"
-	"github.com/nokia/ntt/internal/backend/vm"
 	"github.com/nokia/ntt/internal/basket"
-	"github.com/nokia/ntt/internal/cache"
 	"github.com/nokia/ntt/internal/cli"
-	"github.com/nokia/ntt/internal/framework"
+	"github.com/nokia/ntt/internal/env"
 	"github.com/nokia/ntt/internal/logfilter"
 
 	"github.com/nokia/ntt/project"
@@ -32,8 +30,7 @@ var backendName string
 func init() {
 	Command.Flags().StringVarP(&outputPath, "output", "o", "", "Write logging output to given `file`")
 	Command.Flags().StringVar(&formatName, "format", "auto", "Console output `format`: auto, plain, or color")
-	Command.Flags().StringVar(&backendName, "backend", "vm", "Runtime `backend` that executes the tests: vm only (k3r is not linked in this build)")
-	_ = Command.Flags().MarkHidden("backend")
+	Command.Flags().StringVar(&backendName, "backend", "t3xf", "Runtime `backend` that executes the tests: t3xf (the T3XF virtual machine) or eval (the interpreter)")
 	Command.Flags().AddFlagSet(basket.Flags())
 	Command.Flags().AddFlagSet(logfilter.Flags())
 }
@@ -160,7 +157,12 @@ func runTests(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		return err
 	}
-	if err := b.LoadFromEnvOrConfig(conf, "K3_LIST_BASKETS"); err != nil {
+	// NTT_LIST_BASKETS names the baskets, or else K3_LIST_BASKETS.
+	basketVar := "NTT_LIST_BASKETS"
+	if _, ok := env.LookupEnv(basketVar); !ok && (conf == nil || conf.Variables[basketVar] == "") {
+		basketVar = "K3_LIST_BASKETS"
+	}
+	if err := b.LoadFromEnvOrConfig(conf, basketVar); err != nil {
 		return err
 	}
 
@@ -169,18 +171,16 @@ func runTests(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Assure that the project binaries are up-to-date, before we execute the tests.
-	tasks, err := framework.BuildTasks(conf)
-	if err != nil {
-		return fmt.Errorf("building test suite failed: %w", err)
+	be, ok := backends[backendName]
+	if !ok {
+		return fmt.Errorf("unknown backend %q, want one of %s", backendName, backendNames())
 	}
-	for _, t := range tasks {
-		if err := t.Run(); err != nil {
-			if p.ExpectsRejection() {
-				return nil
-			}
-			return fmt.Errorf("+ %s\n%w", t.String(), err)
+	// Assure that the suite builds, before we execute the tests.
+	if err := be.Build(conf, p.rejectModule); err != nil {
+		if p.ExpectsRejection() {
+			return nil
 		}
+		return fmt.Errorf("building test suite failed: %w", err)
 	}
 	if p.ExpectsRejection() && len(p.Tests) == 0 {
 		return fmt.Errorf("expected module rejection, but the build succeeded")
@@ -216,7 +216,7 @@ func runJobs(cmd *cobra.Command, conf *project.Config, p plan, b basket.Basket, 
 		return closeFile()
 	}
 
-	runtime, err := newRuntime(cmd, conf, p)
+	runtime, err := backends[backendName].Runtime(cmd.Context(), conf, moduleParameters(conf))
 	if err != nil {
 		return err
 	}
@@ -286,19 +286,6 @@ func runJobs(cmd *cobra.Command, conf *project.Config, p plan, b basket.Basket, 
 		return &verdictFailure{tests: check.failed, outputs: outputs.failed, errors: errs.failed}
 	}
 	return nil
-}
-
-// newRuntime starts the backend named by --backend on the suite's T3XF.
-func newRuntime(cmd *cobra.Command, conf *project.Config, p plan) (backend.Runtime, error) {
-	t3xf := cache.Lookup(fmt.Sprintf("%s.t3xf", conf.Name))
-	switch backendName {
-	case "vm":
-		return vm.NewRuntime(t3xf, vm.WithContext(cmd.Context()), vm.WithModuleParameters(moduleParameters(conf)))
-	case "k3r":
-		return nil, fmt.Errorf(`runtime backend "k3r" is not available in this build; use --backend=vm (default) or run with an external k3r`)
-	default:
-		return nil, fmt.Errorf("unknown backend %q, want vm", backendName)
-	}
 }
 
 // stampLayout is the time layout of a k3log timestamp.

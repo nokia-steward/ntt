@@ -13,6 +13,7 @@ import (
 
 	"github.com/nokia/ntt/backend/cpp"
 	"github.com/nokia/ntt/backend/golang"
+	"github.com/nokia/ntt/commands/run"
 	"github.com/nokia/ntt/ir"
 	"github.com/nokia/ntt/ir/lower"
 	"github.com/nokia/ntt/ttcn3"
@@ -25,110 +26,51 @@ var (
 	runJSON    bool
 	runWorkdir string
 
-	runOutput    string
-	runConsole   string
-	runLive      bool
-	runTimeout   time.Duration
-	runLogFilter logFilter
+	runLive    bool
+	runTimeout time.Duration
 )
 
-// RunCommand builds and runs a test suite, printing its structured line log;
-// with --target it instead compiles a TTCN-3 file with a backend and runs it.
-var RunCommand = &cobra.Command{
-	Use:     "run [ <path>... ] [ -- <test id>... ]",
-	Aliases: []string{"run2"},
-	Short:   "Build and run test suite",
-	Long: `Build and run a test suite.
+// ntt run is commands/run's command. On this branch its default backend is
+// eval, ntt's engine; --backend=t3xf runs the T3XF virtual machine. The
+// engine's own flags, and --target, which compiles one file with the go or
+// cpp backend instead, are added here.
+func init() {
+	run.RegisterBackend("eval", evalBackend)
+	run.SetDefaultBackend("eval")
+	c := run.Command
+	c.Aliases = append(c.Aliases, "run2")
+	c.Long = strings.TrimRight(c.Long, "\n") + `
 
-The ntt run command first builds the test suite from the files or
-directories passed as first argument list, and then runs it. If no ids are
-specified, ntt run executes every control part. When the suite declares
-none, it runs every testcase from the sources. --regex, --exclude,
---tags-regex, --tags-exclude, and NTT_LIST_BASKETS filter these default
-jobs: a filtered run executes the matching testcases and does not run
-control parts.
-
-Running control functions is supported. For example:
-
-        ntt run -- test.A test.control test.B
-
-Test baskets are also supported (see "ntt help list"). Below example will
-run all tests with @stable-tag:
-
-	NTT_LIST_BASKETS=stable ntt run
-
-The run prints the structured line log of its events, one per line:
-timestamp|event|identity=file:line|fields. Logging filters select which
-events are printed on the console. The file given to --output keeps every
-event. Filters apply in the order given, on top of all events being
-enabled:
-
-        ntt run --activate=fnen|fnlv --deactivate=Suite:paon|rvon
-
---activate and --deactivate take an event-id regular expression, optionally
-limited to one module as Module:pattern. --activate-all is the default when
-no logging filter is given. A module id that is not in the suite, or an
-event pattern that matches no event, is an error.
-
---format selects how those events are printed on the console. auto (the
-default) colors log events when standard output is a terminal. color always
-colors them. plain prints the raw log text. Error events are bold white on
-red. A tcfi, cofi, or setv is yellow for inconc, green for pass, and red
-for fail or error. plod, perf, vrsn, vach, and bctr are faint grey. auto
-stays uncolored when NO_COLOR is set, when NTT_COLORS=never, or when
-TERM=dumb. The --output file stores raw events.
-
-        ntt run --format=plain
-
-A testcase may name the verdict it is expected to finish with:
-
-        // @verdict: error
-        testcase TC1() {}
-
-When the final verdict differs, ntt run writes a VMIS error and that
-testcase fails the run. A verdict that matches the tag keeps the run
-successful. Otherwise a testcase that ends with fail or error fails the
-run.
-
-A module may instead carry an ETSI/PIXIT verdict tag. "pass accept" accepts
-every testcase verdict except error; "pass reject" expects the module to
-fail to build. Add "ttcn3verdict:<verdict>" to require that verdict of
-every testcase in the module:
-
-        // @verdict: pass accept, ttcn3verdict:pass
-        module Suite {}
-
-The suite runs on ntt's engine, on its virtual clock unless --live is
-given.
+With the eval backend (the default) the suite runs on ntt's engine, on its
+virtual clock unless --live is given; --timeout bounds each testcase's wall
+clock. --backend=t3xf compiles the suite to T3XF and runs it on the virtual
+machine instead. NTT_LIST_BASKETS and NTT_COLORS may stand for the
+basket and color variables above, and take precedence.
 
 With --target go|cpp, ntt run instead lowers one TTCN-3 file through the
 IR (ir/lower), emits source for that backend, builds a binary against the
 runtime, executes it, and prints one line per testcase plus a final suite
-verdict. Build artefacts go into a temp directory unless --keep is passed.`,
-	RunE: func(cmd *cobra.Command, args []string) error {
+verdict. Build artefacts go into a temp directory unless --keep is passed.`
+	flags := c.Flags()
+	flags.BoolVar(&runLive, "live", false, "with --backend=eval, run on a real clock (real timers, real concurrency) instead of the virtual one")
+	flags.DurationVar(&runTimeout, "timeout", 0, "with --backend=eval, per-testcase wall-clock limit (0 = the 60s safety default)")
+	flags.StringVar(&runTarget, "target", "", "compile one file with a backend, 'go' or 'cpp', and run it")
+	flags.BoolVar(&runKeep, "keep", false, "with --target, keep the temporary build directory")
+	flags.BoolVar(&runJSON, "json", false, "with --target, print the full result as JSON instead of text")
+	flags.StringVar(&runWorkdir, "workdir", "", "with --target, use this directory for build artefacts (implies --keep)")
+	suite := c.RunE
+	c.RunE = func(cmd *cobra.Command, args []string) error {
 		if runTarget != "" {
 			if len(args) != 1 {
 				return fmt.Errorf("run: --target takes one file")
 			}
 			return doRun(cmd, args)
 		}
-		return runSuite(cmd, args)
-	},
-}
-
-func init() {
-	RootCommand.AddCommand(RunCommand)
-	flags := RunCommand.Flags()
-	flags.StringVarP(&runOutput, "output", "o", "", "Write logging output to given `file`")
-	flags.StringVar(&runConsole, "format", "auto", "Console output `format`: auto, plain, or color")
-	flags.AddFlagSet(BasketFlags())
-	flags.AddFlagSet(logFilterFlags(&runLogFilter))
-	flags.BoolVar(&runLive, "live", false, "run on a real clock (real timers, real concurrency) instead of the virtual one")
-	flags.DurationVar(&runTimeout, "timeout", 0, "per-testcase wall-clock limit (0 = the 60s safety default)")
-	flags.StringVar(&runTarget, "target", "", "compile one file with a backend, 'go' or 'cpp', and run it")
-	flags.BoolVar(&runKeep, "keep", false, "with --target, keep the temporary build directory")
-	flags.BoolVar(&runJSON, "json", false, "with --target, print the full result as JSON instead of text")
-	flags.StringVar(&runWorkdir, "workdir", "", "with --target, use this directory for build artefacts (implies --keep)")
+		if b := cmd.Flags().Lookup("backend"); b != nil && b.Value.String() != "eval" && (runLive || runTimeout != 0) {
+			return fmt.Errorf("run: --live and --timeout are flags of the eval backend")
+		}
+		return suite(cmd, args)
+	}
 }
 
 // runResult is what the harness emits (and what `--json` renders).

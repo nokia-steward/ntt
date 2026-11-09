@@ -10,6 +10,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/nokia/ntt/commands/run"
 	"github.com/nokia/ntt/internal/env"
 	"github.com/nokia/ntt/internal/log"
 	"github.com/nokia/ntt/internal/proc"
@@ -145,9 +146,7 @@ func init() {
 	root.AddCommand(ReportCommand)
 	root.AddCommand(ShowCommand)
 	root.AddCommand(TagsCommand)
-	// `ntt run` is RunCommand (run.go), the interpreter's run; the
-	// VM-based commands/run is not registered beside it under the
-	// same name.
+	root.AddCommand(run.Command) // its backends and flags: run.go
 
 	ShowCommand.PersistentFlags().BoolVarP(&ShSetup, "sh", "", false, "output test suite data for shell consumption")
 	ShowCommand.PersistentFlags().BoolVarP(&dumb, "dumb", "", false, "do not evaluate testcase configuration")

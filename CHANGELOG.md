@@ -49,13 +49,18 @@ single functional test doubles as a performance probe. See
   interleave that invokes it; map and unmap name the component's port
   before the system's. `ptre`, `ilen` and `illv` have no TCI-TL operation,
   and the XML and JSON Lines logs leave them out.
-- **`ntt run` builds and runs a suite, printing its line log** — `ntt run
+- **`ntt run` builds and runs a suite, printing its line log** — on one
+  of two backends: `--backend=eval` (the default), ntt's engine, on its
+  virtual clock or with `--live` on a real one, `--timeout` bounding each
+  testcase; or `--backend=t3xf`, the suite compiled to T3XF and run on the
+  virtual machine. Both take the same baskets, logging filters, `--output`
+  and `@verdict`, `@output` and `@error` checks. `ntt run
   [ <path>... ] [ -- <test id>... ]`, also `ntt run2`, takes the command
   line of the suite runners its structured line log comes from: it runs
   the test ids given, or every control part, or every testcase when the
   suite declares none, or the testcases the baskets `-r/--regex`,
   `-x/--exclude`, `-R/--tags-regex`, `-X/--tags-exclude` and
-  `NTT_LIST_BASKETS` select. Every event goes to `-o/--output FILE`;
+  `NTT_LIST_BASKETS` select (`NTT_COLORS=never` turns the colors off). Every event goes to `-o/--output FILE`;
   `-a/--activate`, `-d/--deactivate` (an event-id regular expression,
   `Module:pattern` for one module), `-A/--activate-all` and
   `-D/--deactivate-all` choose those on the console, colored by
