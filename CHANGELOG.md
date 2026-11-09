@@ -362,6 +362,13 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **`ntt check` rejects more misuses of the module definitions part**: a
+  module parameter as the target of an assignment (8.2.1 a); a module
+  parameter, constant or other value declared twice, also within one
+  module parameter group (8.2.1 e), where only definitions of one name
+  each were compared; a variable declared in the module definitions part
+  (8.2.0); a negative integer as the right-hand operand of a shift or
+  rotate (7.1.6, 7.1.7).
 - **`ntt check` rejects a declaration of a type it may not have**: a
   module parameter of, or holding at any level of nesting, a component,
   port, timer or default type (8.2.1 b); a template's parameter of, or

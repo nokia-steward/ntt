@@ -208,6 +208,7 @@ func (a *Analyzer) Analyze(tree *ttcn3.Tree) []Diagnostic {
 		out = append(out, a.checkActivateRules(mod)...)
 		out = append(out, a.checkObjectKinds(tree, mod)...)
 		out = append(out, a.checkDeclKinds(tree, mod)...)
+		out = append(out, a.checkModuleDefs(tree, mod)...)
 		out = append(out, a.checkModRemRules(mod)...)
 		out = append(out, a.checkSendPartialTemplateRules(mod)...)
 		out = append(out, a.checkUninitReadRules(mod)...)
@@ -320,28 +321,49 @@ func (a *Analyzer) checkDuplicates(mod *syntax.Module) []Diagnostic {
 	defs := make(map[string]seen)
 	var diags []Diagnostic
 
-	for _, d := range mod.Defs {
-		if d == nil || d.Def == nil {
-			continue
-		}
-		name := syntax.Name(d.Def)
+	check := func(name string, n syntax.Node) {
 		if name == "" {
-			continue
+			return
 		}
 		if prev, ok := defs[name]; ok {
-			span := syntax.SpanOf(d.Def)
 			diags = append(diags, Diagnostic{
 				Code:     "duplicate-definition",
 				Severity: SeverityError,
 				Message: fmt.Sprintf(
 					"duplicate definition of %q (first declared at %s)",
 					name, prev.span.Begin),
-				Node: d.Def,
-				Span: span,
+				Node: n,
+				Span: syntax.SpanOf(n),
 			})
+			return
+		}
+		defs[name] = seen{first: n, span: syntax.SpanOf(n)}
+	}
+	for _, d := range mod.Defs {
+		if d == nil || d.Def == nil {
 			continue
 		}
-		defs[name] = seen{first: d.Def, span: syntax.SpanOf(d.Def)}
+		// A value declaration, a module parameter group's too, declares
+		// each of its names (8.2.1 e: a module parameter only once).
+		switch x := d.Def.(type) {
+		case *syntax.ValueDecl:
+			for _, dec := range x.Decls {
+				if dec != nil {
+					check(syntax.Name(dec.Name), dec)
+				}
+			}
+			continue
+		case *syntax.ModuleParameterGroup:
+			for _, vd := range x.Decls {
+				for _, dec := range vd.Decls {
+					if dec != nil {
+						check(syntax.Name(dec.Name), dec)
+					}
+				}
+			}
+			continue
+		}
+		check(syntax.Name(d.Def), d.Def)
 	}
 	return diags
 }
