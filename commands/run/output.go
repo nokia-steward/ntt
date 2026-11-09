@@ -148,14 +148,18 @@ func sourceLine(src string) (file string, line int, ok bool) {
 
 // sameSource reports whether the file named by an event is the source file
 // path. An absolute event file must equal path. A relative one must name path
-// from the working directory, as k3c was given it, or be a trailing part of
-// it, for example a base name written with --strip-filenames.
+// from the working directory, as the compiler was given it, or be a trailing
+// part of it, for example a base name written with --strip-filenames. Paths
+// compare in slash form, so that on Windows `\` and `/` name the same file,
+// and a path rooted without a drive counts as absolute.
 func sameSource(path, file string) bool {
-	if filepath.IsAbs(file) {
-		return filepath.Clean(file) == path
+	path = filepath.ToSlash(path)
+	clean := filepath.ToSlash(filepath.Clean(file))
+	if filepath.IsAbs(file) || strings.HasPrefix(clean, "/") {
+		return clean == path
 	}
-	if abs, err := filepath.Abs(file); err == nil && abs == path {
+	if abs, err := filepath.Abs(file); err == nil && filepath.ToSlash(abs) == path {
 		return true
 	}
-	return strings.HasSuffix(path, string(filepath.Separator)+filepath.Clean(file))
+	return strings.HasSuffix(path, "/"+clean)
 }
