@@ -1,14 +1,14 @@
 {
- "summary": "ran 5164 files: 5003 matched, 21 skipped (97.28% match rate)",
+ "summary": "ran 5164 files: 5007 matched, 21 skipped (97.36% match rate)",
  "source": "etsi.json",
- "miss_count": 161,
+ "miss_count": 157,
  "outcomes": {
-  "reject->pass": 65,
+  "reject->pass": 60,
   "reject->none": 27,
   "->": 21,
-  "pass->fail": 14,
+  "pass->error": 13,
+  "pass->fail": 13,
   "pass->parse-error": 13,
-  "pass->error": 11,
   "pass->semantic-error": 7,
   "pass->none": 2,
   "error->parse-error": 1
@@ -16,14 +16,14 @@
  "chapters": [
   {
    "chapter": "core_language/06_types_and_values",
-   "misses": 59,
+   "misses": 55,
    "outcomes": {
     "->": 8,
-    "reject->pass": 18,
+    "reject->pass": 14,
     "reject->none": 13,
     "pass->parse-error": 6,
-    "pass->fail": 5,
-    "pass->error": 6,
+    "pass->fail": 4,
+    "pass->error": 7,
     "pass->semantic-error": 2,
     "pass->none": 1
    }
@@ -38,12 +38,12 @@
   },
   {
    "chapter": "core_language/15_templates",
-   "misses": 18,
+   "misses": 17,
    "outcomes": {
     "->": 2,
     "pass->fail": 4,
     "reject->none": 3,
-    "reject->pass": 7,
+    "reject->pass": 6,
     "pass->error": 2
    }
   },
@@ -138,6 +138,13 @@
    "misses": 1,
    "outcomes": {
     "pass->parse-error": 1
+   }
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "misses": 1,
+   "outcomes": {
+    "pass->error": 1
    }
   },
   {
@@ -422,30 +429,6 @@
   },
   {
    "chapter": "core_language/06_types_and_values",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSem_060207_arrays_026.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSem_060207_arrays_027.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSem_060207_arrays_028.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
    "expected": "",
    "actual": "",
    "outcome": "->",
@@ -566,14 +549,6 @@
   },
   {
    "chapter": "core_language/06_types_and_values",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021504_index_notation/NegSem_06021504_index_notation_008.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
    "expected": "pass",
    "actual": "semantic-error",
    "outcome": "pass->semantic-error",
@@ -583,10 +558,10 @@
   {
    "chapter": "core_language/06_types_and_values",
    "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
+   "actual": "error",
+   "outcome": "pass->error",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021504_index_notation/Sem_06021504_index_notation_008.ttcn",
-   "message": ""
+   "message": "Error: operand  of not is uninitialised (ETSI 7.1.0 a)"
   },
   {
    "chapter": "core_language/06_types_and_values",
@@ -961,14 +936,6 @@
    "expected": "reject",
    "actual": "pass",
    "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/NegSem_150606_Referencing_map_elements_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
    "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/NegSem_150606_Referencing_map_elements_003.ttcn",
    "message": ""
   },
@@ -1123,6 +1090,14 @@
    "outcome": "pass->semantic-error",
    "relpath": "core_language/16_functions_altsteps_testcases/1603_testcases/Syn_1603_testcases_004.ttcn",
    "message": "testcase references component member \"messagePort\" (declared in component GeneralComp) but has no `runs on` clause (ETSI 16.1)"
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "pass",
+   "actual": "error",
+   "outcome": "pass->error",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2005_default_handling/200500_general/Sem_200500_general_001.ttcn",
+   "message": "Error: activate of a default that is not suspended (ETSI ES 201 873-1 20.5.2 e)"
   },
   {
    "chapter": "core_language/22_communication_operations",

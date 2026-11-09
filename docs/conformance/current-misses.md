@@ -2,26 +2,26 @@
 
 Generated from `etsi.json` using the current workspace runner.
 
-- Summary: `ran 5164 files: 5003 matched, 21 skipped (97.28% match rate)`
-- Misses: `161`
+- Summary: `ran 5164 files: 5007 matched, 21 skipped (97.36% match rate)`
+- Misses: `157`
 
 ## Misses By Outcome
 
-- `reject->pass`: `65`
+- `reject->pass`: `60`
 - `reject->none`: `27`
 - `->`: `21`
-- `pass->fail`: `14`
+- `pass->error`: `13`
+- `pass->fail`: `13`
 - `pass->parse-error`: `13`
-- `pass->error`: `11`
 - `pass->semantic-error`: `7`
 - `pass->none`: `2`
 - `error->parse-error`: `1`
 
 ## Misses By Chapter
 
-- `core_language/06_types_and_values`: `59` (`->`=8, `pass->error`=6, `pass->fail`=5, `pass->none`=1, `pass->parse-error`=6, `pass->semantic-error`=2, `reject->none`=13, `reject->pass`=18)
+- `core_language/06_types_and_values`: `55` (`->`=8, `pass->error`=7, `pass->fail`=4, `pass->none`=1, `pass->parse-error`=6, `pass->semantic-error`=2, `reject->none`=13, `reject->pass`=14)
 - `core_language/22_communication_operations`: `20` (`reject->none`=1, `reject->pass`=19)
-- `core_language/15_templates`: `18` (`->`=2, `pass->error`=2, `pass->fail`=4, `reject->none`=3, `reject->pass`=7)
+- `core_language/15_templates`: `17` (`->`=2, `pass->error`=2, `pass->fail`=4, `reject->none`=3, `reject->pass`=6)
 - `core_language/05_basic_language_elements`: `16` (`->`=2, `pass->parse-error`=2, `reject->none`=1, `reject->pass`=11)
 - `core_language/B_matching_incoming_values`: `10` (`pass->error`=2, `pass->fail`=5, `reject->none`=2, `reject->pass`=1)
 - `core_language/16_functions_altsteps_testcases`: `9` (`->`=1, `error->parse-error`=1, `pass->parse-error`=2, `pass->semantic-error`=1, `reject->none`=1, `reject->pass`=3)
@@ -33,6 +33,7 @@ Generated from `etsi.json` using the current workspace runner.
 - `core_language/11_variables`: `2` (`->`=2)
 - `core_language/27_specifying_attributes`: `2` (`->`=1, `reject->none`=1)
 - `core_language/10_constants`: `1` (`pass->parse-error`=1)
+- `core_language/20_statement_and_operations_for_alt`: `1` (`pass->error`=1)
 - `core_language/C_predefined_functions`: `1` (`pass->none`=1)
 - `core_language/D_preprocessing_macros`: `1` (`reject->none`=1)
 
@@ -58,10 +59,10 @@ Generated from `etsi.json` using the current workspace runner.
 - `core_language/06_types_and_values/0602_structured_types_and_values/060205_unions/06020502_option_and_union/NegSyn_06020502_option_and_union_001.ttcn`: ` -> `
 - `core_language/06_types_and_values/0602_structured_types_and_values/060205_unions/06020504_embedding_fields/Sem_06020504_embedding_fields_001.ttcn`: `pass -> fail` - a.R is not chosen
 - `core_language/06_types_and_values/0602_structured_types_and_values/060206_anytype/NegSem_060206_anytype_001.ttcn`: `reject -> pass`
-- `core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSem_060207_arrays_026.ttcn`: `reject -> pass`
-- `core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSem_060207_arrays_027.ttcn`: `reject -> pass`
-- `core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSem_060207_arrays_028.ttcn`: `reject -> pass`
-- ... `39` more in `current-misses.json`
+- `core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSyn_060207_arrays_004.ttcn`: ` -> `
+- `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_002.ttcn`: `reject -> pass`
+- `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_003.ttcn`: `reject -> pass`
+- ... `35` more in `current-misses.json`
 
 ### `core_language/22_communication_operations`
 
@@ -94,7 +95,6 @@ Generated from `etsi.json` using the current workspace runner.
 - `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_012.ttcn`: `reject -> none`
 - `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_013.ttcn`: `reject -> none`
 - `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_015.ttcn`: `reject -> pass`
-- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/NegSem_150606_Referencing_map_elements_001.ttcn`: `reject -> pass`
 - `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/NegSem_150606_Referencing_map_elements_003.ttcn`: `reject -> pass`
 - `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/NegSem_150606_Referencing_map_elements_005.ttcn`: `reject -> pass`
 - `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/NegSem_150606_Referencing_map_elements_006.ttcn`: `reject -> pass`
