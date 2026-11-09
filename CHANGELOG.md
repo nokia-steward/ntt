@@ -362,6 +362,13 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **`ntt check` rejects an operation on an object of the wrong kind**
+  (21.3.2-21.3.6 a, 22.2.1 g, 22.3.1 n, 22.5.1-22.5.4 a): a port
+  operation on a timer or a value, a component operation on a port, a
+  timer operation on a component, any of them on a value (`v_i.clear`),
+  and a test component operation on a template (`vt_ptc.start(f())`).
+  The object is resolved by ntt's own lookup; one it cannot resolve, and
+  a field named like an operation (`r.done`), are let be.
 - **Predefined functions and the timer start raise the errors the
   standard gives them**: float2int of infinity, -infinity or
   not_a_number (C.1.9), and it truncates any finite float exactly, where
