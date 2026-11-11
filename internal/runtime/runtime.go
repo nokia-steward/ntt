@@ -121,7 +121,10 @@ func (t *Timer) Stop() bool {
 }
 
 // Running reports whether t is started and has not expired.
-func (t *Timer) Running() bool { return t.active && time.Now().Before(t.deadline) }
+func (t *Timer) Running() bool { return t.RunningAt(time.Now()) }
+
+// RunningAt reports whether t is started and has not expired at now.
+func (t *Timer) RunningAt(now time.Time) bool { return t.active && now.Before(t.deadline) }
 
 // Read returns the seconds elapsed since t started, or 0 when not running.
 func (t *Timer) Read() float64 {
@@ -134,10 +137,15 @@ func (t *Timer) Read() float64 {
 // Timeout reports whether t has expired, and consumes the expiry. Otherwise
 // running reports whether t may still expire, at deadline.
 func (t *Timer) Timeout() (ready, running bool, deadline time.Time) {
+	return t.TimeoutAt(time.Now())
+}
+
+// TimeoutAt is Timeout at now.
+func (t *Timer) TimeoutAt(now time.Time) (ready, running bool, deadline time.Time) {
 	if !t.active {
 		return false, false, time.Time{}
 	}
-	if t.Running() {
+	if t.RunningAt(now) {
 		return false, true, t.deadline
 	}
 	t.active = false
