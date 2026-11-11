@@ -115,6 +115,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			return nil
 		}
 		name := syntax.Name(n.Name)
+		markTemplateDecl(env, name)
 		if referencedAsTemplate(n.RestrictionSpec) || n.RestrictionSpec == nil {
 			markTemplate(env, name)
 		}
@@ -3806,6 +3807,42 @@ func unboundRHSError(rhs syntax.Expr, v runtime.Object, env runtime.Scope) runti
 	return runtime.Errorf("the right-hand side %s is uninitialised (ETSI 19.1.1 c)", syntax.Name(rhs))
 }
 
+// mapOmitError is the error of v given to target, a value and not a
+// template, when a map v holds at any depth associates a key with omit
+// (ETSI 6.2.15.9), or nil. A map template may hold omit.
+func mapOmitError(target syntax.Expr, v runtime.Object, env runtime.Scope) runtime.Object {
+	if target == nil || !holdsMapOmit(v) || declaredTemplate(target, env) {
+		return nil
+	}
+	return runtime.Errorf("%s: a value of a map key is omit (ETSI 6.2.15.9)", syntax.Name(target))
+}
+
+// holdsMapOmit reports whether v, or a field or an element of v at any
+// depth, is a map associating a key with omit.
+func holdsMapOmit(v runtime.Object) bool {
+	switch x := v.(type) {
+	case *runtime.Map:
+		for _, p := range x.Pairs() {
+			if p.Value == runtime.Omit || holdsMapOmit(p.Value) {
+				return true
+			}
+		}
+	case *runtime.List:
+		for _, e := range x.Elements {
+			if holdsMapOmit(e) {
+				return true
+			}
+		}
+	case *runtime.Record:
+		for _, f := range x.Fields {
+			if holdsMapOmit(f) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 // predefinedArgError is the error of a call n of a predefined function
 // whose in or inout actual parameter, a reference, is uninitialised (ETSI
 // ES 201 873-1 16.1.2 a 3), or nil. sizeof and the conversion functions
@@ -4457,6 +4494,7 @@ func bindDynamicTemplate(t *syntax.TemplateDecl, env runtime.Scope) runtime.Obje
 	}
 	name := syntax.Name(t.Name)
 	env.Set(name, &runtime.LazyThunk{Expr: value, Env: env, Fuzzy: true, Template: t.Type})
+	markTemplateDecl(env, name)
 	if referencedAsTemplate(t.RestrictionSpec) || t.RestrictionSpec == nil {
 		markTemplate(env, name)
 	}
@@ -5289,6 +5327,9 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 	if err := unboundRHSError(rhs, val, env); err != nil {
 		return err
 	}
+	if err := mapOmitError(lhs, val, env); err != nil {
+		return err
+	}
 	if runtime.TLActive() {
 		if lexec := tlExec(env); lexec != nil {
 			defer func() {
@@ -5445,6 +5486,11 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 				isMap = true
 			}
 			if isMap {
+				// A map value associates no key with omit (ETSI
+				// 6.2.15.9); a map template may.
+				if val == runtime.Omit && !declaredTemplate(l.X, env) {
+					return runtime.Errorf("%s: omit assigned to the value of a map key (ETSI 6.2.15.9)", syntax.Name(l.X))
+				}
 				m.Delete(idx)
 				if ret := m.Set(idx, val); runtime.IsError(ret) {
 					return ret
@@ -7149,6 +7195,33 @@ func v5InitialValues(vd *syntax.ValueDecl, env runtime.Scope) {
 }
 
 func evalValueDecl(vd *syntax.ValueDecl, env runtime.Scope) runtime.Object {
+	if vd.TemplateRestriction != nil {
+		for _, decl := range vd.Decls {
+			markTemplateDecl(env, syntax.Name(decl.Name))
+		}
+	}
+	r := evalValueDeclBody(vd, env)
+	if runtime.IsError(r) {
+		return r
+	}
+	// A value is no map that associates a key with omit (ETSI
+	// 6.2.15.9); a template may be.
+	if vd.TemplateRestriction == nil {
+		for _, decl := range vd.Decls {
+			if decl == nil || decl.Value == nil {
+				continue
+			}
+			if v, ok := env.Get(syntax.Name(decl.Name)); ok {
+				if err := mapOmitError(decl.Name, v, env); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return r
+}
+
+func evalValueDeclBody(vd *syntax.ValueDecl, env runtime.Scope) runtime.Object {
 	defer v5InitialValues(vd, env)
 	if referencedAsTemplate(vd.TemplateRestriction) {
 		for _, decl := range vd.Decls {
@@ -8449,6 +8522,43 @@ func referencedAsTemplate(r *syntax.RestrictionSpec) bool {
 	return r != nil && (r.Tok == nil || r.Tok.Kind() == syntax.PRESENT)
 }
 
+// templateDeclKey marks a name declared as a template, of any
+// restriction (markTemplateDecl).
+func templateDeclKey(name string) string { return "\x00template-decl:" + name }
+
+// markTemplateDecl records that name, declared in env, is declared a
+// template, of any restriction: a template definition, a template
+// variable or a template parameter. markTemplate records one whose
+// elements are referenced as a template's.
+func markTemplateDecl(env runtime.Scope, name string) {
+	if env != nil && name != "" {
+		env.Set(templateDeclKey(name), runtime.NewBool(true))
+	}
+}
+
+// declaredTemplate reports whether lx refers into a definition declared
+// a template, of any restriction, in the scope that declares it.
+func declaredTemplate(lx syntax.Expr, env runtime.Scope) bool {
+	for {
+		switch x := lx.(type) {
+		case *syntax.SelectorExpr:
+			lx = x.X
+			continue
+		case *syntax.IndexExpr:
+			lx = x.X
+			continue
+		case *syntax.Ident:
+			e, ok := env.(*runtime.Env)
+			if !ok {
+				return false
+			}
+			owner := e.Owner(x.String())
+			return owner != nil && owner.Binds(templateDeclKey(x.String()))
+		}
+		return false
+	}
+}
+
 // markTemplate records that name, declared in env, is a template.
 func markTemplate(env runtime.Scope, name string) {
 	if env != nil && name != "" {
@@ -9578,6 +9688,9 @@ func bindFunctionParams(fn *runtime.Function, args []runtime.Object) *runtime.En
 		for i, param := range fn.Params.List {
 			if param == nil || param.Name == nil {
 				continue
+			}
+			if param.TemplateRestriction != nil {
+				markTemplateDecl(fenv, param.Name.String())
 			}
 			if referencedAsTemplate(param.TemplateRestriction) {
 				markTemplate(fenv, param.Name.String())
@@ -16559,6 +16672,13 @@ func evalMapUnmap(opName string, n *syntax.CallExpr, env runtime.Scope) (runtime
 	target, ok := env.Get(id.String())
 	if !ok {
 		return nil, false
+	}
+	// The map unmapped from is an initialised variable (ETSI 6.2.15.3
+	// a).
+	if target == runtime.Undefined {
+		if td := lvalueTypeDesc(id, env); td != nil && td.Map != nil {
+			return runtime.Errorf("unmap(%s): the map is uninitialised (ETSI 6.2.15.3 a)", id.String()), true
+		}
 	}
 	if _, ok := target.(*runtime.Map); !ok {
 		return nil, false

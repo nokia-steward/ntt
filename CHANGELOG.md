@@ -367,6 +367,11 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **A map value holds no omit, and unmap needs an initialised map**: a
+  value or constant that is, or holds at any depth, a map associating a
+  key with omit, by its initialiser, an assignment or `m[k] := omit`, is
+  an error (6.2.15.9); a map template of any restriction may hold omit.
+  unmap of an uninitialised map variable is an error (6.2.15.3 a).
 - **The omit and present operations check their template** (15.12,
   15.13): omit(t) of a template that is neither omit nor a value, its
   fields specific values or omit, and present(t) of one that as a whole
