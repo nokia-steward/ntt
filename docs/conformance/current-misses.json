@@ -1,9 +1,9 @@
 {
- "summary": "ran 5164 files: 5021 matched, 18 skipped (97.57% match rate)",
+ "summary": "ran 5164 files: 5024 matched, 18 skipped (97.63% match rate)",
  "source": "etsi.json",
- "miss_count": 143,
+ "miss_count": 140,
  "outcomes": {
-  "reject->pass": 52,
+  "reject->pass": 49,
   "reject->none": 24,
   "->": 18,
   "pass->error": 13,
@@ -16,10 +16,10 @@
  "chapters": [
   {
    "chapter": "core_language/06_types_and_values",
-   "misses": 55,
+   "misses": 52,
    "outcomes": {
     "->": 8,
-    "reject->pass": 14,
+    "reject->pass": 11,
     "reject->none": 13,
     "pass->parse-error": 6,
     "pass->fail": 4,
@@ -413,14 +413,6 @@
   },
   {
    "chapter": "core_language/06_types_and_values",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060206_anytype/NegSem_060206_anytype_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
    "expected": "",
    "actual": "",
    "outcome": "->",
@@ -481,14 +473,6 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021501_map_type_definition/NegSem_06021501_map_type_definition_004.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021502_indexed_assignment_notation/NegSem_06021502_indexed_assignment_notation_003.ttcn",
    "message": ""
   },
   {
@@ -577,14 +561,6 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021509_optionality_of_map_element_values/NegSem_06021509_optionality_of_map_element_values_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/0602_toplevel/NegSem_0602_TopLevel_011.ttcn",
    "message": ""
   },
   {

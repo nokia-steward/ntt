@@ -2,12 +2,12 @@
 
 Generated from `etsi.json` using the current workspace runner.
 
-- Summary: `ran 5164 files: 5021 matched, 18 skipped (97.57% match rate)`
-- Misses: `143`
+- Summary: `ran 5164 files: 5024 matched, 18 skipped (97.63% match rate)`
+- Misses: `140`
 
 ## Misses By Outcome
 
-- `reject->pass`: `52`
+- `reject->pass`: `49`
 - `reject->none`: `24`
 - `->`: `18`
 - `pass->error`: `13`
@@ -19,7 +19,7 @@ Generated from `etsi.json` using the current workspace runner.
 
 ## Misses By Chapter
 
-- `core_language/06_types_and_values`: `55` (`->`=8, `pass->error`=7, `pass->fail`=4, `pass->none`=1, `pass->parse-error`=6, `pass->semantic-error`=2, `reject->none`=13, `reject->pass`=14)
+- `core_language/06_types_and_values`: `52` (`->`=8, `pass->error`=7, `pass->fail`=4, `pass->none`=1, `pass->parse-error`=6, `pass->semantic-error`=2, `reject->none`=13, `reject->pass`=11)
 - `core_language/15_templates`: `17` (`->`=2, `pass->error`=2, `pass->fail`=4, `reject->none`=3, `reject->pass`=6)
 - `core_language/05_basic_language_elements`: `16` (`->`=2, `pass->parse-error`=2, `reject->none`=1, `reject->pass`=11)
 - `core_language/22_communication_operations`: `16` (`reject->none`=1, `reject->pass`=15)
@@ -57,11 +57,11 @@ Generated from `etsi.json` using the current workspace runner.
 - `core_language/06_types_and_values/0602_structured_types_and_values/060205_unions/06020501_referencing_fields_of_union_type/NegSem_06020501_referencing_fields_of_union_type_005.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060205_unions/06020502_option_and_union/NegSyn_06020502_option_and_union_001.ttcn`: ` -> `
 - `core_language/06_types_and_values/0602_structured_types_and_values/060205_unions/06020504_embedding_fields/Sem_06020504_embedding_fields_001.ttcn`: `pass -> fail` - a.R is not chosen
-- `core_language/06_types_and_values/0602_structured_types_and_values/060206_anytype/NegSem_060206_anytype_001.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSyn_060207_arrays_004.ttcn`: ` -> `
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_002.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_003.ttcn`: `reject -> pass`
-- ... `35` more in `current-misses.json`
+- `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_004.ttcn`: `reject -> pass`
+- ... `32` more in `current-misses.json`
 
 ### `core_language/15_templates`
 
