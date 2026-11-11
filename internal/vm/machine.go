@@ -136,6 +136,9 @@ type Machine struct {
 	taken    map[int]bool
 	open     int
 	chosenPC int
+	// snap is what the alternatives of the current alt pass are evaluated
+	// against, and nil outside their evaluation (see altSnapshot).
+	snap *altSnapshot
 	// asDefault makes the next call log dten/dtlv.
 	asDefault bool
 	// probing lets isbound and friends read missing elements.
@@ -191,6 +194,60 @@ func (t *testcase) create(m *Machine, typ runtime.Type, name string, unnamed boo
 	t.mu.Unlock()
 	ptc.tc = t
 	return ptc, ptc.initComponent(m, typ)
+}
+
+// altSnapshot is the state an alt or interleave pass evaluates all its
+// alternatives against (ETSI ES 201 873-1 20.1): the port queues
+// (PortSet.TakeSnapshot), whether each component of the testcase is done,
+// and the time timers are read at. A component that ends or a timer that
+// expires during the pass is seen by the next one, by every alternative
+// alike.
+type altSnapshot struct {
+	done map[*runtime.Component]bool
+	now  time.Time
+}
+
+// takeSnapshot is the snapshot of a pass of m's alt.
+func (m *Machine) takeSnapshot() *altSnapshot {
+	s := &altSnapshot{now: time.Now()}
+	if m.tc != nil {
+		s.done = m.tc.componentsDone()
+	}
+	return s
+}
+
+// componentsDone is whether each component of the testcase is done.
+func (t *testcase) componentsDone() map[*runtime.Component]bool {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	done := make(map[*runtime.Component]bool, len(t.ptcs)+1)
+	for c := range t.ptcs {
+		done[c] = c.Done()
+	}
+	if t.mtc != nil {
+		done[t.mtc] = t.mtc.Done()
+	}
+	return done
+}
+
+// componentDone reports whether c is done, as the current alt pass sees
+// it, or now outside one.
+func (m *Machine) componentDone(c *runtime.Component) bool {
+	if m.snap != nil {
+		if done, ok := m.snap.done[c]; ok {
+			return done
+		}
+	}
+	return c.Done()
+}
+
+// now is the time timers are read at: that of the current alt pass, or
+// the present outside one.
+func (m *Machine) now() time.Time {
+	if m.snap != nil {
+		return m.snap.now
+	}
+	return time.Now()
 }
 
 func (t *testcase) machine(c *runtime.Component) *Machine {
@@ -1622,7 +1679,7 @@ func (m *Machine) run(stopPC int) (err error) {
 			comp := m.popValue().(*runtime.Component)
 			outcome := "wait"
 			switch {
-			case comp.Done():
+			case m.componentDone(comp):
 				outcome = "ready"
 			case !comp.Started():
 				outcome = "never"
@@ -1856,16 +1913,17 @@ func (m *Machine) run(stopPC int) (err error) {
 		case opcode.RUNNING:
 			opnd := m.Pop()
 			if c, ok := m.deref(opnd).(*runtime.Component); ok {
-				m.Push(c.Started() && !c.Done())
+				m.Push(c.Started() && !m.componentDone(c))
 				break
 			}
 			t := m.timer(opnd)
-			r := t.Running()
+			r := t.RunningAt(m.now())
 			m.log(k3log.TMRU, t.Name, formatValue(r, nil))
 			m.Push(r)
 
 		case opcode.RUNNING1T:
-			r := slices.ContainsFunc(m.self.Timers, (*runtime.Timer).Running)
+			now := m.now()
+			r := slices.ContainsFunc(m.self.Timers, func(t *runtime.Timer) bool { return t.RunningAt(now) })
 			m.log(k3log.TMRU, "(any)", formatValue(r, nil))
 			m.Push(r)
 
@@ -1982,7 +2040,7 @@ func (m *Machine) run(stopPC int) (err error) {
 
 		case opcode.TIMEOUT:
 			t := m.timer(m.Pop())
-			ready, running, deadline := t.Timeout()
+			ready, running, deadline := t.TimeoutAt(m.now())
 			outcome := ""
 			if ready {
 				outcome = "ready"
@@ -1998,8 +2056,9 @@ func (m *Machine) run(stopPC int) (err error) {
 				m.Push(false)
 				break
 			}
+			now := m.now()
 			for _, t := range m.self.Timers {
-				ready, r, d := t.Timeout()
+				ready, r, d := t.TimeoutAt(now)
 				if ready {
 					outcome = "ready(" + t.Name + ")"
 					break
@@ -2132,8 +2191,10 @@ var (
 // left that might, is a deadlock. op is ALT, ALTND (no defaults), or
 // INTERLEAVE, which repeats until each of its steps has matched once.
 func (m *Machine) runAlt(blk Block, op opcode.Opcode) error {
-	savedW, savedN, savedWake, savedTaken := m.altWait, m.altNever, m.wake, m.taken
-	defer func() { m.altWait, m.altNever, m.wake, m.taken = savedW, savedN, savedWake, savedTaken }()
+	savedW, savedN, savedWake, savedTaken, savedSnap := m.altWait, m.altNever, m.wake, m.taken, m.snap
+	defer func() {
+		m.altWait, m.altNever, m.wake, m.taken, m.snap = savedW, savedN, savedWake, savedTaken, savedSnap
+	}()
 
 	enter, leave, wait := k3log.ALEN, k3log.ALLV, k3log.ALWT
 	m.taken = nil
@@ -2164,10 +2225,13 @@ func (m *Machine) runAlt(blk Block, op opcode.Opcode) error {
 		if m.tc != nil {
 			m.tc.ports.TakeSnapshot(m.self)
 		}
+		m.snap = m.takeSnapshot()
 		err := m.runBlock(blk)
 		if err == nil && m.chosen == nil && op == opcode.ALT {
 			err = m.tryDefaults()
 		}
+		// The body of the alternative taken runs after the snapshot.
+		m.snap = nil
 		if err == nil && m.chosen != nil {
 			if m.taken != nil {
 				m.taken[m.chosenPC] = true

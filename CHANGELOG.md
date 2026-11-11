@@ -367,6 +367,13 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **The T3XF virtual machine evaluates every alternative of an alt pass
+  against one snapshot** (20.1): whether a component is done, as `done`
+  and `running` read it, and the time timers are read at, besides the
+  port queues it already took. A component that ended or a timer that
+  expired during a pass made a later alternative ready while an earlier
+  one waited, so a later branch could be taken (`ntt run
+  --backend=t3xf`).
 - **A map value holds no omit, and unmap needs an initialised map**: a
   value or constant that is, or holds at any depth, a map associating a
   key with omit, by its initialiser, an assignment or `m[k] := omit`, is
