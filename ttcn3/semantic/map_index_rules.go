@@ -116,7 +116,132 @@ func compatibleScalar(lit, target string) bool {
 	if lit == "integer" && target == "float" {
 		return true
 	}
+	// A charstring is a universal charstring (ETSI 6.3.1).
+	if lit == "charstring" && target == "ucharstring" {
+		return true
+	}
 	return false
+}
+
+// isAnyElementsIndex reports whether idx is `*`, the index of a map
+// template's AnyElementsOrNone (ETSI 6.2.15.4).
+func isAnyElementsIndex(idx syntax.Expr) bool {
+	lit, ok := idx.(*syntax.ValueLiteral)
+	return ok && lit.Tok != nil && lit.Tok.Kind() == syntax.MUL
+}
+
+// checkAnyElementsAssignment checks `m[*] := val`, which adds or removes
+// AnyElementsOrNone: val is a boolean (ETSI 6.2.15.4), not a value of
+// the map's to-type.
+func checkAnyElementsAssignment(val syntax.Expr, mapName string) []Diagnostic {
+	if lk := literalKind(val); lk == "" || lk == "boolean" {
+		return nil
+	}
+	return []Diagnostic{{
+		Code:     "map-value-type-mismatch",
+		Severity: SeverityError,
+		Message:  fmt.Sprintf("%s[*] is assigned a %s literal; it takes a boolean (ETSI 6.2.15.4)", mapName, literalKind(val)),
+		Node:     val,
+		Span:     syntax.SpanOf(val),
+	}}
+}
+
+// checkAnyElementsRead flags a declaration of a variable of a type other
+// than boolean initialised with `m[*]`, m a map: it reads whether m has
+// AnyElementsOrNone, a boolean (ETSI 6.2.15.4).
+func checkAnyElementsRead(st syntax.Stmt, vars map[string]string) []Diagnostic {
+	ds, ok := st.(*syntax.DeclStmt)
+	if !ok {
+		return nil
+	}
+	vd, ok := ds.Decl.(*syntax.ValueDecl)
+	if !ok || vd.Type == nil {
+		return nil
+	}
+	typ := identName(vd.Type)
+	if typ == "" || typ == "boolean" {
+		return nil
+	}
+	var diags []Diagnostic
+	for _, d := range vd.Decls {
+		if d == nil || d.Value == nil {
+			continue
+		}
+		ie, ok := d.Value.(*syntax.IndexExpr)
+		if !ok || !isAnyElementsIndex(ie.Index) || mapVarName(ie.X, vars) == "" {
+			continue
+		}
+		diags = append(diags, Diagnostic{
+			Code:     "map-value-type-mismatch",
+			Severity: SeverityError,
+			Message:  fmt.Sprintf("%s[*] is a boolean, not a %s (ETSI 6.2.15.4)", identName(ie.X), typ),
+			Node:     d.Value,
+			Span:     syntax.SpanOf(d.Value),
+		})
+	}
+	return diags
+}
+
+// isMatchingSymbol reports whether e is the literal `?` or `*`.
+func isMatchingSymbol(e syntax.Expr) bool {
+	lit, ok := e.(*syntax.ValueLiteral)
+	return ok && lit.Tok != nil && (lit.Tok.Kind() == syntax.ANY || lit.Tok.Kind() == syntax.MUL)
+}
+
+// checkMapNotation checks the indexed assignment notation of cl: a key
+// of a map template is no matching symbol (ETSI 6.2.15.9), and a map's
+// notation gives no element by position but `*`, and that first
+// (6.2.15.2). The notation is a map's when a key is a literal other than
+// an integer.
+func checkMapNotation(cl *syntax.CompositeLiteral) []Diagnostic {
+	if cl == nil {
+		return nil
+	}
+	var diags []Diagnostic
+	isMap, indexed := false, false
+	for _, e := range cl.List {
+		be, ok := e.(*syntax.BinaryExpr)
+		if !ok || be.Op == nil || be.Op.Kind() != syntax.ASSIGN {
+			continue
+		}
+		ie, ok := be.X.(*syntax.IndexExpr)
+		if !ok || ie.X != nil {
+			continue
+		}
+		indexed = true
+		if isMatchingSymbol(ie.Index) {
+			diags = append(diags, Diagnostic{
+				Code:     "map-index-type-mismatch",
+				Severity: SeverityError,
+				Message:  "a key of a map template is no matching symbol (ETSI 6.2.15.9)",
+				Node:     ie.Index,
+				Span:     syntax.SpanOf(ie.Index),
+			})
+			continue
+		}
+		if lk := literalKind(ie.Index); lk != "" && lk != "integer" {
+			isMap = true
+		}
+	}
+	if !indexed || !isMap {
+		return diags
+	}
+	for i, e := range cl.List {
+		if be, ok := e.(*syntax.BinaryExpr); ok && be.Op != nil && be.Op.Kind() == syntax.ASSIGN {
+			continue
+		}
+		if i == 0 && isAnyElementsIndex(e) {
+			continue
+		}
+		diags = append(diags, Diagnostic{
+			Code:     "map-notation",
+			Severity: SeverityError,
+			Message:  "a map template gives no element by position but *, which comes first (ETSI 6.2.15.2)",
+			Node:     e,
+			Span:     syntax.SpanOf(e),
+		})
+	}
+	return diags
 }
 
 // mapSpec records the `from` / `to` type-family pair for a named
@@ -141,6 +266,12 @@ func (a *Analyzer) checkMapIndexRules(mod *syntax.Module) []Diagnostic {
 	}
 	var diags []Diagnostic
 	syntax.Inspect(mod, func(n syntax.Node) bool {
+		if cl, ok := n.(*syntax.CompositeLiteral); ok {
+			diags = append(diags, checkMapNotation(cl)...)
+		}
+		return true
+	})
+	syntax.Inspect(mod, func(n syntax.Node) bool {
 		body, vars := executableBodyAndVars(n, maps)
 		if body == nil {
 			return true
@@ -150,9 +281,7 @@ func (a *Analyzer) checkMapIndexRules(mod *syntax.Module) []Diagnostic {
 				diags = append(diags, checkAssignForMapMisuse(st, vars, maps)...)
 				diags = append(diags, checkReadForMapMisuse(st, vars, maps)...)
 				diags = append(diags, checkDeclInitForMapMisuse(st, vars, maps)...)
-			}
-			if be, ok := sn.(*syntax.BinaryExpr); ok {
-				diags = append(diags, checkMapEqualityMisuse(be, vars, maps)...)
+				diags = append(diags, checkAnyElementsRead(st, vars)...)
 			}
 			if ce, ok := sn.(*syntax.CallExpr); ok {
 				diags = append(diags, checkUnmapCallMisuse(ce, vars, maps)...)
@@ -162,41 +291,6 @@ func (a *Analyzer) checkMapIndexRules(mod *syntax.Module) []Diagnostic {
 		return true
 	})
 	return diags
-}
-
-// checkMapEqualityMisuse flags `==` / `!=` whose either operand
-// is a known map-typed local variable. ETSI 6.2.15.1 restriction
-// b forbids map values from appearing as operands of equality
-// expressions.
-func checkMapEqualityMisuse(
-	be *syntax.BinaryExpr,
-	vars map[string]string,
-	maps map[string]mapSpec,
-) []Diagnostic {
-	if be == nil || be.Op == nil {
-		return nil
-	}
-	if be.Op.Kind() != syntax.EQ && be.Op.Kind() != syntax.NE {
-		return nil
-	}
-	leftMap := mapVarName(be.X, vars)
-	rightMap := mapVarName(be.Y, vars)
-	if leftMap == "" && rightMap == "" {
-		return nil
-	}
-	hit := leftMap
-	if hit == "" {
-		hit = rightMap
-	}
-	return []Diagnostic{{
-		Code:     "map-equality-not-allowed",
-		Severity: SeverityError,
-		Message: fmt.Sprintf(
-			"map-typed values (here %q) cannot appear as operands of equality (ETSI 6.2.15.1 restriction b)",
-			hit),
-		Node: be,
-		Span: syntax.SpanOf(be),
-	}}
 }
 
 // mapVarName returns the variable name of e when e is a bare
@@ -230,6 +324,16 @@ func checkUnmapCallMisuse(
 	mapName := mapVarName(ce.Args.List[0], vars)
 	if mapName == "" {
 		return nil
+	}
+	// Only the asterisk literal removes AnyElementsOrNone (6.2.15.3).
+	if isMatchingSymbol(ce.Args.List[1]) && !isAnyElementsIndex(ce.Args.List[1]) {
+		return []Diagnostic{{
+			Code:     "map-index-type-mismatch",
+			Severity: SeverityError,
+			Message:  fmt.Sprintf("unmap(%s, %s): a key is no matching symbol, and AnyElementsOrNone is removed with * (ETSI 6.2.15.3)", mapName, ce.Args.List[1].(*syntax.ValueLiteral).Tok.String()),
+			Node:     ce.Args.List[1],
+			Span:     syntax.SpanOf(ce.Args.List[1]),
+		}}
 	}
 	spec, has := maps[vars[mapName]]
 	if !has {
@@ -302,6 +406,9 @@ func checkIndexedAssignEntry(item syntax.Expr, spec mapSpec, mapName string) []D
 	ie, ok := be.X.(*syntax.IndexExpr)
 	if !ok || ie == nil {
 		return nil
+	}
+	if isAnyElementsIndex(ie.Index) {
+		return checkAnyElementsAssignment(be.Y, mapName)
 	}
 	var diags []Diagnostic
 	if d := checkKeyMismatch(ie.Index, spec.from, mapName); d != nil {
@@ -439,6 +546,9 @@ func checkAssignForMapMisuse(
 	spec, has := maps[mapName]
 	if !has {
 		return nil
+	}
+	if isAnyElementsIndex(ie.Index) {
+		return checkAnyElementsAssignment(be.Y, mapName)
 	}
 	var diags []Diagnostic
 	if d := checkKeyMismatch(ie.Index, spec.from, mapName); d != nil {

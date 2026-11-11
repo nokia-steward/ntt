@@ -24,13 +24,8 @@ func (a *Analyzer) checkTemplateTypeRules(mod *syntax.Module) []Diagnostic {
 	for tname := range collectPortTypes(mod) {
 		forbiddenParamFamily[tname] = "port"
 	}
-	// Map types (ETSI 6.2.15.1 restriction a) are forbidden
-	// for templates too. We treat them the same way as ports
-	// here so the nested walk catches `template T` where T
-	// transitively contains a map field.
-	for tname := range collectMapSpecs(mod) {
-		forbiddenParamFamily[tname] = "map"
-	}
+	// A map type may be the type of a template: restriction a of ETSI
+	// ES 201 873-1 6.2.15.1, which forbade it, is void as of V4.17.1.
 	structFieldTypes := collectStructFieldTypes(mod)
 	var diags []Diagnostic
 	syntax.Inspect(mod, func(n syntax.Node) bool {
@@ -55,7 +50,7 @@ func (a *Analyzer) checkTemplateTypeRules(mod *syntax.Module) []Diagnostic {
 			Code:     "template-forbidden-type",
 			Severity: SeverityError,
 			Message: fmt.Sprintf(
-				"template %q is declared on type %q which contains a %s field; templates cannot reference port/timer/default/map kinds (ETSI 15 / 6.2.15.1)",
+				"template %q is declared on type %q which contains a %s field; templates cannot reference port/timer/default kinds (ETSI 15)",
 				name, typeName, family),
 			Node: td,
 			Span: syntax.SpanOf(td),

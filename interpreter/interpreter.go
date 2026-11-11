@@ -487,8 +487,10 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			// into a Map. For typed record-of / set-of variables we
 			// want a List so later positional comparisons and
 			// indexed re-assignments (TTCN-3 6.2.3.2) can update
-			// individual slots without rebuilding the container.
-			if l := mapToList(val); l != nil {
+			// individual slots without rebuilding the container. A
+			// variable of a map type keeps the map, its keys integers
+			// or not (6.2.15).
+			if l := mapToList(val); l != nil && !isMapType(lookupTypeDesc(declaredTypeName(env, syntax.Name(n.Name)), env), env) {
 				val = l
 			}
 			// `var integer v[2..5] := {...}` declares a fixed-size
@@ -2517,7 +2519,9 @@ func evalMixedArrayList(exprs []syntax.Expr, env runtime.Scope) runtime.Object {
 			}
 			ki, ok := key.(runtime.Int)
 			if !ok {
-				return runtime.Errorf("array index must be an integer, got %s", key.Type())
+				// A key other than an integer's indexes a map: the
+				// notation is a map template's (6.2.15.2).
+				return evalMapTemplateList(exprs, env)
 			}
 			val := eval(be.Y, env)
 			if runtime.IsError(val) {
@@ -2604,6 +2608,34 @@ func evalMapAssignmentList(exprs []syntax.Expr, env runtime.Scope) runtime.Objec
 // assignment or mixed notation (ETSI 6.2.0, 6.2.15.2 a).
 func duplicateIndexError(key runtime.Object) runtime.Object {
 	return runtime.Errorf("index %s appears more than once in the notation (ETSI 6.2.0, 6.2.15.2 a)", key.Inspect())
+}
+
+// evalMapTemplateList is the map template `{*, [k] := v, ...}` (ETSI
+// 6.2.15.2, B.1.3.2): its indexed assignments, and AnyElementsOrNone
+// when `*` is given by position, which is all a map's notation may give
+// so.
+func evalMapTemplateList(exprs []syntax.Expr, env runtime.Scope) runtime.Object {
+	var assigned []syntax.Expr
+	anyElements := false
+	for _, e := range exprs {
+		if be, ok := e.(*syntax.BinaryExpr); ok && be.Op.Kind() == syntax.ASSIGN {
+			assigned = append(assigned, e)
+			continue
+		}
+		v := eval(e, env)
+		if runtime.IsError(v) {
+			return v
+		}
+		if v != runtime.AnyOrNone {
+			return runtime.Errorf("a map template gives no element by position but * (ETSI 6.2.15.2)")
+		}
+		anyElements = true
+	}
+	m := evalMapAssignmentList(assigned, env)
+	if mm, ok := m.(*runtime.Map); ok {
+		mm.AnyElementsOrNone = anyElements
+	}
+	return m
 }
 
 func evalKeyExpr(n syntax.Expr, env runtime.Scope) runtime.Object {
@@ -4974,6 +5006,7 @@ func mergeFieldReassignment(existing, fresh runtime.Object, lhs syntax.Expr, env
 // the same map literal flows through multiple slots.
 func mergeMapReassignment(existing, fresh *runtime.Map) *runtime.Map {
 	out := runtime.NewMap()
+	out.AnyElementsOrNone = existing.AnyElementsOrNone || fresh.AnyElementsOrNone
 	for _, p := range existing.Pairs() {
 		out.Set(p.Key, p.Value)
 	}
@@ -5408,7 +5441,21 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 		// fresh map for an uninitialised receiver, then overwrite any
 		// existing entry (Map.Set appends, so delete-then-set keeps the
 		// key single-valued).
-		if _, isInt := idx.(runtime.Int); !isInt &&
+		// `m[*] := b` adds AnyElementsOrNone to the map template m, or
+		// removes it; b is a boolean (ETSI 6.2.15.4).
+		if m, isMap := container.(*runtime.Map); isMap && idx == runtime.AnyOrNone && isAsteriskLiteral(l.Index) {
+			b, ok := val.(runtime.Bool)
+			if !ok {
+				return runtime.Errorf("%s[*] is assigned %s, not a boolean (ETSI 6.2.15.4)", syntax.Name(l.X), val.Inspect())
+			}
+			m.AnyElementsOrNone = bool(b)
+			return nil
+		}
+		// A key indexes a map, of a map type whatever the key's type
+		// (6.2.15.4): a list or a string is indexed by an integer.
+		_, containerIsMap := container.(*runtime.Map)
+		if _, isInt := idx.(runtime.Int); (!isInt || containerIsMap ||
+			(container == runtime.Undefined || container == nil) && isMapType(lvalueTypeDesc(l.X, env), env)) &&
 			idx != runtime.Undefined && idx != runtime.Any && idx != runtime.AnyOrNone {
 			m, isMap := container.(*runtime.Map)
 			if !isMap && (container == runtime.Undefined || container == nil) {
@@ -7277,6 +7324,9 @@ func evalValueDeclBody(vd *syntax.ValueDecl, env runtime.Scope) runtime.Object {
 
 	var result runtime.Object
 	for _, decl := range vd.Decls {
+		// The type is known as the declarator is evaluated: a map's
+		// initialiser stays a map (6.2.15).
+		recordDeclaredType(env, syntax.Name(decl.Name), vd.Type)
 		result = eval(decl, env)
 		if runtime.IsError(result) {
 			return result
@@ -15230,6 +15280,26 @@ func evalPortMap(opName string, n *syntax.CallExpr, env runtime.Scope) (runtime.
 // against the same predicate (the value isn't Undefined / Null /
 // Errored) - that's enough to flip the `if (not ispresent(...))`
 // tests in 0602 / 0603.
+// mapAnyElementsQuery reports, for `m[*]` with m a map, whether m has
+// AnyElementsOrNone; ok is false for another expression.
+func mapAnyElementsQuery(e syntax.Expr, env runtime.Scope) (has, ok bool) {
+	ie, isIndex := e.(*syntax.IndexExpr)
+	if !isIndex || ie.X == nil || !isAsteriskLiteral(ie.Index) {
+		return false, false
+	}
+	m, isMap := eval(ie.X, env).(*runtime.Map)
+	if !isMap {
+		return false, false
+	}
+	return m.AnyElementsOrNone, true
+}
+
+// isAsteriskLiteral reports whether e is the literal `*`.
+func isAsteriskLiteral(e syntax.Expr) bool {
+	lit, ok := e.(*syntax.ValueLiteral)
+	return ok && lit.Tok != nil && lit.Tok.Kind() == syntax.MUL
+}
+
 func evalPresencePred(name string, n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	if n.Args == nil || len(n.Args.List) == 0 {
 		return runtime.NewBool(false)
@@ -15246,6 +15316,11 @@ func evalPresencePred(name string, n *syntax.CallExpr, env runtime.Scope) runtim
 				return runtime.NewBool(chosen)
 			}
 		}
+	}
+	// `isbound(m[*])`, `ispresent(m[*])`: whether the map template m has
+	// AnyElementsOrNone (ETSI 6.2.15.4).
+	if has, ok := mapAnyElementsQuery(n.Args.List[0], env); ok && (name == "isbound" || name == "ispresent" || name == "isvalue") {
+		return runtime.NewBool(has && name != "isvalue")
 	}
 	val := eval(n.Args.List[0], env)
 	if runtime.IsError(val) {
@@ -15464,6 +15539,11 @@ func evalIndexRead(n *syntax.IndexExpr, left runtime.Object, env runtime.Scope) 
 		return cur
 	case left.Type() == runtime.MAP:
 		m := left.(*runtime.Map)
+		// `m[*]` is whether the map template has AnyElementsOrNone
+		// (ETSI 6.2.15.4).
+		if index == runtime.AnyOrNone {
+			return runtime.NewBool(m.AnyElementsOrNone)
+		}
 		val, ok := m.Get(index)
 		if !ok || val == nil {
 			return runtime.Undefined
@@ -15661,6 +15741,12 @@ func evalMapUnmap(opName string, n *syntax.CallExpr, env runtime.Scope) (runtime
 		return key, true
 	}
 	if m, ok := owned(id, env).(*runtime.Map); ok {
+		// `unmap(m, *)` removes AnyElementsOrNone from the map template
+		// m (ETSI 6.2.15.3).
+		if key == runtime.AnyOrNone && isAsteriskLiteral(n.Args.List[1]) {
+			m.AnyElementsOrNone = false
+			return runtime.Undefined, true
+		}
 		m.Delete(key)
 	}
 	return runtime.Undefined, true

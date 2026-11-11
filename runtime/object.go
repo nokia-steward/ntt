@@ -1734,9 +1734,13 @@ type pair struct {
 
 // Map is a map of objects.
 type Map struct {
-	pairs  map[hashKey][]pair
-	shared uint32         // see Share
-	shape  unsafe.Pointer // see Shaped
+	pairs map[hashKey][]pair
+	// AnyElementsOrNone is the `*` of a map template, `{*, [k] := v}`:
+	// it matches the elements whose keys the template does not have
+	// (ETSI ES 201 873-1 B.1.3.2). A value has none.
+	AnyElementsOrNone bool
+	shared            uint32         // see Share
+	shape             unsafe.Pointer // see Shaped
 }
 
 // MapPair exposes a single key/value pair held in a Map. Returned by
@@ -1824,6 +1828,9 @@ func (m *Map) Inspect() string {
 	// In key order: the storage is a Go map, whose order changes from
 	// run to run, and a map's text should not.
 	sort.Strings(pairs)
+	if m.AnyElementsOrNone {
+		pairs = append([]string{"*"}, pairs...)
+	}
 	buf.WriteString("{")
 	buf.WriteString(strings.Join(pairs, ", "))
 	buf.WriteString("}")
@@ -1836,7 +1843,7 @@ func (m *Map) Equal(obj Object) bool {
 	if !ok {
 		return false
 	}
-	if len(m.pairs) != len(other.pairs) {
+	if m.AnyElementsOrNone != other.AnyElementsOrNone || len(m.pairs) != len(other.pairs) {
 		return false
 	}
 

@@ -1714,6 +1714,12 @@ reading; "fixing" the negative would just flip which side fails (a wash).
   an error (20.5.2 restriction e, kept by the V5 working text), so ntt
   gives `error` where the test expects `pass`. With
   `deactivate(v_default, true)` the test would check what it says.
+- **`NegSem_06021501_map_type_definition_001`, `_002`, `_003`**
+  (2026-11-11): they check the restrictions of 6.2.15.1 — no template of
+  a map type, or of a type with a map field, and no map as an operand of
+  `==` — which ES 201 873-1 V4.17.1, the latest edition, makes void. The
+  vendored corpus (2024-03-28) predates it. ntt follows the standard:
+  map templates match maps, and maps are compared.
 
 ---
 

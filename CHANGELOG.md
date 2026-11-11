@@ -367,6 +367,18 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **Maps follow ES 201 873-1 V4.17.1** (6.2.15): a map type may be a
+  template's type and maps are compared, as the two restrictions of
+  6.2.15.1 are void (three ETSI tests of the 2024 corpus still expect
+  them). A map template's `*`, `{*, [k] := v}`, matches the elements whose
+  keys it does not have (B.1.3.2), and a key whose template matches omit
+  may be absent (B.1.2.4); maps are matched by key, where they were
+  compared as values, so `{["x"] := ?}` matched nothing. `m[*]` reads
+  whether the template has the `*`, `m[*] := b` adds or removes it, and
+  `unmap(m, *)` removes it (6.2.15.3, 6.2.15.4); `ntt check` rejects a
+  value other than a boolean for it. A map with integer keys stays a map,
+  where its literal became an array and an element assignment grew one.
+  A charstring key of a universal charstring map is no longer rejected.
 - **On the real clock, every alternative of an alt pass reads timers at
   one instant** (20.1), the defaults it invokes and an altstep taken as an
   alternative included, as they see the port queues as they were when the

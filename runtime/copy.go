@@ -98,6 +98,7 @@ func Unshare(v Object) Object {
 		return x.clone()
 	case *Map:
 		out := NewMap()
+		out.AnyElementsOrNone = x.AnyElementsOrNone
 		for h, bucket := range x.pairs {
 			out.pairs[h] = append([]pair(nil), bucket...)
 		}
@@ -237,7 +238,7 @@ func fingerprint(v Object) string {
 				}
 			}
 			sort.Strings(kv)
-			fmt.Fprintf(&b, "map%v", kv)
+			fmt.Fprintf(&b, "map%v%v", x.AnyElementsOrNone, kv)
 		case nil:
 			b.WriteString("<nil>")
 		case *IfPresent:

@@ -321,9 +321,42 @@ func match(a, b runtime.Object) (bool, error) {
 		return true, nil
 	case *runtime.Binarystring:
 		return matchBinaryString(a.(*runtime.Binarystring), b)
+	case *runtime.Map:
+		return matchMap(a, b)
 	default:
 		return a.Equal(b), nil
 	}
+}
+
+// matchMap matches the map a against the map template t (ETSI ES 201
+// 873-1 6.2.15, B.1.3.2, B.1.2.4, B.1.2.8): every key of t is a's, its
+// value matching t's, unless t's matches omit, which also matches the key
+// absent; and a has no other key, unless t has AnyElementsOrNone.
+func matchMap(a runtime.Object, t *runtime.Map) (bool, error) {
+	m, ok := a.(*runtime.Map)
+	if !ok {
+		return false, nil
+	}
+	for _, p := range t.Pairs() {
+		v, present := m.Get(p.Key)
+		if !present {
+			if MatchesOmitAsAWhole(p.Value) {
+				continue
+			}
+			return false, nil
+		}
+		if ok, err := match(v, p.Value); err != nil || !ok {
+			return false, nil
+		}
+	}
+	if !t.AnyElementsOrNone {
+		for _, p := range m.Pairs() {
+			if _, ok := t.Get(p.Key); !ok {
+				return false, nil
+			}
+		}
+	}
+	return true, nil
 }
 
 // matchPatternString matches a TTCN-3 character pattern (B.1.5) by its
