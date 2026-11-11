@@ -1,9 +1,9 @@
 {
- "summary": "ran 5164 files: 5025 matched, 18 skipped (97.65% match rate)",
+ "summary": "ran 5164 files: 5027 matched, 18 skipped (97.69% match rate)",
  "source": "etsi.json",
- "miss_count": 139,
+ "miss_count": 137,
  "outcomes": {
-  "reject->pass": 48,
+  "reject->pass": 46,
   "reject->none": 24,
   "->": 18,
   "pass->error": 13,
@@ -16,10 +16,10 @@
  "chapters": [
   {
    "chapter": "core_language/06_types_and_values",
-   "misses": 52,
+   "misses": 50,
    "outcomes": {
     "->": 8,
-    "reject->pass": 11,
+    "reject->pass": 9,
     "reject->none": 13,
     "pass->parse-error": 6,
     "pass->fail": 4,
@@ -485,14 +485,6 @@
   },
   {
    "chapter": "core_language/06_types_and_values",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021503_unmapping_keys/NegSem_06021503_unmapping_keys_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
    "expected": "pass",
    "actual": "error",
    "outcome": "pass->error",
@@ -554,14 +546,6 @@
    "outcome": "pass->error",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021504_index_notation/Sem_06021504_index_notation_010.ttcn",
    "message": "Error: array index must be an integer, got string"
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021509_optionality_of_map_element_values/NegSem_06021509_optionality_of_map_element_values_001.ttcn",
-   "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",
