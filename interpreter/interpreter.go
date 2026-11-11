@@ -1868,6 +1868,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// (tliMatch, tliMatchMismatch) with the operands it evaluated.
 		if _, ok := f.(*runtime.Builtin); ok && len(args) == 2 {
 			if id, ok := n.Fun.(*syntax.Ident); ok && id.String() == "match" {
+				if err := matchValueInitError(args[0], n.Args.List[0], env); err != nil {
+					return err
+				}
 				res := apply(f, args)
 				if lexec := tlExec(env); lexec != nil {
 					tlMatch(lexec, n, args[0], args[1], res)
@@ -2534,6 +2537,9 @@ func evalMixedArrayList(exprs []syntax.Expr, env runtime.Scope) runtime.Object {
 		val runtime.Object
 	}
 	var slots []slot
+	// An index given once, by position or assigned, is not given again
+	// (ETSI 6.2.0).
+	seen := map[int]bool{}
 	next, maxIdx := 0, -1
 	for _, e := range exprs {
 		if be, ok := e.(*syntax.BinaryExpr); ok && be.Op.Kind() == syntax.ASSIGN {
@@ -2554,6 +2560,10 @@ func evalMixedArrayList(exprs []syntax.Expr, env runtime.Scope) runtime.Object {
 				return val
 			}
 			idx := int(ki.Int64())
+			if seen[idx] {
+				return duplicateIndexError(key)
+			}
+			seen[idx] = true
 			slots = append(slots, slot{idx, val})
 			if idx > maxIdx {
 				maxIdx = idx
@@ -2565,6 +2575,10 @@ func evalMixedArrayList(exprs []syntax.Expr, env runtime.Scope) runtime.Object {
 		if runtime.IsError(val) {
 			return val
 		}
+		if seen[next] {
+			return duplicateIndexError(runtime.NewInt(next))
+		}
+		seen[next] = true
 		slots = append(slots, slot{next, val})
 		if next > maxIdx {
 			maxIdx = next
@@ -2608,6 +2622,11 @@ func evalMapAssignmentList(exprs []syntax.Expr, env runtime.Scope) runtime.Objec
 		if runtime.IsError(key) {
 			return key
 		}
+		// Every index evaluates to a different value (ETSI 6.2.0,
+		// 6.2.15.2 a).
+		if _, dup := m.Get(key); dup {
+			return duplicateIndexError(key)
+		}
 
 		if ret := m.Set(key, val); runtime.IsError(ret) {
 			return ret
@@ -2615,6 +2634,12 @@ func evalMapAssignmentList(exprs []syntax.Expr, env runtime.Scope) runtime.Objec
 
 	}
 	return m
+}
+
+// duplicateIndexError is the error of an index given twice in an
+// assignment or mixed notation (ETSI 6.2.0, 6.2.15.2 a).
+func duplicateIndexError(key runtime.Object) runtime.Object {
+	return runtime.Errorf("index %s appears more than once in the notation (ETSI 6.2.0, 6.2.15.2 a)", key.Inspect())
 }
 
 func evalKeyExpr(n syntax.Expr, env runtime.Scope) runtime.Object {
@@ -3868,6 +3893,40 @@ func operandInitError(op syntax.Kind, v runtime.Object, e syntax.Expr, env runti
 	}
 	if !completelyInitialised(v, lvalueTypeDesc(e, env), env) {
 		return runtime.Errorf("operand %s of %s is not completely initialised (ETSI 7.1.0 a, 7.1.3)", syntax.Name(e), op)
+	}
+	return nil
+}
+
+// matchValueInitError is the error of v, the value of e matched by match,
+// when it is uninitialised (ETSI 15.9 b), or nil. Whether it is completely
+// initialised is not looked at: an implicitly omitted field reads as not. An omitted
+// optional field is matched (15.9 a), and, as of an operand compared, an
+// optional field left out of the value reads as one. Only a reference to
+// a field or an element is checked, an alternative not chosen among them:
+// of a variable or a parameter the interpreter may have no value only
+// because it does not model how it got one (a testcase's parameters run
+// alone, an attribute retrieved).
+func matchValueInitError(v runtime.Object, e syntax.Expr, env runtime.Scope) runtime.Object {
+	for {
+		p, ok := e.(*syntax.ParenExpr)
+		if !ok || len(p.List) != 1 {
+			break
+		}
+		e = p.List[0]
+	}
+	switch e.(type) {
+	case *syntax.SelectorExpr, *syntax.IndexExpr:
+	default:
+		return nil
+	}
+	if !isValueReference(e) || v == runtime.Omit {
+		return nil
+	}
+	if v == runtime.Undefined {
+		if sel, ok := e.(*syntax.SelectorExpr); ok && isOptionalStructField(lvalueTypeDesc(sel.X, env), syntax.Name(sel.Sel)) {
+			return nil
+		}
+		return runtime.Errorf("the value %s matched is uninitialised (ETSI 15.9 b)", syntax.Name(e))
 	}
 	return nil
 }

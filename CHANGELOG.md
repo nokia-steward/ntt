@@ -367,6 +367,14 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **An index given twice in a notation, and a value matched that is not
+  initialised, are errors**: an index assigned twice in an assignment or
+  mixed notation of a record of, set of or array, or assigned where a
+  value is given by position (6.2.0), and a key of a map's index
+  assignment notation that evaluates to the value of another (6.2.15.2
+  a); a field or element given to match that is uninitialised, as an
+  alternative of a union, anytype too, other than the chosen one (15.9 b,
+  6.2.5.1). An omitted optional field is matched as before.
 - **`ntt check` rejects a call of a function on a component it may not
   run on** (6.3.3, 16.1.1 d, f): one whose runs on type has a definition
   the caller's component type has none of, of its name and kind, through
