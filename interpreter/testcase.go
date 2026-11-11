@@ -3238,7 +3238,7 @@ type idleRounds struct {
 // It is a loop's iteration, and checked as one (loopStopped): a stop or
 // the testcase's time limit ends it, and on the virtual clock time passes
 // in it as in any computation. There, an alt whose [else] does nothing
-// but repeat, and that has a timer guard, polled busyWaitPolls times at
+// but repeat, and that has a timer guard, polled runtime.TimerBusyWaitPolls times at
 // one instant is taken to be waiting for that timer, as a timer polled
 // that often is: nothing it does changes between its rounds, so it waits
 // as it would without its [else] — the timer fires when the clock
@@ -3262,7 +3262,7 @@ func altIdleRound(n *syntax.AltStmt, elseClause *syntax.CommClause, env runtime.
 		// takes a new one for progress (interleave.go).
 		idle.at, idle.n, idle.tok = now, 0, new(byte)
 	}
-	if idle.n++; idle.n < busyWaitPolls {
+	if idle.n++; idle.n < runtime.TimerBusyWaitPolls {
 		return nil
 	}
 	idle.n = 0
@@ -3663,7 +3663,7 @@ func nextAltTimerVirtualDeadline(n *syntax.AltStmt, env runtime.Scope) (float64,
 		if th == nil || !th.Running || th.Duration <= 0 {
 			return
 		}
-		dl := th.StartedAtVirtual + th.Duration
+		dl := th.VirtualDeadline()
 		if dl <= floor {
 			return
 		}
@@ -4347,7 +4347,7 @@ func commGuardMatches(g syntax.Node, env runtime.Scope) bool {
 	if isCatchTimeoutGuard(g) {
 		if th := callTimeoutTimer(env); th != nil {
 			if timerExpired(th, env) {
-				th.Running = false
+				th.Fire()
 				if exec := tlExec(env); exec != nil {
 					tlCatchTimeout(exec, g, env)
 				}

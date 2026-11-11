@@ -427,7 +427,7 @@ func timerWait(th *runtime.TimerHandle, at interface{}) ilEvent {
 	if th == nil || !th.Running || th.Duration <= 0 {
 		return ev
 	}
-	ev.deadline, ev.hasTimer = th.StartedAtVirtual+th.Duration, true
+	ev.deadline, ev.hasTimer = th.VirtualDeadline(), true
 	if !th.StartedAt.IsZero() {
 		left := time.Until(th.StartedAt.Add(time.Duration(th.Duration * float64(time.Second))))
 		ev.real, ev.hasReal = time.Duration(math.Max(0, float64(left))), true
