@@ -1,4 +1,4 @@
-[![Go Report Card](https://goreportcard.com/badge/github.com/nokia/ntt?style=flat-square)](https://goreportcard.com/report/github.com/nokia/ntt)
+[![CI](https://github.com/nokia-steward/ntt/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/nokia-steward/ntt/actions/workflows/ci.yml)
 [![Build Status](https://travis-ci.com/nokia/ntt.svg?branch=master)](https://travis-ci.com/nokia/ntt)
 [![Conformance](https://img.shields.io/badge/ETSI%20conformance-67.22%25-yellow)](docs/conformance/index.html)
 
