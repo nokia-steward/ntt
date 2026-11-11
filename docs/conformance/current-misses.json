@@ -1,9 +1,9 @@
 {
- "summary": "ran 5164 files: 5024 matched, 18 skipped (97.63% match rate)",
+ "summary": "ran 5164 files: 5025 matched, 18 skipped (97.65% match rate)",
  "source": "etsi.json",
- "miss_count": 140,
+ "miss_count": 139,
  "outcomes": {
-  "reject->pass": 49,
+  "reject->pass": 48,
   "reject->none": 24,
   "->": 18,
   "pass->error": 13,
@@ -29,17 +29,6 @@
    }
   },
   {
-   "chapter": "core_language/15_templates",
-   "misses": 17,
-   "outcomes": {
-    "->": 2,
-    "pass->fail": 4,
-    "reject->none": 3,
-    "reject->pass": 6,
-    "pass->error": 2
-   }
-  },
-  {
    "chapter": "core_language/05_basic_language_elements",
    "misses": 16,
    "outcomes": {
@@ -47,6 +36,17 @@
     "pass->parse-error": 2,
     "reject->none": 1,
     "->": 2
+   }
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "misses": 16,
+   "outcomes": {
+    "->": 2,
+    "pass->fail": 4,
+    "reject->none": 3,
+    "reject->pass": 5,
+    "pass->error": 2
    }
   },
   {
@@ -897,14 +897,6 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/15_templates/1511_concatenating_templates_of_string_and_list_types/NegSem_1511_ConcatenatingTemplatesOfStringAndListTypes_004.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1513_the_present_operation/NegSem_1512_ThePresentOperation_003.ttcn",
    "message": ""
   },
   {
