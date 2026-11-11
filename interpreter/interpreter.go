@@ -138,6 +138,17 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		}
 		if n.Value != nil && n.Params == nil {
 			val := eval(n.Value, env)
+			// A template is initialised where it is declared (ETSI
+			// 15.3), so the error of an omit or present operation
+			// that is its body is the declaration's (15.12, 15.13).
+			// Other errors leave the template unbound, as before:
+			// some come from notations the interpreter does not
+			// model (types of XML and JSON modules, anytype fields).
+			if runtime.IsError(val) {
+				if c, ok := n.Value.(*syntax.CallExpr); ok && restrictionOperation(c) != 0 {
+					return val
+				}
+			}
 			if !runtime.IsError(val) && val != nil {
 				val = coerceToDeclaredStruct(val, n.Type, n.Value, env)
 				env.Set(name, val)
@@ -1428,16 +1439,10 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return nil
 
 	case *syntax.CallExpr:
-		// `omit(template)` is the omit restriction operation (ETSI
-		// 15.12): it asserts the operand is a complete value or
-		// `omit` and yields that operand unchanged. `omit` is a
-		// keyword, so the parser surfaces it as a ValueLiteral rather
-		// than an Ident. A restriction violation (`omit(?)`) is a
-		// negative-test concern; those fixtures still reach their
-		// explicit setverdict(fail), so identity is sufficient here.
-		if lit, ok := n.Fun.(*syntax.ValueLiteral); ok && lit.Tok != nil &&
-			lit.Tok.Kind() == syntax.OMIT && n.Args != nil && len(n.Args.List) == 1 {
-			return eval(n.Args.List[0], env)
+		// `omit(t)` and `present(t)` are the omit and present
+		// operations (ETSI 15.12, 15.13).
+		if op := restrictionOperation(n); op != 0 {
+			return evalRestrictionOperation(op, n.Args.List[0], env)
 		}
 		if isTestcaseStop(n.Fun) {
 			var args []syntax.Expr
@@ -3895,6 +3900,78 @@ func operandInitError(op syntax.Kind, v runtime.Object, e syntax.Expr, env runti
 		return runtime.Errorf("operand %s of %s is not completely initialised (ETSI 7.1.0 a, 7.1.3)", syntax.Name(e), op)
 	}
 	return nil
+}
+
+// restrictionOperation is the restriction n checks, OMIT for the omit
+// operation (ETSI 15.12), PRESENT for the present operation (15.13), or 0
+// when n is another call. Both are keywords: the parser makes omit a
+// value literal and present an identifier.
+func restrictionOperation(n *syntax.CallExpr) syntax.Kind {
+	if n.Args == nil || len(n.Args.List) != 1 {
+		return 0
+	}
+	switch f := n.Fun.(type) {
+	case *syntax.ValueLiteral:
+		if f.Tok != nil && f.Tok.Kind() == syntax.OMIT {
+			return syntax.OMIT
+		}
+	case *syntax.Ident:
+		if f.Tok != nil && f.Tok2 == nil && f.Tok.Kind() == syntax.PRESENT {
+			return syntax.PRESENT
+		}
+	}
+	return 0
+}
+
+// evalRestrictionOperation is omit(e) or present(e): the template e, if
+// it fulfils the omit or the present restriction (ETSI 15.8), and any
+// other situation an error (15.12, 15.13). A template fulfils the omit
+// restriction when it is omit or a value, its fields specific values or
+// omit; the present restriction when it does not as a whole match omit:
+// it is not omit, AnyValueOrNone, with ifpresent, or a template list one
+// of these is in (table 12).
+func evalRestrictionOperation(op syntax.Kind, e syntax.Expr, env runtime.Scope) runtime.Object {
+	v := eval(e, env)
+	if runtime.IsError(v) {
+		return v
+	}
+	clause := map[syntax.Kind]string{syntax.OMIT: "15.12", syntax.PRESENT: "15.13"}[op]
+	if v == runtime.Undefined {
+		return runtime.Errorf("%s(%s): the template is uninitialised (ETSI %s)", op, syntax.Name(e), clause)
+	}
+	switch op {
+	case syntax.OMIT:
+		if v != runtime.Omit && hasMatchingMechanism(v) {
+			return runtime.Errorf("omit(%s): the template is neither omit nor a value (ETSI 15.12, 15.8)", syntax.Name(e))
+		}
+	case syntax.PRESENT:
+		if matchesOmitAsAWhole(v) {
+			return runtime.Errorf("present(%s): the template matches omit (ETSI 15.13, 15.8)", syntax.Name(e))
+		}
+	}
+	return v
+}
+
+// matchesOmitAsAWhole reports whether the template v as a whole matches
+// omit, which the present restriction forbids (ETSI 15.8, table 12):
+// omit, AnyValueOrNone, a template with ifpresent, or a template list one
+// of these is in.
+func matchesOmitAsAWhole(v runtime.Object) bool {
+	switch x := v.(type) {
+	case *runtime.IfPresent:
+		return true
+	case *runtime.List:
+		if x.ListType != runtime.VALUE_LIST {
+			return false
+		}
+		for _, e := range x.Elements {
+			if matchesOmitAsAWhole(e) {
+				return true
+			}
+		}
+		return false
+	}
+	return v == runtime.Omit || v == runtime.AnyOrNone
 }
 
 // matchValueInitError is the error of v, the value of e matched by match,

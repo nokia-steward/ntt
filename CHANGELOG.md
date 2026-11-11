@@ -367,6 +367,14 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **The omit and present operations check their template** (15.12,
+  15.13): omit(t) of a template that is neither omit nor a value, its
+  fields specific values or omit, and present(t) of one that as a whole
+  matches omit (omit, `*`, ifpresent, a template list holding one of
+  these), are errors, as of an uninitialised template; before, both gave
+  back their operand. A template whose body is one of them raises the
+  error where it is declared (15.3), where an error initialising it left
+  it unbound.
 - **An index given twice in a notation, and a value matched that is not
   initialised, are errors**: an index assigned twice in an assignment or
   mixed notation of a record of, set of or array, or assigned where a
