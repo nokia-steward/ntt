@@ -934,49 +934,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			case "create":
 				return createComponent(ref.TypeName, ref.Module, "", n, env)
 			case "stop", "kill":
-				op := strings.ToLower(syntax.Name(n.Sel))
-				if ref != nil {
-					tlStopKill(env, n, op, ref)
-					ref.SetDone(true)
-					if op == "kill" || !ref.AliveModifier {
-						ref.SetAlive(false)
-					}
-				}
-				if exec := runtime.FindTestcaseExec(env); exec != nil {
-					// `mtc.stop` / `mtc.kill` from inside any
-					// component aborts the whole testcase per
-					// TTCN-3 21.3.3 - stopping the MTC stops
-					// every PTC and terminates the testcase
-					// run. We mark the exec so subsequent
-					// BlockStmt steps short-circuit.
-					if ref != nil && ref.ID == exec.MTCID() {
-						exec.Stop()
-					}
-					// Async PTC: signal the goroutine the
-					// alive-component `.start` forked so its
-					// alt scheduler unwinds out of any park.
-					// Non-blocking per TTCN-3 21.3.3.
-					if ref != nil {
-						exec.StopPTC(ref.ID)
-						// Explicit `comp.stop` (the bare
-						// statement form `ds[0].stop;` parsed
-						// as ExprStmt → SelectorExpr, no
-						// CallExpr wrapper) must also release
-						// any ports the target component
-						// mapped so the next testcase (or a
-						// sibling PTC rebinding the same port)
-						// can claim the listen socket.
-						// Mirrors the CallExpr
-						// path in evalComponentMethod so both
-						// `comp.stop` and `comp.stop()` drain
-						// the same way.
-						drainComponentPortMaps(exec, ref.ID)
-					}
-					if cur := exec.CurrentComponent(); cur != nil && cur.Equal(ref) {
-						return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
-					}
-				}
-				return runtime.Undefined
+				return stopComponent(ref, strings.ToLower(syntax.Name(n.Sel)), n, env)
 			}
 		}
 
@@ -11200,8 +11158,7 @@ func endBehaviour(exec *runtime.TestcaseExec, ref *runtime.ComponentRef, result 
 	if exec.Stopped() || componentStopRequested(exec) {
 		return ""
 	}
-	ref.MergeVerdict(runtime.ErrorVerdict)
-	exec.SetVerdict(runtime.ErrorVerdict, fmt.Sprintf("component %s: %s", ref.Inspect(), reason))
+	exec.SetVerdictOn(ref, runtime.ErrorVerdict, fmt.Sprintf("component %s: %s", ref.Inspect(), reason))
 	return reason
 }
 
@@ -11398,6 +11355,27 @@ func snapshotPTCArgs(body syntax.Node, env runtime.Scope) (*runtime.Function, []
 		}
 	}
 	return fn, snap, callArgs
+}
+
+// stopComponent performs `ref.stop` or `ref.kill`, op, at n (ETSI 21.3.3,
+// 21.3.4), and logs it. Stopping the component that runs it ends its
+// behaviour: the result unwinds the function call.
+func stopComponent(ref *runtime.ComponentRef, op string, n syntax.Node, env runtime.Scope) runtime.Object {
+	exec := runtime.FindTestcaseExec(env)
+	if ref != nil {
+		tlStopKill(env, n, op, ref)
+		if exec != nil {
+			exec.StopComponent(ref, op == "kill")
+		} else {
+			ref.Terminate(op == "kill")
+		}
+	}
+	if exec != nil {
+		if cur := exec.CurrentComponent(); cur != nil && cur.Equal(ref) {
+			return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
+		}
+	}
+	return runtime.Undefined
 }
 
 // evalComponentMethod implements the component lifecycle methods we
@@ -11726,7 +11704,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 						tlArg("reason", tl.String("timeout")))
 				}
 				exec.StopPTC(ref.ID)
-				drainComponentPortMaps(exec, ref.ID)
+				exec.UnmapComponentPorts(ref.ID)
 				ref.SetDone(true)
 				if !ref.AliveModifier {
 					ref.SetAlive(false)
@@ -11783,9 +11761,6 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 					tlTerminated(lexec, ref, reason)
 				}
 			}
-			// if exec := runtime.FindTestcaseExec(env); exec != nil {
-			//     drainComponentPortMaps(exec, ref.ID)
-			// }
 			ref.SetDone(true)
 			// A non-alive component ends with its behaviour, started
 			// or called; an alive one stays, to be started or called
@@ -11822,41 +11797,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 	case "killed":
 		return runtime.NewBool(compKilled(ref, env)), true
 	case "stop", "kill":
-		if ref != nil {
-			tlStopKill(env, n, op, ref)
-			ref.SetDone(true)
-			if op == "kill" || !ref.AliveModifier {
-				ref.SetAlive(false)
-			}
-			// Async PTC: signal the goroutine to unwind out
-			// of any alt / receive / timer wait. `comp.stop`
-			// on a non-self ref is non-blocking per
-			// TTCN-3 21.3.3, so we don't join here - the
-			// testcase teardown's WaitPTCs covers that.
-			if exec := runtime.FindTestcaseExec(env); exec != nil {
-				exec.StopPTC(ref.ID)
-				// Explicit stop/kill must release any
-				// ports the target component mapped, so
-				// the next testcase (or a sibling PTC
-				// rebinding the same port number) can
-				// claim the listen socket.
-				drainComponentPortMaps(exec, ref.ID)
-			}
-		}
-		// `self.stop` / `self.kill` should bail out of the
-		// currently running component body (TTCN-3 21.3.3).
-		// Returning a ReturnValue unwinds the function call.
-		// If the target is the MTC, also mark the testcase as
-		// stopped so the outer testcase body short-circuits.
-		if exec := runtime.FindTestcaseExec(env); exec != nil {
-			if ref != nil && ref.ID == exec.MTCID() {
-				exec.Stop()
-			}
-			if cur := exec.CurrentComponent(); cur != nil && cur.Equal(ref) {
-				return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}, true
-			}
-		}
-		return runtime.Undefined, true
+		return stopComponent(ref, op, n, env), true
 	case "create":
 		name := ""
 		if n.Args != nil && len(n.Args.List) >= 1 {
@@ -15252,7 +15193,7 @@ func evalPortMap(opName string, n *syntax.CallExpr, env runtime.Scope) (runtime.
 			// receive bind() calls in an undefined order,
 			// breaking the start-order == map-order
 			// assumption a later `ds[i].stop` /
-			// drainComponentPortMaps depends on.
+			// UnmapComponentPorts depends on.
 			if compID >= 0 {
 				if exit := exec.PTCExit(compID); exit != nil {
 					exit.SignalMap()
@@ -15275,59 +15216,6 @@ func evalPortMap(opName string, n *syntax.CallExpr, env runtime.Scope) (runtime.
 		return runtime.Errorf("%s(%s, %s): driver returned: %v", opName, localName, remote, err), true
 	}
 	return runtime.Undefined, true
-}
-
-// drainComponentPortMaps issues Unmap for every (local, remote)
-// pair the component currently holds. No-op when the component
-// never mapped any port, when no testcase exec is in scope, or
-// when no PortDriver is bound for a recorded local. Safe to call
-// multiple times on the same component (the second call drains an
-// empty list).
-func drainComponentPortMaps(exec *runtime.TestcaseExec, compID int64) {
-	if exec == nil {
-		return
-	}
-	entries := exec.DrainPortMaps(compID)
-	debug := os.Getenv("NTT_PORT_DEBUG") != ""
-	if debug {
-		fmt.Fprintf(os.Stderr, "[ntt] drainComponentPortMaps(%d): %d entries\n", compID, len(entries))
-	}
-	for _, ent := range entries {
-		drv := exec.PortDriver(ent.Local)
-		if drv == nil {
-			continue
-		}
-		if debug {
-			fmt.Fprintf(os.Stderr, "[ntt] drainComponentPortMaps: Unmap(%q, %q)\n", ent.Local, ent.Remote)
-		}
-		_ = drv.Unmap(ent.Local, ent.Remote)
-	}
-}
-
-// drainAllPortMaps issues Unmap for every (local, remote) pair
-// recorded across every component in this testcase. Called once
-// from the testcase teardown - after WaitPTCs has joined the PTC
-// goroutines - so cabi/cgo C++ ports release their listen sockets
-// before the next testcase tries to bind them.
-func drainAllPortMaps(exec *runtime.TestcaseExec) {
-	if exec == nil {
-		return
-	}
-	entries := exec.DrainAllPortMaps()
-	debug := os.Getenv("NTT_PORT_DEBUG") != ""
-	if debug {
-		fmt.Fprintf(os.Stderr, "[ntt] drainAllPortMaps: %d entries\n", len(entries))
-	}
-	for _, ent := range entries {
-		drv := exec.PortDriver(ent.Local)
-		if drv == nil {
-			continue
-		}
-		if debug {
-			fmt.Fprintf(os.Stderr, "[ntt] drainAllPortMaps: Unmap(%q, %q)\n", ent.Local, ent.Remote)
-		}
-		_ = drv.Unmap(ent.Local, ent.Remote)
-	}
 }
 
 // evalPresencePred is the shared implementation of `ispresent`,

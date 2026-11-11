@@ -476,8 +476,6 @@ func (c *ComponentRef) SetDone(v bool) {
 	c.mu.Unlock()
 }
 
-// IsAlive reports whether the component is still reachable (not
-// stopped/killed). Safe to call from any goroutine (mu-guarded).
 // IsStarted reports whether a behaviour was ever started on the
 // component.
 func (c *ComponentRef) IsStarted() bool { return c != nil && c.started.Load() }
@@ -485,6 +483,8 @@ func (c *ComponentRef) IsStarted() bool { return c != nil && c.started.Load() }
 // SetStarted records that a behaviour was started on the component.
 func (c *ComponentRef) SetStarted() { c.started.Store(true) }
 
+// IsAlive reports whether the component is still reachable (not
+// stopped/killed). Safe to call from any goroutine (mu-guarded).
 func (c *ComponentRef) IsAlive() bool {
 	if c == nil {
 		return false

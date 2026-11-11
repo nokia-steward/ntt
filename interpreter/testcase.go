@@ -600,7 +600,7 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 	// Cabi/cgo C++ ports (e.g. a server port type) hold their TCP listener until on_unmap
 	// fires; without this drain, the second testcase that
 	// re-uses a daemon port number fails with "socket error".
-	drainAllPortMaps(exec)
+	exec.UnmapAllPorts()
 
 	// An undeclared verdict is `none` (ETSI ES 201 873-1 clause 22.4.1).
 	// It used to be coerced to `pass` here, which read the clause as "a
@@ -1207,17 +1207,10 @@ func evalAllComponentAction(kind string, sel syntax.Expr, env runtime.Scope) (ru
 		if !r.IsStarted() && op == "stop" {
 			continue
 		}
-		r.SetDone(true)
-		if op == "kill" || !r.AliveModifier {
-			r.SetAlive(false)
-		}
-		// `all component.stop` must actually cancel the forked worker
-		// goroutines, not just flip the flags above. Mirror the single
-		// `comp.stop` path: close the PTC's StopChan (which also wakes a
-		// parked alt / blocking timer via signalMessageReady) and unmap
-		// its ports.
-		exec.StopPTC(r.ID)
-		drainComponentPortMaps(exec, r.ID)
+		// `all component.stop` cancels the forked worker goroutines, as
+		// a single `comp.stop` does: their stop wakes a parked alt or
+		// blocking timer, and their ports are unmapped.
+		exec.StopComponent(r, op == "kill")
 	}
 	return runtime.Undefined, true
 }
@@ -1256,19 +1249,15 @@ func evalSetverdict(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 		}
 		reasonParts = append(reasonParts, a.Inspect())
 	}
-	exec.SetVerdict(verdict, strings.Join(reasonParts, " "))
+	// The running component's verdict too, so that `comp.done -> value v`
+	// can retrieve that PTC's local verdict (ETSI 21.3.7 / 22.4.1).
+	exec.SetVerdictOn(exec.CurrentComponent(), verdict, strings.Join(reasonParts, " "))
 	if lexec := tlExec(env); lexec != nil {
 		targs := []tl.Arg{tlArg("verdict", tl.Verdict(string(verdict)))}
 		if r := strings.Join(reasonParts, " "); r != "" {
 			targs = append(targs, tlArg("reason", tl.String(r)))
 		}
 		tlEmitWith(lexec, siteOf(n), "tliSetVerdict", func(e *tl.Event) { e.Parts = tlPartsOf(args[1:], n.Args.List[1:], env) }, targs...)
-	}
-	// Also accumulate the verdict on the running component so
-	// `comp.done -> value v` can retrieve that PTC's local verdict
-	// (ETSI 21.3.7 / 22.4.1).
-	if cur := exec.CurrentComponent(); cur != nil {
-		cur.MergeVerdict(verdict)
 	}
 	return nil
 }
@@ -1303,10 +1292,7 @@ func evalTestcaseStop(n syntax.Node, argExprs []syntax.Expr, env runtime.Scope) 
 		}
 		reason.WriteString(a.Inspect())
 	}
-	exec.SetVerdict(runtime.ErrorVerdict, reason.String())
-	if cur := exec.CurrentComponent(); cur != nil {
-		cur.MergeVerdict(runtime.ErrorVerdict)
-	}
+	exec.SetVerdictOn(exec.CurrentComponent(), runtime.ErrorVerdict, reason.String())
 	if lexec := tlExec(env); lexec != nil {
 		var targs []tl.Arg
 		if reason.Len() > 0 {

@@ -242,41 +242,30 @@ func waitComponentsState(kind, op string, refs []*runtime.ComponentRef, env runt
 // compAlive / compRunning / compDone / compKilled are the single source
 // of truth for the four component-state predicates.
 func compAlive(ref *runtime.ComponentRef, env runtime.Scope) bool {
-	if ref == nil {
-		return false
-	}
-	if !ref.IsAlive() {
-		return false
-	}
-	return true
+	return componentState(ref, env).Alive
 }
 
 func compRunning(ref *runtime.ComponentRef, env runtime.Scope) bool {
-	if ref == nil {
-		return false
-	}
-	// A component no behaviour was started on is inactive, not running
-	// (ETSI 21.3.5). The MTC runs from the testcase's start, and a
-	// component asking about itself is running a behaviour — one it was
-	// given by call rather than start included.
-	if !ref.IsStarted() {
-		exec := runtime.FindTestcaseExec(env)
-		if exec == nil {
-			return false
-		}
-		if cur := exec.CurrentComponent(); ref.ID != exec.MTCID() && (cur == nil || cur.ID != ref.ID) {
-			return false
-		}
-	}
-	return ref.IsAlive() && !ref.IsDone()
+	return componentState(ref, env).Running
 }
 
 func compDone(ref *runtime.ComponentRef, env runtime.Scope) bool {
-	return ref == nil || ref.IsDone() || !ref.IsAlive()
+	return componentState(ref, env).Done
 }
 
 func compKilled(ref *runtime.ComponentRef, env runtime.Scope) bool {
-	return ref == nil || !ref.IsAlive()
+	return componentState(ref, env).Killed
+}
+
+// componentState is the state of ref as the component running in env
+// sees it (see runtime.TestcaseExec.ComponentState).
+func componentState(ref *runtime.ComponentRef, env runtime.Scope) runtime.ComponentState {
+	exec := runtime.FindTestcaseExec(env)
+	var by *runtime.ComponentRef
+	if exec != nil && ref != nil && !ref.IsStarted() {
+		by = exec.CurrentComponent()
+	}
+	return exec.ComponentState(ref, by)
 }
 
 // evalComponentDoneRedirect handles `comp.done -> value v` /
