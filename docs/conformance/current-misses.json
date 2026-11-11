@@ -1,30 +1,30 @@
 {
- "summary": "ran 5164 files: 5027 matched, 18 skipped (97.69% match rate)",
+ "summary": "ran 5164 files: 5044 matched, 20 skipped (98.06% match rate)",
  "source": "etsi.json",
- "miss_count": 137,
+ "miss_count": 120,
  "outcomes": {
   "reject->pass": 46,
   "reject->none": 24,
-  "->": 18,
-  "pass->error": 13,
-  "pass->fail": 13,
+  "->": 20,
   "pass->parse-error": 13,
-  "pass->semantic-error": 7,
+  "pass->fail": 7,
+  "pass->error": 5,
   "pass->none": 2,
+  "pass->semantic-error": 2,
   "error->parse-error": 1
  },
  "chapters": [
   {
    "chapter": "core_language/06_types_and_values",
-   "misses": 50,
+   "misses": 45,
    "outcomes": {
-    "->": 8,
+    "->": 10,
     "reject->pass": 9,
     "reject->none": 13,
     "pass->parse-error": 6,
-    "pass->fail": 4,
-    "pass->error": 7,
-    "pass->semantic-error": 2,
+    "pass->fail": 3,
+    "pass->error": 2,
+    "pass->semantic-error": 1,
     "pass->none": 1
    }
   },
@@ -39,17 +39,6 @@
    }
   },
   {
-   "chapter": "core_language/15_templates",
-   "misses": 16,
-   "outcomes": {
-    "->": 2,
-    "pass->fail": 4,
-    "reject->none": 3,
-    "reject->pass": 5,
-    "pass->error": 2
-   }
-  },
-  {
    "chapter": "core_language/22_communication_operations",
    "misses": 16,
    "outcomes": {
@@ -58,13 +47,14 @@
    }
   },
   {
-   "chapter": "core_language/B_matching_incoming_values",
-   "misses": 10,
+   "chapter": "core_language/15_templates",
+   "misses": 15,
    "outcomes": {
-    "reject->pass": 1,
-    "pass->fail": 5,
-    "pass->error": 2,
-    "reject->none": 2
+    "->": 2,
+    "pass->fail": 4,
+    "reject->none": 3,
+    "reject->pass": 5,
+    "pass->error": 1
    }
   },
   {
@@ -80,18 +70,18 @@
    }
   },
   {
-   "chapter": "core_language/07_expressions",
-   "misses": 6,
-   "outcomes": {
-    "pass->semantic-error": 4,
-    "reject->pass": 2
-   }
-  },
-  {
    "chapter": "core_language/26_module_control",
    "misses": 3,
    "outcomes": {
     "->": 3
+   }
+  },
+  {
+   "chapter": "core_language/B_matching_incoming_values",
+   "misses": 3,
+   "outcomes": {
+    "reject->pass": 1,
+    "reject->none": 2
    }
   },
   {
@@ -100,6 +90,13 @@
    "outcomes": {
     "pass->parse-error": 2,
     "reject->pass": 1
+   }
+  },
+  {
+   "chapter": "core_language/07_expressions",
+   "misses": 2,
+   "outcomes": {
+    "reject->pass": 2
    }
   },
   {
@@ -469,34 +466,34 @@
   },
   {
    "chapter": "core_language/06_types_and_values",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021501_map_type_definition/NegSem_06021501_map_type_definition_004.ttcn",
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021501_map_type_definition/NegSem_06021501_map_type_definition_001.ttcn",
    "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021502_indexed_assignment_notation/Sem_06021502_indexed_assignment_notation_004.ttcn",
-   "message": "Error: array index must be an integer, got string"
+   "expected": "",
+   "actual": "",
+   "outcome": "->",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021501_map_type_definition/NegSem_06021501_map_type_definition_002.ttcn",
+   "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021503_unmapping_keys/Sem_06021503_unmapping_keys_003.ttcn",
-   "message": "Error: array index must be an integer, got string"
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021501_map_type_definition/NegSem_06021501_map_type_definition_003.ttcn",
+   "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021503_unmapping_keys/Sem_06021503_unmapping_keys_004.ttcn",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021501_map_type_definition/NegSem_06021501_map_type_definition_004.ttcn",
    "message": ""
   },
   {
@@ -506,46 +503,6 @@
    "outcome": "reject->pass",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021504_index_notation/NegSem_06021504_index_notation_006.ttcn",
    "message": ""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021504_index_notation/NegSem_06021504_index_notation_007.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "pass",
-   "actual": "semantic-error",
-   "outcome": "pass->semantic-error",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021504_index_notation/Sem_06021504_index_notation_007.ttcn",
-   "message": "map \"TMap\" expects values of type charstring, got boolean literal"
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021504_index_notation/Sem_06021504_index_notation_008.ttcn",
-   "message": "Error: operand  of not is uninitialised (ETSI 7.1.0 a)"
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021504_index_notation/Sem_06021504_index_notation_009.ttcn",
-   "message": "Error: array index must be an integer, got string"
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021504_index_notation/Sem_06021504_index_notation_010.ttcn",
-   "message": "Error: array index must be an integer, got string"
   },
   {
    "chapter": "core_language/06_types_and_values",
@@ -682,38 +639,6 @@
    "outcome": "->",
    "relpath": "core_language/06_types_and_values/0605_automatic_type/NegSem_0605_automatic_type_003.ttcn",
    "message": ""
-  },
-  {
-   "chapter": "core_language/07_expressions",
-   "expected": "pass",
-   "actual": "semantic-error",
-   "outcome": "pass->semantic-error",
-   "relpath": "core_language/07_expressions/0701_operators/070103_relational_operators/Sem_070103_RelationalOperators_054.ttcn",
-   "message": "map-typed values (here \"v_map1\") cannot appear as operands of equality (ETSI 6.2.15.1 restriction b)"
-  },
-  {
-   "chapter": "core_language/07_expressions",
-   "expected": "pass",
-   "actual": "semantic-error",
-   "outcome": "pass->semantic-error",
-   "relpath": "core_language/07_expressions/0701_operators/070103_relational_operators/Sem_070103_RelationalOperators_055.ttcn",
-   "message": "map-typed values (here \"v_map1\") cannot appear as operands of equality (ETSI 6.2.15.1 restriction b)"
-  },
-  {
-   "chapter": "core_language/07_expressions",
-   "expected": "pass",
-   "actual": "semantic-error",
-   "outcome": "pass->semantic-error",
-   "relpath": "core_language/07_expressions/0701_operators/070103_relational_operators/Sem_070103_RelationalOperators_056.ttcn",
-   "message": "map-typed values (here \"v_map1\") cannot appear as operands of equality (ETSI 6.2.15.1 restriction b)"
-  },
-  {
-   "chapter": "core_language/07_expressions",
-   "expected": "pass",
-   "actual": "semantic-error",
-   "outcome": "pass->semantic-error",
-   "relpath": "core_language/07_expressions/0701_operators/070103_relational_operators/Sem_070103_RelationalOperators_057.ttcn",
-   "message": "map-typed values (here \"v_map1\") cannot appear as operands of equality (ETSI 6.2.15.1 restriction b)"
   },
   {
    "chapter": "core_language/07_expressions",
@@ -865,15 +790,7 @@
    "actual": "error",
    "outcome": "pass->error",
    "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/Sem_150606_Referencing_map_elements_005.ttcn",
-   "message": "Error: array index must be an integer, got string"
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/Sem_150606_Referencing_map_elements_006.ttcn",
-   "message": "Error: array index must be an integer, got string"
+   "message": "Error: the right-hand side  is uninitialised (ETSI 19.1.1 c)"
   },
   {
    "chapter": "core_language/15_templates",
@@ -1141,66 +1058,10 @@
   },
   {
    "chapter": "core_language/B_matching_incoming_values",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0102_matching_mechanisms/B010204_any_value_or_none/Sem_B010204_any_value_or_none_006.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/B_matching_incoming_values",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0102_matching_mechanisms/B010204_any_value_or_none/Sem_B010204_any_value_or_none_007.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/B_matching_incoming_values",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0102_matching_mechanisms/B010208_omit_value/Sem_B010208_omit_value_006.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/B_matching_incoming_values",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0103_matching_inside_values/B010302_any_number_of_elements_or_none/Sem_B010302_any_number_of_elements_or_none_004.ttcn",
-   "message": "Error: array index must be an integer, got string"
-  },
-  {
-   "chapter": "core_language/B_matching_incoming_values",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0103_matching_inside_values/B010302_any_number_of_elements_or_none/Sem_B010302_any_number_of_elements_or_none_005.ttcn",
-   "message": "Error: array index must be an integer, got string"
-  },
-  {
-   "chapter": "core_language/B_matching_incoming_values",
    "expected": "reject",
    "actual": "none",
    "outcome": "reject->none",
    "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0104_matching_attributes_of_values/B010402_ifPresent_indicator/NegSem_B010402_ifPresent_indicator_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/B_matching_incoming_values",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0104_matching_attributes_of_values/B010402_ifPresent_indicator/Sem_B010402_ifPresent_indicator_003.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/B_matching_incoming_values",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0104_matching_attributes_of_values/B010402_ifPresent_indicator/Sem_B010402_ifPresent_indicator_005.ttcn",
    "message": ""
   },
   {

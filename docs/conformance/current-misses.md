@@ -2,32 +2,32 @@
 
 Generated from `etsi.json` using the current workspace runner.
 
-- Summary: `ran 5164 files: 5027 matched, 18 skipped (97.69% match rate)`
-- Misses: `137`
+- Summary: `ran 5164 files: 5044 matched, 20 skipped (98.06% match rate)`
+- Misses: `120`
 
 ## Misses By Outcome
 
 - `reject->pass`: `46`
 - `reject->none`: `24`
-- `->`: `18`
-- `pass->error`: `13`
-- `pass->fail`: `13`
+- `->`: `20`
 - `pass->parse-error`: `13`
-- `pass->semantic-error`: `7`
+- `pass->fail`: `7`
+- `pass->error`: `5`
 - `pass->none`: `2`
+- `pass->semantic-error`: `2`
 - `error->parse-error`: `1`
 
 ## Misses By Chapter
 
-- `core_language/06_types_and_values`: `50` (`->`=8, `pass->error`=7, `pass->fail`=4, `pass->none`=1, `pass->parse-error`=6, `pass->semantic-error`=2, `reject->none`=13, `reject->pass`=9)
+- `core_language/06_types_and_values`: `45` (`->`=10, `pass->error`=2, `pass->fail`=3, `pass->none`=1, `pass->parse-error`=6, `pass->semantic-error`=1, `reject->none`=13, `reject->pass`=9)
 - `core_language/05_basic_language_elements`: `16` (`->`=2, `pass->parse-error`=2, `reject->none`=1, `reject->pass`=11)
-- `core_language/15_templates`: `16` (`->`=2, `pass->error`=2, `pass->fail`=4, `reject->none`=3, `reject->pass`=5)
 - `core_language/22_communication_operations`: `16` (`reject->none`=1, `reject->pass`=15)
-- `core_language/B_matching_incoming_values`: `10` (`pass->error`=2, `pass->fail`=5, `reject->none`=2, `reject->pass`=1)
+- `core_language/15_templates`: `15` (`->`=2, `pass->error`=1, `pass->fail`=4, `reject->none`=3, `reject->pass`=5)
 - `core_language/16_functions_altsteps_testcases`: `8` (`->`=1, `error->parse-error`=1, `pass->parse-error`=2, `pass->semantic-error`=1, `reject->none`=1, `reject->pass`=2)
-- `core_language/07_expressions`: `6` (`pass->semantic-error`=4, `reject->pass`=2)
 - `core_language/26_module_control`: `3` (`->`=3)
+- `core_language/B_matching_incoming_values`: `3` (`reject->none`=2, `reject->pass`=1)
 - `oo/501_classes_and_objects`: `3` (`pass->parse-error`=2, `reject->pass`=1)
+- `core_language/07_expressions`: `2` (`reject->pass`=2)
 - `core_language/09_test_configurations`: `2` (`pass->error`=1, `reject->none`=1)
 - `core_language/27_specifying_attributes`: `2` (`->`=1, `reject->none`=1)
 - `core_language/08_modules`: `1` (`->`=1)
@@ -61,7 +61,7 @@ Generated from `etsi.json` using the current workspace runner.
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_002.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_003.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_004.ttcn`: `reject -> pass`
-- ... `30` more in `current-misses.json`
+- ... `25` more in `current-misses.json`
 
 ### `core_language/05_basic_language_elements`
 
@@ -84,25 +84,6 @@ Generated from `etsi.json` using the current workspace runner.
 - `core_language/05_basic_language_elements/0505_cyclic_definitions/NegSem_0505_cyclic_definitions_001.ttcn`: ` -> `
 - `core_language/05_basic_language_elements/05_toplevel/NegSyn_05_TopLevel_001.ttcn`: ` -> `
 
-### `core_language/15_templates`
-
-- `core_language/15_templates/1503_global_and_local_templates/NegSyn_1503_GlobalAndLocalTemplates_006.ttcn`: ` -> `
-- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150601_referencing_individual_string_elements/Sem_150601_ReferencingIndividualStringElements_003.ttcn`: `pass -> fail`
-- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_011.ttcn`: `reject -> none`
-- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_012.ttcn`: `reject -> none`
-- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_013.ttcn`: `reject -> none`
-- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_015.ttcn`: `reject -> pass`
-- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/NegSem_150606_Referencing_map_elements_003.ttcn`: `reject -> pass`
-- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/NegSem_150606_Referencing_map_elements_005.ttcn`: `reject -> pass`
-- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/NegSem_150606_Referencing_map_elements_006.ttcn`: `reject -> pass`
-- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/Sem_150606_Referencing_map_elements_001.ttcn`: `pass -> fail`
-- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/Sem_150606_Referencing_map_elements_003.ttcn`: `pass -> fail`
-- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/Sem_150606_Referencing_map_elements_004.ttcn`: `pass -> fail`
-- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/Sem_150606_Referencing_map_elements_005.ttcn`: `pass -> error` - Error: array index must be an integer, got string
-- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/Sem_150606_Referencing_map_elements_006.ttcn`: `pass -> error` - Error: array index must be an integer, got string
-- `core_language/15_templates/1511_concatenating_templates_of_string_and_list_types/NegSem_1511_ConcatenatingTemplatesOfStringAndListTypes_004.ttcn`: `reject -> pass`
-- `core_language/15_templates/15_toplevel/NegSyn_15_TopLevel_001.ttcn`: ` -> `
-
 ### `core_language/22_communication_operations`
 
 - `core_language/22_communication_operations/2202_message_based_communication/220201_send_operation/NegSem_220201_SendOperation_011.ttcn`: `reject -> pass`
@@ -122,15 +103,20 @@ Generated from `etsi.json` using the current workspace runner.
 - `core_language/22_communication_operations/2203_procedure_based_communication/220306_catch_operation/NegSem_220306_catch_operation_014.ttcn`: `reject -> pass`
 - `core_language/22_communication_operations/2204_the_check_operation/NegSem_2204_the_check_operation_005.ttcn`: `reject -> pass`
 
-### `core_language/B_matching_incoming_values`
+### `core_language/15_templates`
 
-- `core_language/B_matching_incoming_values/B01_template_matching/B0102_matching_mechanisms/B010201_value_list/NegSem_B010201_value_list_001.ttcn`: `reject -> pass`
-- `core_language/B_matching_incoming_values/B01_template_matching/B0102_matching_mechanisms/B010204_any_value_or_none/Sem_B010204_any_value_or_none_006.ttcn`: `pass -> fail`
-- `core_language/B_matching_incoming_values/B01_template_matching/B0102_matching_mechanisms/B010204_any_value_or_none/Sem_B010204_any_value_or_none_007.ttcn`: `pass -> fail`
-- `core_language/B_matching_incoming_values/B01_template_matching/B0102_matching_mechanisms/B010208_omit_value/Sem_B010208_omit_value_006.ttcn`: `pass -> fail`
-- `core_language/B_matching_incoming_values/B01_template_matching/B0103_matching_inside_values/B010302_any_number_of_elements_or_none/Sem_B010302_any_number_of_elements_or_none_004.ttcn`: `pass -> error` - Error: array index must be an integer, got string
-- `core_language/B_matching_incoming_values/B01_template_matching/B0103_matching_inside_values/B010302_any_number_of_elements_or_none/Sem_B010302_any_number_of_elements_or_none_005.ttcn`: `pass -> error` - Error: array index must be an integer, got string
-- `core_language/B_matching_incoming_values/B01_template_matching/B0104_matching_attributes_of_values/B010402_ifPresent_indicator/NegSem_B010402_ifPresent_indicator_001.ttcn`: `reject -> none`
-- `core_language/B_matching_incoming_values/B01_template_matching/B0104_matching_attributes_of_values/B010402_ifPresent_indicator/Sem_B010402_ifPresent_indicator_003.ttcn`: `pass -> fail`
-- `core_language/B_matching_incoming_values/B01_template_matching/B0104_matching_attributes_of_values/B010402_ifPresent_indicator/Sem_B010402_ifPresent_indicator_005.ttcn`: `pass -> fail`
-- `core_language/B_matching_incoming_values/B01_template_matching/B0105_matching_character_pattern/B010504_match_referenced_characters/NegSem_B010504_match_referenced_characters_001.ttcn`: `reject -> none`
+- `core_language/15_templates/1503_global_and_local_templates/NegSyn_1503_GlobalAndLocalTemplates_006.ttcn`: ` -> `
+- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150601_referencing_individual_string_elements/Sem_150601_ReferencingIndividualStringElements_003.ttcn`: `pass -> fail`
+- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_011.ttcn`: `reject -> none`
+- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_012.ttcn`: `reject -> none`
+- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_013.ttcn`: `reject -> none`
+- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150603_referencing_record_of_and_set_elements/NegSem_150603_ReferencingRecordOfAndSetElements_015.ttcn`: `reject -> pass`
+- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/NegSem_150606_Referencing_map_elements_003.ttcn`: `reject -> pass`
+- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/NegSem_150606_Referencing_map_elements_005.ttcn`: `reject -> pass`
+- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/NegSem_150606_Referencing_map_elements_006.ttcn`: `reject -> pass`
+- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/Sem_150606_Referencing_map_elements_001.ttcn`: `pass -> fail`
+- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/Sem_150606_Referencing_map_elements_003.ttcn`: `pass -> fail`
+- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/Sem_150606_Referencing_map_elements_004.ttcn`: `pass -> fail`
+- `core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/Sem_150606_Referencing_map_elements_005.ttcn`: `pass -> error` - Error: the right-hand side  is uninitialised (ETSI 19.1.1 c)
+- `core_language/15_templates/1511_concatenating_templates_of_string_and_list_types/NegSem_1511_ConcatenatingTemplatesOfStringAndListTypes_004.ttcn`: `reject -> pass`
+- `core_language/15_templates/15_toplevel/NegSyn_15_TopLevel_001.ttcn`: ` -> `
