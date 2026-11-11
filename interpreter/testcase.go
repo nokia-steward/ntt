@@ -2412,7 +2412,7 @@ func (m *moduleInit) implicitOmitTemplate(t *syntax.TemplateDecl, override bool)
 		return
 	}
 	mode := omitMode{keepDash: true, modifies: true, fillTop: true}
-	if merged, ok := mergeTemplateMod(base, withImplicitOmit(coerceToDeclaredStruct(mod, t.Type, t.Value, m.env), td, m.env, 0, mode)); ok {
+	if merged, ok := builtins.MergeTemplateMod(base, withImplicitOmit(coerceToDeclaredStruct(mod, t.Type, t.Value, m.env), td, m.env, 0, mode)); ok {
 		m.env.Set(name, merged)
 	}
 }
@@ -2873,7 +2873,7 @@ func evalSelectStmt(n *syntax.SelectStmt, env runtime.Scope) runtime.Object {
 			// A case selects when its template matches the tag (ETSI
 			// 19.3.1): a template, `(5..10)` or `?`, by matching; a value
 			// as `==` compares.
-			if hasMatchingMechanism(v) {
+			if builtins.HasMatchingMechanism(v) {
 				if b, ok := builtins.Match(tag, v).(runtime.Bool); ok && bool(b) {
 					matched = true
 					break
