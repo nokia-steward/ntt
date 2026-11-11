@@ -11229,82 +11229,6 @@ func componentStopRequested(exec *runtime.TestcaseExec) bool {
 	return false
 }
 
-// startBodyContainsProcedureOp walks the body of `comp.start(call)`
-// and reports whether the loopback model should skip the body
-// entirely. It returns true for bodies that would either (a) call a
-// procedure-based comm op we don't model (call / getcall / reply /
-// raise / catch / getreply) and end up in a `timer.timeout {
-// setverdict(fail) }` branch the test never expected to fire, or
-// (b) loop forever (while(true) / for(;;)) which would deadlock the
-// testcase under synchronous execution.
-//
-// We resolve `call` to its CallExpr root, dereference any function /
-// altstep reference in env, and then scan the resolved body.
-func startBodyShouldSkip(body syntax.Node, env runtime.Scope) bool {
-	root := startBodyRoot(body, env)
-	procOps := map[string]bool{
-		// `timer.timeout` is a blocking operation in the
-		// TTCN-3 model (clause 23.4): the PTC suspends until
-		// the timer fires. Our toy interpreter has no real
-		// clock, so executing the body synchronously would
-		// skip the wait and let `setverdict(fail)` lines that
-		// guard the timeout fire prematurely. Treating
-		// `.timeout` as a "blocking" op makes the PTC body a
-		// no-op (the component stays alive / not done), which
-		// matches TTCN-3 semantics for the
-		// 21.3.{3,5,6,7,8,10} tests that start PTCs with
-		// long-running timers as a stand-in for "still
-		// running".
-		"timeout": true,
-	}
-	// Scan the body and every function/altstep it transitively calls.
-	// A blocking op (e.g. `t.timeout`) is frequently reached only
-	// through a helper - the responder pattern `f() { t.start;
-	// a_altstep(); }` where `a_altstep` holds `[] t.timeout {...}`.
-	// Resolving callees lets us treat such a body as blocking too,
-	// instead of running it synchronously and stalling the parent for
-	// the full timer duration (210301 create_operation fixtures).
-	visited := map[syntax.Node]bool{}
-	var scan func(n syntax.Node) bool
-	scan = func(rootNode syntax.Node) bool {
-		if rootNode == nil || visited[rootNode] {
-			return false
-		}
-		visited[rootNode] = true
-		found := false
-		syntax.Inspect(rootNode, func(n syntax.Node) bool {
-			if found || n == nil {
-				return false
-			}
-			if sel, ok := n.(*syntax.SelectorExpr); ok {
-				if id, ok := sel.Sel.(*syntax.Ident); ok && procOps[id.String()] {
-					found = true
-					return false
-				}
-			}
-			if w, ok := n.(*syntax.WhileStmt); ok {
-				if lit, ok := w.Cond.(*syntax.ValueLiteral); ok && lit.Tok.Kind() == syntax.TRUE {
-					found = true
-					return false
-				}
-			}
-			if ce, ok := n.(*syntax.CallExpr); ok {
-				if id, ok := ce.Fun.(*syntax.Ident); ok {
-					if v, ok := env.Get(id.String()); ok {
-						if fn, ok := v.(*runtime.Function); ok && fn.Body != nil && scan(fn.Body) {
-							found = true
-							return false
-						}
-					}
-				}
-			}
-			return true
-		})
-		return found
-	}
-	return scan(root)
-}
-
 // startBodyRoot resolves the `.start(f())` argument to the function
 // body it ultimately runs, so the body-shape predicates can inspect
 // the responder's statements rather than just the call expression.
@@ -11315,83 +11239,6 @@ func startBodyRoot(body syntax.Node, env runtime.Scope) syntax.Node {
 		}
 	}
 	return body
-}
-
-// startBodyIsFiniteResponder reports whether the PTC body answers
-// procedure calls (getcall / reply / raise) without an infinite loop.
-// Such a body is run synchronously at `comp.start` ONLY when calls are
-// already queued (see the HasPendingCalls gate at the call site): with
-// the caller's nowait calls waiting, getcall consumes them and reply/
-// raise enqueues the response the caller's getreply/catch then matches
-// (the 220304/220306 pattern). Without queued calls the body would
-// dead-end on getcall and hit its timeout->fail branch, so it stays on
-// the legacy "PTC is a no-op, still running" path.
-func startBodyIsFiniteResponder(body syntax.Node, env runtime.Scope) bool {
-	root := startBodyRoot(body, env)
-	// A responder must produce a response (reply / raise) on a port
-	// ARRAY element (`p[i].reply` / `p[i].raise`) without an infinite
-	// loop. The indexed-port requirement is what scopes this slice
-	// to the array fan-out pattern (220304/220306: caller `call`s on
-	// every p[i], starts the responder, then `any from p.getreply`).
-	// Single-port responders are left on the legacy skip path: their
-	// callers typically use `check`/bare `getreply` whose verdict
-	// logic depends on template matching this slice does not model,
-	// so running them would regress (the 2204 check fixtures).
-	hasIndexedResponder := false
-	hasWhileTrue := false
-	syntax.Inspect(root, func(n syntax.Node) bool {
-		if n == nil {
-			return false
-		}
-		if sel, ok := n.(*syntax.SelectorExpr); ok {
-			if id, ok := sel.Sel.(*syntax.Ident); ok && (id.String() == "reply" || id.String() == "raise") {
-				if _, indexed := sel.X.(*syntax.IndexExpr); indexed {
-					hasIndexedResponder = true
-				}
-			}
-		}
-		if w, ok := n.(*syntax.WhileStmt); ok {
-			if lit, ok := w.Cond.(*syntax.ValueLiteral); ok && lit.Tok.Kind() == syntax.TRUE {
-				hasWhileTrue = true
-			}
-		}
-		return true
-	})
-	return hasIndexedResponder && !hasWhileTrue
-}
-
-// startBodyIsDeferredResponder reports whether a skipped PTC body is a
-// one-shot procedure server: it waits with getcall and then produces a
-// reply or exception. Such bodies cannot run at .start time when no
-// call is queued, but they can be replayed immediately after a later
-// MTC `p.call(...)` enqueues the request.
-func startBodyIsDeferredResponder(body syntax.Node, env runtime.Scope) bool {
-	root := startBodyRoot(body, env)
-	hasGetcall := false
-	hasResponse := false
-	hasWhileTrue := false
-	syntax.Inspect(root, func(n syntax.Node) bool {
-		if n == nil {
-			return false
-		}
-		if sel, ok := n.(*syntax.SelectorExpr); ok {
-			if id, ok := sel.Sel.(*syntax.Ident); ok {
-				switch id.String() {
-				case "getcall":
-					hasGetcall = true
-				case "reply", "raise":
-					hasResponse = true
-				}
-			}
-		}
-		if w, ok := n.(*syntax.WhileStmt); ok {
-			if lit, ok := w.Cond.(*syntax.ValueLiteral); ok && lit.Tok.Kind() == syntax.TRUE {
-				hasWhileTrue = true
-			}
-		}
-		return true
-	})
-	return hasGetcall && hasResponse && !hasWhileTrue
 }
 
 // startBodyUses reports whether a started body — the functions it calls
@@ -11594,127 +11441,16 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 			tlEmitWith(lexec, siteOf(n), tlOp, func(e *tl.Event) { e.Site = decl },
 				tlArg("comp", lexec.TLComponent(ref).Content()), tlArg("name", tl.BehaviourID(mod, fn)))
 		}
-		// Skip the body when running it synchronously would
-		// diverge or dead-end: an infinite loop, a procedure-based
-		// op, or a `timer.timeout` wait the synchronous model can't
-		// satisfy (those dead-end in a `[] timer.timeout {
-		// setverdict(fail); }` clause and derail tests that passed
-		// on the old "PTC body is a no-op" path). We still tag the
-		// ref as alive so `comp.alive`/`comp.done` answer correctly.
-		// A call runs its behaviour, as a start does (below).
-		skip := op != "call" && startBodyShouldSkip(body, env)
-		// An `alive` PTC body (including a while(true) send/receive load
-		// worker) runs on a real goroutine instead of the
-		// skip/virtual-clock model, so never send it to the skip branch.
-		if op == "start" && ref != nil && ref.AliveModifier {
-			skip = false
-		}
-		// A non-alive PTC started with a body that blocks on
-		// inter-component communication (a server blocked in `getcall`,
-		// or a client issuing a blocking `call`) must run concurrently —
-		// TTCN-3 `start` runs the body regardless of the `alive` modifier
-		// (ES 201 873-1 §21.3.2). The synchronous model skips such bodies
-		// (they'd dead-end), so two-PTC call/reply fixtures
-		// (Sem_220301/220302) never execute. We fork them onto a real
-		// goroutine; the deterministic clock automatically falls back to
-		// the real clock while these PTCs are live
-		// (deterministicClockEnabled), so inter-PTC events race in real
-		// time instead of a virtual-clock advance firing a safety timer
-		// prematurely.
-		forkStrict := false
 		// A started behaviour runs as its component, on its own goroutine
 		// (ES 201 873-1 §21.3.2), on either clock: what it does is what it
 		// does, not a model of it. A loop in it that never ends and never
-		// waits is dealt with where it is entered (see parkEndlessLoop).
-		forkComm := op == "start" && ref != nil && !ref.AliveModifier
-		if forkComm {
-			// A body that communicates runs as the component it is, on its
-			// own goroutine. A responder used to be replayed inline on
-			// demand, or run inline when a call was already queued, while a
-			// standalone getcall did not wait; now that it waits (ETSI
-			// 20.1), run inline it would block the component that started
-			// it.
-			skip = false
-			forkStrict = true
-		}
-		// Exception: a finite responder body (getcall/reply/raise)
-		// runs when the caller already queued its nowait calls
-		// (pattern A: `p.call(..., nowait); ...; comp.start(f)`).
-		// Then getcall consumes the queued calls and reply/raise
-		// enqueues the response the caller's getreply/catch matches
-		// (220304/220306). When no call is pending (pattern B: the
-		// server starts before the client calls) we keep skipping
-		// so the responder's getcall doesn't fall through to its
-		// timeout->fail branch.
-		if skip && startBodyIsFiniteResponder(body, env) {
-			if exec := runtime.FindTestcaseExec(env); exec != nil && exec.HasPendingCalls() {
-				skip = false
-			}
-		}
-		// Single-port finite responders (getcall + reply/raise, no
-		// infinite loop) also run at start when a call is already queued.
-		// The exception above only covers indexed-port responders, so a
-		// single-port `getcall; reply` server would stay skipped and its
-		// caller's getreply/catch never match (220304/220306).
-		if skip && startBodyIsDeferredResponder(body, env) {
-			if exec := runtime.FindTestcaseExec(env); exec != nil && exec.HasPendingCalls() {
-				skip = false
-			}
-		}
-		if skip {
-			// We're skipping the body to avoid deadlock/divergence.
-			// Pretend the PTC is still "running" (TTCN-3 21.3.6) so
-			// the testcase's subsequent `.running`/`.done`/`.alive`
-			// queries see the same state they would on a real
-			// scheduler - the body hasn't completed.
-			//
-			// If the skipped body's only blocking op is a finite
-			// `timer.timeout`, record a modelled duration so
-			// `.done`/`.killed`/`.running` can answer correctly once
-			// that much wall-clock has elapsed (the MTC's own
-			// blocking timeout provides the observation window). This
-			// lets the `done`/`killed` operation tests distinguish a
-			// short-timer PTC (terminated at the observation point)
-			// from long-timer siblings (still running). Bodies with no
-			// finite model leave ModeledDuration at 0 and stay running
-			// until an explicit stop/kill.
-			if ref != nil {
-				ref.StartedAt = time.Now()
-				if exec := runtime.FindTestcaseExec(env); exec != nil {
-					ref.StartedAtVirtual = exec.VirtualClock()
-				}
-				if d, ok := modeledStartDuration(body, env); ok {
-					ref.ModeledDuration = d
-				}
-				// Remember whether the skipped body ends in a `kill`
-				// so the component counts as killed (not just done)
-				// once the modelled duration elapses - even under the
-				// alive modifier (ETSI 21.3.4/21.3.8).
-				if modeledBodyKills(body, env) {
-					ref.ModeledKill = true
-				}
-				// `comp.call(f)` is blocking (ETSI 21.3.10): it
-				// waits until the started behaviour terminates, so
-				// the component is done the moment control returns -
-				// even when the body itself was skipped. `.start` is
-				// non-blocking and keeps the modelled-duration timing.
-				if op == "call" {
-					ref.SetDone(true)
-					if !ref.AliveModifier {
-						ref.SetAlive(false)
-					}
-				}
-				// Started, after what a watcher reads with it.
-				ref.SetStarted()
-				if exec := runtime.FindTestcaseExec(env); exec != nil {
-					exec.WakeWaiters()
-				}
-			}
-			return runtime.Undefined, true
-		}
-		// Record that behaviour was started on this component (the
-		// skipped body above records it too), by start or by call,
-		// which starts one too. `running` (any and all), `all
+		// waits is dealt with where it is entered (see parkEndlessLoop). A
+		// body that communicates runs as the component it is, on its own
+		// goroutine; run inline it would block the component that started
+		// it. An `alive` component's behaviour forks as well (below).
+		forkStrict := op == "start" && ref != nil && !ref.AliveModifier
+		// Record that behaviour was started on this component, by start or
+		// by call, which starts one too. `running` (any and all), `all
 		// component.done` and `all component.stop` consider only
 		// ever-started PTCs (ETSI 21.3.3, 21.3.6, 21.3.7).
 		if ref != nil {
@@ -12072,8 +11808,6 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		return runtime.Undefined, true
 	case "running":
 		// `comp.running` is true only between `.start` and `.done`.
-		// The Done flag flips once the synchronous body exits; a
-		// modelled finite-timer body completes after its duration.
 		ok := compRunning(ref, env)
 		tlCompQuery(env, n, "tliCRunning", ref, ok)
 		return runtime.NewBool(ok), true

@@ -399,38 +399,15 @@ type ComponentRef struct {
 	// goroutine while the MTC polls it.
 	done bool
 
-	// started records that a `.start(...)` ran on this ref, even when
-	// the loopback model skipped the body (e.g. a finite-timer PTC).
-	// ModeledDuration/StartedAt then drive virtual completion: a PTC
-	// whose body only blocks on a finite `timer.timeout` is treated
-	// as terminated once that much wall-clock has elapsed since the
-	// start (the MTC's own blocking `timeout` provides the real
-	// observation window). ModeledDuration == 0 means "no finite
-	// model" - such a body stays running until an explicit stop/kill.
-	// Another component may start this one while a third watches it,
-	// so it is atomic (IsStarted/SetStarted); what the starter sets
-	// before SetStarted, the watcher sees after IsStarted.
+	// started records that a behaviour was started on this ref, by start
+	// or by call. Another component may start this one while a third
+	// watches it, so it is atomic (IsStarted/SetStarted); what the starter
+	// sets before SetStarted, the watcher sees after IsStarted.
 	started atomic.Bool
 	// LoopTicks counts the loop iterations the component's behaviour has
 	// run, for yielding on the virtual clock; only its own goroutine
 	// touches it.
-	LoopTicks       int64
-	StartedAt       time.Time
-	ModeledDuration float64
-
-	// StartedAtVirtual is the per-testcase virtual-clock reading when the
-	// modelled body was started. Under the deterministic clock the MTC's
-	// observation window (`t.timeout`) advances virtual time, not wall
-	// time, so completion is measured as VirtualClock-StartedAtVirtual;
-	// StartedAt (wall time) drives the same check when the clock is real.
-	StartedAtVirtual float64
-
-	// ModeledKill records that the skipped finite-timer body ends in a
-	// `kill` (rather than a natural return or `stop`). Once the modelled
-	// duration elapses such a component counts as killed and no longer
-	// alive even though it was created with the `alive` modifier, which
-	// would otherwise keep it reusable (ETSI 21.3.4/21.3.8).
-	ModeledKill bool
+	LoopTicks int64
 
 	// verdict is this component's local verdict, accumulated from the
 	// `setverdict(...)` calls executed while it was the running
