@@ -1262,7 +1262,7 @@ func evalSetverdict(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 		if r := strings.Join(reasonParts, " "); r != "" {
 			targs = append(targs, tlArg("reason", tl.String(r)))
 		}
-		tlEmitWith(lexec, n, "tliSetVerdict", func(e *tl.Event) { e.Parts = tlPartsOf(args[1:], n.Args.List[1:], env) }, targs...)
+		tlEmitWith(lexec, siteOf(n), "tliSetVerdict", func(e *tl.Event) { e.Parts = tlPartsOf(args[1:], n.Args.List[1:], env) }, targs...)
 	}
 	// Also accumulate the verdict on the running component so
 	// `comp.done -> value v` can retrieve that PTC's local verdict
@@ -1312,7 +1312,7 @@ func evalTestcaseStop(n syntax.Node, argExprs []syntax.Expr, env runtime.Scope) 
 		if reason.Len() > 0 {
 			targs = append(targs, tlArg("reason", tl.String(reason.String())))
 		}
-		tlEmit(lexec, n, "tliTcStop", targs...)
+		tlEmit(lexec, siteOf(n), "tliTcStop", targs...)
 	}
 	exec.Stop()
 	return &runtime.ReturnValue{Value: runtime.Undefined, Stopped: true}
@@ -1382,7 +1382,7 @@ func evalAction(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 		exec.Log("action: " + text)
 	}
 	if lexec := tlExec(env); lexec != nil {
-		tlEmitWith(lexec, n, "tliAction", func(e *tl.Event) { e.Parts = tlPartsOf(vals, texts, env) }, tlArg("action", tl.String(text)))
+		tlEmitWith(lexec, siteOf(n), "tliAction", func(e *tl.Event) { e.Parts = tlPartsOf(vals, texts, env) }, tlArg("action", tl.String(text)))
 	}
 	return nil
 }
@@ -1404,12 +1404,12 @@ func evalLog(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	if exec := runtime.FindTestcaseExec(env); exec != nil {
 		exec.Log(line)
 		if exec.TestLogger() != nil {
-			tlEmitWith(exec, n, "tliLog", func(e *tl.Event) { e.Parts = tlPartsOf(args, n.Args.List, env) }, tlArg("log", tl.String(line)))
+			tlEmitWith(exec, siteOf(n), "tliLog", func(e *tl.Event) { e.Parts = tlPartsOf(args, n.Args.List, env) }, tlArg("log", tl.String(line)))
 		}
 		return nil
 	}
 	if lexec := tlExec(env); lexec != nil {
-		tlEmitWith(lexec, n, "tliLog", func(e *tl.Event) { e.Parts = tlPartsOf(args, n.Args.List, env) }, tlArg("log", tl.String(line)))
+		tlEmitWith(lexec, siteOf(n), "tliLog", func(e *tl.Event) { e.Parts = tlPartsOf(args, n.Args.List, env) }, tlArg("log", tl.String(line)))
 	}
 	// A control part run for a testcase's actuals writes nothing.
 	if _, quiet := env.Get(controlQuietKey); quiet {
@@ -2981,8 +2981,8 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 	}
 	if lexec != nil {
 		lexec.TLAltBump(currentCompID(lexec))
-		tlEmit(lexec, n, "tliAEnter")
-		defer tlEmit(lexec, n, "tliALeave")
+		tlEmit(lexec, siteOf(n), "tliAEnter")
+		defer tlEmit(lexec, siteOf(n), "tliALeave")
 		// However the alt is left — a default that fired, a stop — its
 		// guard scan is over.
 		defer lexec.TLScanEnd(currentCompID(lexec))
@@ -3093,7 +3093,7 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 					if lexec != nil {
 						lexec.TLScanEnd(currentCompID(lexec))
 						lexec.TLAltBump(currentCompID(lexec))
-						tlEmit(lexec, n, "tliARepeat")
+						tlEmit(lexec, siteOf(n), "tliARepeat")
 					}
 					if r := loopStopped(env); r != nil {
 						return r
@@ -3126,7 +3126,7 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 						return runtime.Repeat
 					}
 					if lexec != nil {
-						tlEmit(lexec, n, "tliARepeat")
+						tlEmit(lexec, siteOf(n), "tliARepeat")
 					}
 					if r := loopStopped(env); r != nil {
 						return r
@@ -3140,7 +3140,7 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			return nil
 		}
 		if lexec != nil && !waiting {
-			tlEmit(lexec, n, "tliANomatch")
+			tlEmit(lexec, siteOf(n), "tliANomatch")
 		}
 		if elseClause != nil {
 			if lexec != nil {
@@ -3158,7 +3158,7 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 					return runtime.Repeat
 				}
 				if lexec != nil {
-					tlEmit(lexec, n, "tliARepeat")
+					tlEmit(lexec, siteOf(n), "tliARepeat")
 				}
 				if r := altIdleRound(n, elseClause, env, &idle); r != nil {
 					return r
@@ -3178,13 +3178,13 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		// its branches not yet taken (20.4, 20.5).
 		if !defaultsSuppressed(n) && currentInterleaveBranch() == nil {
 			if lexec != nil && !waiting && len(activeDefaults(env)) > 0 {
-				tlEmit(lexec, n, "tliADefaults")
+				tlEmit(lexec, siteOf(n), "tliADefaults")
 			}
 			if ctl, fired := runDefaults(env); fired {
 				if ctl == runtime.Repeat {
 					// The default repeats this alt (20.5.2).
 					if lexec != nil {
-						tlEmit(lexec, n, "tliARepeat")
+						tlEmit(lexec, siteOf(n), "tliARepeat")
 					}
 					if r := loopStopped(env); r != nil {
 						return r
@@ -3210,7 +3210,7 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		if lexec != nil {
 			lexec.TLScanEnd(currentCompID(lexec))
 			if !waiting {
-				tlEmit(lexec, n, "tliAWait")
+				tlEmit(lexec, siteOf(n), "tliAWait")
 			}
 		}
 		waiting = true

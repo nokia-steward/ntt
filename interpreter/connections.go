@@ -562,7 +562,7 @@ func applyPortLifecycle(n syntax.Node, op, port string, env runtime.Scope) {
 		exec.HaltPort(key)
 	}
 	if exec.TestLogger() != nil {
-		tlEmitLazy(exec, n, "tliP"+strings.ToUpper(op[:1])+op[1:], func() []tl.Arg {
+		tlEmitLazy(exec, siteOf(n), "tliP"+strings.ToUpper(op[:1])+op[1:], func() []tl.Arg {
 			return []tl.Arg{tlArg("port", tlOwnPort(exec, port).Content()), tlArg("stat", tl.String(tlPortStatus(exec, port)))}
 		})
 	}

@@ -147,8 +147,8 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) (result runt
 	// Its entry and leaving, events TCI-TL has none for.
 	if lexec := tlExec(env); lexec != nil && lexec.TestLogger() != nil {
 		aside := func(e *tl.Event) { e.Aside = true }
-		tlEmitWith(lexec, n, "tliIEnter", aside)
-		defer tlEmitWith(lexec, n, "tliILeave", aside)
+		tlEmitWith(lexec, siteOf(n), "tliIEnter", aside)
+		defer tlEmitWith(lexec, siteOf(n), "tliILeave", aside)
 	}
 	var clauses []*syntax.CommClause
 	for _, s := range n.Body.Stmts {
@@ -340,7 +340,7 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) (result runt
 				if ctl == runtime.Repeat {
 					// The default repeats: look again (20.5.2).
 					if lexec != nil {
-						tlEmit(lexec, n, "tliARepeat")
+						tlEmit(lexec, siteOf(n), "tliARepeat")
 					}
 					waiting = false
 					waitAt = new(byte)

@@ -10692,7 +10692,7 @@ func evalTimerAggregate(kind string, sel syntax.Expr, env runtime.Scope) (runtim
 	res, ok := evalTimerAggregateOp(kind, sel, env)
 	if lexec := tlExec(env); lexec != nil && ok && syntax.Name(sel) == "timeout" {
 		if b, isBool := res.(runtime.Bool); isBool && bool(b) {
-			tlEmit(lexec, sel, "tliTTimeout", tlArg("timer", tl.TimerID(kind, "", "")),
+			tlEmit(lexec, siteOf(sel), "tliTTimeout", tlArg("timer", tl.TimerID(kind, "", "")),
 				tlArg("timerTmpl", tlTimerTemplate(kind, nil)))
 		}
 	}
@@ -11718,14 +11718,14 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				if id, ok := ce.Fun.(*syntax.Ident); ok {
 					if v, ok := env.Get(id.String()); ok {
 						if f, ok := v.(*runtime.Function); ok && f.Body != nil {
-							decl.Src, decl.Line = tlPos(f.Body)
+							decl = siteOf(f.Body)
 						}
 					}
 				}
 			}
 			tlCallSite(lexec, ref.ID, n)
 			mod, fn := tlQualified(body, env)
-			tlEmitWith(lexec, n, tlOp, func(e *tl.Event) { e.Site = decl },
+			tlEmitWith(lexec, siteOf(n), tlOp, func(e *tl.Event) { e.Site = decl },
 				tlArg("comp", lexec.TLComponent(ref).Content()), tlArg("name", tl.BehaviourID(mod, fn)))
 		}
 		// Skip the body when running it synchronously would
@@ -12119,7 +12119,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 				// `catch(timeout)` clause if it has one, else in a
 				// testcase error (ETSI 21.3.10).
 				if lexec := tlExec(env); lexec != nil {
-					tlEmit(lexec, nil, "tliCCallTerminated",
+					tlEmit(lexec, tl.Pos{}, "tliCCallTerminated",
 						tlArg("verdict", tl.Verdict(tlVerdict(ref.GetVerdict()))),
 						tlArg("reason", tl.String("timeout")))
 				}
@@ -12170,7 +12170,7 @@ func evalComponentMethod(ref *runtime.ComponentRef, op string, n *syntax.CallExp
 		if ref != nil {
 			if lexec := tlExec(env); lexec != nil {
 				if op == "call" {
-					tlEmitLazy(lexec, nil, "tliCCallTerminated", func() []tl.Arg {
+					tlEmitLazy(lexec, tl.Pos{}, "tliCCallTerminated", func() []tl.Arg {
 						args := []tl.Arg{tlArg("verdict", tl.Verdict(tlVerdict(ref.GetVerdict())))}
 						if !stopped && result != nil && result != runtime.Undefined {
 							args = append(args, tlArg("returnValue", runtime.TLValue(result).AsValue()))
@@ -13897,7 +13897,7 @@ func evalActivate(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	defEnv := snapshotActivateArgs(callExpr, env)
 	id := exec.AddDefault(runtime.Default{Body: &astNode{n: callExpr}, Env: defEnv, Owner: currentCompID(exec)})
 	if lexec := tlExec(env); lexec != nil {
-		tlEmitLazy(lexec, n, "tliAActivate", func() []tl.Arg {
+		tlEmitLazy(lexec, siteOf(n), "tliAActivate", func() []tl.Arg {
 			mod, name := tlQualified(callExpr, env)
 			return []tl.Arg{
 				tlArg("name", tl.QualifiedName(mod, name)),
@@ -13956,7 +13956,7 @@ func evalReactivate(n *syntax.CallExpr, ref syntax.Expr, env runtime.Scope) runt
 		return runtime.Errorf("activate of a default that is not suspended (ETSI ES 201 873-1 20.5.2 e)")
 	}
 	if lexec := tlExec(env); exec != nil && lexec != nil {
-		tlEmitLazy(lexec, n, "tliAActivate", func() []tl.Arg {
+		tlEmitLazy(lexec, siteOf(n), "tliAActivate", func() []tl.Arg {
 			var mod, name string
 			if ast, ok := d.Body.(*astNode); ok && ast != nil {
 				if call, ok := ast.n.(syntax.Expr); ok {
@@ -14081,7 +14081,7 @@ func evalDeactivate(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 		endOutlivedTimers(exec, currentCompID(exec))
 	}
 	if lexec := tlExec(env); exec != nil && lexec != nil {
-		tlEmit(lexec, n, "tliADeactivate", tlArg("ref", tl.Value{Kind: "default", Text: strconv.Itoa(id)}.AsValue()))
+		tlEmit(lexec, siteOf(n), "tliADeactivate", tlArg("ref", tl.Value{Kind: "default", Text: strconv.Itoa(id)}.AsValue()))
 	}
 	return runtime.Undefined
 }
@@ -18065,7 +18065,7 @@ func timerDue(th *runtime.TimerHandle, env runtime.Scope) float64 {
 func clearPort(exec *runtime.TestcaseExec, n syntax.Node, pname string) {
 	exec.ClearPort(exec.PortKey(pname))
 	if exec.TestLogger() != nil {
-		tlEmitLazy(exec, n, "tliPClear", func() []tl.Arg {
+		tlEmitLazy(exec, siteOf(n), "tliPClear", func() []tl.Arg {
 			return []tl.Arg{tlArg("port", tlOwnPort(exec, pname).Content()), tlArg("stat", tl.String(tlPortStatus(exec, pname)))}
 		})
 	}
