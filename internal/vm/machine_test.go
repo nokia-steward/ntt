@@ -2710,6 +2710,95 @@ control {
 	}
 }
 
+// TestAltSnapshotComponentDone checks that every alternative of an alt pass
+// sees one snapshot (ETSI ES 201 873-1 20.1): the PTC ends while the second
+// alternative's guard computes, after the first alternative found it
+// running. The second's done does not see it end; the next pass takes the
+// first. Were the guard quicker than the PTC, both would see it end on a
+// later pass and the first would be taken all the same.
+func TestAltSnapshotComponentDone(t *testing.T) {
+	out, err := runModule(t, `module M {
+type component C {}
+function f() runs on C {
+  timer t := 0.01;
+  t.start;
+  t.timeout;
+  setverdict(pass);
+}
+function busy() return boolean {
+  var integer i, s := 0;
+  for (i := 0; i < 10000; i := i + 1) { s := s + 1; }
+  return s > 0;
+}
+testcase tc() runs on C {
+  var C c := C.create;
+  c.start(f());
+  alt {
+    [] c.done { log("first"); }
+    [busy()] c.done { log("second"); }
+  }
+}
+control {
+  execute(tc());
+}
+}
+`)
+	if err != nil {
+		t.Fatalf("execute: %v\n%s", err, out)
+	}
+	var logs []string
+	for _, line := range eventsByComponent(out)["MTC"] {
+		if strings.HasPrefix(line, "ulog|") {
+			logs = append(logs, line)
+		}
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], `"first"`) {
+		t.Fatalf("alternative taken:\n%s", out)
+	}
+}
+
+// TestAltSnapshotTimeout checks that timers are read at the time of the alt
+// pass (ETSI ES 201 873-1 20.1): both expire while the second alternative's
+// guard computes, after the first alternative found its timer running. The
+// second's timeout does not see its timer expire; the next pass takes the
+// first.
+func TestAltSnapshotTimeout(t *testing.T) {
+	out, err := runModule(t, `module M {
+type component C {}
+function busy() return boolean {
+  var integer i, s := 0;
+  for (i := 0; i < 10000; i := i + 1) { s := s + 1; }
+  return s > 0;
+}
+testcase tc() runs on C {
+  timer t1 := 0.01, t2 := 0.01;
+  t1.start;
+  t2.start;
+  alt {
+    [] t1.timeout { log("first"); }
+    [busy()] t2.timeout { log("second"); }
+  }
+  setverdict(pass);
+}
+control {
+  execute(tc());
+}
+}
+`)
+	if err != nil {
+		t.Fatalf("execute: %v\n%s", err, out)
+	}
+	var logs []string
+	for _, line := range eventsByComponent(out)["MTC"] {
+		if strings.HasPrefix(line, "ulog|") {
+			logs = append(logs, line)
+		}
+	}
+	if len(logs) != 1 || !strings.Contains(logs[0], `"first"`) {
+		t.Fatalf("alternative taken:\n%s", out)
+	}
+}
+
 func TestPTCStopsOnError(t *testing.T) {
 	out, err := runModule(t, `module M {
 type component C {}
