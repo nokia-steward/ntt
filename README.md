@@ -273,8 +273,7 @@ The full feature matrix between Titan and ntt is in
 | `internal/asn1/`         | pure-Go ASN.1:2015 frontend (no external compiler)               |
 | `internal/lsp/`          | language-server protocol implementation                          |
 | `interpreter/`           | tree-walking interpreter that powers `ntt exec` and `ntt conformance` |
-| `runtime/`               | runtime model (values, ports, components, alt, timers, codecs)   |
-| `runtime/codec/`         | RAW / TEXT / JSON / OER / BER codecs                             |
+| `runtime/`               | runtime model (values, scopes, testcase execution, scheduler)    |
 | `runtime/{mctr,hc,wire}/`| distributed executor (master, host-controller, line protocol)    |
 | `runtime/{explorer,dap}/`| VS Code test-explorer + debugger adapter                         |
 | `builtins/`              | TTCN-3 predefined functions (sizeof, lengthof, encvalue, ...)    |
