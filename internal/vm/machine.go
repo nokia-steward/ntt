@@ -209,11 +209,11 @@ type altSnapshot struct {
 
 // takeSnapshot is the snapshot of a pass of m's alt.
 func (m *Machine) takeSnapshot() *altSnapshot {
-	s := &altSnapshot{now: time.Now()}
+	var done map[*runtime.Component]bool
 	if m.tc != nil {
-		s.done = m.tc.componentsDone()
+		done = m.tc.componentsDone()
 	}
-	return s
+	return &altSnapshot{done: done, now: time.Now()}
 }
 
 // componentsDone is whether each component of the testcase is done.
@@ -230,15 +230,15 @@ func (t *testcase) componentsDone() map[*runtime.Component]bool {
 	return done
 }
 
-// componentDone reports whether c is done, as the current alt pass sees
+// componentDone reports whether comp is done, as the current alt pass sees
 // it, or now outside one.
-func (m *Machine) componentDone(c *runtime.Component) bool {
+func (m *Machine) componentDone(comp *runtime.Component) bool {
 	if m.snap != nil {
-		if done, ok := m.snap.done[c]; ok {
+		if done, ok := m.snap.done[comp]; ok {
 			return done
 		}
 	}
-	return c.Done()
+	return comp.Done()
 }
 
 // now is the time timers are read at: that of the current alt pass, or
