@@ -367,6 +367,13 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **On the real clock, every alternative of an alt pass reads timers at
+  one instant** (20.1), the defaults it invokes and an altstep taken as an
+  alternative included, as they see the port queues as they were when the
+  pass began. A timer that expired during a pass made a later alternative
+  or an older default ready while an earlier one had waited, so a later
+  branch could be taken (`ntt exec --live`). The virtual clock was not
+  affected; a branch body reads the clock as before.
 - **The T3XF virtual machine evaluates every alternative of an alt pass
   against one snapshot** (20.1): whether a component is done, as `done`
   and `running` read it, and the time timers are read at, besides the

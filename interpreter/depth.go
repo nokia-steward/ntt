@@ -3,6 +3,7 @@ package interpreter
 import (
 	"sync"
 	"sync/atomic"
+	"time"
 )
 
 // depthStore is a goroutine-local counter for tracking the current
@@ -98,6 +99,43 @@ func defaultBranchTook() bool {
 	took := atomic.LoadInt64(v.(*int64)) == 2
 	defaultBranchState.Delete(gid)
 	return took
+}
+
+// altPassTime holds, per goroutine, the wall-clock time of the alt pass
+// being evaluated: every alternative of a pass, an altstep taken as one
+// and the defaults it invokes read timers at this one instant, as they see
+// the port queues as they were at its start (ETSI ES 201 873-1 20.1). The
+// pass's branch body runs without it.
+var altPassTime sync.Map // map[uint64]time.Time
+
+// altPassNow is the time of the alt pass this goroutine evaluates, if it
+// evaluates one.
+func altPassNow() (time.Time, bool) {
+	if v, ok := altPassTime.Load(goroutineID()); ok {
+		return v.(time.Time), true
+	}
+	return time.Time{}, false
+}
+
+// setAltPassNow makes t the time of this goroutine's alt pass.
+func setAltPassNow(t time.Time) { altPassTime.Store(goroutineID(), t) }
+
+// clearAltPassNow ends this goroutine's alt pass.
+func clearAltPassNow() { altPassTime.Delete(goroutineID()) }
+
+// suspendAltPass leaves this goroutine's alt pass, if any, until the
+// returned function restores it: for a branch body, which runs after the
+// snapshot, and for the alt that ends.
+func suspendAltPass() (restore func()) {
+	gid := goroutineID()
+	v, ok := altPassTime.LoadAndDelete(gid)
+	return func() {
+		if ok {
+			altPassTime.Store(gid, v)
+		} else {
+			altPassTime.Delete(gid)
+		}
+	}
 }
 
 func (a *altContext) counter(gid uint64) *int64 {

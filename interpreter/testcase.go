@@ -2974,6 +2974,14 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 		defer lexec.TLScanEnd(currentCompID(lexec))
 	}
 	waiting := false
+	// The time timers are read at in a pass (altPassTime): an alt that
+	// starts within another's pass, a default or an altstep taken as an
+	// alternative, reads them at that pass's time; one of its own takes
+	// its time at the start of each of its passes.
+	_, inherited := altPassNow()
+	if !inherited {
+		defer suspendAltPass()()
+	}
 	// Rounds its [else] repeated at one virtual instant (altIdleRound).
 	var idle idleRounds
 	// Blocking is ended by a matching event, this component's stop, or
@@ -2990,6 +2998,9 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			}
 		}
 
+		if !inherited {
+			setAltPassNow(time.Now())
+		}
 		// Snapshot pass: the first clause whose guard fires wins.
 		//
 		// Freeze the visible-message boundary for the duration of the guard
@@ -3103,8 +3114,9 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			if matchedClause.Body != nil {
 				// The branch of a default that matched is ordinary
 				// behaviour: an alt in it waits, as any alt does.
-				restore, restoreBranch := defaultCtx.suspend(), defaultBranchSuspend()
+				restore, restoreBranch, restorePass := defaultCtx.suspend(), defaultBranchSuspend(), suspendAltPass()
 				res := evalAltClauseBody(matchedClause.Body, env)
+				restorePass()
 				restoreBranch()
 				restore()
 				if res == runtime.Repeat {
@@ -3135,8 +3147,9 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			// A default that takes its [else] has fired (20.5.1); its
 			// branch is ordinary behaviour, as a matched one is.
 			defaultBranchFire()
-			restore, restoreBranch := defaultCtx.suspend(), defaultBranchSuspend()
+			restore, restoreBranch, restorePass := defaultCtx.suspend(), defaultBranchSuspend(), suspendAltPass()
 			res := evalAltClauseBody(elseClause.Body, env)
+			restorePass()
 			restoreBranch()
 			restore()
 			if res == runtime.Repeat {
@@ -3200,6 +3213,10 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			}
 		}
 		waiting = true
+		// The pass is over; the next takes its own time.
+		if !inherited {
+			clearAltPassNow()
+		}
 		if !blockForAltEvents(n, waitAt, wake, env) {
 			// The testcase or this PTC was stopped: conclude without
 			// fabricating a verdict. A control part whose time is up

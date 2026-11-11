@@ -10857,6 +10857,10 @@ func evalTimerOp(th *runtime.TimerHandle, op string, args []syntax.Expr, env run
 // whether its timers run on that.
 func timerNow(env runtime.Scope) runtime.TimerNow {
 	now := runtime.TimerNow{Wall: time.Now(), OnVirtual: useVirtualClock(env)}
+	// In an alt pass, the wall clock is read at the pass's time.
+	if t, ok := altPassNow(); ok {
+		now.Wall = t
+	}
 	now.Virtual, now.HasVirtual = virtualNow(env)
 	return now
 }
