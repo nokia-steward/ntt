@@ -16652,6 +16652,9 @@ func evalPortTrigger(port string, n *syntax.CallExpr, env runtime.Scope) runtime
 		tlReceive(exec, env, n, port, head, tmpl, nil, ev, false, false)
 	}
 	if !matches {
+		// The message is removed all the same (22.2.3): the alt looks at
+		// the queue again, with the next message at its head.
+		markAltQueueChanged()
 		return runtime.Undefined
 	}
 	return runtime.NewBool(true)

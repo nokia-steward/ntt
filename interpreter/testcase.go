@@ -3000,6 +3000,7 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 
 		if !inherited {
 			setAltPassNow(time.Now())
+			takeAltQueueChanged()
 		}
 		// Snapshot pass: the first clause whose guard fires wins.
 		//
@@ -3211,6 +3212,15 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 			if !waiting {
 				tlEmit(lexec, siteOf(n), "tliAWait")
 			}
+		}
+		// A trigger that removed a message it did not match changed the
+		// queue: the next snapshot is taken at once, with the next message
+		// at the head (22.2.3).
+		if !inherited && takeAltQueueChanged() {
+			if r := loopStopped(env); r != nil {
+				return r
+			}
+			continue
 		}
 		waiting = true
 		// The pass is over; the next takes its own time.

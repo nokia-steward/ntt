@@ -373,6 +373,14 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **A trigger triggers on the first message that matches**, however many
+  come before it (22.2.3): it removes the message at the head of the
+  queue, matched or not, and the alt now takes its next snapshot at once,
+  with the next message at the head. It waited for another event, so a
+  trigger in an alt removed one message per event and a trigger statement
+  could deadlock with the message it waited for in its queue. One message
+  is still removed per snapshot, so an alternative of another port a
+  snapshot can take comes first.
 - **Maps follow ES 201 873-1 V4.17.1** (6.2.15): a map type may be a
   template's type and maps are compared, as the two restrictions of
   6.2.15.1 are void (three ETSI tests of the 2024 corpus still expect

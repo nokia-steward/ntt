@@ -123,6 +123,24 @@ func setAltPassNow(t time.Time) { altPassTime.Store(goroutineID(), t) }
 // clearAltPassNow ends this goroutine's alt pass.
 func clearAltPassNow() { altPassTime.Delete(goroutineID()) }
 
+// altQueueChanged records, per goroutine, that the alt pass being
+// evaluated changed a port queue itself: a trigger removed a message it
+// did not match (ETSI ES 201 873-1 22.2.3). The alt then takes a new
+// snapshot at once, as nothing else would wake it to look at the queue
+// as it now is.
+var altQueueChanged sync.Map // map[uint64]bool
+
+// markAltQueueChanged records that this goroutine's alt pass changed a
+// port queue.
+func markAltQueueChanged() { altQueueChanged.Store(goroutineID(), true) }
+
+// takeAltQueueChanged reports whether this goroutine's alt pass changed a
+// port queue since it was last asked, and forgets it.
+func takeAltQueueChanged() bool {
+	_, ok := altQueueChanged.LoadAndDelete(goroutineID())
+	return ok
+}
+
 // suspendAltPass leaves this goroutine's alt pass, if any, until the
 // returned function restores it: for a branch body, which runs after the
 // snapshot, and for the alt that ends.
