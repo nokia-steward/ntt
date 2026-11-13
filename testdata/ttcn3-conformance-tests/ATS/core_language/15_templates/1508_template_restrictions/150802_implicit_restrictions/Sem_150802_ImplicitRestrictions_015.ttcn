@@ -1,0 +1,36 @@
+/*****************************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.8.2, Ensure that referenced item have implicit template restriction.
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+/*
+ * Reference element of a 'union' template without restriction.
+ * (see Table 13C: Implicit restrictions)
+ *
+ */
+module Sem_150802_ImplicitRestrictions_015{
+
+type component GeneralComp { }
+
+type anytype A;
+
+testcase TC_Sem_150802_ImplicitRestrictions_015() runs on GeneralComp {
+	var template A m_anytype := { integer := 12345};
+
+	var template (present) integer v_int := m_anytype.integer;
+
+	if (ispresent(v_int)) {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+}
+
+control{
+	execute(TC_Sem_150802_ImplicitRestrictions_015());
+}
+
+
+}

@@ -1,0 +1,27 @@
+/***************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.15, Value extraction
+ ** @verdict  pass reject
+ ***************************************************/
+
+/* The following requirements are tested:
+ * Value extraction:
+ * a. Applying the value extraction to a template that contains neither a pattern nor a value template with an ifpresent matching attribute nor a value shall result in an error.
+ */
+
+module NegSem_1515_ValueExtaction_001 {
+
+	type component GeneralComp {}
+
+	testcase TC_NegSem_1515_ValueExtaction_001 runs on GeneralComp {
+
+        var template charstring v_any := ?;
+        var charstring v_cs := v_any.value;				//shall result in an error
+        setverdict(pass);
+	}
+
+	control {
+		execute(TC_NegSem_1515_ValueExtaction_001);
+	};
+}

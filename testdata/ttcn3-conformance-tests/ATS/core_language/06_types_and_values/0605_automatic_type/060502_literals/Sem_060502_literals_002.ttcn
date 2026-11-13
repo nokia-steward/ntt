@@ -1,0 +1,25 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for verdicttype literals.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060502_literals_002 {
+
+type component GeneralComp {}
+
+// inout parameters require strong typing and can be used to type verification.
+function verifyType(inout verdicttype v) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_060502_literals_002() runs on GeneralComp {
+	{ var v := none; verifyType(v); }
+	{ var v := pass; verifyType(v); }
+	{ var v := inconc; verifyType(v); }
+	{ var v := fail; verifyType(v); }
+	{ var v := error; verifyType(v); }
+}
+
+control {
+	execute(TC_Sem_060502_literals_002());
+}
+
+}

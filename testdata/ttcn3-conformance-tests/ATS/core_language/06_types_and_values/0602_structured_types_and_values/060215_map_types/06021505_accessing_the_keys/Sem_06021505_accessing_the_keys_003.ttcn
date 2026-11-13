@@ -1,0 +1,31 @@
+/***************************************************
+ ** @author   TTF T014
+ ** @version  0.0.1
+ ** @purpose  1:6.2.15.5, Verify that map keys are unique
+ ** @verdict  pass accept, ttcn3verdict: pass
+ ***************************************************/
+
+// The following requirement is tested:
+// Since there is at most one value mapped to each key in a map value, the values in the set of keys
+// will be unique. The length of the map value is equal to the length of the set of keys.
+
+module Sem_06021505_accessing_the_keys_003 {
+	type map from charstring to integer TMap1;
+	type component C {}
+
+	testcase TC_Sem_06021505_accessing_the_keys_003() runs on C {
+		var TMap1 v_map;
+		v_map["test"] := 1;
+		v_map["xyz"] := 5;
+		v_map["test"] := 6;
+		if (match(v_map.from, { "test", "xyz" }) and lengthof(v_map.from) == 2) {
+			setverdict(pass);
+		} else {
+			setverdict(fail);
+		}
+	}
+
+	control {
+		execute(TC_Sem_06021505_accessing_the_keys_003());
+	}
+}

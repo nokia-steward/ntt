@@ -43,7 +43,7 @@ func (r *Reference) Set(value any) {
 	if r.Index >= len(s) {
 		newSlice := make([]any, r.Index+1)
 		copy(newSlice, s)
-		*(*[]any)(r.Base) = newSlice
+		*r.Base = newSlice
 	}
 	s[r.Index] = value
 }

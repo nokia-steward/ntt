@@ -1,0 +1,24 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure field assignment lists are anonymous records.
+// @verdict  pass accept, ttcn3verdict:pass
+
+//NOTE TTF T032: Test not valid, will be deleted
+
+module Sem_060505_field_assignment_lists_003 {
+
+//type component GeneralComp {}
+
+//function verifyType(inout record { integer x, integer y } r) {
+//	setverdict(pass);
+//}
+
+//testcase TC_Sem_060505_field_assignment_lists_003() runs on GeneralComp {
+//	var v := { x := 1, y := 2 };
+//	verifyType(v);
+//}
+
+//control {
+//	execute(TC_Sem_060505_field_assignment_lists_003());
+//}
+
+}

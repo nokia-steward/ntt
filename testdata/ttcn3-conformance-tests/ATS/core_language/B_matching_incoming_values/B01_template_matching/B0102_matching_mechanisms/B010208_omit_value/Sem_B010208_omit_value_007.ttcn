@@ -1,0 +1,65 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:B.1.2.8, omit in a map field (field present)
+ ** @verdict  pass accept, ttcn3verdict:pass
+ ***************************************************/
+
+// The following requirement is tested:
+// The keyword omit denotes that an optional field of a record or set or a specific
+// key within a map shall be absent. If used as a matching mechanism, it matches
+// an optional field or a map key if and only if it is absent.
+
+module Sem_B010208_omit_value_007 {
+
+    type record ProductInfo {
+        charstring producer,
+        charstring model,
+        charstring description optional
+    };
+
+    type map from charstring to ProductInfo TMap;
+
+    type record TRec {
+        integer a,
+        TMap b optional
+    }
+
+	type component GeneralComp {
+	}
+
+	testcase TC_Sem_B010208_omit_value_007() runs on GeneralComp {
+        var template TRec v_template := {
+            a := ?,
+            b := {
+                ["XS125"] := ?,
+                ["DZ506"] := omit
+            }
+        };
+        var TRec v_val := {
+            a := 1,
+            b := {
+                ["XS125"] := {
+                    producer := "Yoomstick Tec",
+                    model := "BrooMAX 194",
+                    description := omit
+                },
+                ["DZ506"] := {
+                    producer := "XanDonHua Mechanics",
+                    model := "RS-469-23",
+                    description := "Top quality product with many outstanging features"
+                }
+            }
+        };
+        if (not match(v_val, v_template)) {
+            setverdict(pass);
+         } else {
+             setverdict(fail);
+         }
+	}
+
+	control{
+	    execute(TC_Sem_B010208_omit_value_007());
+	}
+
+}

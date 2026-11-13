@@ -1,0 +1,18 @@
+// @author   TTF T023
+// @purpose  1:5.4.3, Ensure an actual record of parameter in assignment notation has no additional ellipsis.
+// @verdict  pass reject
+module NegSem_050403_variadic_parameters_005 {
+
+type component GeneralComp {}
+
+testcase TC_NegSem_050403_variadic_parameters_005() runs on GeneralComp {
+	f(args := {1, 2, 3}...);
+}
+
+function f(in integer args...) {}
+
+control {
+	execute(TC_NegSem_050403_variadic_parameters_005());
+}
+
+}

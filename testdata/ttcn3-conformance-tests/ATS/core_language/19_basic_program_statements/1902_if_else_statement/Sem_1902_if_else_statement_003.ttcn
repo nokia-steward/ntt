@@ -1,0 +1,28 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:19.2, Ensure that the IUT properly evaluates init statement within conditions of if-else statements
+ ** @verdict  pass  accept, ttcn3verdict:pass
+ ***************************************************/
+module Sem_1902_if_else_statement_002 {
+
+type component GeneralComp {
+}
+
+testcase TC_Sem_1902_if_else_statement_003 () runs on GeneralComp{
+
+ if (var integer v_i:=1; match(v_i, 2) ) { // use of init statement
+   setverdict(fail);
+ }
+ else if(match(v_i, 1)) { setverdict(pass) };  //else if shorthand notation
+}
+
+
+control{
+
+    execute(TC_Sem_1902_if_else_statement_003());
+
+}
+
+}
+

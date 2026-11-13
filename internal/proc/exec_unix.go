@@ -1,3 +1,4 @@
+//go:build unix || linux
 // +build unix linux
 
 package proc

@@ -1,0 +1,65 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:B.1.4.2, ifpresent in a map field (field missing)
+ ** @verdict  pass accept, ttcn3verdict:pass
+ ***************************************************/
+
+// The following requirement is tested:
+// A map template key that uses the ifpresent indicator in the value associated with
+// it matches the corresponding key if, and only if, either the corresponding key is
+// present and its value matches according to the associated matching mechanism, or
+// if the corresponding key is absent.
+
+module Sem_B010402_ifPresent_indicator_005 {
+
+    type record ProductInfo {
+        charstring producer,
+        charstring model,
+        charstring description optional
+    };
+
+    type map from charstring to ProductInfo TMap;
+
+    type record TRec {
+        integer a,
+        TMap b optional
+    }
+
+	type component GeneralComp {
+	}
+
+	testcase TC_Sem_B010402_ifPresent_indicator_005() runs on GeneralComp {
+        var template TRec v_template := {
+            a := ?,
+            b := {
+                ["XS125"] := ?,
+                ["DZ506"] := {
+                    producer := "XanDonHua Mechanics",
+                    model := ?,
+                    description := *
+                } ifpresent
+            }
+        };
+        var TRec v_val := {
+            a := 1,
+            b := {
+                ["XS125"] := {
+                    producer := "Yoomstick Tec",
+                    model := "BrooMAX 194",
+                    description := omit
+                }
+            }
+        };
+        if (match(v_val, v_template)) {
+            setverdict(pass);
+         } else {
+             setverdict(fail);
+         }
+	}
+
+	control{
+	    execute(TC_Sem_B010402_ifPresent_indicator_005());
+	}
+
+}

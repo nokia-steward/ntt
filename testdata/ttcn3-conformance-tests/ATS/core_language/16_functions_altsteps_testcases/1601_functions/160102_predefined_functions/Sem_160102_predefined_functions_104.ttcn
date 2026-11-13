@@ -28,7 +28,7 @@ module Sem_160102_predefined_functions_104 {
 
     testcase TC_Sem_160102_predefined_functions_104 () runs on GeneralComp {
 
-    var template MyPDU v_temp := { "test",5};
+    var template(value) MyPDU v_temp := { "test",5};
 
     //Encoding:
     var octetstring v_enc := encvalue_o(v_temp); //encode the record to octetstring

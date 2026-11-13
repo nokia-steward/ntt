@@ -5,8 +5,8 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"io"
 	"github.com/nokia/ntt/internal/t3xf/opcode"
+	"io"
 	"os"
 )
 
@@ -354,7 +354,7 @@ func Read(r io.Reader) (*File, error) {
 	if err := binary.Read(r, binary.LittleEndian, &magic); err != nil {
 		return nil, err
 	}
-	if bytes.Compare(magic, []byte("T3XFASM\x00")) != 0 {
+	if !bytes.Equal(magic, []byte("T3XFASM\x00")) {
 		return nil, errors.New("invalid magic number")
 	}
 

@@ -65,6 +65,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// A Windows checkout ends lines with CRLF; the tables do not.
+	b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
 	if err := yaml.Unmarshal(b, &opcodes); err != nil {
 		log.Fatal(err)
 	}

@@ -1,0 +1,485 @@
+package goport_test
+
+import (
+	"context"
+	"sync"
+	"sync/atomic"
+	"testing"
+
+	"github.com/nokia/ntt/interpreter"
+	"github.com/nokia/ntt/runtime"
+	"github.com/nokia/ntt/runtime/port"
+	"github.com/nokia/ntt/runtime/port/api"
+	"github.com/nokia/ntt/runtime/port/goport"
+	"github.com/nokia/ntt/runtime/tl"
+	"github.com/nokia/ntt/ttcn3"
+)
+
+func parse(t *testing.T, src string) *ttcn3.Tree {
+	t.Helper()
+	tree := ttcn3.Parse(src)
+	if tree == nil || tree.Err != nil {
+		t.Fatalf("parse error: %v\n%s", tree, src)
+	}
+	return tree
+}
+
+func run(t *testing.T, tc, src string) (runtime.Verdict, string) {
+	t.Helper()
+	v, reason, err := interpreter.RunTestcase([]*ttcn3.Tree{parse(t, src)}, tc)
+	if err != nil {
+		t.Fatalf("RunTestcase(%s): %v", tc, err)
+	}
+	return v, reason
+}
+
+// echoPort is a pure-Go test port that bounces every sent value straight
+// back to the testcase, as if a peer had replied with the same value.
+type echoPort struct {
+	api.Base
+	inst string
+}
+
+func (e *echoPort) Send(_ context.Context, env *port.Envelope) error {
+	if obj, ok := env.Payload.(runtime.Object); ok {
+		goport.Inject(e.inst, obj)
+	}
+	return nil
+}
+
+// TestGoPort_SendReceiveEcho is the headline proof: a pure-Go port,
+// registered with no cgo, carries `p.send` into Go and a `p.receive`
+// back out via Inject.
+func TestGoPort_SendReceiveEcho(t *testing.T) {
+	goport.Register("P", func(inst string) api.TestPort { return &echoPort{inst: inst} })
+	t.Cleanup(goport.Reset)
+
+	v, reason := run(t, "M.tc", `module M {
+		type port P message { inout integer }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			map(self:p, system:p);
+			p.send(5);
+			alt {
+				[] p.receive(5) { setverdict(pass); }
+				[] p.receive { setverdict(fail, "wrong value"); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+}
+
+// lifecyclePort records every lifecycle / send call the runtime drives,
+// proving the Titan-style hooks (OnMap/OnUnmap/OnStart/OnStop/Send) are
+// all wired.
+type lifecyclePort struct {
+	api.Base
+	mu                          sync.Mutex
+	maps, unmaps, starts, stops int
+	sent                        []runtime.Object
+}
+
+func (p *lifecyclePort) OnMap(context.Context) error   { p.bump(&p.maps); return nil }
+func (p *lifecyclePort) OnUnmap(context.Context) error { p.bump(&p.unmaps); return nil }
+func (p *lifecyclePort) OnStart(context.Context) error { p.bump(&p.starts); return nil }
+func (p *lifecyclePort) OnStop(context.Context) error  { p.bump(&p.stops); return nil }
+func (p *lifecyclePort) Send(_ context.Context, env *port.Envelope) error {
+	p.mu.Lock()
+	if obj, ok := env.Payload.(runtime.Object); ok {
+		p.sent = append(p.sent, obj)
+	}
+	p.mu.Unlock()
+	return nil
+}
+func (p *lifecyclePort) bump(n *int) { p.mu.Lock(); *n++; p.mu.Unlock() }
+
+func TestGoPort_FullLifecycle(t *testing.T) {
+	lp := &lifecyclePort{}
+	goport.Register("P", func(string) api.TestPort { return lp })
+	t.Cleanup(goport.Reset)
+
+	v, reason := run(t, "M.tc", `module M {
+		type port P message { inout integer }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			map(self:p, system:p);
+			p.start;
+			p.send(1);
+			p.send(2);
+			p.stop;
+			unmap(self:p, system:p);
+			setverdict(pass);
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+	lp.mu.Lock()
+	defer lp.mu.Unlock()
+	if lp.maps != 1 || lp.unmaps != 1 || lp.starts != 1 || lp.stops != 1 || len(lp.sent) != 2 {
+		t.Fatalf("lifecycle: map=%d unmap=%d start=%d stop=%d sends=%d, want 1/1/1/1/2",
+			lp.maps, lp.unmaps, lp.starts, lp.stops, len(lp.sent))
+	}
+}
+
+// asyncPort delivers a value from its own I/O goroutine after OnMap, so
+// the testcase's blocking receive must park and wake on the injected
+// message - exercising the concurrent receive path end to end in Go.
+type asyncPort struct {
+	api.Base
+	inst string
+}
+
+func (a *asyncPort) OnMap(context.Context) error {
+	go goport.Inject(a.inst, runtime.NewInt(42))
+	return nil
+}
+
+func TestGoPort_AsyncReceive(t *testing.T) {
+	goport.Register("P", func(inst string) api.TestPort { return &asyncPort{inst: inst} })
+	t.Cleanup(goport.Reset)
+
+	v, reason := run(t, "M.tc", `module M {
+		type port P message { inout integer }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer t_guard := 5.0;
+			map(self:p, system:p);
+			t_guard.start;
+			alt {
+				[] p.receive(42) { setverdict(pass); }
+				[] t_guard.timeout { setverdict(fail, "no async delivery"); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+}
+
+// callPort answers a procedure call synchronously by writing the reply
+// value to the envelope's Reply channel.
+type callPort struct {
+	api.Base
+}
+
+func (callPort) Call(_ context.Context, env *port.Envelope) error {
+	if env.Reply != nil {
+		env.Reply <- runtime.NewInt(99)
+	}
+	return nil
+}
+
+// TestGoPort_ProcedureCall proves the procedure path (p.call -> driver,
+// reply -> getreply) is wired for a pure-Go port.
+func TestGoPort_ProcedureCall(t *testing.T) {
+	goport.Register("P", func(string) api.TestPort { return callPort{} })
+	t.Cleanup(goport.Reset)
+
+	v, reason := run(t, "M.tc", `module M {
+		signature S() return integer;
+		type port P procedure { inout S }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			var integer v_ret := 0;
+			map(self:p, system:p);
+			p.call(S:{}) {
+				[] p.getreply(S:?) -> value v_ret { }
+			}
+			if (v_ret == 99) { setverdict(pass); }
+			else { setverdict(fail, "wrong reply", v_ret); }
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+}
+
+// countingCallPort counts the procedure calls that reach it.
+type countingCallPort struct {
+	api.Base
+	calls *atomic.Int32
+}
+
+func (p countingCallPort) Call(_ context.Context, _ *port.Envelope) error {
+	p.calls.Add(1)
+	return nil
+}
+
+// TestGoPort_ProcedureCallToAddressReachesDriver covers `p.call(...) to
+// <address>` on a port mapped to the system. The address names something
+// behind the driver's transport, so the call must reach the driver just as
+// an unaddressed call does. Routing `to` among components for every port
+// once sent it nowhere: the driver was never called and the verdict stayed
+// pass.
+func TestGoPort_ProcedureCallToAddressReachesDriver(t *testing.T) {
+	var calls atomic.Int32
+	goport.Register("P", func(string) api.TestPort { return countingCallPort{calls: &calls} })
+	t.Cleanup(goport.Reset)
+
+	v, reason := run(t, "M.tc", `module M {
+		type charstring address;
+		signature S() noblock;
+		type port P procedure { out S }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			var address v_addr := "sut-1";
+			map(self:p, system:p);
+			p.call(S:{}) to v_addr;
+			setverdict(pass);
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("driver saw %d calls, want 1: an addressed call must still reach the system", n)
+	}
+}
+
+// replyPort answers a procedure call by delivering the reply
+// asynchronously via InjectReply (rather than the synchronous env.Reply
+// channel).
+type replyPort struct {
+	api.Base
+	inst string
+}
+
+func (p *replyPort) Call(_ context.Context, _ *port.Envelope) error {
+	goport.InjectReply(p.inst, nil, runtime.NewInt(42))
+	return nil
+}
+
+// TestGoPort_ProcedureReplyAsync proves InjectReply delivers a reply's
+// return value to getreply (the path used when a port replies out of
+// band rather than on the env.Reply channel).
+func TestGoPort_ProcedureReplyAsync(t *testing.T) {
+	goport.Register("P", func(inst string) api.TestPort { return &replyPort{inst: inst} })
+	t.Cleanup(goport.Reset)
+
+	v, reason := run(t, "M.tc", `module M {
+		signature S() return integer;
+		type port P procedure { inout S }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			var integer v_ret := 0;
+			map(self:p, system:p);
+			p.call(S:{}) {
+				[] p.getreply(S:?) -> value v_ret { }
+			}
+			if (v_ret == 42) { setverdict(pass); }
+			else { setverdict(fail, "ret", v_ret); }
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+}
+
+// excPort answers a procedure call by raising an exception via
+// InjectException.
+type excPort struct {
+	api.Base
+	inst string
+}
+
+func (p *excPort) Call(_ context.Context, _ *port.Envelope) error {
+	goport.InjectException(p.inst, runtime.NewInt(99))
+	return nil
+}
+
+// TestGoPort_ProcedureException proves InjectException reaches a catch.
+func TestGoPort_ProcedureException(t *testing.T) {
+	goport.Register("P", func(inst string) api.TestPort { return &excPort{inst: inst} })
+	t.Cleanup(goport.Reset)
+
+	v, reason := run(t, "M.tc", `module M {
+		signature S() exception(integer);
+		type port P procedure { inout S }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			var integer v_exc := 0;
+			map(self:p, system:p);
+			p.call(S:{}) {
+				[] p.catch(S, integer:?) -> value v_exc { }
+			}
+			if (v_exc == 99) { setverdict(pass); }
+			else { setverdict(fail, "wrong exception", v_exc); }
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+}
+
+// asyncEchoPort bounces every sent value back from its OWN goroutine, so
+// the reply races the testcase's alt evaluation (unlike echoPort, which
+// injects synchronously inside Send). This reproduces the real-clock
+// arrival timing a networked port produces.
+type asyncEchoPort struct {
+	api.Base
+	inst string
+}
+
+func (a *asyncEchoPort) Send(_ context.Context, env *port.Envelope) error {
+	if obj, ok := env.Payload.(runtime.Object); ok {
+		go goport.Inject(a.inst, obj)
+	}
+	return nil
+}
+
+// TestGoPort_AltSnapshotSpecificBeatsCatchAll is the regression for the
+// ETSI 20.2 alt-snapshot race: with two receive branches on one port
+// (specific template first, catch-all second) and an ASYNCHRONOUS reply,
+// the specific branch must always win — a message arriving mid-round must
+// not be visible to the catch-all before the earlier specific clause has
+// had its shot at it. Before the snapshot boundary this flaked under
+// -race: the catch-all intermittently matched the reply one step after it
+// arrived. Run it -count to exercise the timing window.
+func TestGoPort_AltSnapshotSpecificBeatsCatchAll(t *testing.T) {
+	goport.Register("P", func(inst string) api.TestPort { return &asyncEchoPort{inst: inst} })
+	t.Cleanup(goport.Reset)
+
+	v, reason := run(t, "M.tc", `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 5.0;
+			map(self:p, system:p);
+			g.start;
+			p.send("ping");
+			alt {
+				[] p.receive("ping") { setverdict(pass); }
+				[] p.receive { setverdict(fail, "catch-all matched before the specific clause"); }
+				[] g.timeout { setverdict(fail, "no async delivery"); }
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+}
+
+// TestGoPort_InterleaveSnapshotSpecificBeatsCatchAll is the interleave
+// analogue of the alt-snapshot regression: with a specific and a catch-all
+// receive branch on one port and asynchronous arrivals, the specific
+// branch must take its value — the catch-all must not grab a message
+// mid-round that an earlier specific clause would match. Each interleave
+// branch is taken exactly once; the specific takes "ping", the catch-all
+// takes "other".
+func TestGoPort_InterleaveSnapshotSpecificBeatsCatchAll(t *testing.T) {
+	goport.Register("P", func(inst string) api.TestPort { return &asyncEchoPort{inst: inst} })
+	t.Cleanup(goport.Reset)
+
+	v, reason := run(t, "M.tc", `module M {
+		type port P message { inout charstring }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 5.0;
+			map(self:p, system:p);
+			g.start;
+			p.send("ping");
+			p.send("other");
+			var charstring v_caught := "";
+			interleave {
+				[] p.receive("ping") { setverdict(pass); }
+				[] p.receive(charstring:?) -> value v_caught {
+					if (v_caught == "ping") { setverdict(fail, "catch-all took the specific value"); }
+					else { setverdict(pass); }
+				}
+			}
+		}
+	}`)
+	if v != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), want pass", v, reason)
+	}
+}
+
+// TestGoPort_TestLogUsesMappedOperations covers the _m side of TCI-TL: a
+// port mapped to the system logs its send, the injected reply's arrival
+// and the receive as tliMSend_m, tliMDetected_m and tliMReceive_m, not the
+// connected-component forms.
+func TestGoPort_TestLogUsesMappedOperations(t *testing.T) {
+	goport.Register("P", func(inst string) api.TestPort { return &echoPort{inst: inst} })
+	t.Cleanup(goport.Reset)
+
+	v := &tl.Validator{}
+	rec := &tl.Recorder{}
+	v.Next = rec
+	verdict, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, `module M {
+		type port P message { inout integer }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			timer g := 2.0;
+			map(self:p, system:p);
+			p.send(5);
+			g.start;
+			alt {
+				[] p.receive(5) { setverdict(pass); }
+				[] g.timeout { setverdict(fail, "no echo"); }
+			}
+		}
+	}`)}, "M.tc", interpreter.TestcaseOptions{TestLogger: v})
+	if err != nil || verdict != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), err %v", verdict, reason, err)
+	}
+	if n, errs := v.Result(); len(errs) > 0 {
+		t.Fatalf("%d of %d events invalid: %v", len(errs), n, errs)
+	}
+	seen := map[string]bool{}
+	for _, op := range rec.Ops() {
+		seen[op] = true
+	}
+	for _, op := range []string{"tliPMap", "tliMSend_m", "tliMDetected_m", "tliMReceive_m"} {
+		if !seen[op] {
+			t.Errorf("no %s in %v", op, rec.Ops())
+		}
+	}
+	for _, op := range []string{"tliMSend_c", "tliMDetected_c", "tliMReceive_c"} {
+		if seen[op] {
+			t.Errorf("mapped port logged the connected form %s", op)
+		}
+	}
+}
+
+// TestGoPort_TestLogUsesMappedProcedureOperations covers the _m side of the
+// procedure operations: a call through a port driver is tliPrCall_m, and
+// the reply the driver returns arrives and is taken as tliPrGetReply_m.
+func TestGoPort_TestLogUsesMappedProcedureOperations(t *testing.T) {
+	goport.Register("P", func(string) api.TestPort { return callPort{} })
+	t.Cleanup(goport.Reset)
+
+	v := &tl.Validator{}
+	rec := &tl.Recorder{}
+	v.Next = rec
+	verdict, reason, err := interpreter.RunTestcaseWith([]*ttcn3.Tree{parse(t, `module M {
+		signature S() return integer;
+		type port P procedure { inout S }
+		type component C { port P p }
+		testcase tc() runs on C system C {
+			var integer v_ret := 0;
+			map(self:p, system:p);
+			p.call(S:{}) {
+				[] p.getreply(S:?) -> value v_ret { }
+			}
+			if (v_ret == 99) { setverdict(pass); } else { setverdict(fail, "wrong reply", v_ret); }
+		}
+	}`)}, "M.tc", interpreter.TestcaseOptions{TestLogger: v})
+	if err != nil || verdict != runtime.PassVerdict {
+		t.Fatalf("verdict = %s (%s), err %v", verdict, reason, err)
+	}
+	if n, errs := v.Result(); len(errs) > 0 {
+		t.Fatalf("%d of %d events invalid: %v", len(errs), n, errs)
+	}
+	seen := map[string]bool{}
+	for _, op := range rec.Ops() {
+		seen[op] = true
+	}
+	for _, op := range []string{"tliPrCall_m", "tliPrGetReplyDetected_m", "tliPrGetReply_m"} {
+		if !seen[op] {
+			t.Errorf("no %s in %v", op, rec.Ops())
+		}
+	}
+}

@@ -1,0 +1,8 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure ambiguous types are rejected.
+// @verdict  pass reject
+module NegSem_0605_automatic_type_003 {
+
+const X := null;
+
+}

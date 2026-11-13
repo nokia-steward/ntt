@@ -12,6 +12,8 @@ import (
 //
 // In the future we might want to patch REFs to FROZEN_REFs and all special
 // opcodes to FUNCTIONX opcodes.
+//
+//nolint:unused // kept for the old T3XF block layout
 func patchBlocks(b []byte) {
 	type block struct {
 		Parent *block

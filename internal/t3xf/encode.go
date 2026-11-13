@@ -32,10 +32,9 @@ func (e *EncoderError) Unwrap() error {
 }
 
 type Encoder struct {
-	c       int    // Instruction count
-	i       int    // Instruction index (== offset/4)
-	b       []byte // T3XF byte code
-	o       int
+	c       int           // Instruction count
+	i       int           // Instruction index (== offset/4)
+	b       []byte        // T3XF byte code
 	op      opcode.Opcode // Current opcode
 	offsets map[int]int   // Map instruction index to T3XF byte offset
 	patches []patch       // List of unresolved references

@@ -1,0 +1,54 @@
+/*****************************************************************
+ ** @author   STF 487
+ ** @version  0.0.1
+ ** @purpose  1:15.8, Ensure that the restrictiveness of parameters template(value)->template(omit) is handled correctly.
+ ** @verdict  pass reject
+ *****************************************************************/
+
+// ATTENTION: valid for TTCN-3:2013 (ETSI ES 201 873-1 V4.5.1) and newer
+// Older versions of the core languate standard didn't allow this type of
+// modification because of restriction 15.8.c.
+
+/*
+Pro opinion:
+Test an intentional change made on the request of the STF160 in TTCN-3:2013. In particular, restriction 15.8.c was taken away from the core language specification (as marked in test case comments). This restriction did indeed mean that the tests would behave as you described, thus producing an error. However, with the restriction missing, the tests are perfectly valid. I also do not understand why you claim that it would not be possible to instantiate super-templates in these cases. Restrictions are always related to actual values and if the values satisfy both restrictions (parent and modified), there's no problem at all. And this is exactly what these test intend to verify.
+Besides, the core language specification does not say that the parameters must be the same. There's a rule saying that the parameters shall not be omitted. It is rather unfortunate wording, because it might be interpreted in several ways. There's a CR 6692 regarding this issue.
+
+Contra opinion
+The problem is with the semantics of modified templates. For every actual parameter list, first, the template-to-be-modified is implicitly instantiated and then modified by the given modifications. If the template-to-be-modified is not defined for the actual parameters, then neither is the modified one. Of course, you are right in that this restriction could be applied for actual parameters only and need not be checked at the template-level already. However, it does not make sense to lessen the template restriction of a parameter, as implicitly, it still keeps the stronger restriction (because of the modification-semantics). Therefore, it is misleading to SEEMINGLY allow a template(present) parameter for a template where the super-template has a template(value) parameter. If allowed, the user might use a non-value template as an actual parameter and then get a runtime error, even though the template-restriction matched the one in the formal parameter of the template. Therefore, we interpret the standard in such a way that the inheritance of the parameters includes the inheritance of both the types and the template restrictions of the inherited parameters. Strengthening of template restrictions would indeed not be a problem. Lessening is.
+
+*/
+
+module Sem_1508_TemplateRestrictions_032 {
+
+	type component GeneralComp { }
+
+    type record ExampleType {
+        integer a,
+        boolean b optional
+    }
+
+    template(present) ExampleType m_baseTemplate(template(value) integer p_myInt) := {
+        a := p_myInt,
+        b := true
+    }
+
+    template(present) ExampleType m_modifiedTemplate(template(omit) integer p_myInt) modifies m_baseTemplate := {
+        a := 21
+    }
+
+	testcase TC_Sem_1508_TemplateRestrictions_032() runs on GeneralComp {
+        if (match(valueof(m_modifiedTemplate(1).a), 21) and
+            match(valueof(m_modifiedTemplate(1).b), true)
+        ) {
+            setverdict(pass);
+        } else {
+            setverdict(fail);
+        }
+    }
+
+    control{
+        execute(TC_Sem_1508_TemplateRestrictions_032());
+    }
+
+}

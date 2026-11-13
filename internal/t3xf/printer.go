@@ -2,8 +2,8 @@ package t3xf
 
 import (
 	"fmt"
-	"io"
 	"github.com/nokia/ntt/internal/t3xf/opcode"
+	"io"
 	"strings"
 )
 

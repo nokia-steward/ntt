@@ -1,4 +1,8 @@
-//go:build cgo
+//go:build cgo && linux
+
+// GMP's generator, for rnd(seed) sequences as the reference runtime gives
+// them, where libgmp is the system's: on Linux. Elsewhere, and without
+// cgo, rnd_nocgo.go stands in.
 
 package runtime
 

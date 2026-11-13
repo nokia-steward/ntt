@@ -574,7 +574,7 @@ func CloneValue(value any) any {
 		}
 		return clone
 	case TemplateList:
-		return TemplateList{Kind: value.Kind, Items: CloneValue([]any(value.Items)).([]any)}
+		return TemplateList{Kind: value.Kind, Items: CloneValue(value.Items).([]any)}
 	case ModifiedTemplate:
 		return ModifiedTemplate{Val: CloneValue(value.Val), Length: CloneValue(value.Length), IfPresent: value.IfPresent}
 	default:

@@ -59,7 +59,7 @@ func Decode(b []byte) (n int, op opcode.Opcode, arg interface{}) {
 		n = 4
 
 	case opcode.ArgLine, opcode.ArgImm:
-		arg = int(i)
+		arg = i
 		n = 4
 
 	default:

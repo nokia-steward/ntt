@@ -1,0 +1,33 @@
+/*****************************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.8.2, Ensure that referenced element of templates(value) are not allowed to implicite restrict to template(present)
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+/*
+ * Reference element of a 'set of' template with value restriction.
+ * (see Table 13C: Implicit restrictions)
+ *
+ */
+module Sem_150802_ImplicitRestrictions_021 {
+
+type component GeneralComp { }
+
+type set of integer SetOfInt;
+
+testcase TC_Sem_150802_ImplicitRestrictions_021() runs on GeneralComp {
+
+	template (value) SetOfInt m_exampleValue := {1, 2} & {3, 4};
+
+	var template (present) integer  v_present := m_exampleValue[2]; //Not allowed
+
+	setverdict(pass);
+}
+
+control{
+	execute(TC_Sem_150802_ImplicitRestrictions_021());
+}
+
+
+}

@@ -19,33 +19,31 @@ parameter bit_length.
 module Sem_160102_predefined_functions_110 {
 
     type component GeneralComp {
-
     }
 
     type bitstring MyPDU;
 
-
-
     testcase TC_Sem_160102_predefined_functions_110 () runs on GeneralComp {
 
-    var MyPDU v_bitstr := '011'B;
-    var octetstring result := '0300000060'O;    // bit length not divisable by 8, the encoded message will be left-aligned in the returned octetstring and the least significant (8 - (bit length mod 8)) bits in the least significant octet will be 0.
+        var MyPDU v_bitstr := '011'B;
 
-    //Encoding:
-    var octetstring v_enc := encvalue_o(v_bitstr); //encode the non octet based bitstring to octetstring
+        //Encoding:
+        var octetstring v_enc := encvalue_o(v_bitstr); //encode the non octet based bitstring to octetstring
+        var bitstring v_bitEnc := encvalue(v_bitstr); //encode the non octet based bitstring to bitstring
 
-    if (lengthof (v_enc) > 0 and match(v_enc,result)) {
-          setverdict(pass);
-    } else {
-          setverdict(fail,v_enc);
+        while (lengthof(v_bitEnc) mod 8 > 0) { // right padding, because bit2oct uses left padding by default
+            v_bitEnc[lengthof(v_bitEnc)] := '0'B;
+        }
+
+        if (v_enc == bit2oct(v_bitEnc)) {
+              setverdict(pass);
+        } else {
+              setverdict(fail,v_enc);
+        }
+
     }
 
-   }
-
-    control{
-
+    control {
         execute(TC_Sem_160102_predefined_functions_110());
-
     }
-
 }

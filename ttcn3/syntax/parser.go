@@ -1,18 +1,10 @@
 package syntax
 
 import (
-	"bytes"
 	"context"
-	"errors"
 	"fmt"
-	"io"
-	"io/ioutil"
 	"os"
 	trc "runtime/trace"
-	"strconv"
-	"strings"
-
-	"github.com/nokia/ntt/internal/fs"
 )
 
 // A Mode value is a set of flags (or 0).
@@ -109,29 +101,6 @@ func Parse(src []byte, opts ...ParserOption) (root *Root) {
 	return p.Root
 }
 
-// If src != nil, readSource converts src to a []byte if possible;
-// otherwise it returns an error. If src == nil, readSource returns
-// the result of reading the file specified by filename.
-func readSource(filename string, src interface{}) ([]byte, error) {
-	if src != nil {
-		switch s := src.(type) {
-		case string:
-			return []byte(s), nil
-		case []byte:
-			return s, nil
-		case *bytes.Buffer:
-			// is io.Reader, but src is already available in []byte form
-			if s != nil {
-				return s.Bytes(), nil
-			}
-		case io.Reader:
-			return ioutil.ReadAll(s)
-		}
-		return nil, errors.New("invalid source")
-	}
-	return fs.Content(filename)
-}
-
 // The parser structure holds the parser's internal state.
 type parser struct {
 	// Tracing/debugging
@@ -152,8 +121,6 @@ type parser struct {
 	seenBrace bool
 
 	// Pre-processor Handling
-	ppLvl  int
-	ppCnt  int
 	ppSkip bool
 	ppDefs map[string]bool
 
@@ -179,6 +146,7 @@ type parser struct {
 	// loops across multiple parser functions during error recovery)
 	syncPos int // last synchronization position
 	syncCnt int // number of advance calls without progress
+
 }
 
 func newRoot(src []byte) *Root {
@@ -191,53 +159,6 @@ func newRoot(src []byte) *Root {
 func un(p *parser) {
 	p.indent--
 	p.printTrace(")")
-}
-
-func (p *parser) handlePreproc(s string) {
-	f := strings.Fields(s)
-	switch b := false; f[0] {
-	case "#ifndef":
-		b = true
-		fallthrough
-	case "#ifdef", "#if":
-		if len(f) < 2 {
-			p.error(p.peek(1), "missing condition in preprocessor directive")
-			break
-		}
-		if p.ppSkip == false && p.ppLvl == p.ppCnt {
-			p.ppLvl++
-			p.ppSkip = (p.ppDefs[f[1]] == b)
-		}
-		p.ppCnt++
-	case "#else":
-		if p.ppLvl == p.ppCnt {
-			p.ppSkip = !p.ppSkip
-		}
-	case "#endif":
-		if p.ppLvl == p.ppCnt {
-			p.ppLvl--
-			p.ppSkip = false
-		}
-		p.ppCnt--
-
-	case "#define":
-		switch len(f) {
-		case 2:
-			p.ppDefs[f[1]] = true
-		case 3:
-			if v, err := strconv.ParseBool(f[2]); err != nil {
-				p.ppDefs[f[1]] = v
-				break
-			}
-			p.error(p.peek(1), "not a boolean expression")
-		default:
-			p.error(p.peek(1), "malformed 'define' directive")
-		}
-	default:
-		if !strings.HasPrefix(s, "#!") {
-			p.error(p.peek(1), "unknown preprocessor directive")
-		}
-	}
 }
 
 // Advance to the next token
@@ -1008,9 +929,6 @@ L:
 			x = p.parseIndexExpr(x)
 		case LPAREN:
 			x = p.parseCallExpr(x)
-			// Not supporting chained function calls like 'get().x'
-			// eleminates conflicts with alt-guards.
-			break
 		default:
 			break L
 		}
@@ -1069,6 +987,12 @@ func (p *parser) parseOperand() Expr {
 		return p.make_use(p.consume())
 
 	case IDENT:
+		// `objid { ... }` is the OBJECT IDENTIFIER value notation
+		// (ETSI 6.1.0). `objid` is not a reserved word, so it only
+		// becomes a literal when a brace list follows directly.
+		if p.lit(1) == "objid" && p.peek(2).Kind() == LBRACE {
+			return p.parseObjidLiteral()
+		}
 		return p.parseRef()
 
 	case INT,
@@ -1091,7 +1015,7 @@ func (p *parser) parseOperand() Expr {
 		return &ValueLiteral{Tok: p.consume()}
 
 	case LPAREN:
-		// can be template `x := (1,2,3)`, but also artihmetic expression: `1*(2+3)`
+		// can be template `x := (1,2,3)`, but also arithmetic expression: `1*(2+3)`
 		return p.parseParenExpr()
 
 	case LBRACK:
@@ -1169,6 +1093,31 @@ func (p *parser) parseRef() Expr {
 	return id
 }
 
+// ExceptionSpec ::= "exception" "(" TypeOrNestedTypeDef {"," TypeOrNestedTypeDef} [","] ")"
+//
+// A type of the list that is a reference is parsed as an expression is
+// (parseParenExpr).
+func (p *parser) parseExceptionList() *ParenExpr {
+	item := func() Expr {
+		switch p.tok {
+		case RECORD, SET, UNION, MAP, ENUMERATED:
+			return p.parseTypeOrNestedTypeDef()
+		}
+		return p.parseExpr()
+	}
+	x := &ParenExpr{LParen: p.expect(LPAREN)}
+	x.List = append(x.List, item())
+	for p.tok == COMMA {
+		p.consume()
+		if p.tok == RPAREN {
+			break
+		}
+		x.List = append(x.List, item())
+	}
+	x.RParen = p.expect(RPAREN)
+	return x
+}
+
 func (p *parser) parseParenExpr() *ParenExpr {
 	return &ParenExpr{
 		LParen: p.expect(LPAREN),
@@ -1179,6 +1128,26 @@ func (p *parser) parseParenExpr() *ParenExpr {
 
 func (p *parser) parseUniversalCharstring() *Ident {
 	return p.make_use(p.expect(UNIVERSAL), p.expect(CHARSTRING))
+}
+
+// parseObjidLiteral parses the OBJECT IDENTIFIER value notation
+// `objid { component+ }`. Components are whitespace separated (no
+// commas): a name form (`itu_t`), a number form (`7`), or a
+// name-and-number form (`question(1)`), each of which parses as one
+// primary expression.
+func (p *parser) parseObjidLiteral() *ObjidLiteral {
+	x := new(ObjidLiteral)
+	x.Tok = p.consume()
+	x.LBrace = p.expect(LBRACE)
+	for p.tok != RBRACE && p.tok != EOF {
+		e := p.parsePrimaryExpr()
+		x.List = append(x.List, e)
+		if _, bad := e.(*ErrorNode); bad {
+			break
+		}
+	}
+	x.RBrace = p.expect(RBRACE)
+	return x
 }
 
 func (p *parser) parseCompositeLiteral() *CompositeLiteral {
@@ -1515,16 +1484,23 @@ func (p *parser) parseTypeRef() Expr {
 }
 
 // TypeOrNestedTypeDef ::= TypeRef | NestedTypeDef
+//
+// A nested type definition is recorded for NestedTypes.
 func (p *parser) parseTypeOrNestedTypeDef() Expr {
+	var x Expr
 	switch p.tok {
 	case RECORD, SET, UNION, ENUMERATED:
-		return p.parseTypeSpec().(Expr)
+		x = p.parseTypeSpec().(Expr)
 	case MAP:
 		if p.peek(2).Kind() == FROM {
-			return p.parseMapSpec()
+			x = p.parseMapSpec()
 		}
 	}
-	return p.parseTypeRef()
+	if x == nil {
+		return p.parseTypeRef()
+	}
+	p.Root.nested = append(p.Root.nested, x)
+	return x
 }
 
 // parseModifiers parses an optional "@lazy" or "@fuzzy" modifier followed by
@@ -1642,22 +1618,6 @@ func (p *parser) tryTypeIdent() Expr {
  * Module
  *************************************************************************/
 
-func (p *parser) parseModuleList() []*Module {
-	var list []*Module
-	if m := p.parseModule(); m != nil {
-		list = append(list, m)
-		p.expectSemi(m.LastTok())
-	}
-	for p.tok == MODULE {
-		if m := p.parseModule(); m != nil {
-			list = append(list, m)
-			p.expectSemi(m.LastTok())
-		}
-	}
-	p.expect(EOF)
-	return list
-}
-
 func (p *parser) parseModule() *Module {
 	if p.trace {
 		defer un(trace(p, "Module"))
@@ -1669,6 +1629,13 @@ func (p *parser) parseModule() *Module {
 
 	if p.tok == LANGUAGE {
 		m.Language = p.parseLanguageSpec()
+	} else if p.tok == STRING {
+		// TTCN-3 OO 2018 (ETSI ES 203 022) allows a bare
+		// language-string after the module name as in
+		// `module M "TTCN-3:2018 Object-Oriented" { ... }`.
+		// Accept the abbreviated form by synthesising the
+		// implicit `language` keyword.
+		m.Language = p.parseLanguageSpecImplicit()
 	}
 
 	m.LBrace = p.expect(LBRACE)
@@ -1694,6 +1661,22 @@ func (p *parser) parseLanguageSpec() *LanguageSpec {
 		if p.tok == LBRACE {
 			break
 		}
+	}
+	return l
+}
+
+// parseLanguageSpecImplicit handles the abbreviated `module M "..." {`
+// form from the TTCN-3 OO 2018 extension. There is no `language`
+// keyword in the source, so we leave the Tok zero-valued and only
+// populate the list of strings.
+func (p *parser) parseLanguageSpecImplicit() *LanguageSpec {
+	l := new(LanguageSpec)
+	for {
+		l.List = append(l.List, p.expect(STRING))
+		if p.tok != COMMA {
+			break
+		}
+		p.consume()
 	}
 	return l
 }
@@ -2015,7 +1998,8 @@ func (p *parser) parseWithStmt() *WithStmt {
 		EXTENSION,
 		OPTIONAL,
 		STEPSIZE,
-		OVERRIDE:
+		OVERRIDE,
+		TEMPLATE: // TTCN-3 V5: how a module's templates are evaluated
 		x.KindTok = p.consume()
 	case SEMICOLON, RBRACE, EOF:
 		p.errorExpected("with-attribute")
@@ -2125,6 +2109,15 @@ func (p *parser) parseTypeDecl() Decl {
 		return p.parseComponentTypeDecl()
 	case CLASS:
 		return p.parseClassTypeDecl()
+	case EXTERNAL:
+		// `type external class ...` (ETSI 5.1.1.3 external classes).
+		if p.peek(3).Kind() == CLASS {
+			return p.parseClassTypeDecl()
+		}
+		etok := p.peek(1)
+		p.errorExpected("type definition")
+		p.advance(stmtStart)
+		return &ErrorNode{From: etok, To: p.peek(1)}
 	case UNION:
 		return p.parseStructTypeDecl()
 	case MAP:
@@ -2163,6 +2156,9 @@ func (p *parser) parsePortTypeDecl() *PortTypeDecl {
 	switch p.tok {
 	case MIXED, MESSAGE, PROCEDURE:
 		x.KindTok = p.consume()
+	case LBRACE, REALTIME:
+		// A port type without its kind is a message port type
+		// (TTCN-3 V5, ETSI TR 104 081 6.5.4).
 	default:
 		p.errorExpected("'message' or 'procedure'")
 	}
@@ -2264,6 +2260,9 @@ func (p *parser) parseClassTypeDecl() *ClassTypeDecl {
 	x := new(ClassTypeDecl)
 
 	x.TypeTok = p.consume()
+	if p.tok == EXTERNAL {
+		x.ExternalTok = p.consume()
+	}
 	x.KindTok = p.consume()
 	if p.tok == MODIF {
 		x.Modif = p.consume()
@@ -2284,7 +2283,7 @@ func (p *parser) parseClassTypeDecl() *ClassTypeDecl {
 	}
 	x.LBrace = p.expect(LBRACE)
 	for p.tok != RBRACE && p.tok != EOF {
-		x.Defs = append(x.Defs, p.parseModuleDef())
+		x.Defs = append(x.Defs, p.parseClassMemberDef())
 		p.expectSemi(x.Defs[len(x.Defs)-1].LastTok())
 	}
 	x.RBrace = p.expect(RBRACE)
@@ -2294,6 +2293,30 @@ func (p *parser) parseClassTypeDecl() *ClassTypeDecl {
 	}
 	x.With = p.parseWith()
 	return x
+}
+
+// parseClassMemberDef parses a single class member. It mirrors
+// parseModuleDef but additionally accepts `port` and `timer` member
+// declarations (ETSI 5.1.1: a class may own ports and timers), which
+// are not valid at module scope. Everything else is delegated to
+// parseModuleDef so module-level parsing is unaffected.
+func (p *parser) parseClassMemberDef() *ModuleDef {
+	kind := p.tok
+	if kind == PRIVATE || kind == PUBLIC {
+		kind = p.peek(2).Kind()
+	}
+	if kind != PORT && kind != TIMER {
+		return p.parseModuleDef()
+	}
+	m := new(ModuleDef)
+	if p.tok == PRIVATE || p.tok == PUBLIC {
+		m.Visibility = p.consume()
+	}
+	m.Def = p.parseValueDecl()
+	if m.Def != nil {
+		p.addName(m.Def)
+	}
+	return m
 }
 
 /*************************************************************************
@@ -2384,6 +2407,12 @@ func (p *parser) parseBehaviourTypeDecl() *BehaviourTypeDecl {
 	x.Params = p.parseFormalPars()
 	if p.tok == RUNS {
 		x.RunsOn = p.parseRunsOn()
+	}
+
+	// A behaviour type (ETSI ES 202 785) has the mtc clause a
+	// behaviour of its kind may have (ES 201 873-1 16.1).
+	if p.tok == MTC {
+		x.Mtc = p.parseMtc()
 	}
 
 	if p.tok == SYSTEM {
@@ -2761,11 +2790,47 @@ func (p *parser) parseFuncDecl() *FuncDecl {
 		x.Return = p.parseReturn()
 	}
 
+	// Optional object-oriented exception clause (ETSI 5.2):
+	// `function f() ... exception(T1, T2) { ... }`.
+	if p.tok == EXCEPTION {
+		x.ExceptionTok = p.consume()
+		x.Exception = p.parseExceptionList()
+	}
+
 	if p.tok == LBRACE {
 		x.Body = p.parseBlockStmt()
 	}
 
+	// Optional `catch (...) { ... }` handlers and a trailing
+	// `finally { ... }` block after the body (ETSI 5.2).
+	for p.tok == IDENT && p.lit(1) == "catch" {
+		x.Catch = append(x.Catch, p.parseExceptionClause())
+	}
+	if p.tok == IDENT && p.lit(1) == "finally" {
+		x.FinallyTok = p.consume()
+		x.Finally = p.parseBlockStmt()
+	}
+
 	x.With = p.parseWith()
+	return x
+}
+
+// parseExceptionClause parses a single object-oriented exception handler
+// `catch (Type [name]) { ... }` attached after a function, altstep or
+// testcase body (ETSI ES 201 873-1 clause 5.2).
+func (p *parser) parseExceptionClause() *ExceptionClause {
+	if p.trace {
+		defer un(trace(p, "ExceptionClause"))
+	}
+	x := new(ExceptionClause)
+	x.CatchTok = p.consume() // "catch"
+	x.LParen = p.expect(LPAREN)
+	x.Type = p.parseTypeRef()
+	if p.tok == IDENT {
+		x.Var = p.parseIdent()
+	}
+	x.RParen = p.expect(RPAREN)
+	x.Body = p.parseBlockStmt()
 	return x
 }
 
@@ -2781,6 +2846,10 @@ func (p *parser) parseConstructorDecl() *ConstructorDecl {
 	x := new(ConstructorDecl)
 	x.Name = p.parseIdent()
 	x.Params = p.parseFormalPars()
+	if p.tok == COLON {
+		x.ColonTok = p.consume()
+		x.Init = p.parsePrimaryExpr()
+	}
 	x.Body = p.parseBlockStmt()
 
 	return x
@@ -2820,6 +2889,12 @@ func (p *parser) parseExtFuncDecl() *FuncDecl {
 
 	if p.tok == RETURN {
 		x.Return = p.parseReturn()
+	}
+	// Optional object-oriented exception clause on external functions
+	// (ETSI 5.2.2): `external function f() exception(T);`.
+	if p.tok == EXCEPTION {
+		x.ExceptionTok = p.consume()
+		x.Exception = p.parseExceptionList()
 	}
 	x.With = p.parseWith()
 	return x
@@ -3021,6 +3096,21 @@ func (p *parser) parseStmt() Stmt {
 		defer un(trace(p, "Stmt"))
 	}
 
+	// Object-oriented `raise <expr>` statement (ETSI 5.2.3). `raise`
+	// is not a reserved word, so match it contextually: a bare `raise`
+	// at statement start directly followed by an expression token is
+	// the throw statement. Proc-based `pt.raise(...)` starts with a
+	// port name, and `raise(...)`/`raise := ...`/`raise;` fall through
+	// to ordinary identifier parsing.
+	if p.tok == IDENT && p.lit(1) == "raise" {
+		switch p.peek(2).Kind() {
+		case INT, FLOAT, STRING, BSTRING, TRUE, FALSE, IDENT, SUB, ADD, NOT, NOT4B:
+			x := &RaiseStmt{Tok: p.consume()}
+			x.X = p.parseExpr()
+			return x
+		}
+	}
+
 	etok := p.peek(1)
 	switch p.tok {
 	case TEMPLATE:
@@ -3130,6 +3220,16 @@ func (p *parser) parseStmt() Stmt {
 				p.expect(RPAREN)
 			}
 			return p.parseBlockStmt()
+		case "@lazy", "@fuzzy", "@deterministic":
+			// TTCN-3 ed. 4.13+ permits a small set of modifiers
+			// at statement position - they alter the runtime
+			// scheduler's behaviour but don't change the
+			// syntactic shape of the following statement.
+			// Consume the modifier and parse the next statement
+			// as-is; the modifier is currently discarded since
+			// the interpreter doesn't model the distinction.
+			p.consume()
+			return p.parseStmt()
 		}
 		fallthrough
 	default:
@@ -3228,29 +3328,6 @@ func (p *parser) parseForLoop() Stmt {
 	}
 }
 
-func hasAssignment(n Node) bool {
-	switch n := n.(type) {
-	case *DeclStmt:
-		return hasAssignment(n.Decl)
-	case *ExprStmt:
-		return hasAssignment(n.Expr)
-	case *ValueDecl:
-		for _, d := range n.Decls {
-			if d.AssignTok != nil {
-				return true
-			}
-		}
-		return false
-	case *BinaryExpr:
-		if n.Op.Kind() == ASSIGN {
-			return true
-		}
-		return false
-	default:
-		return false
-	}
-}
-
 // CondWithInit ::= [ ( VarInstance | Assignment ) ";" ] Expr
 func (p *parser) parseCondWithInit() (init Stmt, semi Token, cond Expr) {
 	if p.tok == VAR {
@@ -3310,6 +3387,8 @@ func (p *parser) parseSelect() *SelectStmt {
 	x.Tok = p.expect(SELECT)
 	if p.tok == UNION {
 		x.Union = p.consume()
+	} else if p.tok == CLASS {
+		x.Class = p.consume()
 	}
 	if p.tok == LPAREN && (p.peek(2).Kind() == VAR || p.peek(2).Kind() == CONST) {
 		x.LParen = p.consume()

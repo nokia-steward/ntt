@@ -26,7 +26,7 @@ module Sem_160102_predefined_functions_107 {
 
         var integer v_dec with { variant "32 bit" };
         var integer v_res;
-        var template MyPDU v_temp := {"testText",5};
+        var template(value) MyPDU v_temp := {"testText",5};
         var octetstring v_ref := encvalue_o(v_temp);
         //log(v_ref);    //'74657374546578740005000000'O
         v_ref := v_ref[1];	// trunk encoded octetstring

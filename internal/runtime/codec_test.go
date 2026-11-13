@@ -21,8 +21,8 @@ func TestEncDecValueInteger(t *testing.T) {
 
 func TestEncValueInt32Variant(t *testing.T) {
 	typ := &NamedType{
-		Name: "I",
-		Type: IntegerType,
+		Name:       "I",
+		Type:       IntegerType,
 		Attributes: Attributes{Variant: Attribute{Value: "32 bit"}},
 	}
 	bits, err := EncValue(1094861636, typ)
@@ -37,8 +37,8 @@ func TestEncValueInt32Variant(t *testing.T) {
 
 func TestDecValueInsufficientBits(t *testing.T) {
 	typ := &NamedType{
-		Name: "I",
-		Type: IntegerType,
+		Name:       "I",
+		Type:       IntegerType,
 		Attributes: Attributes{Variant: Attribute{Value: "32 bit"}},
 	}
 	short := Binary{Unit: 'B', Digits: "0011000100110000"}

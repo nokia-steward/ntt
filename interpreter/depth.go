@@ -1,0 +1,239 @@
+package interpreter
+
+import (
+	"sync"
+	"sync/atomic"
+	"time"
+)
+
+// depthStore is a goroutine-local counter for tracking the current
+// eval recursion depth. We need it per-goroutine because the
+// conformance runner fans testcases out to a worker pool, and a
+// process-wide counter would either race or charge one testcase's
+// frames against another's budget.
+//
+// Implementation: a sync.Map of *uint64 counters keyed by goroutine
+// id. enter()/leave() are the hot path -- every eval() pair hits
+// them. The earlier mutex-protected map[uint64]int form serialised
+// every goroutine onto a single lock and dominated interpreter
+// runtime once a loop body started doing more than a handful of
+// expressions; sync.Map plus an atomic counter takes the whole
+// thing off the critical path.
+type depthStore struct {
+	counters sync.Map // map[uint64]*int64
+}
+
+// altCtx is a per-goroutine counter for "currently evaluating an
+// alt-statement guard". When non-zero, standalone-mode behaviours
+// like falling back to activated defaults should be suppressed - the
+// alt scheduler handles guard mismatch on its own.
+type altContext struct {
+	counters sync.Map // map[uint64]*int64
+}
+
+var altCtx altContext
+
+// altBodyCtx is set while the alt scheduler is evaluating the
+// chosen clause's body (NOT the guard). The body is the only place
+// the TTCN-3 21.2.4 `repeat` keyword may appear; without a body
+// context the interpreter cannot tell a legitimate `repeat` from a
+// stray one in a helper function and would have to silently
+// promote every `repeat` to the runtime.Repeat sentinel.
+var altBodyCtx altContext
+
+// defaultCtx tracks whether the interpreter is currently inside a
+// runDefaults() invocation. Reentry is suppressed so an activated
+// altstep that itself ends up calling into the alt scheduler can't
+// trigger a fresh defaults sweep, which would loop forever when no
+// guard ever matches.
+var defaultCtx altContext
+
+// defaultBranchState tracks, per goroutine, whether an alt guard actually
+// matched while runDefaults was evaluating an activated default. runDefaults
+// arms it before eval-ing each default and reads it after; the alt evaluator
+// flips it to "fired" when a real guard match takes a branch. This detects a
+// default that fired but re-asserted an already-set verdict — which the
+// verdict-change heuristic cannot see (Sem_2204_the_check_operation_059..084).
+// State per gid: 0/absent = unarmed, 1 = armed-not-fired, 2 = armed-fired.
+var defaultBranchState sync.Map // map[uint64]*int64
+
+func defaultBranchArm() {
+	v, _ := defaultBranchState.LoadOrStore(goroutineID(), new(int64))
+	atomic.StoreInt64(v.(*int64), 1)
+}
+
+// defaultBranchFire records a real guard match on this goroutine, but only
+// while armed (inside a runDefaults default eval); a no-op otherwise, so it
+// is safe to call from the shared alt evaluator on every branch selection.
+func defaultBranchFire() {
+	if v, ok := defaultBranchState.Load(goroutineID()); ok {
+		atomic.CompareAndSwapInt64(v.(*int64), 1, 2)
+	}
+}
+
+// defaultBranchSuspend puts this goroutine's tracker aside until the
+// returned function restores it: a default's branch body may run defaults
+// of its own, which arm and disarm the tracker of theirs.
+func defaultBranchSuspend() (restore func()) {
+	gid := goroutineID()
+	v, ok := defaultBranchState.Load(gid)
+	if !ok {
+		return func() {}
+	}
+	state := atomic.LoadInt64(v.(*int64))
+	defaultBranchState.Delete(gid)
+	return func() {
+		nv, _ := defaultBranchState.LoadOrStore(gid, new(int64))
+		atomic.StoreInt64(nv.(*int64), state)
+	}
+}
+
+// defaultBranchTook reports whether a branch fired since the last arm and
+// disarms the tracker for this goroutine.
+func defaultBranchTook() bool {
+	gid := goroutineID()
+	v, ok := defaultBranchState.Load(gid)
+	if !ok {
+		return false
+	}
+	took := atomic.LoadInt64(v.(*int64)) == 2
+	defaultBranchState.Delete(gid)
+	return took
+}
+
+// altPassTime holds, per goroutine, the wall-clock time of the alt pass
+// being evaluated: every alternative of a pass, an altstep taken as one
+// and the defaults it invokes read timers at this one instant, as they see
+// the port queues as they were at its start (ETSI ES 201 873-1 20.1). The
+// pass's branch body runs without it.
+var altPassTime sync.Map // map[uint64]time.Time
+
+// altPassNow is the time of the alt pass this goroutine evaluates, if it
+// evaluates one.
+func altPassNow() (time.Time, bool) {
+	if v, ok := altPassTime.Load(goroutineID()); ok {
+		return v.(time.Time), true
+	}
+	return time.Time{}, false
+}
+
+// setAltPassNow makes t the time of this goroutine's alt pass.
+func setAltPassNow(t time.Time) { altPassTime.Store(goroutineID(), t) }
+
+// clearAltPassNow ends this goroutine's alt pass.
+func clearAltPassNow() { altPassTime.Delete(goroutineID()) }
+
+// altQueueChanged records, per goroutine, that the alt pass being
+// evaluated changed a port queue itself: a trigger removed a message it
+// did not match (ETSI ES 201 873-1 22.2.3). The alt then takes a new
+// snapshot at once, as nothing else would wake it to look at the queue
+// as it now is.
+var altQueueChanged sync.Map // map[uint64]bool
+
+// markAltQueueChanged records that this goroutine's alt pass changed a
+// port queue.
+func markAltQueueChanged() { altQueueChanged.Store(goroutineID(), true) }
+
+// takeAltQueueChanged reports whether this goroutine's alt pass changed a
+// port queue since it was last asked, and forgets it.
+func takeAltQueueChanged() bool {
+	_, ok := altQueueChanged.LoadAndDelete(goroutineID())
+	return ok
+}
+
+// suspendAltPass leaves this goroutine's alt pass, if any, until the
+// returned function restores it: for a branch body, which runs after the
+// snapshot, and for the alt that ends.
+func suspendAltPass() (restore func()) {
+	gid := goroutineID()
+	v, ok := altPassTime.LoadAndDelete(gid)
+	return func() {
+		if ok {
+			altPassTime.Store(gid, v)
+		} else {
+			altPassTime.Delete(gid)
+		}
+	}
+}
+
+func (a *altContext) counter(gid uint64) *int64 {
+	if v, ok := a.counters.Load(gid); ok {
+		return v.(*int64)
+	}
+	v, _ := a.counters.LoadOrStore(gid, new(int64))
+	return v.(*int64)
+}
+
+func (a *altContext) enter() {
+	atomic.AddInt64(a.counter(goroutineID()), 1)
+}
+
+func (a *altContext) leave() {
+	gid := goroutineID()
+	c := a.counter(gid)
+	if atomic.AddInt64(c, -1) <= 0 {
+		a.counters.Delete(gid)
+	}
+}
+
+// suspend leaves the context on this goroutine, however deeply it was
+// entered, until the returned function restores it: for a branch body run
+// from within it, which is ordinary behaviour again.
+func (a *altContext) suspend() (restore func()) {
+	gid := goroutineID()
+	v, ok := a.counters.Load(gid)
+	if !ok {
+		return func() {}
+	}
+	n := atomic.SwapInt64(v.(*int64), 0)
+	a.counters.Delete(gid)
+	return func() {
+		if n > 0 {
+			atomic.AddInt64(a.counter(gid), n)
+		}
+	}
+}
+
+func (a *altContext) active() bool {
+	if v, ok := a.counters.Load(goroutineID()); ok {
+		return atomic.LoadInt64(v.(*int64)) > 0
+	}
+	return false
+}
+
+func (d *depthStore) counter(gid uint64) *int64 {
+	if v, ok := d.counters.Load(gid); ok {
+		return v.(*int64)
+	}
+	v, _ := d.counters.LoadOrStore(gid, new(int64))
+	return v.(*int64)
+}
+
+func (d *depthStore) enter() bool {
+	cur := atomic.AddInt64(d.counter(goroutineID()), 1)
+	return cur <= int64(MaxEvalDepth)
+}
+
+func (d *depthStore) leave() {
+	gid := goroutineID()
+	c := d.counter(gid)
+	if atomic.AddInt64(c, -1) <= 0 {
+		d.counters.Delete(gid)
+	}
+}
+
+// reset clears the depth for the current goroutine; the executor
+// calls this at the start of every testcase so a leftover frame
+// count from an earlier evaluation doesn't shrink the next budget.
+func (d *depthStore) reset() {
+	d.counters.Delete(goroutineID())
+}
+
+// goroutineID returns the current goroutine's runtime id. We read
+// it directly from the runtime's g struct via the fast path in
+// depth_runtime.go; see that file for the layout note. Falling back
+// to runtime.Stack() parsing here would dominate interpreter cost
+// (every eval() does one enter+leave -> two stack walks).
+func goroutineID() uint64 {
+	return fastGoroutineID()
+}

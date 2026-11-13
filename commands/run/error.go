@@ -29,9 +29,6 @@ type ExpectedError struct {
 	Testcase string
 }
 
-// errorEvents is the k3r event filter that selects every error event.
-const errorEvents = "^[A-Z0-9]{4}$"
-
 // loadFailure is the exit status of k3r when an error ends it, for example
 // a module that fails to load.
 const loadFailure = 2

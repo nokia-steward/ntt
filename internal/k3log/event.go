@@ -21,7 +21,7 @@ type Event struct {
 var tokens map[string]Category
 
 // ParseEvent parses string s and returns an event. If the string could not be
-// parsed sucessfully, ParseEvent will return an error
+// parsed successfully, ParseEvent will return an error
 func ParseEvent(s string) (Event, error) {
 	var e Event
 

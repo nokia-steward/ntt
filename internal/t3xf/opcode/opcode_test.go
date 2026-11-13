@@ -1,6 +1,7 @@
 package opcode_test
 
 import (
+	"bytes"
 	"os"
 	"slices"
 	"testing"
@@ -14,6 +15,8 @@ func TestGeneratedTables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// A Windows checkout ends lines with CRLF; the generated tables do not.
+	b = bytes.ReplaceAll(b, []byte("\r\n"), []byte("\n"))
 	var opcodes map[string]*opcode.Descriptor
 	if err := yaml.Unmarshal(b, &opcodes); err != nil {
 		t.Fatal(err)

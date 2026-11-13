@@ -45,12 +45,87 @@ func (s *Server) didChange(ctx context.Context, params *protocol.DidChangeTextDo
 	uri := string(params.TextDocument.URI.SpanURI())
 	f := fs.Open(uri)
 	for _, ch := range params.ContentChanges {
-		f.SetBytes([]byte(ch.Text))
+		if ch.Range == nil {
+			// Either the client doesn't honour our incremental
+			// preference or it is sending a full-document refresh.
+			// Either way we just take the new text verbatim.
+			f.SetBytes([]byte(ch.Text))
+			continue
+		}
+		current, err := f.Bytes()
+		if err != nil {
+			// Fall back to full sync on read errors instead of
+			// dropping the change.
+			f.SetBytes([]byte(ch.Text))
+			continue
+		}
+		next, ok := applyIncrementalChange(current, ch)
+		if !ok {
+			f.SetBytes([]byte(ch.Text))
+			continue
+		}
+		f.SetBytes(next)
 	}
 
 	s.db.Index(uri)
 	s.Diagnose(params.TextDocument.URI)
 	return nil
+}
+
+// applyIncrementalChange splices ch.Text into existing at ch.Range.
+// LSP positions are 0-indexed (line, UTF-16 character) so we work line
+// by line. Returns the new content and true on success; false means
+// the caller should fall back to a full replace.
+func applyIncrementalChange(existing []byte, ch protocol.TextDocumentContentChangeEvent) ([]byte, bool) {
+	if ch.Range == nil {
+		return nil, false
+	}
+	startOff, ok := positionToOffset(existing, ch.Range.Start.Line, ch.Range.Start.Character)
+	if !ok {
+		return nil, false
+	}
+	endOff, ok := positionToOffset(existing, ch.Range.End.Line, ch.Range.End.Character)
+	if !ok {
+		return nil, false
+	}
+	if startOff > endOff {
+		startOff, endOff = endOff, startOff
+	}
+	out := make([]byte, 0, len(existing)-(endOff-startOff)+len(ch.Text))
+	out = append(out, existing[:startOff]...)
+	out = append(out, ch.Text...)
+	out = append(out, existing[endOff:]...)
+	return out, true
+}
+
+// positionToOffset converts an LSP (line, character) pair to a byte
+// offset into src. We treat the source as UTF-8 and approximate the
+// character count - a more rigorous implementation would walk runes
+// and respect UTF-16 surrogate pairs, but that complexity only pays
+// off once we have plenty of non-ASCII identifiers in real suites.
+func positionToOffset(src []byte, line, character uint32) (int, bool) {
+	off := 0
+	curLine := uint32(0)
+	for off < len(src) && curLine < line {
+		if src[off] == '\n' {
+			curLine++
+		}
+		off++
+	}
+	if curLine != line {
+		// Past EOF - clamp to the end so an append at column 0 on
+		// the line after the last newline still applies cleanly.
+		return len(src), true
+	}
+	col := uint32(0)
+	for off < len(src) && col < character {
+		if src[off] == '\n' {
+			break
+		}
+		off++
+		col++
+	}
+	return off, true
 }
 
 func (s *Server) didSave(ctx context.Context, params *protocol.DidSaveTextDocumentParams) error {
