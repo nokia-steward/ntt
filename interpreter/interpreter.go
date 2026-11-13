@@ -538,7 +538,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		// reserved keyword, so intercepting the identifier is safe.
 		if name == "disconnect" {
 			if exec := runtime.FindTestcaseExec(env); exec != nil {
-				exec.DisconnectComponent(currentComponentID(exec))
+				exec.DisconnectComponent(exec.CurrentComponentID())
 			}
 			return runtime.Undefined
 		}
@@ -1281,7 +1281,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		}
 		if id, ok := n.Expr.(*syntax.Ident); ok && id.Tok != nil && id.String() == "unmap" {
 			if exec := runtime.FindTestcaseExec(env); exec != nil {
-				exec.UnmapComponent(currentComponentID(exec))
+				exec.UnmapComponent(exec.CurrentComponentID())
 			}
 			return runtime.Undefined
 		}
@@ -14228,19 +14228,6 @@ func xmlWhiteSpaceReplace(s string) string {
 	}, s)
 }
 
-// portSendError is the error of the sending operation op (send, call,
-// reply or raise) on a port that is stopped or halted (ETSI 22.5.3,
-// 22.5.4, F.3.3), or nil when the port is started.
-func portSendError(exec *runtime.TestcaseExec, op, port string) runtime.Object {
-	switch exec.PortStateOf(exec.PortKey(port)) {
-	case runtime.PortStopped:
-		return runtime.Errorf("%s on port %s, which is stopped (ETSI 22.5.3)", op, port)
-	case runtime.PortHalted:
-		return runtime.Errorf("%s on port %s, which is halted (ETSI 22.5.4)", op, port)
-	}
-	return nil
-}
-
 // evalPortSend models the message-based `port.send(value [, to dest])`
 // operation by appending the payload to a per-testcase loopback queue
 // keyed by port name. The optional `to <addr>` clause (passed via the
@@ -14402,7 +14389,7 @@ func evalProcedureCallTo(port string, call *syntax.CallExpr, toExpr syntax.Expr,
 	if exec == nil || call == nil {
 		return runtime.Undefined
 	}
-	if err := portSendError(exec, "call", port); err != nil {
+	if err := exec.SendError("call", port); err != nil {
 		return err
 	}
 	// A port bound to a driver is mapped to the system: its `to` address
@@ -14427,31 +14414,11 @@ func evalProcedureCallTo(port string, call *syntax.CallExpr, toExpr syntax.Expr,
 		Payload:   params,
 		Signature: sig,
 	}
-	targets := callTargetComponentIDs(toExpr, env)
-	var keys []string
-	addressed := false
-	if targets == nil {
-		// Unresolved target set: fall back to the default broadcast routing.
-		keys = envelopeRoute(exec, exec.PortKey(port), port)
-	} else {
-		var curID int64 = -1
-		if cur := exec.CurrentComponent(); cur != nil {
-			curID = cur.ID
-		}
-		for _, peer := range connectedPeers(exec, curID, port) {
-			if targets[peer.Comp] {
-				keys = append(keys, exec.PortKeyFor(peer.Comp, peer.Port))
-			}
-		}
-		addressed = len(keys) > 0
-		if !addressed {
-			keys = envelopeRoute(exec, exec.PortKey(port), port)
-		}
-	}
+	keys, addressed := exec.Route(port, callTargetComponentIDs(toExpr, env))
 	if exec.TestLogger() != nil {
 		tlProcSend(exec, call, "call", port, msg, keys, addressed, false)
 	}
-	deliverEnvelope(exec, keys, msg)
+	exec.DeliverEnvelope(keys, msg)
 	return runtime.Undefined
 }
 
@@ -14485,11 +14452,11 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 		return runtime.Undefined
 	}
 	if op == "call" || op == "reply" || op == "raise" {
-		if err := portSendError(exec, op, port); err != nil {
+		if err := exec.SendError(op, port); err != nil {
 			return err
 		}
 		// Without a to clause (the forms with one route elsewhere).
-		if err := sendReceiverError(op, exec, port, nil); err != nil {
+		if err := exec.ReceiverError(op, port, false); err != nil {
 			return err
 		}
 	}
@@ -14535,11 +14502,11 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 			Payload:   params,
 			Signature: sig,
 		}
-		keys := envelopeRoute(exec, port, bareName)
+		keys, _ := exec.Route(bareName, nil)
 		if exec.TestLogger() != nil {
 			tlProcSend(exec, n, "call", bareName, callMsg, keys, false, false)
 		}
-		deliverEnvelope(exec, keys, callMsg)
+		exec.DeliverEnvelope(keys, callMsg)
 		return runtime.Undefined
 	case "reply":
 		var params, ret runtime.Object
@@ -14555,11 +14522,11 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 			RetValue:  ret,
 			Signature: sig,
 		}
-		keys := envelopeRoute(exec, port, bareName)
+		keys, _ := exec.Route(bareName, nil)
 		if exec.TestLogger() != nil {
 			tlProcSend(exec, n, "reply", bareName, replyMsg, keys, false, false)
 		}
-		deliverEnvelope(exec, keys, replyMsg)
+		exec.DeliverEnvelope(keys, replyMsg)
 		return runtime.Undefined
 	case "raise":
 		// raise(Signature, <exception value>): arg[0] names the
@@ -14579,11 +14546,11 @@ func evalProcedurePortOp(op, port string, n *syntax.CallExpr, env runtime.Scope)
 			RetValue:  exc,
 			Signature: sig,
 		}
-		keys := envelopeRoute(exec, port, bareName)
+		keys, _ := exec.Route(bareName, nil)
 		if exec.TestLogger() != nil {
 			tlProcSend(exec, n, "raise", bareName, excMsg, keys, false, false)
 		}
-		deliverEnvelope(exec, keys, excMsg)
+		exec.DeliverEnvelope(keys, excMsg)
 		return runtime.Undefined
 	case "getcall", "getreply", "catch":
 		kind, _ := procKindForOp(op)
@@ -15777,87 +15744,6 @@ func portMapArgName(e syntax.Expr) string {
 	return ""
 }
 
-// strictConnectedTargets returns the component-qualified queue keys a
-// send / call / reply / raise on bareName (from the current component)
-// must be delivered to: the connected peer(s) via the connect graph.
-// Returns nil when there is no current component or the port has no peer
-// — the caller then self-delivers on its own key (loopback-to-self /
-// self-connect). bareName is the pre-qualification instance name (the
-// connect graph keys on bare names per component).
-func strictConnectedTargets(exec *runtime.TestcaseExec, bareName string) []string {
-	cur := exec.CurrentComponent()
-	if cur == nil {
-		return nil
-	}
-	peers := connectedPeers(exec, cur.ID, bareName)
-	if len(peers) == 0 {
-		return nil
-	}
-	keys := make([]string, 0, len(peers))
-	for _, peer := range peers {
-		keys = append(keys, exec.PortKeyFor(peer.Comp, peer.Port))
-	}
-	return keys
-}
-
-// splitPortIndex splits an indexed port-instance name into its array
-// base and subscript suffix: "p[0]" -> ("p","[0]"), "p[0][1]" ->
-// ("p","[0][1]"), "p" -> ("p","").
-func splitPortIndex(name string) (base, suffix string) {
-	if i := strings.IndexByte(name, '['); i >= 0 {
-		return name[:i], name[i:]
-	}
-	return name, ""
-}
-
-// envelopeRoute returns the queues a procedure envelope (call / reply /
-// raise) is delivered to, the way a message send is routed: a CONNECTED
-// port delivers to the peer(s)' queue(s); otherwise (and for self-connect
-// / no peer) the envelope goes on the given qualified port key. Routing and
-// delivery (deliverEnvelope) are separate so a delivery can be logged
-// before it happens, and a log's order follows cause and effect.
-func envelopeRoute(exec *runtime.TestcaseExec, port, bareName string) []string {
-	if targets := strictConnectedTargets(exec, bareName); targets != nil {
-		return targets
-	}
-	return []string{port}
-}
-
-// deliverEnvelope enqueues msg on each of keys.
-func deliverEnvelope(exec *runtime.TestcaseExec, keys []string, msg runtime.PortMessage) {
-	for _, key := range keys {
-		exec.EnqueueEnvelope(key, msg)
-	}
-}
-
-// routeProcEnvelopeTo returns the queues a procedure reply/exception
-// envelope goes to: ONLY those of the components named by toExpr (a
-// `reply ... to c` / `raise ... to (a,b)` clause), mirroring
-// evalProcedureCallTo's per-component routing, with addressed set. Falls
-// back to the default broadcast routing (envelopeRoute) when the target set
-// can't be resolved or matches no connected peer, so a mis-typed target
-// degrades to the old behaviour rather than vanishing. The caller delivers.
-func routeProcEnvelopeTo(exec *runtime.TestcaseExec, bareName string, toExpr syntax.Expr, env runtime.Scope) (keys []string, addressed bool) {
-	targets := callTargetComponentIDs(toExpr, env)
-	if targets == nil {
-		return envelopeRoute(exec, exec.PortKey(bareName), bareName), false
-	}
-	curID := int64(-1)
-	if cur := exec.CurrentComponent(); cur != nil {
-		curID = cur.ID
-	}
-	for _, peer := range connectedPeers(exec, curID, bareName) {
-		if !targets[peer.Comp] {
-			continue
-		}
-		keys = append(keys, exec.PortKeyFor(peer.Comp, peer.Port))
-	}
-	if len(keys) == 0 {
-		return envelopeRoute(exec, exec.PortKey(bareName), bareName), false
-	}
-	return keys, true
-}
-
 // evalProcedureReplyRaiseTo handles `p.reply(...) to <dest>` and
 // `p.raise(...) to <dest>` under the cooperative scheduler: it builds the
 // kind-tagged envelope and routes it to only the addressed component(s),
@@ -15868,7 +15754,7 @@ func evalProcedureReplyRaiseTo(op, bareName string, call *syntax.CallExpr, toExp
 	if exec == nil {
 		return runtime.Undefined
 	}
-	if err := portSendError(exec, op, bareName); err != nil {
+	if err := exec.SendError(op, bareName); err != nil {
 		return err
 	}
 	var msg runtime.PortMessage
@@ -15894,11 +15780,11 @@ func evalProcedureReplyRaiseTo(op, bareName string, call *syntax.CallExpr, toExp
 	default:
 		return evalProcedurePortOp(op, bareName, call, env)
 	}
-	keys, addressed := routeProcEnvelopeTo(exec, bareName, toExpr, env)
+	keys, addressed := exec.Route(bareName, callTargetComponentIDs(toExpr, env))
 	if exec.TestLogger() != nil {
 		tlProcSend(exec, call, op, bareName, msg, keys, addressed, false)
 	}
-	deliverEnvelope(exec, keys, msg)
+	exec.DeliverEnvelope(keys, msg)
 	return runtime.Undefined
 }
 
@@ -15907,138 +15793,41 @@ func evalPortSendTo(port string, n *syntax.CallExpr, env runtime.Scope, dest syn
 	if exec == nil || n.Args == nil || len(n.Args.List) == 0 {
 		return runtime.Undefined
 	}
-	if err := portSendError(exec, "send", port); err != nil {
+	if err := exec.SendError("send", port); err != nil {
 		return err
 	}
-	bareName := port          // pre-qualification instance name, for the connect graph
-	port = exec.PortKey(port) // real-scheduler: per-PTC port identity (no-op by default)
 	payload := eval(n.Args.List[0], env)
 	if runtime.IsError(payload) {
 		return payload
 	}
-	var sender runtime.Object
+	var to runtime.Object
 	if dest != nil {
 		if v := eval(dest, env); !runtime.IsError(v) {
-			sender = v
+			to = v
 		}
 	}
-	// No explicit `to <addr>`: tag the message with the
-	// currently running component's reference (set by
-	// comp.start(...) via PushComponent). Outside a .start()
-	// invocation CurrentComponent returns nil and we leave the
-	// sender unset, matching the prior loopback behaviour.
-	if sender == nil {
-		if cur := exec.CurrentComponent(); cur != nil {
-			sender = cur
-		}
-	}
-	// Profiling: count the send and stamp it so the next receive on this
-	// port can sample the round-trip latency (no-op unless profiling is on).
-	exec.RecordSend(port)
 	if exec.TestLogger() != nil {
+		// The destination logged is the to clause's value; one not known
+		// is the sending component, as it was routed by.
 		var destVal runtime.Object
 		if dest != nil {
-			destVal = sender
-		}
-		tlSend(exec, n, bareName, destVal, payload, lvalueTypeDesc(n.Args.List[0], env), env)
-	}
-	// External port-driver path: when the testcase has a driver
-	// bound to this port instance (typically a C/C++ test port
-	// registered via the cabi/cgo bridge), route the payload
-	// through the driver instead of looping it back. The driver is
-	// responsible for serialising the value and pushing it onto
-	// the transport. Receive-side traffic comes back in via
-	// EnqueueMessageFrom on whatever I/O goroutine the driver
-	// owns, so the alt scheduler keeps a single source of truth
-	// for the port queue.
-	if drv := exec.PortDriver(port); drv != nil {
-		if err := drv.Send(payload, sender); err != nil {
-			return runtime.Errorf("port %q: driver send failed: %v", port, err)
-		}
-		// Release the start-barrier's send-phase: a daemon PTC binds
-		// its listen socket on this first external send, so the
-		// parent's `d.start` can now be sure the bind() has been
-		// issued. Idempotent; keyed to the goroutine's
-		// current component.
-		if cur := exec.CurrentComponent(); cur != nil {
-			if exit := exec.PTCExit(cur.ID); exit != nil {
-				exit.SignalSend()
+			destVal = to
+			if cur := exec.CurrentComponent(); destVal == nil && cur != nil {
+				destVal = cur
 			}
 		}
-		return runtime.Undefined
+		tlSend(exec, n, port, destVal, payload, lvalueTypeDesc(n.Args.List[0], env), env)
 	}
-	// A one-to-many connection takes a to clause (22.2.1 d).
-	if err := sendReceiverError("send", exec, bareName, dest); err != nil {
+	if err := exec.SendMessage(port, payload, to, dest != nil); err != nil {
 		return err
 	}
-	// A send on a CONNECTED port is delivered to the connected peer(s)'
-	// queue(s) via the connect graph, not the sender's own queue, and
-	// tagged with the actual sending component so the receiver's `from`
-	// matches. Falls through to self-delivery when the port has no peer
-	// (loopback-to-self / self-connect handled by ConnectedPeers).
-	if targets := strictConnectedTargets(exec, bareName); targets != nil {
-		// `p.send(v) to c` / `to (a,b)`: under the scheduler route to ONLY
-		// the addressed component(s) via their per-component port key, so a
-		// unicast send is not broadcast to every connected peer (which would
-		// let a sibling PTC receive a value meant for another —
-		// Sem_220201_SendOperation_005). Fall back to broadcast when the
-		// target set can't be resolved or matches no connected peer.
-		if dest != nil {
-			// The destination as evaluated above: a `to f()` runs once.
-			if ids := targetComponentIDs(sender); ids != nil {
-				curID := int64(-1)
-				if cur := exec.CurrentComponent(); cur != nil {
-					curID = cur.ID
-				}
-				delivered := false
-				for _, peer := range connectedPeers(exec, curID, bareName) {
-					if !ids[peer.Comp] {
-						continue
-					}
-					exec.EnqueueMessageFrom(exec.PortKeyFor(peer.Comp, peer.Port), payload, exec.CurrentComponent())
-					delivered = true
-				}
-				if delivered {
-					return runtime.Undefined
-				}
-			}
-		}
-		for _, key := range targets {
-			exec.EnqueueMessageFrom(key, payload, exec.CurrentComponent())
-		}
-		return runtime.Undefined
-	}
-	// A mapped port with no driver loops the message back, as the SUT
-	// would answer it: it comes from the system.
-	if exec.IsMapped(runtime.PortEndpoint{Comp: currentComponentID(exec), Port: bareName}) {
-		sender = systemSender
-	}
-	exec.EnqueueMessageFrom(port, payload, sender)
 	return runtime.Undefined
 }
-
-// sendReceiverError is the error of the sending operation op on port, of
-// the running component, with the to clause dest (nil when none): a port
-// connected to several others is sent on with a to clause (ETSI 22.2.1 d,
-// 22.3.1 e, 22.3.3 d, 22.3.5 c). A port neither connected nor mapped is
-// let be: the MTC's ports are the test system interface of a testcase
-// without a system clause (16.3), whose loopback stands in for the SUT.
-func sendReceiverError(op string, exec *runtime.TestcaseExec, port string, dest syntax.Expr) runtime.Object {
-	ep := runtime.PortEndpoint{Comp: currentComponentID(exec), Port: port}
-	if peers := livePeers(exec, ep, false); dest == nil && len(peers) > 1 {
-		return runtime.Errorf("%s on port %s, connected to %d ports, without a to clause (ETSI 22.2.1 d)", op, port, len(peers))
-	}
-	return nil
-}
-
-// systemSender is the sender of what a mapped port receives from the
-// system when no port driver stands for it (see evalPortSendTo).
-var systemSender = &runtime.ComponentRef{ID: systemEndpointID, Name: "system"}
 
 // isSystemRef reports whether v is the system component's reference.
 func isSystemRef(v runtime.Object) bool {
 	r, ok := v.(*runtime.ComponentRef)
-	return ok && r != nil && r.ID == systemEndpointID
+	return ok && r != nil && r.ID == runtime.SystemEndpointID
 }
 
 // commOpInfo is the parsed shape of a `port.send/receive/check/...`

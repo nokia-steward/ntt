@@ -506,7 +506,7 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 	env.Set("self", mtcRef)
 	// `system` is a component reference too: the one what arrives from
 	// the SUT comes from (ETSI 22.2.2).
-	env.Set("system", systemSender)
+	env.Set("system", runtime.SystemComponent)
 	exec.PushComponent(mtcRef)
 	defer exec.PopComponent()
 	mtcRef.Vars = mtcVars

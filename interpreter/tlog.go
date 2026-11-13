@@ -465,7 +465,7 @@ func tlSend(exec *runtime.TestcaseExec, n syntax.Node, port string, dest, payloa
 		return
 	}
 	peers := tlConnectedPeers(exec, port)
-	if ids := targetComponentIDs(dest); ids != nil {
+	if ids := runtime.TargetComponentIDs(dest); ids != nil {
 		var to []tl.PortID
 		for _, p := range peers {
 			if ids[p.Comp] {
@@ -518,7 +518,7 @@ func tlConnectedPeers(exec *runtime.TestcaseExec, port string) []runtime.PortEnd
 	if c := exec.CurrentComponent(); c != nil {
 		cur = c.ID
 	}
-	peers := connectedPeers(exec, cur, port)
+	peers := exec.PortPeers(cur, port)
 	// The connection graph is a map: list the peers in one order, so that
 	// two runs log a broadcast alike.
 	sort.Slice(peers, func(i, j int) bool {
@@ -528,30 +528,6 @@ func tlConnectedPeers(exec *runtime.TestcaseExec, port string) []runtime.PortEnd
 		return peers[i].Port < peers[j].Port
 	})
 	return peers
-}
-
-// targetComponentIDs is the set of components a `to` value addresses: one
-// component, or a list of them. Nil when it addresses none.
-func targetComponentIDs(dest runtime.Object) map[int64]bool {
-	var refs []runtime.Object
-	switch v := dest.(type) {
-	case *runtime.ComponentRef:
-		refs = []runtime.Object{v}
-	case *runtime.List:
-		refs = v.Elements
-	default:
-		return nil
-	}
-	ids := map[int64]bool{}
-	for _, r := range refs {
-		if c, ok := r.(*runtime.ComponentRef); ok && c != nil {
-			ids[c.ID] = true
-		}
-	}
-	if len(ids) == 0 {
-		return nil
-	}
-	return ids
 }
 
 // tlReceive logs a message receiving operation on port against the head

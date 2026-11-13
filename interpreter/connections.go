@@ -15,12 +15,6 @@ import (
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
-// Sentinel component ids for endpoints that are not a concrete PTC.
-const (
-	mtcEndpointID    int64 = 0  // the MTC / testcase main thread
-	systemEndpointID int64 = -2 // the `system` side of a map
-)
-
 // resolvePortEndpoint turns a `connect`/`map` argument into a
 // (component,port) endpoint. The argument is either `comp:port`
 // (a BinaryExpr whose left names the component and right the port) or a
@@ -56,24 +50,6 @@ func portElementName(e syntax.Expr, env runtime.Scope) string {
 		}
 	}
 	return portRefName(e)
-}
-
-// connectedPeers returns the endpoints port of component comp is connected
-// to. An element of a port array is connected as itself; one whose array
-// was connected as a whole reaches the same element of the peer's array.
-func connectedPeers(exec *runtime.TestcaseExec, comp int64, port string) []runtime.PortEndpoint {
-	if peers := exec.ConnectedPeers(runtime.PortEndpoint{Comp: comp, Port: port}); len(peers) > 0 {
-		return peers
-	}
-	base, suffix := splitPortIndex(port)
-	if suffix == "" {
-		return nil
-	}
-	peers := exec.ConnectedPeers(runtime.PortEndpoint{Comp: comp, Port: base})
-	for i := range peers {
-		peers[i].Port += suffix
-	}
-	return peers
 }
 
 // portRefName extracts the port name from a port reference, accepting
@@ -130,33 +106,24 @@ func resolvePortName(e syntax.Expr, env runtime.Scope) (name string, isPort bool
 // body (the MTC and PTCs are real ComponentRefs with stable ids).
 func resolveComponentID(e syntax.Expr, env runtime.Scope, exec *runtime.TestcaseExec) (int64, bool) {
 	if e == nil {
-		return currentComponentID(exec), false
+		return exec.CurrentComponentID(), false
 	}
 	if id, ok := e.(*syntax.Ident); ok {
 		switch id.String() {
 		case "self":
-			return currentComponentID(exec), false
+			return exec.CurrentComponentID(), false
 		case "system":
-			return systemEndpointID, true
+			return runtime.SystemEndpointID, true
 		}
 	}
 	if v := eval(e, env); !runtime.IsError(v) {
 		if ref, ok := v.(*runtime.ComponentRef); ok && ref != nil {
 			// A reference to the system component, as a parameter holds
 			// it, is the system's.
-			return ref.ID, ref.ID == systemEndpointID
+			return ref.ID, ref.ID == runtime.SystemEndpointID
 		}
 	}
-	return currentComponentID(exec), false
-}
-
-func currentComponentID(exec *runtime.TestcaseExec) int64 {
-	if exec != nil {
-		if c := exec.CurrentComponent(); c != nil {
-			return c.ID
-		}
-	}
-	return mtcEndpointID
+	return exec.CurrentComponentID(), false
 }
 
 // evalConnectOp implements `connect`/`disconnect` (ETSI 21.1.1/21.1.2)
@@ -190,7 +157,7 @@ func evalConnectOp(op string, n *syntax.CallExpr, env runtime.Scope) runtime.Obj
 		if len(args) == 0 {
 			// `disconnect;` (no args) tears down every connection
 			// of the running component (ETSI 21.1.2).
-			exec.DisconnectComponent(currentComponentID(exec))
+			exec.DisconnectComponent(exec.CurrentComponentID())
 			return runtime.Undefined
 		}
 		a, _, okA := resolvePortEndpoint(args[0], env)
@@ -303,46 +270,11 @@ func uncreatedComponentError(op string, args []syntax.Expr, env runtime.Scope) r
 		if v == runtime.Null || v == runtime.Undefined {
 			return runtime.Errorf("%s of a port of %s, which refers to no component created (ETSI 21.1.1)", op, syntax.Name(be.X))
 		}
-		if ref, ok := v.(*runtime.ComponentRef); ok && componentEnded(ref) {
+		if ref, ok := v.(*runtime.ComponentRef); ok && ref.Ended() {
 			return runtime.Errorf("%s of a port of %s, a component that has ended (ETSI 21.1.1, 21.3.3, 21.3.4)", op, syntax.Name(be.X))
 		}
 	}
 	return nil
-}
-
-// componentEnded reports whether ref is a component that is no more:
-// killed, or one not alive-type whose behaviour is done (ETSI 21.3.3,
-// 21.3.4). Its connections are released.
-func componentEnded(ref *runtime.ComponentRef) bool {
-	if ref == nil || ref.ID == mtcEndpointID || ref.ID == systemEndpointID {
-		return false
-	}
-	return !ref.IsAlive() || ref.IsDone() && !ref.AliveModifier
-}
-
-// livePeers returns what endpoint e is connected to (map false) or mapped
-// to (map true), but the ports of components that have ended.
-func livePeers(exec *runtime.TestcaseExec, e runtime.PortEndpoint, mapped bool) []runtime.PortEndpoint {
-	peers := exec.ConnectedPeers(e)
-	if mapped {
-		peers = exec.MappedPeers(e)
-	}
-	ended := map[int64]bool{}
-	for _, ref := range exec.AllComponents() {
-		if componentEnded(ref) {
-			ended[ref.ID] = true
-		}
-	}
-	if len(ended) == 0 {
-		return peers
-	}
-	out := peers[:0:0]
-	for _, p := range peers {
-		if !ended[p.Comp] {
-			out = append(out, p)
-		}
-	}
-	return out
 }
 
 // connectError is the error of connecting a and b that clauses 9.1 a and
@@ -352,18 +284,18 @@ func connectError(exec *runtime.TestcaseExec, a, b runtime.PortEndpoint, aSys, b
 	if aSys || bSys {
 		return runtime.Errorf("connect of a port of the test system interface; it is mapped (ETSI 21.1.1 b, 9.1 a)")
 	}
-	for _, p := range livePeers(exec, a, false) {
+	for _, p := range exec.LivePeers(a, false) {
 		if p == b {
 			return nil
 		}
 	}
 	for _, e := range []runtime.PortEndpoint{a, b} {
-		if len(livePeers(exec, e, true)) > 0 {
+		if len(exec.LivePeers(e, true)) > 0 {
 			return runtime.Errorf("connect of port %s, which is mapped (ETSI 9.1 a)", e.Port)
 		}
 	}
 	for _, pair := range [][2]runtime.PortEndpoint{{a, b}, {b, a}} {
-		for _, p := range livePeers(exec, pair[0], false) {
+		for _, p := range exec.LivePeers(pair[0], false) {
 			if p.Comp == pair[1].Comp && p != pair[1] {
 				return runtime.Errorf("connect of port %s to a second port of one component, %s and %s (ETSI 9.1 a)", pair[0].Port, p.Port, pair[1].Port)
 			}
@@ -384,7 +316,7 @@ func mapError(exec *runtime.TestcaseExec, a, b runtime.PortEndpoint, aSys, bSys 
 	if aSys {
 		c, s = b, a
 	}
-	if peers := livePeers(exec, c, true); len(peers) > 0 {
+	if peers := exec.LivePeers(c, true); len(peers) > 0 {
 		for _, p := range peers {
 			if p == s {
 				return nil
@@ -392,10 +324,10 @@ func mapError(exec *runtime.TestcaseExec, a, b runtime.PortEndpoint, aSys, bSys 
 		}
 		return runtime.Errorf("map of port %s, which is mapped already (ETSI 9.1 a)", c.Port)
 	}
-	if len(livePeers(exec, c, false)) > 0 {
+	if len(exec.LivePeers(c, false)) > 0 {
 		return runtime.Errorf("map of port %s, which is connected (ETSI 9.1 a)", c.Port)
 	}
-	for _, p := range livePeers(exec, s, true) {
+	for _, p := range exec.LivePeers(s, true) {
 		if p.Comp == c.Comp {
 			return runtime.Errorf("map of system port %s to a second port of one component, %s and %s (ETSI 9.1 a)", s.Port, p.Port, c.Port)
 		}
@@ -506,7 +438,7 @@ func isCheckstateState(s string) bool {
 // and Linked is either.
 func portInState(exec *runtime.TestcaseExec, port, state string) bool {
 	known := exec != nil && port != ""
-	ep := runtime.PortEndpoint{Comp: currentComponentID(exec), Port: port}
+	ep := runtime.PortEndpoint{Comp: exec.CurrentComponentID(), Port: port}
 	switch state {
 	case "Started", "Stopped", "Halted":
 		s := runtime.PortStarted
