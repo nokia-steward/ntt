@@ -9288,6 +9288,8 @@ func evalAnyAllFromMsg(n *syntax.FromExpr, sel *syntax.SelectorExpr, call *synta
 	}
 	name := base.String()
 	isTrigger := op == "trigger"
+	// One template for the messages of every port of the array.
+	matcher := newReceiveMatcher(call, env)
 	for _, pn := range arrayPortNames(exec, name) {
 		key := exec.PortKey(pn)
 		for {
@@ -9298,7 +9300,7 @@ func evalAnyAllFromMsg(n *syntax.FromExpr, sel *syntax.SelectorExpr, call *synta
 			var tmpl runtime.Object = runtime.Any
 			if call != nil {
 				var matched bool
-				if matched, tmpl = portReceiveMatch(head.Payload, systemLoopback(head), call, env); !matched {
+				if matched, tmpl = matcher.match(head.Payload, systemLoopback(head)); !matched {
 					if exec.TestLogger() != nil {
 						tlReceive(exec, env, call, pn, head, tmpl, nil, "mismatch", false, !isTrigger)
 					}
@@ -16275,6 +16277,12 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 	// whatever is at the head of the queue, a call, reply or exception
 	// included (ETSI 22.4).
 	checkAny := !consume && isCheckAnyStandIn(info.call)
+	// One template for every message the operation looks at: a trigger
+	// drops the heads it does not match.
+	var matcher *receiveMatcher
+	if !isProc && info.call != nil {
+		matcher = newReceiveMatcher(info.call, env)
+	}
 	for {
 		head, ok := exec.PeekKindLimited(port, kind, limit)
 		if checkAny {
@@ -16309,8 +16317,8 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 		// `p.getcall(S:?) from v_ptc`), so always evaluate it.
 		payloadOk := true
 		var tmpl runtime.Object = runtime.Any
-		if !isProc && info.call != nil {
-			payloadOk, tmpl = portReceiveMatch(head.Payload, systemLoopback(head), info.call, env)
+		if matcher != nil {
+			payloadOk, tmpl = matcher.match(head.Payload, systemLoopback(head))
 		}
 		// Honour the procedure signature template (parameter record +
 		// `value`/exception) rather than the lenient "any envelope of
@@ -16797,34 +16805,65 @@ func encodedView(typeExpr syntax.Expr, env runtime.Scope) bool {
 
 // portReceiveMatch is portReceiveMatches that also returns the template it
 // matched against (runtime.Any when the operation has none), so a logged
-// receive or mismatch shows the template actually used.
-//
-// A typed template (`charstring:?`) matches only a value of its type —
-// unless, for a message looped back by a port mapped to the system with
-// no driver (loopback), the template can be the value's encoded form.
+// receive or mismatch shows the template actually used. An operation that
+// matches several messages makes one receiveMatcher for all of them.
 func portReceiveMatch(head runtime.Object, loopback bool, n *syntax.CallExpr, env runtime.Scope) (bool, runtime.Object) {
-	if n.Args == nil || len(n.Args.List) == 0 {
-		return true, runtime.Any
+	return newReceiveMatcher(n, env).match(head, loopback)
+}
+
+// receiveMatcher matches the messages a message receiving operation looks
+// at — a trigger the ones it drops, `any from` those of every port — with
+// the operation's template, evaluated once for the operation: what it is
+// matched against does not change it (ETSI ES 201 873-1 22.2, 16.1.4).
+// It is evaluated when the first message is matched, as an operation with
+// no message to match evaluates no template.
+type receiveMatcher struct {
+	call *syntax.CallExpr
+	env  runtime.Scope
+
+	evaluated bool
+	// any is set when every message matches: the operation has no
+	// template, or its template could not be evaluated.
+	any bool
+	// first is the template expression and typeExpr the type of a typed
+	// template, `T: t`.
+	first, typeExpr syntax.Expr
+	tmpl            runtime.Object
+	// record is tmpl, a positional record template named by its type, as
+	// the map-based record a message payload record is: matched by field
+	// name, not by an order a map has not.
+	record *runtime.Record
+	json   *runtime.TypeDesc
+	xml    *xmlLoopbackTransform
+}
+
+func newReceiveMatcher(n *syntax.CallExpr, env runtime.Scope) *receiveMatcher {
+	return &receiveMatcher{call: n, env: env}
+}
+
+// evaluate evaluates the operation's template, once.
+func (m *receiveMatcher) evaluate() {
+	if m.evaluated {
+		return
+	}
+	m.evaluated = true
+	n := m.call
+	if n == nil || n.Args == nil || len(n.Args.List) == 0 || n.Args.List[0] == nil {
+		m.any, m.tmpl = true, runtime.Any
+		return
 	}
 	first := n.Args.List[0]
-	if first == nil {
-		return true, runtime.Any
-	}
 	// `receive(MyType: <template>)` is the type-prefixed value
 	// notation - strip the type prefix and match against the RHS.
-	var typeExpr syntax.Expr
 	if v, ok := first.(*syntax.BinaryExpr); ok && v.Op != nil && v.Op.Kind() == syntax.COLON {
-		typeExpr = v.X
+		m.typeExpr = v.X
 		first = v.Y
 	}
-	tmpl := eval(first, env)
+	m.first = first
+	tmpl := eval(first, m.env)
 	if runtime.IsError(tmpl) || tmpl == nil {
-		return true, runtime.Any
-	}
-	// A typed template matches only a value of its type (ETSI ES 201
-	// 873-1 22.2.2): `charstring:?` is any charstring, not anything.
-	if typeExpr != nil && !(loopback && encodedView(typeExpr, env)) && !valueOfType(head, typeExpr, env) {
-		return false, tmpl
+		m.any, m.tmpl = true, runtime.Any
+		return
 	}
 	// Coerce a POSITIONAL record/set template to its declared named fields.
 	// A runtime.Record is an unordered map, so matching a positional list
@@ -16832,33 +16871,51 @@ func portReceiveMatch(head runtime.Object, loopback bool, n *syntax.CallExpr, en
 	// (Sem_13_declaring_msg_003). coerceToDeclaredStruct names the fields by
 	// the type's declaration order; it is a no-op for `?`/omit, non-struct
 	// types, and already-named values.
-	if typeExpr != nil {
-		tmpl = coerceToDeclaredStruct(tmpl, typeExpr, first, env)
-		// coerceToDeclaredStruct names a positional record template but
-		// leaves it as a *List with FieldNames, while a message payload
-		// record is a map-based *Record. Reconcile them into a *Record so
-		// the match is by field NAME (order-independent) — a *Record's map
-		// has no field order, so a positional-list match would depend on
-		// fragile iteration order (Sem_13_declaring_msg_003).
-		if _, headIsRec := head.(*runtime.Record); headIsRec {
-			if lst, ok := tmpl.(*runtime.List); ok && len(lst.FieldNames) > 0 &&
-				len(lst.FieldNames) == len(lst.Elements) {
-				fields := make(map[string]runtime.Object, len(lst.FieldNames))
-				for i, nm := range lst.FieldNames {
-					fields[nm] = lst.Elements[i]
-				}
-				tmpl = &runtime.Record{Fields: fields}
+	if m.typeExpr != nil {
+		tmpl = coerceToDeclaredStruct(tmpl, m.typeExpr, first, m.env)
+		if lst, ok := tmpl.(*runtime.List); ok && len(lst.FieldNames) > 0 &&
+			len(lst.FieldNames) == len(lst.Elements) {
+			fields := make(map[string]runtime.Object, len(lst.FieldNames))
+			for i, nm := range lst.FieldNames {
+				fields[nm] = lst.Elements[i]
 			}
+			m.record = &runtime.Record{Fields: fields}
 		}
+	}
+	m.tmpl = tmpl
+	if td := receiveTemplateTypeDesc(first, m.env); td != nil && isJSONEncodedType(td) {
+		m.json = td
+	}
+	m.xml = xmlLoopbackTransformForTemplate(first, m.env)
+}
+
+// match reports whether head matches the template, and the template it
+// matched against. A typed template (`charstring:?`) matches only a value
+// of its type — unless, for a message looped back by a port mapped to the
+// system with no driver (loopback), the template can be the value's
+// encoded form.
+func (m *receiveMatcher) match(head runtime.Object, loopback bool) (bool, runtime.Object) {
+	m.evaluate()
+	if m.any {
+		return true, m.tmpl
+	}
+	// A typed template matches only a value of its type (ETSI ES 201
+	// 873-1 22.2.2): `charstring:?` is any charstring, not anything.
+	if m.typeExpr != nil && !(loopback && encodedView(m.typeExpr, m.env)) && !valueOfType(head, m.typeExpr, m.env) {
+		return false, m.tmpl
+	}
+	tmpl := m.tmpl
+	if _, headIsRec := head.(*runtime.Record); headIsRec && m.record != nil {
+		tmpl = m.record
 	}
 	if tmpl == runtime.Any || tmpl == runtime.AnyOrNone {
 		return true, tmpl
 	}
-	if td := receiveTemplateTypeDesc(first, env); td != nil && isJSONEncodedType(td) {
-		head = materialiseJSONDefaultFields(head, td, env)
+	if m.json != nil {
+		head = materialiseJSONDefaultFields(head, m.json, m.env)
 	}
-	if tr := xmlLoopbackTransformForTemplate(first, env); tr != nil {
-		head = applyXMLLoopbackTransform(head, tr)
+	if m.xml != nil {
+		head = applyXMLLoopbackTransform(head, m.xml)
 	}
 	res := builtins.Match(head, tmpl)
 	if b, ok := res.(runtime.Bool); ok {
