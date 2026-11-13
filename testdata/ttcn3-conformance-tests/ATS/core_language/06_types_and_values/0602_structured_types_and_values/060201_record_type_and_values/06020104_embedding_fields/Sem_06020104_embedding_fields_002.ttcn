@@ -10,7 +10,7 @@ type record A {
 }
 
 type record B {
-	integer b;
+	integer b
 }
 
 testcase TC_Sem_06020104_embedding_fields_002() runs on GeneralComp {

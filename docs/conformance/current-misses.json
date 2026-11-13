@@ -1,41 +1,29 @@
 {
- "summary": "ran 5164 files: 5044 matched, 20 skipped (98.06% match rate)",
- "source": "etsi.json",
- "miss_count": 120,
+ "summary": "ran 5164 files: 5054 matched, 20 skipped (98.25% match rate)",
+ "source": "etsi-new.json",
+ "miss_count": 110,
  "outcomes": {
   "reject->pass": 46,
   "reject->none": 24,
   "->": 20,
-  "pass->parse-error": 13,
-  "pass->fail": 7,
-  "pass->error": 5,
+  "pass->fail": 8,
+  "pass->error": 6,
   "pass->none": 2,
-  "pass->semantic-error": 2,
-  "error->parse-error": 1
+  "pass->parse-error": 2,
+  "pass->semantic-error": 2
  },
  "chapters": [
   {
    "chapter": "core_language/06_types_and_values",
-   "misses": 45,
+   "misses": 40,
    "outcomes": {
     "->": 10,
     "reject->pass": 9,
     "reject->none": 13,
-    "pass->parse-error": 6,
-    "pass->fail": 3,
+    "pass->fail": 4,
     "pass->error": 2,
     "pass->semantic-error": 1,
     "pass->none": 1
-   }
-  },
-  {
-   "chapter": "core_language/05_basic_language_elements",
-   "misses": 16,
-   "outcomes": {
-    "reject->pass": 11,
-    "pass->parse-error": 2,
-    "reject->none": 1,
-    "->": 2
    }
   },
   {
@@ -58,13 +46,21 @@
    }
   },
   {
+   "chapter": "core_language/05_basic_language_elements",
+   "misses": 14,
+   "outcomes": {
+    "reject->pass": 11,
+    "reject->none": 1,
+    "->": 2
+   }
+  },
+  {
    "chapter": "core_language/16_functions_altsteps_testcases",
-   "misses": 8,
+   "misses": 6,
    "outcomes": {
     "reject->none": 1,
     "reject->pass": 2,
-    "error->parse-error": 1,
-    "pass->parse-error": 2,
+    "pass->error": 1,
     "->": 1,
     "pass->semantic-error": 1
    }
@@ -120,13 +116,6 @@
    "misses": 1,
    "outcomes": {
     "->": 1
-   }
-  },
-  {
-   "chapter": "core_language/10_constants",
-   "misses": 1,
-   "outcomes": {
-    "pass->parse-error": 1
    }
   },
   {
@@ -242,22 +231,6 @@
   },
   {
    "chapter": "core_language/05_basic_language_elements",
-   "expected": "pass",
-   "actual": "parse-error",
-   "outcome": "pass->parse-error",
-   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050403_variadic_parameters/Sem_050403_variadic_parameters_009.ttcn",
-   "message": "1 error occurred:\n\t* testdata/ttcn3-conformance-tests/ATS/core_language/05_basic_language_elements/0504_parametrization/050403_variadic_parameters/Sem_050403_variadic_parameters_009.ttcn:9:32-11:2: ex..."
-  },
-  {
-   "chapter": "core_language/05_basic_language_elements",
-   "expected": "pass",
-   "actual": "parse-error",
-   "outcome": "pass->parse-error",
-   "relpath": "core_language/05_basic_language_elements/0504_parametrization/050403_variadic_parameters/Sem_050403_variadic_parameters_011.ttcn",
-   "message": "6 errors occurred:\n\t* testdata/ttcn3-conformance-tests/ATS/core_language/05_basic_language_elements/0504_parametrization/050403_variadic_parameters/Sem_050403_variadic_parameters_011.ttcn:9:34-9:35: e..."
-  },
-  {
-   "chapter": "core_language/05_basic_language_elements",
    "expected": "reject",
    "actual": "none",
    "outcome": "reject->none",
@@ -323,10 +296,10 @@
   {
    "chapter": "core_language/06_types_and_values",
    "expected": "pass",
-   "actual": "parse-error",
-   "outcome": "pass->parse-error",
+   "actual": "fail",
+   "outcome": "pass->fail",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060201_record_type_and_values/06020104_embedding_fields/Sem_06020104_embedding_fields_002.ttcn",
-   "message": "2 errors occurred:\n\t* testdata/ttcn3-conformance-tests/ATS/core_language/06_types_and_values/0602_structured_types_and_values/060201_record_type_and_values/06020104_embedding_fields/Sem_06020104_embed..."
+   "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",
@@ -579,46 +552,6 @@
   {
    "chapter": "core_language/06_types_and_values",
    "expected": "pass",
-   "actual": "parse-error",
-   "outcome": "pass->parse-error",
-   "relpath": "core_language/06_types_and_values/0605_automatic_type/060504_references/Sem_060504_references_007.ttcn",
-   "message": "1 error occurred:\n\t* testdata/ttcn3-conformance-tests/ATS/core_language/06_types_and_values/0605_automatic_type/060504_references/Sem_060504_references_007.ttcn:8:1-10:2: expected module definition, f..."
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "pass",
-   "actual": "parse-error",
-   "outcome": "pass->parse-error",
-   "relpath": "core_language/06_types_and_values/0605_automatic_type/060504_references/Sem_060504_references_008.ttcn",
-   "message": "1 error occurred:\n\t* testdata/ttcn3-conformance-tests/ATS/core_language/06_types_and_values/0605_automatic_type/060504_references/Sem_060504_references_008.ttcn:12:1-14:2: expected module definition, ..."
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "pass",
-   "actual": "parse-error",
-   "outcome": "pass->parse-error",
-   "relpath": "core_language/06_types_and_values/0605_automatic_type/060504_references/Sem_060504_references_011.ttcn",
-   "message": "1 error occurred:\n\t* testdata/ttcn3-conformance-tests/ATS/core_language/06_types_and_values/0605_automatic_type/060504_references/Sem_060504_references_011.ttcn:12:23-15:2: expected module definition,..."
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "pass",
-   "actual": "parse-error",
-   "outcome": "pass->parse-error",
-   "relpath": "core_language/06_types_and_values/0605_automatic_type/060504_references/Sem_060504_references_012.ttcn",
-   "message": "2 errors occurred:\n\t* testdata/ttcn3-conformance-tests/ATS/core_language/06_types_and_values/0605_automatic_type/060504_references/Sem_060504_references_012.ttcn:9:35-9:36: expected '}', found ;\n\t* te..."
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "pass",
-   "actual": "parse-error",
-   "outcome": "pass->parse-error",
-   "relpath": "core_language/06_types_and_values/0605_automatic_type/060506_return_values/Sem_060506_return_values_005.ttcn",
-   "message": "2 errors occurred:\n\t* testdata/ttcn3-conformance-tests/ATS/core_language/06_types_and_values/0605_automatic_type/060506_return_values/Sem_060506_return_values_005.ttcn:9:30-9:31: expected operand, fou..."
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "pass",
    "actual": "semantic-error",
    "outcome": "pass->semantic-error",
    "relpath": "core_language/06_types_and_values/0605_automatic_type/060506_return_values/Sem_060506_return_values_008.ttcn",
@@ -679,14 +612,6 @@
    "outcome": "pass->error",
    "relpath": "core_language/09_test_configurations/0901_communication_ports/Sem_0901_Communication_ports_004.ttcn",
    "message": "test system deadlocked: every component is blocked and no timer can fire"
-  },
-  {
-   "chapter": "core_language/10_constants",
-   "expected": "pass",
-   "actual": "parse-error",
-   "outcome": "pass->parse-error",
-   "relpath": "core_language/10_constants/Sem_10_nested_types_001.ttcn",
-   "message": "2 errors occurred:\n\t* testdata/ttcn3-conformance-tests/ATS/core_language/10_constants/Sem_10_nested_types_001.ttcn:6:25-6:27: expected 'IDENT', found :=\n\t* testdata/ttcn3-conformance-tests/ATS/core_la..."
   },
   {
    "chapter": "core_language/15_templates",
@@ -826,22 +751,6 @@
   },
   {
    "chapter": "core_language/16_functions_altsteps_testcases",
-   "expected": "error",
-   "actual": "parse-error",
-   "outcome": "error->parse-error",
-   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/NegSem_160106_the_not_implemented_function_004.ttcn",
-   "message": "1 error occurred:\n\t* testdata/ttcn3-conformance-tests/ATS/core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/NegSem_160106_the_not_implemented_function_00..."
-  },
-  {
-   "chapter": "core_language/16_functions_altsteps_testcases",
-   "expected": "pass",
-   "actual": "parse-error",
-   "outcome": "pass->parse-error",
-   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/Sem_160106_the_not_implemented_function_001.ttcn",
-   "message": "1 error occurred:\n\t* testdata/ttcn3-conformance-tests/ATS/core_language/16_functions_altsteps_testcases/1601_functions/160106_the_not_implemented_function/Sem_160106_the_not_implemented_function_001.t..."
-  },
-  {
-   "chapter": "core_language/16_functions_altsteps_testcases",
    "expected": "reject",
    "actual": "pass",
    "outcome": "reject->pass",
@@ -851,10 +760,10 @@
   {
    "chapter": "core_language/16_functions_altsteps_testcases",
    "expected": "pass",
-   "actual": "parse-error",
-   "outcome": "pass->parse-error",
+   "actual": "error",
+   "outcome": "pass->error",
    "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/1601_toplevel/Sem_1601_toplevel_004.ttcn",
-   "message": "1 error occurred:\n\t* testdata/ttcn3-conformance-tests/ATS/core_language/16_functions_altsteps_testcases/1601_functions/1601_toplevel/Sem_1601_toplevel_004.ttcn:8:14-10:2: expected module definition, f..."
+   "message": "Error: function f ended without a return statement (ETSI 16.1.0)"
   },
   {
    "chapter": "core_language/16_functions_altsteps_testcases",

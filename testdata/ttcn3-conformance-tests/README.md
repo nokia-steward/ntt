@@ -8,8 +8,8 @@ the corpus for `ntt conformance` and the CI regression gate.
 | | |
 | --- | --- |
 | Upstream | <https://forge.etsi.org/rep/mts/ttcn3-conformance-tests> |
-| Revision | `fdc17d2c03c4074ceee77c1be4614dcce04421a5` (2024-03-28), branch `main` |
-| Imported | 2026-10-29; before that `99ac02bc` (2022-09-07), imported 2022-09-10 |
+| Revision | `74e68f948be03283358b08204ed542c93418172d` (2026-10-31), branch `main` |
+| Imported | 2026-11-13; before that `fdc17d2c` (2024-03-28), imported 2026-10-29, and `99ac02bc` (2022-09-07), imported 2022-09-10 |
 | Vendored | `ATS/` and `LICENSE`; upstream's `docs/`, `standards/`, `build-aux/` and `Makefile` are not |
 | Local delta | two `@purpose` comment lines (below) |
 | `.ttcn` files | 5,164 — the same count as upstream at that revision |

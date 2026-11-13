@@ -6,7 +6,7 @@ module Sem_060506_return_values_005 {
 type component GeneralComp {}
 
 testcase TC_Sem_060506_return_values_005() runs on GeneralComp {
-	var v := match(23, integer:();
+	var v := match(23, integer:?);
 		if (v) {
 			setverdict(pass);
 		}

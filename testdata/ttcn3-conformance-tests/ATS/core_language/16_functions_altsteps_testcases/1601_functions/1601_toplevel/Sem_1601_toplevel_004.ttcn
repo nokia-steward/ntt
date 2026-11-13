@@ -5,7 +5,7 @@ module Sem_1601_toplevel_004 {
 
 type component GeneralComp {}
 
-function f() returns record of record {}[3] {
+function f() return record of record {}[3] {
 	setverdict(pass);
 }
 

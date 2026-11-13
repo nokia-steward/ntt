@@ -5,7 +5,7 @@ module Sem_060504_references_007 {
 
 type component GeneralComp {}
 
-verifyType(inout GeneralComp c) {
+function verifyType(inout GeneralComp c) {
 	setverdict(pass);
 }
 

@@ -6,7 +6,7 @@ module Sem_060504_references_012 {
 type component GeneralComp {}
 
 type record R {
-	record { integer i, float f, } nr;
+	record { integer i, float f, } nr
 }
 
 function verifyType(inout R.nr nr) {

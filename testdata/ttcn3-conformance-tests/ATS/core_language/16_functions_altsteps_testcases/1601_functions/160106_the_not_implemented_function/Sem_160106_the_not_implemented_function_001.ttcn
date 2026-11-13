@@ -5,7 +5,7 @@ module Sem_160106_the_not_implemented_function_001 {
 
 type component GeneralComp {}
 
-function isNeg(in integer i := ???) boolean {
+function isNeg(in integer i := ???) return boolean {
 	return i < 0;
 }
 

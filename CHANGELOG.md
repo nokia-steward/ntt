@@ -250,6 +250,12 @@ single functional test doubles as a performance probe. See
 
 ### Changed
 
+- **The ETSI conformance corpus is upstream 74e68f94** (2026-10-31), which
+  fixes the syntax of 12 tests that are to be accepted: ntt now matches 10
+  of them, 5054 of 5164 files (98.25%). `Sem_1601_toplevel_004` still
+  expects a function that ends without a return statement to pass (16.1.0
+  i); embedded fields, which `Sem_06020104_embedding_fields_002` uses,
+  are not implemented yet.
 - **The parser is master's, with what the engine added to it** — master's
   error-resilient parser of 2026-11-01 (template repetition, `implies`,
   `except`, variadic parameters, `@deterministic`, embedded fields, nested

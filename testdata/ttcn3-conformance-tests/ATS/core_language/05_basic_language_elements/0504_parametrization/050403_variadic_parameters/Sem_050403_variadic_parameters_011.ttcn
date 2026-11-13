@@ -6,7 +6,7 @@ module Sem_050403_variadic_parameters_011 {
 type component GeneralComp {}
 
 testcase TC_Sem_050403_variadic_parameters_011() runs on GeneralComp {
-	if (len(args := {1, 2, 3}) == 3)) {
+	if (len(args := {1, 2, 3}) == 3) {
 	setverdict(pass);
 } else {
 	setverdict(fail, "len(args := {1, 2, 3}) != 3");

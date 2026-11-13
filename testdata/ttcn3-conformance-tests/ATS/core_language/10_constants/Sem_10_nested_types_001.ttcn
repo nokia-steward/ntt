@@ -3,7 +3,7 @@
 // @verdict  pass accept
 module Sem_10_nested_types_001 {
 
-const record of integer := { 1, 2, 3 };
+const record of integer c := { 1, 2, 3 };
 
 type component GeneralComp {}
 

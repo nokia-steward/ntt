@@ -29,6 +29,13 @@ not the declaration. Over some 1,600 TTCN-3 files outside the suite the
 new checks reported one case, in a test that expects the error.
 Remaining by clause, see [current-misses.md](current-misses.md).
 
+**2026-11-13 — corpus refreshed to upstream `main` `74e68f94` (2026-10-31):
+5054 / 5164 matched (98.25%).** The one upstream commit since `fdc17d2c`
+fixes the syntax of 12 tests marked pass accept; every other file is
+unchanged, and gives the outcome it gave. Ten of the twelve now match;
+`Sem_1601_toplevel_004` is a test defect (Bucket 2) and
+`Sem_06020104_embedding_fields_002` needs embedded fields.
+
 **2026-10-29 — corpus refreshed to upstream `main` `fdc17d2c` (2024-03-28):
 4916 / 5164 matched (95.59%), 21 skipped, 248 misses.** The earlier copy
 (`99ac02bc`, 2022-09-07) gave 4803 / 4948. ntt gives every test the two
@@ -1720,6 +1727,11 @@ reading; "fixing" the negative would just flip which side fails (a wash).
   `==` — which ES 201 873-1 V4.17.1, the latest edition, makes void. The
   vendored corpus (2024-03-28) predates it. ntt follows the standard:
   map templates match maps, and maps are compared.
+- **`Sem_1601_toplevel_004`** (2026-11-13, upstream 74e68f94): it checks
+  that a nested return type parses, but its function `f() return record
+  of record {}[3]` ends without a return statement, which is a test case
+  error (16.1.0 i); ntt gives `error` where the test expects `pass`. A
+  `return` in `f` would make the test check only what it says.
 
 ---
 

@@ -9,7 +9,7 @@ type component GeneralComp {
 
 type port Port message { inout integer }
 
-verifyType(inout Port p) {
+function verifyType(inout Port p) {
 	setverdict(pass);
 }
 

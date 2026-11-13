@@ -9,9 +9,10 @@ function verifyType(inout integer i) {
 	setverdict(pass);
 }
 
-function f(integer i) returns integer {
+function f(integer i) return integer {
 	var j := i;
 	verifyType(j);
+	return j;
 }
 
 testcase TC_Sem_060504_references_011() runs on GeneralComp {

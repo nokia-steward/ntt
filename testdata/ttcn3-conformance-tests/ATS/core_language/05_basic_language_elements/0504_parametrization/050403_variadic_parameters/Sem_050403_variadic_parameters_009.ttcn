@@ -6,8 +6,8 @@ module Sem_050403_variadic_parameters_009 {
 type record of integer Roi;
 type component GeneralComp {}
 
-function f(in integer args...) returns RoI {
-	return args
+function f(in integer args...) return Roi {
+	return args;
 }
 
 testcase TC_Sem_050403_variadic_parameters_009() runs on GeneralComp {
