@@ -1,21 +1,25 @@
-[![CI](https://github.com/nokia-steward/ntt/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/nokia-steward/ntt/actions/workflows/ci.yml)
-[![Build Status](https://travis-ci.com/nokia/ntt.svg?branch=master)](https://travis-ci.com/nokia/ntt)
-
 <p align="center">
-<img src="https://nokia.github.io/ntt/static/ntt.png"/><br>
-<b>
-<a href="https://nokia.github.io/ntt/">Documentation</a>&nbsp;&nbsp;|&nbsp;&nbsp;
-<a href="#install">Installation</a>&nbsp;&nbsp;|&nbsp;&nbsp;
-<a href="#contact-us">Contact</a>&nbsp;&nbsp;|&nbsp;&nbsp;
-<a href="https://github.com/nokia/ntt/blob/master/CONTRIBUTING.md">Contribute</a>
-</b>
-<br>
-<br>
-<br>
+  <a href="https://github.com/nokia-steward/ntt/actions/workflows/ci.yml">
+    <img src="https://github.com/nokia-steward/ntt/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI">
+  </a>
 </p>
 
-<img width="40%" align="right" src="https://nokia.github.io/ntt/static/highlight.png"/>
-
+<table align="center">
+  <tr>
+    <td align="center">
+      <a href="https://nokia.github.io/ntt/">Documentation</a>
+    </td>
+    <td align="center">
+      <a href="#install">Installation</a>
+    </td>
+    <td align="center">
+      <a href="#contact-us">Contact</a>
+    </td>
+    <td align="center">
+      <a href="https://github.com/nokia/ntt/blob/master/CONTRIBUTING.md">Contribute</a>
+    </td>
+  </tr>
+</table>
 
 **ntt** is a free and open toolset for language agnostic testing with
 [TTCN-3](https://nokia.github.io/ntt#whats-ttcn-3). It provides IDE support,
