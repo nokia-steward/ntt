@@ -37,7 +37,7 @@ jobs:
         # The race detector makes the interpreter's tests several times
         # slower; on a loaded runner they outlast go test's default
         # ten minutes per package.
-        run: go test -race -timeout 20m ./...
+        run: go test -race -v -timeout 20m ./...
 
   lint:
     name: Linting
@@ -48,9 +48,10 @@ jobs:
         with:
           go-version: stable
       - name: golangci-lint
+        # v1.60 was built with Go 1.23 and refuses the Go 1.25 module.
         uses: golangci/golangci-lint-action@v9
         with:
-          version: v2.14.0
+          version: v2.15.0
 
   conformance:
     # The ntt-Titan roadmap makes the ETSI conformance pass-rate the
