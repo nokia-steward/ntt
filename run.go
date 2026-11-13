@@ -30,21 +30,19 @@ var (
 	runTimeout time.Duration
 )
 
-// ntt run is commands/run's command. On this branch its default backend is
-// eval, ntt's engine; --backend=t3xf runs the T3XF virtual machine. The
-// engine's own flags, and --target, which compiles one file with the go or
-// cpp backend instead, are added here.
+// ntt run is commands/run's command, with master's default backend, t3xf,
+// the T3XF virtual machine; --backend=eval runs the suite on ntt's engine.
+// The engine's own flags, and --target, which compiles one file with the
+// go or cpp backend instead, are added here.
 func init() {
 	run.RegisterBackend("eval", evalBackend)
-	run.SetDefaultBackend("eval")
 	c := run.Command
 	c.Aliases = append(c.Aliases, "run2")
 	c.Long = strings.TrimRight(c.Long, "\n") + `
 
-With the eval backend (the default) the suite runs on ntt's engine, on its
-virtual clock unless --live is given; --timeout bounds each testcase's wall
-clock. --backend=t3xf compiles the suite to T3XF and runs it on the virtual
-machine instead. NTT_LIST_BASKETS and NTT_COLORS may stand for the
+By default (--backend=t3xf) the suite is compiled to T3XF and runs on the
+virtual machine. With --backend=eval it runs on ntt's engine, on its virtual
+clock unless --live is given; --timeout bounds each testcase's wall clock. NTT_LIST_BASKETS and NTT_COLORS may stand for the
 basket and color variables above, and take precedence.
 
 With --target go|cpp, ntt run instead lowers one TTCN-3 file through the

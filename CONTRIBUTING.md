@@ -166,6 +166,8 @@ ntt                 main binary with sub-commands (list, build, run, lint, ...)
 │
 ├── project         test suite configuration package
 ├── control         test management and control
+│   ├── k3r         runner implementation for k3r
+│   └── k3s         runner implementation for k3s
 │
 ├── runtime         runtime system
 ├── builtins        predefined and builtin functions
@@ -173,28 +175,30 @@ ntt                 main binary with sub-commands (list, build, run, lint, ...)
 │
 ├── ttcn3           language support (semantics and convenience functions)
 │   ├── ast         abstract syntax tree and helpers
-│   ├── parser      parser (TTCN-3:2018, various extensions, support for Titan and mtc)
+│   ├── parser      parser (TTCN-3:2018, various extensions, support for Titan, k3 and mtc)
 │   ├── scanner     tokenizer
 │   ├── token       token types
 │   ├── printer     obsolete pretty printer
 │   └── doc         documentation tags package
 │
-└── internal
-    ├── compdb      compilation database types (compile_commands.json)
-    ├── results     result database types (test_results.json)
-    ├── env         environment file handling (ntt.env)
-    ├── loc         source location package
-    ├── log         logging library
-    ├── proc        subprocess library
-    ├── session     session handling library
-    ├── errors      multi-error implementation
-    ├── fs          file caching and filesystem utilities
-    ├── cache	    path cache package (NTT_CACHE, VPATH)
-    ├── memoize     data caching library
-    ├── lsp         language server
-    ├── pipeconn    net.Conn implementation for os.Stdin/os.Stdout (unsed)
-    └── yaml        YAML support library
+├── internal
+│   ├── compdb      compilation database types (compile_commands.json)
+│   ├── results     result database types (test_results.json)
+│   ├── env         environment file handling (ntt.env)
+│   ├── loc         source location package
+│   ├── log         logging library
+│   ├── proc        subprocess library
+│   ├── session     session handling library
+│   ├── errors      multi-error implementation
+│   ├── fs          file caching and filesystem utilities
+│   ├── cache	    path cache package (NTT_CACHE, VPATH)
+│   ├── memoize     data caching library
+│   ├── lsp         language server
+│   ├── pipeconn    net.Conn implementation for os.Stdin/os.Stdout (unsed)
+│   └── yaml        YAML support library
 │
+└── k3              k3 support packages
+    └── log         log file parser
 ```
 
 ## Issue and Pull Request Labels

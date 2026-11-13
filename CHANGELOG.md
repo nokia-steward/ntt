@@ -50,10 +50,10 @@ single functional test doubles as a performance probe. See
   before the system's. `ptre`, `ilen` and `illv` have no TCI-TL operation,
   and the XML and JSON Lines logs leave them out.
 - **`ntt run` builds and runs a suite, printing its line log** — on one
-  of two backends: `--backend=eval` (the default), ntt's engine, on its
-  virtual clock or with `--live` on a real one, `--timeout` bounding each
-  testcase; or `--backend=t3xf`, the suite compiled to T3XF and run on the
-  virtual machine. Both take the same baskets, logging filters, `--output`
+  of two backends: `--backend=t3xf` (the default, as on master), the suite
+  compiled to T3XF and run on the virtual machine; or `--backend=eval`,
+  ntt's engine, on its virtual clock or with `--live` on a real one,
+  `--timeout` bounding each testcase. Both take the same baskets, logging filters, `--output`
   and `@verdict`, `@output` and `@error` checks. `ntt run
   [ <path>... ] [ -- <test id>... ]`, also `ntt run2`, takes the command
   line of the suite runners its structured line log comes from: it runs
