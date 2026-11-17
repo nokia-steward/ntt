@@ -16001,9 +16001,9 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 	// redirect form here (with the literal port key "any port"), whereas
 	// the non-redirect form is handled by evalAnyPortOp; without this the
 	// redirect form matched no queue so `any port.getcall(...) -> param`
-	// never bound its params (Sem_220302_GetcallOperation_005). The scan
-	// runs before ReceiveLock so the per-port recursion takes the lock
-	// itself; PortNames is sorted, so the choice is deterministic.
+	// never bound its params (Sem_220302_GetcallOperation_005). Each port
+	// is received from in a critical section of its own (exec.Receive);
+	// PortNames is sorted, so the choice is deterministic.
 	if port == "any port" {
 		// Fan out over the current component's own ports as BARE names, so
 		// the per-port recursion re-qualifies each back to its storage key
@@ -16031,16 +16031,6 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 		return runtime.Undefined
 	}
 	port = exec.PortKey(port) // real-scheduler: per-PTC port identity (no-op by default)
-	// Serialize the match-and-consume section: when two PTC
-	// goroutines share a port-instance name (e.g. two daemon-style
-	// PTCs each with `port MyServer_PT srv`), this guarantees each
-	// receiver peeks, matches and dequeues the same message under one
-	// lock so it can never bind its redirect to a message a sibling
-	// already claimed. Non-blocking section, so the lock is released
-	// promptly; the alt scheduler parks outside this call, never while
-	// holding recvMu.
-	exec.ReceiveLock()
-	defer exec.ReceiveUnlock()
 	isTrigger := false
 	if info.call != nil {
 		switch f := info.call.Fun.(type) {
@@ -16056,66 +16046,24 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 	}
 	kind := commOpKind(info)
 	isProc := kind != runtime.MsgMessage
-	// ETSI 20.2 alt snapshot boundary: on the real-clock concurrent path a
-	// receive guard only observes messages that were queued when this alt
-	// round began, so a message arriving mid-round can't be stolen by a
-	// later catch-all clause from an earlier specific one. -1 (no freeze)
-	// on the coop / conformance path — behaviour is then byte-identical.
-	limit := altReceiveLimit(exec, port)
-	// A check with no receiving operation (`p.check(from c)`) observes
-	// whatever is at the head of the queue, a call, reply or exception
-	// included (ETSI 22.4).
-	checkAny := !consume && isCheckAnyStandIn(info.call)
 	// One template for every message the operation looks at: a trigger
 	// drops the heads it does not match.
 	var matcher *receiveMatcher
 	if !isProc && info.call != nil {
 		matcher = newReceiveMatcher(info.call, env)
 	}
-	for {
-		head, ok := exec.PeekKindLimited(port, kind, limit)
-		if checkAny {
-			head, ok = exec.PeekHeadLimited(port, limit)
-		}
-		if !ok {
-			// Without the cooperative scheduler, bind a `-> sender v`
-			// target to the latest PTC ref so fixtures whose PTC body was
-			// skipped still see a meaningful sender. Under the scheduler
-			// PTCs run for real and the sender binds from the ACTUAL matched
-			// message, so pre-populating here would wrongly bind the target
-			// on a no-match and corrupt a `[v == null]` clause guard that
-			// gates re-acceptance (Sem_220303_ReplyOperation_001).
-			if !deterministicSchedulerEnabled(env) {
-				prePopulateRedirectExpr(info.redirect, exec, env)
-			}
-			if exec.TestLogger() != nil && kind == runtime.MsgMessage && !checkAny {
-				tlReceiveEmpty(exec, env, info.call, info.call, port)
-			}
-			if !altCtx.active() && exec.CurrentComponent() != nil {
-				return &runtime.ReturnValue{Value: runtime.Undefined}
-			}
-			return runtime.Undefined
-		}
-		// Procedure receives (getreply / getcall / catch) match
-		// leniently by signature template - the conformance suite
-		// keys verdicts off "a reply/call/exception arrived on this
-		// port" rather than the parameter record - so the payload
-		// filter applies only to message receive. The `from` filter,
-		// however, is independent of the signature template and ETSI
-		// 22.3 honours it for procedure ops too (e.g.
-		// `p.getcall(S:?) from v_ptc`), so always evaluate it.
+	// The templates the last head was matched against, for the log.
+	var tmpl, fromTmpl, parsTmpl, valTmpl runtime.Object
+	match := func(head runtime.PortMessage) bool {
+		// A message receive matches the payload against its template, a
+		// procedure receive the parameters and the value or exception
+		// against the signature template. The from clause applies to
+		// both (22.2.2, 22.3).
 		payloadOk := true
-		var tmpl runtime.Object = runtime.Any
+		tmpl, parsTmpl, valTmpl = runtime.Any, nil, nil
 		if matcher != nil {
 			payloadOk, tmpl = matcher.match(head.Payload, systemLoopback(head))
 		}
-		// Honour the procedure signature template (parameter record +
-		// `value`/exception) rather than the lenient "any envelope of
-		// this kind" match above, so e.g.
-		// `check(getreply(S:{p:=(100..200)} value ?))` does NOT match a
-		// reply whose p is out of range (2204 check fixtures). The `from`
-		// filter below still applies independently.
-		var parsTmpl, valTmpl runtime.Object
 		if isProc && info.call != nil {
 			payloadOk, parsTmpl, valTmpl = procReceiveMatch(procReceiveOpName(info.call), info.call, head, env)
 		}
@@ -16134,65 +16082,83 @@ func evalPortReceiveInfo(port string, info commOpInfo, env runtime.Scope, consum
 				mismatchDesc = "answers " + head.Signature + ", not the called " + csig
 			}
 		}
-		fromOk, fromTmpl := fromAddrMatch(head.Sender, info.from, env)
-		if !payloadOk || !fromOk {
-			if exec.TestLogger() != nil {
-				// A trigger drops this head: every drop is an event.
-				if !isProc {
-					tlReceive(exec, env, info.call, port, head, tmpl, fromTmpl, "mismatch", payloadOk, !isTrigger)
-				} else {
-					if payloadOk && mismatchDesc == "" {
-						mismatchDesc = "sender does not match the from clause"
-					}
-					tlProcReceive(exec, info.call, port, head, parsTmpl, valTmpl, fromTmpl, "mismatch", mismatchDesc, !isTrigger)
-				}
-			}
-			if isTrigger {
-				// trigger drops a non-matching head and retries; it consumed
-				// one frozen entry, so shrink the snapshot window to match.
-				_, _ = exec.DequeueKindLimited(port, kind, limit)
-				if limit > 0 {
-					limit--
-				}
-				continue
-			}
-			return runtime.Undefined
-		}
-		if consume {
-			// Bind the redirect to the envelope actually removed
-			// from the queue, not the separately-peeked head, so a
-			// concurrent receiver can never make the two diverge.
-			if deq, okDeq := exec.DequeueKindLimited(port, kind, limit); okDeq {
-				head = deq
-			}
-		}
-		if info.redirect != nil {
-			if isProc {
-				applyRedirectProc(info.redirect, head, env)
-			} else {
-				applyRedirect(info.redirect, head, env)
-			}
-		}
-		// Profiling: a message receive that consumed a value samples the
-		// round-trip latency against the last send on this port. Procedure
-		// receives (getcall/getreply/catch) are excluded — the latency model
-		// pairs a message send with its response.
-		if consume && !isProc {
-			exec.RecordReceive(port)
+		var fromOk bool
+		fromOk, fromTmpl = fromAddrMatch(head.Sender, info.from, env)
+		if payloadOk && fromOk {
+			return true
 		}
 		if exec.TestLogger() != nil {
-			ev := "receive"
-			if !consume {
-				ev = "check"
-			}
+			// A trigger drops this head: every drop is an event.
 			if !isProc {
-				tlReceive(exec, env, info.call, port, head, tmpl, fromTmpl, ev, false, false)
+				tlReceive(exec, env, info.call, port, head, tmpl, fromTmpl, "mismatch", payloadOk, !isTrigger)
 			} else {
-				tlProcReceive(exec, info.call, port, head, parsTmpl, valTmpl, fromTmpl, ev, "", false)
+				if payloadOk && mismatchDesc == "" {
+					mismatchDesc = "sender does not match the from clause"
+				}
+				tlProcReceive(exec, info.call, port, head, parsTmpl, valTmpl, fromTmpl, "mismatch", mismatchDesc, !isTrigger)
 			}
 		}
-		return runtime.NewBool(true)
+		return false
 	}
+	// A check with no receiving operation (`p.check(from c)`) observes
+	// whatever is at the head of the queue, a call, reply or exception
+	// included (ETSI 22.4).
+	checkAny := !consume && isCheckAnyStandIn(info.call)
+	head, res := exec.Receive(runtime.ReceiveOp{
+		Port:    port,
+		Kind:    kind,
+		AnyKind: checkAny,
+		// ETSI 20.2 alt snapshot boundary: on the real-clock concurrent
+		// path a receive guard only observes messages that were queued
+		// when this alt round began, so a message arriving mid-round
+		// can't be stolen by a later catch-all clause from an earlier
+		// specific one. -1 (no freeze) on the coop / conformance path.
+		Limit:   altReceiveLimit(exec, port),
+		Consume: consume,
+		Trigger: isTrigger,
+		Match:   match,
+	})
+	switch res {
+	case runtime.ReceiveEmpty:
+		// Without the cooperative scheduler, bind a `-> sender v`
+		// target to the latest PTC ref so fixtures whose PTC body was
+		// skipped still see a meaningful sender. Under the scheduler
+		// PTCs run for real and the sender binds from the ACTUAL matched
+		// message, so pre-populating here would wrongly bind the target
+		// on a no-match and corrupt a `[v == null]` clause guard that
+		// gates re-acceptance (Sem_220303_ReplyOperation_001).
+		if !deterministicSchedulerEnabled(env) {
+			prePopulateRedirectExpr(info.redirect, exec, env)
+		}
+		if exec.TestLogger() != nil && kind == runtime.MsgMessage && !checkAny {
+			tlReceiveEmpty(exec, env, info.call, info.call, port)
+		}
+		if !altCtx.active() && exec.CurrentComponent() != nil {
+			return &runtime.ReturnValue{Value: runtime.Undefined}
+		}
+		return runtime.Undefined
+	case runtime.ReceiveMismatch:
+		return runtime.Undefined
+	}
+	if info.redirect != nil {
+		if isProc {
+			applyRedirectProc(info.redirect, head, env)
+		} else {
+			applyRedirect(info.redirect, head, env)
+		}
+	}
+	if exec.TestLogger() != nil {
+		ev := "receive"
+		if !consume {
+			ev = "check"
+		}
+		if !isProc {
+			tlReceive(exec, env, info.call, port, head, tmpl, fromTmpl, ev, false, false)
+		} else {
+			tlProcReceive(exec, info.call, port, head, parsTmpl, valTmpl, fromTmpl, ev, "", false)
+		}
+	}
+	return runtime.NewBool(true)
 }
 
 // prePopulateRedirectExpr binds the redirect's sender target to the
