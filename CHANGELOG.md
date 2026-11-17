@@ -378,6 +378,11 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **`ntt check` no longer takes a field named like a variable for that
+  variable**: `r.line`, `{ line := x }`, `f(line := x)` and
+  `-> value (v := line)` name a field or a parameter, so they are no longer
+  reported as `line` read outside the block that declares a variable
+  `line` (`var-out-of-scope`).
 - **`ntt check` allows what ES 201 873-1 20.4 allows in an interleave**: a
   loop within a statement block that has no reception statement, also in
   a branch that receives before or after it (restriction d), and an

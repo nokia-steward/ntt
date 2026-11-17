@@ -19,7 +19,9 @@
 //  3. For every Ident reference whose name was declared
 //     locally exactly once, emit a diagnostic when the
 //     reference's scope chain does not contain the
-//     declaring BlockStmt.
+//     declaring BlockStmt. A field or a parameter named
+//     after such a variable (x.f, { f := 1 }, g(p := 1),
+//     -> value (v := f)) is not a reference to it.
 //
 // The "declared exactly once" guard keeps the rule narrow:
 // shadowing across sibling blocks is left to a future
@@ -388,25 +390,7 @@ func collectScopeRefs(
 	}
 	// Leaf statement (ExprStmt, DeclStmt, AssignStmt, etc.).
 	// Inspect its sub-expressions.
-	syntax.Inspect(st, func(n syntax.Node) bool {
-		if id, ok := n.(*syntax.Ident); ok && id != nil {
-			name := id.String()
-			if d, ok := singleDecl[name]; ok {
-				if !chain[d.block] && d.block != cur && !sameKey(d, id, seen) {
-					*diags = append(*diags, Diagnostic{
-						Code:     "var-out-of-scope",
-						Severity: SeverityError,
-						Message: fmt.Sprintf(
-							"%q is referenced outside the block in which it was declared (ETSI 5.2)",
-							name),
-						Node: id,
-						Span: syntax.SpanOf(id),
-					})
-				}
-			}
-		}
-		return true
-	})
+	inspectExprForScope(st, cur, chain, singleDecl, diags, seen)
 }
 
 func inspectExprForScope(
@@ -420,25 +404,101 @@ func inspectExprForScope(
 	if expr == nil {
 		return
 	}
-	syntax.Inspect(expr, func(n syntax.Node) bool {
-		if id, ok := n.(*syntax.Ident); ok && id != nil {
-			name := id.String()
-			if d, ok := singleDecl[name]; ok {
-				if !chain[d.block] && d.block != cur && !sameKey(d, id, seen) {
-					*diags = append(*diags, Diagnostic{
-						Code:     "var-out-of-scope",
-						Severity: SeverityError,
-						Message: fmt.Sprintf(
-							"%q is referenced outside the block in which it was declared (ETSI 5.2)",
-							name),
-						Node: id,
-						Span: syntax.SpanOf(id),
-					})
-				}
+	scopeRefs(expr, func(id *syntax.Ident) {
+		name := id.String()
+		if d, ok := singleDecl[name]; ok {
+			if !chain[d.block] && d.block != cur && !sameKey(d, id, seen) {
+				*diags = append(*diags, Diagnostic{
+					Code:     "var-out-of-scope",
+					Severity: SeverityError,
+					Message: fmt.Sprintf(
+						"%q is referenced outside the block in which it was declared (ETSI 5.2)",
+						name),
+					Node: id,
+					Span: syntax.SpanOf(id),
+				})
 			}
+		}
+	})
+}
+
+// scopeRefs calls visit for each identifier under n that names a
+// declaration in scope. A field or a parameter is named in the type or
+// the definition it belongs to, not in the block, so it is not one: the
+// field selected after a dot (x.f, ETSI 6.2.1), and the field or the
+// parameter on the left of := in a value list or an argument list
+// ({ f := 1 }, g(p := 1); 6.2.1, 5.4.2), and the one on the right of :=
+// in a redirect (-> value (v := f), -> param (v := p)).
+func scopeRefs(n syntax.Node, visit func(*syntax.Ident)) {
+	if n == nil {
+		return
+	}
+	syntax.Inspect(n, func(n syntax.Node) bool {
+		switch n := n.(type) {
+		case *syntax.Ident:
+			if n != nil {
+				visit(n)
+			}
+		case *syntax.SelectorExpr:
+			if n != nil && n.X != nil {
+				scopeRefs(n.X, visit)
+			}
+			return false
+		case *syntax.CompositeLiteral:
+			if n != nil {
+				namedListRefs(n.List, visit)
+			}
+			return false
+		case *syntax.ParenExpr:
+			if n != nil {
+				namedListRefs(n.List, visit)
+			}
+			return false
+		case *syntax.RedirectExpr:
+			if n == nil {
+				return false
+			}
+			for _, x := range []syntax.Expr{n.X, n.Verdict, n.Sender, n.Index, n.Timestamp} {
+				scopeRefs(x, visit)
+			}
+			redirectListRefs(n.Value, visit)
+			redirectListRefs(n.Param, visit)
+			return false
 		}
 		return true
 	})
+}
+
+// redirectListRefs visits the references of a value or parameter
+// redirect, where an element `v := name` stores the field or the
+// parameter named into the variable v: only v refers (ETSI 22.2.2,
+// 22.3.2).
+func redirectListRefs(list []syntax.Expr, visit func(*syntax.Ident)) {
+	for _, e := range list {
+		if pe, ok := e.(*syntax.ParenExpr); ok && pe != nil {
+			redirectListRefs(pe.List, visit)
+			continue
+		}
+		if be, ok := e.(*syntax.BinaryExpr); ok && be != nil && be.Op != nil && be.Op.Kind() == syntax.ASSIGN {
+			scopeRefs(be.X, visit)
+			continue
+		}
+		scopeRefs(e, visit)
+	}
+}
+
+// namedListRefs visits the references of a value or argument list, where
+// an element `name := v` names a field or a parameter: only v refers.
+func namedListRefs(list []syntax.Expr, visit func(*syntax.Ident)) {
+	for _, e := range list {
+		if be, ok := e.(*syntax.BinaryExpr); ok && be != nil && be.Op != nil && be.Op.Kind() == syntax.ASSIGN {
+			if _, named := be.X.(*syntax.Ident); named {
+				scopeRefs(be.Y, visit)
+				continue
+			}
+		}
+		scopeRefs(e, visit)
+	}
 }
 
 func descendBlock(
