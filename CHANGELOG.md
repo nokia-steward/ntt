@@ -373,6 +373,11 @@ single functional test doubles as a performance probe. See
 
 ### Fixed
 
+- **`ntt check` allows what ES 201 873-1 20.4 allows in an interleave**: a
+  loop within a statement block that has no reception statement, also in
+  a branch that receives before or after it (restriction d), and an
+  interleave nested in an interleave, which 20.4 does not forbid. A loop
+  whose block contains a reception statement is still an error.
 - **A trigger triggers on the first message that matches**, however many
   come before it (22.2.3): it removes the message at the head of the
   queue, matched or not, and the alt now takes its next snapshot at once,

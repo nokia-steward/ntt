@@ -1,18 +1,10 @@
-// interleave_goto_rules.go enforces ETSI ES 201 873-1 clause
-// 20.4 restriction d on control-transfer statements inside
-// an `interleave` branch:
-//
-//   - `for`, `while`, and `do-while` loops whose body
-//     contains a reception statement are illegal;
-//   - nested `alt` and `interleave` statements are illegal
-//     because they would block on a competing event-set;
-//   - `goto` to a label inside the interleave is illegal
-//     whenever the surrounding branch body contains a
-//     reception, since the branch then transfers control
-//     across a blocking-event boundary, unless the goto and
-//     its label lie in a statement block that contains no
-//     reception. A jump out of the interleave is allowed,
-//     conditional or not.
+// interleave_goto_rules.go enforces ETSI ES 201 873-1 clause 20.4
+// restriction d on `goto` inside an `interleave` branch: a goto to a
+// label inside the interleave is illegal when the branch contains a
+// reception statement, unless the goto and its label lie in a statement
+// block that contains none. A jump out of the interleave is allowed,
+// conditional or not. (The loops of restriction d are checked by
+// checkInterleaveRestrictions.)
 //
 // We only inspect the immediate branch body; deeper nested
 // scopes (e.g. inner functions) are intentionally skipped
@@ -35,17 +27,7 @@ func (a *Analyzer) checkInterleaveGotoRules(mod *syntax.Module) []Diagnostic {
 			if !ok || cc == nil || cc.Body == nil {
 				continue
 			}
-			bodyHasReception := containsReceptionStmt(cc.Body)
-			if bodyHasReception {
-				for _, loop := range collectLoopStmts(cc.Body) {
-					diags = append(diags, Diagnostic{
-						Code:     "interleave-loop-in-reception-branch",
-						Severity: SeverityError,
-						Message:  "loops (`for`, `while`, `do-while`) inside an `interleave` branch are only allowed in reception-free branches (ETSI 20.4 restriction d a)",
-						Node:     loop,
-						Span:     syntax.SpanOf(loop),
-					})
-				}
+			if containsReceptionStmt(cc.Body) {
 				for _, g := range collectGotoStmts(cc.Body) {
 					if !inside[syntax.Name(g.Label)] || jumpsWithinReceptionFreeBlock(cc.Body, g) {
 						continue
@@ -95,34 +77,6 @@ func containsReceptionStmt(n syntax.Node) bool {
 		return true
 	})
 	return found
-}
-
-// collectLoopStmts returns every ForStmt, ForRangeStmt,
-// WhileStmt, and DoWhileStmt inside the node.
-func collectLoopStmts(n syntax.Node) []syntax.Stmt {
-	var out []syntax.Stmt
-	syntax.Inspect(n, func(node syntax.Node) bool {
-		switch v := node.(type) {
-		case *syntax.ForStmt:
-			if v != nil {
-				out = append(out, v)
-			}
-		case *syntax.ForRangeStmt:
-			if v != nil {
-				out = append(out, v)
-			}
-		case *syntax.WhileStmt:
-			if v != nil {
-				out = append(out, v)
-			}
-		case *syntax.DoWhileStmt:
-			if v != nil {
-				out = append(out, v)
-			}
-		}
-		return true
-	})
-	return out
 }
 
 // jumpsWithinReceptionFreeBlock reports whether goto g and its label lie

@@ -1,25 +1,16 @@
 // interleave_restrictions.go implements ETSI ES 201 873-1 clause
-// 20.4 restriction (a) ... (d): inside an `interleave` statement
-// the body may not contain control-transfer or function-call
-// constructs that could observe partial reception order. The spec
-// lists the forbidden constructs explicitly:
+// 20.4's restrictions on what an `interleave` statement contains:
 //
-//   - for / while / do-while loops (if the body contains reception)
-//   - goto statements (conditional and unconditional)
-//   - if / select statements (control-flow inside an alternative)
-//   - nested alt / interleave (use a guard expression instead)
-//   - activate / deactivate calls
-//   - stop / repeat / return statements
-//   - direct altstep calls used as alternatives
-//   - user-defined function calls whose body contains reception
-//     statements (direct or indirect)
+//   - activate / deactivate calls, repeat and return statements, direct
+//     altstep calls, and calls of user-defined functions whose body
+//     contains reception statements, directly or indirectly (a);
+//   - for / while / do-while loops whose block contains a reception
+//     statement (d): a loop is allowed in a block without one, even in
+//     a branch that receives before or after it.
 //
-// The conformance suite enforces the structural side of these
-// rules (no for/while/do-while/if/select/goto/alt anywhere inside
-// the interleave body, regardless of whether the body would
-// actually receive). The narrower "must contain reception" variant
-// the spec text mentions is not separately exercised, so the rule
-// is intentionally strict.
+// An alt or an interleave inside an interleave is allowed: 20.4 forbids
+// neither, and the replacement of an interleave by nested alt statements
+// covers them.
 package semantic
 
 import (
@@ -171,18 +162,6 @@ func (a *Analyzer) checkInterleaveRestrictions(mod *syntax.Module) []Diagnostic 
 			case *syntax.DoWhileStmt:
 				if x.Body != nil && bodyHasReception(x.Body, false) {
 					diags = append(diags, interleaveCtrlDiag("do-while-with-reception", x))
-				}
-			case *syntax.AltStmt:
-				// Skip the outer interleave itself.
-				if outer != nil && m == outer {
-					return true
-				}
-				// Only `interleave` nested in another
-				// interleave is illegal; nested `alt` is
-				// fine because it's the conformance suite's
-				// preferred reception pattern.
-				if x.Tok != nil && x.Tok.Kind() == syntax.INTERLEAVE {
-					diags = append(diags, interleaveCtrlDiag("nested interleave", x))
 				}
 			}
 			return true

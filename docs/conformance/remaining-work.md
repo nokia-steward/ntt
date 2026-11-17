@@ -1732,6 +1732,12 @@ reading; "fixing" the negative would just flip which side fails (a wash).
   of record {}[3]` ends without a return statement, which is a test case
   error (16.1.0 i); ntt gives `error` where the test expects `pass`. A
   `return` in `f` would make the test check only what it says.
+- **`NegSem_2004_InterleaveStatement_001`** (2026-11-17): it expects a
+  `for` loop in an interleave branch that receives to be rejected, but the
+  loop's block has no reception statement, which 20.4 restriction d
+  allows. The test predates that rule; upstream's
+  `Sem_2004_InterleaveStatement_023` (89ad548f) expects the same
+  construct to be accepted. ntt follows the standard and accepts it.
 
 ---
 
