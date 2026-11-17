@@ -8,11 +8,11 @@ the corpus for `ntt conformance` and the CI regression gate.
 | | |
 | --- | --- |
 | Upstream | <https://forge.etsi.org/rep/mts/ttcn3-conformance-tests> |
-| Revision | `74e68f948be03283358b08204ed542c93418172d` (2026-10-31), branch `main` |
-| Imported | 2026-11-13; before that `fdc17d2c` (2024-03-28), imported 2026-10-29, and `99ac02bc` (2022-09-07), imported 2022-09-10 |
+| Revision | `89ad548f5cac342f04159bb258fd5f226fc24fa2` (2026-11-16), branch `main` |
+| Imported | 2026-11-17; before that `74e68f94` (2026-10-31), imported 2026-11-13, `fdc17d2c` (2024-03-28), imported 2026-10-29, and `99ac02bc` (2022-09-07), imported 2022-09-10 |
 | Vendored | `ATS/` and `LICENSE`; upstream's `docs/`, `standards/`, `build-aux/` and `Makefile` are not |
 | Local delta | two `@purpose` comment lines (below) |
-| `.ttcn` files | 5,164 — the same count as upstream at that revision |
+| `.ttcn` files | 5,177 — the same count as upstream at that revision |
 
 Note the upstream group is **`mts`** (ETSI TC MTS). A `ttcn3` group does not
 exist; that path returns a sign-in redirect, which looks like a permissions

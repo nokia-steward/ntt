@@ -29,6 +29,14 @@ not the declaration. Over some 1,600 TTCN-3 files outside the suite the
 new checks reported one case, in a test that expects the error.
 Remaining by clause, see [current-misses.md](current-misses.md).
 
+**2026-11-17 — corpus refreshed to upstream `main` `89ad548f` (2026-11-16):
+5065 / 5177 matched (98.22%).** The one upstream commit since `74e68f94`
+adds 13 tests of interleaves over several steps, of defaults and of
+interleave altsteps, which upstream marks unverified. Twelve match;
+`Sem_2004_InterleaveStatement_017` is a test defect (Bucket 2). With it,
+`ntt check` follows 20.4 on loops and nested interleaves, which costs
+`NegSem_2004_InterleaveStatement_001`, a test defect too.
+
 **2026-11-13 — corpus refreshed to upstream `main` `74e68f94` (2026-10-31):
 5054 / 5164 matched (98.25%).** The one upstream commit since `fdc17d2c`
 fixes the syntax of 12 tests marked pass accept; every other file is
@@ -1738,6 +1746,13 @@ reading; "fixing" the negative would just flip which side fails (a wash).
   allows. The test predates that rule; upstream's
   `Sem_2004_InterleaveStatement_023` (89ad548f) expects the same
   construct to be accepted. ntt follows the standard and accepts it.
+- **`Sem_2004_InterleaveStatement_017`** (2026-11-17, upstream 89ad548f,
+  marked unverified): with messages 2 and 4 both queued when its first
+  branch, having received 1, reaches `receive(2)`, it expects the second
+  branch's `receive(4)` to come first, the trace `{1, 4, 2, 9}`. The
+  replacement of an interleave by nested alt statements (20.4, the
+  example) lists the continuation of the branch first, so 2 is received
+  first: `{1, 2, 9, 4}`, as ntt gives.
 
 ---
 

@@ -1,16 +1,16 @@
 # Current Conformance Misses
 
-Generated from `etsi-new.json` using the current workspace runner.
+Generated from `etsi-89.json` using the current workspace runner.
 
-- Summary: `ran 5164 files: 5054 matched, 20 skipped (98.25% match rate)`
-- Misses: `110`
+- Summary: `ran 5177 files: 5065 matched, 20 skipped (98.22% match rate)`
+- Misses: `112`
 
 ## Misses By Outcome
 
-- `reject->pass`: `46`
+- `reject->pass`: `47`
 - `reject->none`: `24`
 - `->`: `20`
-- `pass->fail`: `8`
+- `pass->fail`: `9`
 - `pass->error`: `6`
 - `pass->none`: `2`
 - `pass->parse-error`: `2`
@@ -23,6 +23,7 @@ Generated from `etsi-new.json` using the current workspace runner.
 - `core_language/15_templates`: `15` (`->`=2, `pass->error`=1, `pass->fail`=4, `reject->none`=3, `reject->pass`=5)
 - `core_language/05_basic_language_elements`: `14` (`->`=2, `reject->none`=1, `reject->pass`=11)
 - `core_language/16_functions_altsteps_testcases`: `6` (`->`=1, `pass->error`=1, `pass->semantic-error`=1, `reject->none`=1, `reject->pass`=2)
+- `core_language/20_statement_and_operations_for_alt`: `3` (`pass->error`=1, `pass->fail`=1, `reject->pass`=1)
 - `core_language/26_module_control`: `3` (`->`=3)
 - `core_language/B_matching_incoming_values`: `3` (`reject->none`=2, `reject->pass`=1)
 - `oo/501_classes_and_objects`: `3` (`pass->parse-error`=2, `reject->pass`=1)
@@ -30,7 +31,6 @@ Generated from `etsi-new.json` using the current workspace runner.
 - `core_language/09_test_configurations`: `2` (`pass->error`=1, `reject->none`=1)
 - `core_language/27_specifying_attributes`: `2` (`->`=1, `reject->none`=1)
 - `core_language/08_modules`: `1` (`->`=1)
-- `core_language/20_statement_and_operations_for_alt`: `1` (`pass->error`=1)
 - `core_language/C_predefined_functions`: `1` (`pass->none`=1)
 - `core_language/D_preprocessing_macros`: `1` (`reject->none`=1)
 

@@ -1,12 +1,12 @@
 {
- "summary": "ran 5164 files: 5054 matched, 20 skipped (98.25% match rate)",
- "source": "etsi-new.json",
- "miss_count": 110,
+ "summary": "ran 5177 files: 5065 matched, 20 skipped (98.22% match rate)",
+ "source": "etsi-89.json",
+ "miss_count": 112,
  "outcomes": {
-  "reject->pass": 46,
+  "reject->pass": 47,
   "reject->none": 24,
   "->": 20,
-  "pass->fail": 8,
+  "pass->fail": 9,
   "pass->error": 6,
   "pass->none": 2,
   "pass->parse-error": 2,
@@ -66,6 +66,15 @@
    }
   },
   {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "misses": 3,
+   "outcomes": {
+    "reject->pass": 1,
+    "pass->fail": 1,
+    "pass->error": 1
+   }
+  },
+  {
    "chapter": "core_language/26_module_control",
    "misses": 3,
    "outcomes": {
@@ -116,13 +125,6 @@
    "misses": 1,
    "outcomes": {
     "->": 1
-   }
-  },
-  {
-   "chapter": "core_language/20_statement_and_operations_for_alt",
-   "misses": 1,
-   "outcomes": {
-    "pass->error": 1
    }
   },
   {
@@ -780,6 +782,22 @@
    "outcome": "pass->semantic-error",
    "relpath": "core_language/16_functions_altsteps_testcases/1603_testcases/Syn_1603_testcases_004.ttcn",
    "message": "testcase references component member \"messagePort\" (declared in component GeneralComp) but has no `runs on` clause (ETSI 16.1)"
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "reject",
+   "actual": "pass",
+   "outcome": "reject->pass",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2004_the_interleave_statement/NegSem_2004_InterleaveStatement_001.ttcn",
+   "message": ""
+  },
+  {
+   "chapter": "core_language/20_statement_and_operations_for_alt",
+   "expected": "pass",
+   "actual": "fail",
+   "outcome": "pass->fail",
+   "relpath": "core_language/20_statement_and_operations_for_alt/2004_the_interleave_statement/Sem_2004_InterleaveStatement_017.ttcn",
+   "message": "Unexpected traces:  {1, 2, 9, 4} {1, 3, 9, 4}"
   },
   {
    "chapter": "core_language/20_statement_and_operations_for_alt",

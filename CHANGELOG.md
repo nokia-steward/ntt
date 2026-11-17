@@ -250,6 +250,11 @@ single functional test doubles as a performance probe. See
 
 ### Changed
 
+- **The ETSI conformance corpus is upstream 89ad548f** (2026-11-16), which
+  adds 13 tests of interleaves, defaults and interleave altsteps: ntt
+  matches 12 of them, 5065 of 5177 files (98.22%).
+  `Sem_2004_InterleaveStatement_017` expects an order of alternatives the
+  interleave's replacement by nested alts does not give.
 - **The ETSI conformance corpus is upstream 74e68f94** (2026-10-31), which
   fixes the syntax of 12 tests that are to be accepted: ntt now matches 10
   of them, 5054 of 5164 files (98.25%). `Sem_1601_toplevel_004` still

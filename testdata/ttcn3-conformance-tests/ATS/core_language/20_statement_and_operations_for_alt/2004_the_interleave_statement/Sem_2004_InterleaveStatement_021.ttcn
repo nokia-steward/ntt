@@ -1,0 +1,74 @@
+/*****************************************************************
+ ** @author   TTF T056
+ ** @version  0.0.1
+ ** @purpose  1:20.4, Verify that when an active default without repeat is invoked at a second reception statement inside an interleave branch, the entire interleave statement terminates immediately (CR6238).
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+// The following requirements are tested:
+// Clause 20.4 rule b) & NOTE 2, Clause 20.5.1 (CR6238):
+// Because all reception statements in an interleave statement are replaced by nested alt
+// statements (and not stand-alone sequential receives), if a default altstep finishes
+// without repeat (or with break) while waiting at an inner reception statement of a branch,
+// execution leaves the entire interleave statement immediately.
+
+module Sem_2004_InterleaveStatement_021 {
+
+    type port MyPort message {
+        inout integer
+    }
+
+    type record of integer IntList;
+
+    type component GeneralComp {
+        port MyPort pt_In, pt_Out;
+        var boolean vc_defaultCalled := false;
+    }
+
+    altstep a_abortOnUnexpected() runs on GeneralComp {
+        [] pt_In.receive(integer:99) {
+            vc_defaultCalled := true;
+            // No repeat: must exit the entire interleave statement!
+        }
+    }
+
+    testcase TC_Sem_2004_InterleaveStatement_021() runs on GeneralComp {
+        var IntList v_trace := {};
+        var integer v_leftover := 0;
+        connect(mtc:pt_In, mtc:pt_Out);
+        activate(a_abortOnUnexpected());
+
+        // 1 matches Branch 1 step 1; then 99 triggers the default while Branch 1 is waiting
+        // for 3 and Branch 2 is waiting for 2. Message 2 must remain unconsumed in the queue!
+        pt_Out.send(integer:1);
+        pt_Out.send(integer:99);
+        pt_Out.send(integer:2);
+
+        interleave {
+            [] pt_In.receive(integer:1) {
+                v_trace[lengthof(v_trace)] := 1;
+                pt_In.receive(integer:3);
+                v_trace[lengthof(v_trace)] := 3; // must not be reached
+                setverdict(fail, "Statements after aborted inner receive must not execute");
+            }
+            [] pt_In.receive(integer:2) {
+                v_trace[lengthof(v_trace)] := 2; // must not be reached because interleave already exited
+                setverdict(fail, "Branch 2 must not execute after default exited interleave");
+            }
+        }
+
+        // Message 2 should still be at the head of pt_In after the interleave exited
+        pt_In.receive(integer:2) -> value v_leftover;
+
+        const IntList c_expected := { 1 };
+        if (vc_defaultCalled and v_trace == c_expected and v_leftover == 2) {
+            setverdict(pass);
+        } else {
+            setverdict(fail, "Unexpected state after mid-branch default exit: ", vc_defaultCalled, v_trace, v_leftover);
+        }
+    }
+
+    control {
+        execute(TC_Sem_2004_InterleaveStatement_021());
+    }
+}

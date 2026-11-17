@@ -1,0 +1,39 @@
+/*****************************************************************
+ ** @author   TTF T056
+ ** @version  0.0.1
+ ** @purpose  1:16.2, Verify that top alternatives of an interleave altstep obey the restrictions of the interleave statement in Clause 20.4 (no Boolean guards).
+ ** @verdict  pass reject
+ *****************************************************************/
+
+// The following requirement is tested:
+// Clause 16.2.0 restriction g) (CR7619):
+// If the altstep is an interleave altstep, all restrictions of the interleave statement
+// (see clause 20.4) apply to the top alternatives of the altstep as well.
+
+module NegSem_1602_toplevel_056 {
+
+    type port MyPort message {
+        inout integer
+    }
+
+    type component GeneralComp {
+        port MyPort pt_In, pt_Out;
+    }
+
+    altstep interleave a_invalidInterleaveStep(in boolean p_guard) runs on GeneralComp {
+        [p_guard] pt_In.receive(integer:1) {} // error: Boolean guard is forbidden in interleave altstep
+        [] pt_In.receive(integer:2) {}
+    }
+
+    testcase TC_NegSem_1602_toplevel_056() runs on GeneralComp {
+        connect(mtc:pt_In, mtc:pt_Out);
+        pt_Out.send(integer:1);
+        pt_Out.send(integer:2);
+        a_invalidInterleaveStep(true);
+        setverdict(pass);
+    }
+
+    control {
+        execute(TC_NegSem_1602_toplevel_056());
+    }
+}
