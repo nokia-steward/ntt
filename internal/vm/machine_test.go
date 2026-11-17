@@ -2447,10 +2447,12 @@ func runModule(t *testing.T, src string) (string, error) {
 		}()
 		errCh <- Run(l.Image, &out)
 	}()
+	// A guard against a hang only: a module that logs every step of a
+	// busy loop takes seconds under the race detector on a loaded machine.
 	select {
 	case err := <-errCh:
 		return out.String(), err
-	case <-time.After(2 * time.Second):
+	case <-time.After(30 * time.Second):
 		t.Fatal("timeout")
 		return "", nil
 	}
