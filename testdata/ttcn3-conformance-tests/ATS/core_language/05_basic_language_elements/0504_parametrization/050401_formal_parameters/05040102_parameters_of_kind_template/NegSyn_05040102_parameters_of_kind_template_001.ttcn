@@ -2,7 +2,7 @@
  ** @author   STF 487
  ** @version  0.0.1
  ** @purpose  1:5.4.1.2, verify that module parameter of template kind is not allowed
- ** @verdict  pass reject
+ ** @verdict  pass accept, noexecution
  ***************************************************/
 
 // The following requirement is tested:

@@ -1,0 +1,39 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:19.3, Ensure that the IUT properly evaluates init statement within select-case statements
+ ** @verdict  pass  accept, ttcn3verdict:pass
+ ***************************************************/
+module Sem_190301_select_case_statement_008 {
+
+type component GeneralComp {
+}
+
+testcase TC_Sem_190301_select_case_statement_008 () runs on GeneralComp{
+
+
+ select (var integer v_i:=2; v_i) {
+  case(1) {
+   setverdict(fail);
+  }
+  case(2) {
+   setverdict(pass);
+  }
+  case(3) {
+   setverdict(fail);
+  }
+  case else {
+   setverdict(fail);
+  }
+ }
+}
+
+
+control{
+
+    execute(TC_Sem_190301_select_case_statement_008());
+
+}
+
+}
+

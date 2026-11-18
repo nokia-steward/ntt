@@ -1,0 +1,16 @@
+// @author   TTF T023
+// @purpose  1:5.4.3, Ensure testcase definitions support variadic formal parameters.
+// @verdict  pass accept, testverdict:pass
+module Sem_050403_variadic_parameters_004 {
+
+type component GeneralComp {}
+
+testcase TC_Sem_050403_variadic_parameters_004(in verdicttype verdicts...) runs on GeneralComp {
+	setverdict(pass);
+}
+
+control {
+	execute(TC_Sem_050403_variadic_parameters_004());
+}
+
+}

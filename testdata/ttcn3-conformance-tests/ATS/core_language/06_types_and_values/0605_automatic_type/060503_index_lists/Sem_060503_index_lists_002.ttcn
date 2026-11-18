@@ -1,0 +1,19 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure index list with common key type keys is a map.
+// @verdict  pass accept
+module Sem_060503_index_lists_002 {
+
+type component GeneralComp {}
+
+type map from float to charstring M;
+
+testcase TC_Sem_060503_index_lists_002() runs on GeneralComp {
+	var v := { [1.0] := "a", [2.1] := "b" };
+	var M m := v;
+}
+
+control {
+	execute(TC_Sem_060503_index_lists_002());
+}
+
+}

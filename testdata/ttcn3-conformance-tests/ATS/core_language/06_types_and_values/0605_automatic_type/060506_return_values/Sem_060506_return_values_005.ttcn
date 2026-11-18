@@ -1,0 +1,19 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for match.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060506_return_values_005 {
+
+type component GeneralComp {}
+
+testcase TC_Sem_060506_return_values_005() runs on GeneralComp {
+	var v := match(23, integer:();
+		if (v) {
+			setverdict(pass);
+		}
+	}
+
+	control {
+		execute(TC_Sem_060506_return_values_005());
+	}
+
+}

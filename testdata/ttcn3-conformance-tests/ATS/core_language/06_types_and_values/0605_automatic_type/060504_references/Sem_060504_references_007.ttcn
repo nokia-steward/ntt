@@ -1,0 +1,21 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for components.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060504_references_007 {
+
+type component GeneralComp {}
+
+verifyType(inout GeneralComp c) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_060504_references_007() runs on GeneralComp {
+	var c := mtc;
+	verifyType(c);
+}
+
+control {
+	execute(TC_Sem_060504_references_007());
+}
+
+}

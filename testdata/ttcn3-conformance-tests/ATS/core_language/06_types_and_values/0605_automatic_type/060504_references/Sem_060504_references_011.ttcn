@@ -1,0 +1,25 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for parameters.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060504_references_011 {
+
+type component GeneralComp {}
+
+function verifyType(inout integer i) {
+	setverdict(pass);
+}
+
+function f(integer i) returns integer {
+	var j := i;
+	verifyType(j);
+}
+
+testcase TC_Sem_060504_references_011() runs on GeneralComp {
+	f(1);
+}
+
+control {
+	execute(TC_Sem_060504_references_011());
+}
+
+}

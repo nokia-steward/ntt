@@ -1,0 +1,17 @@
+// @author   TTF T023
+// @purpose  1:11, Ensure variables accept nested types.
+// @verdict  pass accept
+module Sem_11_nested_types_001 {
+
+type component GeneralComp {}
+
+testcase TC_Sem_11_nested_types_001() runs on GeneralComp {
+	var template record of integer t := {1, *, 3};
+	var record {} v[3];
+}
+
+control {
+	execute(TC_Sem_11_nested_types_001());
+}
+
+}

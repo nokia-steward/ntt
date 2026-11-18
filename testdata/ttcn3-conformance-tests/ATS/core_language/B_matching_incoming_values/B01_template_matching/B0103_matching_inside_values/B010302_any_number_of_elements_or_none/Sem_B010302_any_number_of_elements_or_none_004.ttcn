@@ -1,0 +1,65 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:B.1.3.2, AnyElementsOrNone inside a map template (no additional fields)
+ ** @verdict  pass accept, ttcn3verdict:pass
+ ***************************************************/
+
+// The following requirement is tested:
+// AnyElementsOrNone is also used in templates of a map type where it replaces none or
+// any number of elements whose keys are not present in the map template.
+
+module Sem_B010302_any_number_of_elements_or_none_004 {
+
+    type record ProductInfo {
+        charstring producer,
+        charstring model,
+        charstring description optional
+    };
+
+    type map from charstring to ProductInfo TMap;
+
+    type record TRec {
+        integer a,
+        TMap b optional
+    }
+
+	type component GeneralComp {
+	}
+
+	testcase TC_Sem_B010302_any_number_of_elements_or_none_004() runs on GeneralComp {
+        var template TRec v_template := {
+            a := ?,
+            b := {
+                *,
+                ["XS125"] := ?,
+                ["DZ506"] := ?
+            }
+        };
+        var TRec v_val := {
+            a := 1,
+            b := {
+                ["XS125"] := {
+                    producer := "Yoomstick Tec",
+                    model := "BrooMAX 194",
+                    description := omit
+                },
+                ["DZ506"] := {
+                    producer := "XanDonHua Mechanics",
+                    model := "RS-469-23",
+                    description := "Top quality product with many outstanging features"
+                }
+            }
+        };
+        if (match(v_val, v_template)) {
+            setverdict(pass);
+         } else {
+             setverdict(fail);
+         }
+	}
+
+	control{
+	    execute(TC_Sem_B010302_any_number_of_elements_or_none_004());
+	}
+
+}

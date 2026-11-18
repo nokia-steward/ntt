@@ -1,0 +1,23 @@
+// @author   TTF T023
+// @purpose  1:16.1.6, Ensure ??? can be used as value as default parameter
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_160106_the_not_implemented_function_001 {
+
+type component GeneralComp {}
+
+function isNeg(in integer i := ???) boolean {
+	return i < 0;
+}
+
+testcase TC_Sem_160106_the_not_implemented_function_001() runs on GeneralComp {
+	// No error because default parameter is not evaluated.
+	if (isNeg(-5)) {
+		setverdict(pass);
+	}
+}
+
+control {
+	execute(TC_Sem_160106_the_not_implemented_function_001());
+}
+
+}

@@ -1,0 +1,41 @@
+/*****************************************************************
+ ** @author   STF 470
+ ** @version  0.0.1
+ ** @purpose  1:15.8, Ensure that a template(omit) base template can be modified with template(value) restriction.
+ ** @verdict  pass reject
+ *****************************************************************/
+
+module Sem_1508_TemplateRestrictions_022 {
+
+    type component GeneralComp { }
+
+    type record ExampleType {
+        integer a,
+        boolean b optional
+    }
+
+    template(omit) ExampleType m_baseTemplate := {
+        a := 20,
+        b := true
+    }
+
+    template(value) ExampleType m_modifiedTemplate modifies m_baseTemplate := {
+        a := 22
+    }
+
+    testcase TC_Sem_1508_TemplateRestrictions_022() runs on GeneralComp {
+        if (match(valueof(m_modifiedTemplate.a), 22) and
+            match(valueof(m_modifiedTemplate.b), true)
+        ) {
+            setverdict(pass);
+        } else {
+            setverdict(fail);
+        }
+    }
+
+    control{
+        execute(TC_Sem_1508_TemplateRestrictions_022());
+    }
+
+
+}

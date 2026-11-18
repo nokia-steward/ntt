@@ -1,0 +1,22 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure common type of value lists is inferred.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060507_value_lists_002 {
+
+type component GeneralComp {}
+
+type record of universal charstring MyRecord;
+function verifyType(inout MyRecord v) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_060507_value_lists_002() runs on GeneralComp {
+	var v := { "Hello", "Wörld" };
+	verifyType(v);
+}
+
+control {
+	execute(TC_Sem_060507_value_lists_002());
+}
+
+}

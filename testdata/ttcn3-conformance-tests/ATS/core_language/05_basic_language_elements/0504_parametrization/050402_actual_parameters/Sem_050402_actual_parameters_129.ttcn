@@ -16,7 +16,7 @@ module Sem_050402_actual_parameters_129 {
     }
 
     type record R {
-        integer field1
+        integer field1 optional
     }
 
     testcase TC_Sem_050402_actual_parameters_129(out template integer p_val) runs on GeneralComp {

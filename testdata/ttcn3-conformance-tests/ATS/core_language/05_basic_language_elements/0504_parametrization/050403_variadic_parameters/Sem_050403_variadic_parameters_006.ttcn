@@ -1,0 +1,15 @@
+// @author   TTF T023
+// @purpose  1:5.4.3, Ensure variadic parameters are visible as record of types inside the defintion.
+// @verdict  pass accept
+module Sem_050403_variadic_parameters_006 {
+
+type record of integer RoI;
+type record of integer RoA[3];
+type record of C RoC;
+type component C {}
+
+function f1(integer args...) { var RoI r := args }
+function f2(integer args[3]...) { var RoA r := args }
+function f3(C args[3]...) { var RoC r := args }
+
+}

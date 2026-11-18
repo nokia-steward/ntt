@@ -18,7 +18,7 @@ module Sem_050402_actual_parameters_152 {
     type record R {
         integer field1,
         record {
-            integer subfield1,
+            integer subfield1 optional,
             integer subfield2
         } field2 optional
     }

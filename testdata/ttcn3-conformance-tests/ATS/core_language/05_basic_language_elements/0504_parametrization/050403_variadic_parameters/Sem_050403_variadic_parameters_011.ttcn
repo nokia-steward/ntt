@@ -1,0 +1,24 @@
+// @author   TTF T023
+// @purpose  1:5.4.3, Ensure an actual record of parameter in assignment notation is passed directly to the formal variadic parameter.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_050403_variadic_parameters_011 {
+
+type component GeneralComp {}
+
+testcase TC_Sem_050403_variadic_parameters_011() runs on GeneralComp {
+	if (len(args := {1, 2, 3}) == 3)) {
+	setverdict(pass);
+} else {
+	setverdict(fail, "len(args := {1, 2, 3}) != 3");
+}
+}
+
+function len(in integer args...) return integer {
+return lengthof(args);
+}
+
+control {
+execute(TC_Sem_050403_variadic_parameters_011());
+}
+
+}
