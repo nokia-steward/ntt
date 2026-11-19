@@ -1904,6 +1904,14 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			ret, fenv, stopped := applyFunctionWithCallSite(fn, args, n.Args.List)
 			if !stopped {
 				writebackInoutParamsWithSnapshot(fn, n.Args.List, indexSnapshot, fenv, env)
+				// As after an assignment, after use as an out or inout
+				// actual parameter (27.7).
+				for _, a := range n.Args.List {
+					if b, ok := a.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.ASSIGN {
+						a = b.Y
+					}
+					applyOwnImplicitOmit(a, env)
+				}
 				return ret
 			}
 			// A `stop` (or self.stop / self.kill) inside the callee
@@ -5906,6 +5914,13 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 	if assignLazy(lhs, rhs, env) {
 		return nil
 	}
+	// A variable with an "implicit omit" optional attribute of its own
+	// has its optional fields completed after each assignment (27.7).
+	defer func() {
+		if !runtime.IsError(res) {
+			applyOwnImplicitOmit(lhs, env)
+		}
+	}()
 	// The target gets its own value (ETSI 6): `r2 := r` then `r.a := 3`
 	// leaves r2 as it was.
 	val := runtime.Share(eval(rhs, env))
@@ -7881,6 +7896,19 @@ func evalValueDecl(vd *syntax.ValueDecl, env runtime.Scope) runtime.Object {
 
 func evalValueDeclBody(vd *syntax.ValueDecl, env runtime.Scope) runtime.Object {
 	defer v5InitialValues(vd, env)
+	// The attributes of the declaration's own with clause are the
+	// declared definitions' whatever their value (27.8); with "implicit
+	// omit", their optional fields are completed once declared (27.7).
+	if vd.With != nil {
+		attrs := map[string][]string{}
+		collectWithAttrs(vd.With, attrs, nil, nil)
+		for _, decl := range vd.Decls {
+			if decl != nil && decl.Name != nil {
+				recordOwnAttrs(env, syntax.Name(decl.Name), attrs)
+				defer applyOwnImplicitOmit(decl.Name, env)
+			}
+		}
+	}
 	if referencedAsTemplate(vd.TemplateRestriction) {
 		for _, decl := range vd.Decls {
 			markTemplate(env, syntax.Name(decl.Name))
@@ -9325,6 +9353,41 @@ func ownAttrsKey(name string) string { return "\x00ownattrs:" + name }
 func recordOwnAttrs(env runtime.Scope, name string, attrs map[string][]string) {
 	if len(attrs) > 0 {
 		env.Set(ownAttrsKey(name), &runtime.TypeDesc{Name: name, Attrs: attrs})
+	}
+}
+
+// applyOwnImplicitOmit sets to omit the optional fields, at any depth, not
+// given a value of the variable lx is rooted at, when its own with clause
+// gives it the optional attribute "implicit omit" (27.7: "recursive
+// procedure is applied to their optional fields after each assignment or
+// usage as out or inout actual parameter").
+func applyOwnImplicitOmit(lx syntax.Expr, env runtime.Scope) {
+	for {
+		switch x := lx.(type) {
+		case *syntax.SelectorExpr:
+			lx = x.X
+			continue
+		case *syntax.IndexExpr:
+			lx = x.X
+			continue
+		}
+		break
+	}
+	root, ok := lx.(*syntax.Ident)
+	if !ok {
+		return
+	}
+	vals, ok := ownDefAttr(env, root.String(), "optional")
+	if !ok || len(vals) == 0 || !strings.EqualFold(strings.TrimSpace(vals[len(vals)-1]), "implicit omit") {
+		return
+	}
+	v, ok := env.Get(root.String())
+	if !ok || isThunk(v) {
+		return
+	}
+	td := lookupTypeDesc(declaredTypeName(env, root.String()), env)
+	if nv := withImplicitOmit(v, td, env, 0, omitMode{}); nv != v {
+		storeReceiver(root, nv, env)
 	}
 }
 
