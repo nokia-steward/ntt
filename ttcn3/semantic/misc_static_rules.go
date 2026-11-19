@@ -15,7 +15,10 @@
 //   - the default duration of a timer is not infinity (12);
 //   - an index redirection is used with any from only (21.3, 22, 23);
 //   - no list branch follows the else branch of a select case (19.3.1);
-//   - a range does not start with infinity (B.1.2.5).
+//   - a range does not start with infinity (B.1.2.5);
+//   - a template a receiving operation matches with is no
+//     AnyValueOrNone, omit or ifpresent as a whole (B.1.2.4, B.1.2.8,
+//     B.1.4.2).
 package semantic
 
 import (
@@ -67,10 +70,20 @@ func (a *Analyzer) checkMiscStaticRules(mod *syntax.Module) []Diagnostic {
 		}
 	}
 	indexOK := indexRedirectsWithAnyFrom(mod)
+	wholeOnly := wholeMatchingTemplates(mod)
 
 	mod.Inspect(func(n syntax.Node) bool {
 		switch x := n.(type) {
 		case *syntax.CallExpr:
+			// A template matching a received message is no AnyValueOrNone,
+			// omit or ifpresent as a whole (B.1.2.4, B.1.2.8, B.1.4.2).
+			if op := receivingOpName(x.Fun); op != "" && x.Args != nil && len(x.Args.List) > 0 {
+				if ref, ok := unparen(x.Args.List[0]).(*syntax.Ident); ok {
+					if what := wholeOnly[ref.String()]; what != "" {
+						add(x, "whole-template-in-receive", fmt.Sprintf("template %s is %s as a whole: no template of a %s (ETSI B.1.2.4, B.1.2.8, B.1.4.2)", ref.String(), what, op))
+					}
+				}
+			}
 			id, ok := x.Fun.(*syntax.Ident)
 			if !ok {
 				return true
@@ -263,4 +276,48 @@ func indexRedirectsWithAnyFrom(mod *syntax.Module) map[*syntax.RedirectExpr]bool
 		return true
 	})
 	return ok
+}
+
+// receivingOpName is the receiving operation fun names, `p.receive` or
+// `receive` inside a check, or "".
+func receivingOpName(fun syntax.Expr) string {
+	var name string
+	switch f := fun.(type) {
+	case *syntax.SelectorExpr:
+		name = syntax.Name(f.Sel)
+	case *syntax.Ident:
+		name = f.String()
+	}
+	switch name {
+	case "receive", "trigger", "getcall", "getreply":
+		return name
+	}
+	return ""
+}
+
+// wholeMatchingTemplates are the templates without parameters, by name,
+// that are AnyValueOrNone, omit or have ifpresent as a whole, and which.
+func wholeMatchingTemplates(mod *syntax.Module) map[string]string {
+	out := map[string]string{}
+	mod.Inspect(func(n syntax.Node) bool {
+		t, ok := n.(*syntax.TemplateDecl)
+		if !ok || t.Name == nil || t.Params != nil || t.Base != nil || t.Value == nil {
+			return true
+		}
+		switch v := t.Value.(type) {
+		case *syntax.ValueLiteral:
+			if v.Tok != nil && v.Tok.Kind() == syntax.MUL {
+				out[t.Name.String()] = "AnyValueOrNone"
+			}
+			if v.Tok != nil && v.Tok.Kind() == syntax.OMIT {
+				out[t.Name.String()] = "omit"
+			}
+		case *syntax.UnaryExpr:
+			if v.Op != nil && v.Op.Kind() == syntax.IFPRESENT {
+				out[t.Name.String()] = "ifpresent"
+			}
+		}
+		return true
+	})
+	return out
 }

@@ -26,6 +26,9 @@ func TestMiscStaticRules(t *testing.T) {
 		`control { all port.clear; }`:                                               "control-part-port-op",
 		`type port P message { inout integer } type component C { port P p; timer T } testcase tc() runs on C { T.timeout -> @index value v; }`: "index-redirect-without-any-from",
 	}
+	for _, tmpl := range []string{"*", "omit", "5 ifpresent"} {
+		bad[`type port P message { inout integer } type component C { port P p } template integer m := `+tmpl+`; testcase tc() runs on C { p.receive(m); }`] = "whole-template-in-receive"
+	}
 	for src, code := range bad {
 		diags := NewAnalyzer(&ttcn3.DB{}).Analyze(parse(t, `module M { `+src+` }`))
 		if !containsCode(diags, code) {
