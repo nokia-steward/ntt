@@ -17095,6 +17095,13 @@ func extractCommOp(expr syntax.Expr) commOpInfo {
 				info.call = &syntax.CallExpr{Fun: v}
 			}
 			return info
+		case *syntax.SelectorExpr:
+			// The operation without a parameter list, `p.trigger ->
+			// sender v` or `p.receive from c`: the call of none.
+			if op := syntax.Name(v.Sel); isReceivingOpName(op) || op == "check" {
+				info.call = &syntax.CallExpr{Fun: v}
+			}
+			return info
 		default:
 			return info
 		}
