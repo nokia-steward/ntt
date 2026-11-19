@@ -317,10 +317,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		return runtime.Undefined
 
 	case *syntax.DecmatchExpr:
-		// `decmatch [...] template` is part of the decoded-content
-		// matching machinery (Annex E). We don't model codecs end
-		// to end so treat it as a wildcard.
-		return runtime.Undefined
+		return evalDecmatch(n, env)
 
 	case *syntax.RegexpExpr:
 		return evalRegexpExpr(n, env)
@@ -12961,6 +12958,94 @@ func evalDecValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 		return decvalueUnichar(n, enc, env)
 	}
 	return decodeValue(fn, n, enc, env)
+}
+
+// decmatchTargetKey names, in a scope of its own, the decoded instance a
+// decmatch template decodes into.
+const decmatchTargetKey = "\x00ttcn3:decmatch-target"
+
+var decmatchTarget = &syntax.Ident{Tok: nameTok(decmatchTargetKey)}
+
+// decmatchFormatKey names the encoding format a decmatch template passes
+// decvalue_unichar.
+const decmatchFormatKey = "\x00ttcn3:decmatch-format"
+
+var decmatchFormat = &syntax.Ident{Tok: nameTok(decmatchFormatKey)}
+
+// evalDecmatch is the decmatch template n (ETSI B.1.2.9): a field matches
+// it when decvalue, for a binary string, or decvalue_unichar with the
+// encoding format, "UTF-8" when there is none, for a character string,
+// decodes the whole field into an instance of the decoding target's type
+// that the target matches. A format none of the strings decvalue_unichar
+// takes is an error.
+func evalDecmatch(n *syntax.DecmatchExpr, env runtime.Scope) runtime.Object {
+	format := "UTF-8"
+	if p, ok := n.Params.(*syntax.ParenExpr); ok && len(p.List) == 1 {
+		v := forceThunk(eval(p.List[0], env))
+		if runtime.IsError(v) {
+			return v
+		}
+		s, ok := v.(*runtime.String)
+		if !ok || !builtins.IsUCSEncoding(s.String()) {
+			return runtime.Errorf("decmatch: encoding format %s is none of the strings decvalue_unichar takes (ETSI B.1.2.9 c)", v.Inspect())
+		}
+		format = s.String()
+	}
+	target := eval(n.X, env)
+	if runtime.IsError(target) {
+		return target
+	}
+	// The type of the decoding target: `T: template`, or the declared
+	// type of a template referenced.
+	var typeName string
+	if b, ok := n.X.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.COLON {
+		typeName = syntax.Name(b.X)
+	} else if t, _, ok := staticTypeOf(n.X, env, 0); ok {
+		typeName = t.name
+	}
+	decode := func(v runtime.Object) (runtime.Object, bool) {
+		scope := runtime.NewEnv(env)
+		scope.Set(decmatchTargetKey, runtime.Undefined)
+		if typeName != "" {
+			scope.Set(declaredTypeKey(decmatchTargetKey), runtime.NewCharstring(typeName))
+		}
+		var res runtime.Object
+		switch x := v.(type) {
+		case *runtime.String:
+			enc := runtime.NewUniversalString(string(x.Value))
+			scope.Set(codecBufferKey, enc)
+			scope.Set(decmatchFormatKey, runtime.NewCharstring(format))
+			call := &syntax.CallExpr{Args: &syntax.ParenExpr{List: []syntax.Expr{codecBuffer, decmatchTarget, decmatchFormat}}}
+			res = decvalueUnichar(call, enc, scope)
+		case *runtime.Binarystring:
+			bits := builtins.Hex2Bit(x)
+			if x.Unit == runtime.Octet {
+				bits = builtins.Oct2Bit(x)
+			} else if x.Unit == runtime.Bit {
+				bits = x
+			}
+			scope.Set(codecBufferKey, bits)
+			call := &syntax.CallExpr{Args: &syntax.ParenExpr{List: []syntax.Expr{codecBuffer, decmatchTarget}}}
+			res = decodeValue("decvalue", call, bits, scope)
+		default:
+			return nil, false
+		}
+		if r, ok := res.(runtime.Int); !ok || r.Int64() != 0 {
+			return nil, false
+		}
+		// The whole field decoded: nothing left.
+		if rest, ok := scope.Get(codecBufferKey); ok {
+			if l, ok := rest.(interface{ Len() int }); ok && l.Len() != 0 {
+				return nil, false
+			}
+		}
+		out, ok := scope.Get(decmatchTargetKey)
+		if !ok || out == runtime.Undefined {
+			return nil, false
+		}
+		return out, true
+	}
+	return &runtime.Decmatch{Decode: decode, Target: target, Text: target.Inspect()}
 }
 
 // codecBuffer names, in a scope of its own, the bitstring decvalue_unichar

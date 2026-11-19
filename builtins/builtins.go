@@ -937,7 +937,7 @@ func IsTemplateKind(args ...runtime.Object) runtime.Object {
 		// A decmatch template is held as the Undefined placeholder
 		// the matcher takes for any value; an unbound template is no
 		// argument of istemplatekind.
-		res = t == runtime.Undefined
+		_, res = t.(*runtime.Decmatch)
 	case "AnyElement":
 		res = inside(func(e runtime.Object) bool { return e == runtime.Any }, '?')
 	case "AnyElementsOrNone":

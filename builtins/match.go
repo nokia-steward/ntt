@@ -91,6 +91,19 @@ func enumTemplatePair(a, b runtime.Object) (tmpl, val *runtime.EnumValue, ok boo
 }
 
 // match returns true given objects match.
+// matchDecoded is whether v, an encoded field, decodes whole into a value
+// the decmatch template d's target matches (B.1.2.9).
+func matchDecoded(v runtime.Object, d *runtime.Decmatch) (bool, error) {
+	if v == runtime.Omit || v == runtime.Undefined || d.Decode == nil {
+		return false, nil
+	}
+	decoded, ok := d.Decode(v)
+	if !ok {
+		return false, nil
+	}
+	return match(decoded, d.Target)
+}
+
 func match(a, b runtime.Object) (bool, error) {
 	// A nil Object reaches here when an unbound formal (e.g. a
 	// defaulted parameter omitted in a named-argument call) is fed
@@ -98,6 +111,14 @@ func match(a, b runtime.Object) (bool, error) {
 	// we never nil-deref on a.Type()/b.Type() below.
 	if a == nil || b == nil {
 		return true, nil
+	}
+	// decmatch: the field decoded, matched by the decoding target
+	// (B.1.2.9).
+	if d, ok := b.(*runtime.Decmatch); ok {
+		return matchDecoded(a, d)
+	}
+	if d, ok := a.(*runtime.Decmatch); ok {
+		return matchDecoded(b, d)
 	}
 	// `*` (AnyOrNone) matches any value, present or absent (including
 	// `omit`), so it wins before the omit handling below.

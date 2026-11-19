@@ -70,6 +70,7 @@ const (
 	LAZY_THUNK        ObjectType = "lazy thunk"
 	NULL              ObjectType = "null"
 	LENGTH_RESTRICTED ObjectType = "length-restricted template"
+	DECMATCH          ObjectType = "decmatch template"
 	COMPONENT_REF     ObjectType = "component reference"
 	CLASS_DESC        ObjectType = "class descriptor"
 	CLASS_INSTANCE    ObjectType = "object reference"
@@ -198,6 +199,23 @@ type Range struct {
 }
 
 func (r *Range) Type() ObjectType { return RANGE }
+
+// Decmatch is the matching mechanism MatchDecodedContent, `decmatch
+// [(format)] target` (ETSI ES 201 873-1 B.1.2.9): it matches an encoded
+// field that Decode decodes, whole, into a value Target matches. Decode
+// reports false when the field cannot be decoded.
+type Decmatch struct {
+	Decode func(Object) (Object, bool)
+	Target Object
+	Text   string // as written, for Inspect
+}
+
+func (d *Decmatch) Type() ObjectType { return DECMATCH }
+func (d *Decmatch) Inspect() string  { return "decmatch " + d.Text }
+func (d *Decmatch) Equal(other Object) bool {
+	o, ok := other.(*Decmatch)
+	return ok && o == d
+}
 
 // LengthRestricted wraps an inner template with a length attribute,
 // e.g. `?length(1..3)` or `"abc" length(3)`. The matcher checks the
