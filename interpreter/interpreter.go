@@ -1428,6 +1428,10 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				return evalInt2Enum(n, env)
 			case "substr":
 				return evalSubstr(n, env)
+			case "replace":
+				if res, ok := evalReplaceTemplate(n, env); ok {
+					return res
+				}
 			case "log":
 				return evalLog(n, env)
 			case "action":
@@ -3449,6 +3453,245 @@ func evalSubstr(n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 		res = &runtime.IfPresent{Inner: res}
 	}
 	return res
+}
+
+// evalReplaceTemplate is replace(inpar, index, len, repl) when inpar or
+// repl is a template (ETSI C.4.3): ? length (index..infinity) when both
+// are AnyValue, * length (index..infinity) when inpar is AnyValueOrNone
+// and repl AnyValue, and otherwise, an AnyValue repl taken for pattern "*"
+// or a binary string of one *,
+//
+//	substr(inpar, 0, index) & repl & substr(inpar, index + len, lengthof(inpar) - index - len)
+//
+// with an ifpresent of inpar moved to the result. ok is false when neither
+// is a template: the predefined function on values takes the call.
+func evalReplaceTemplate(n *syntax.CallExpr, env runtime.Scope) (runtime.Object, bool) {
+	if n.Args == nil || len(n.Args.List) != 4 {
+		return nil, false
+	}
+	for _, a := range n.Args.List {
+		if b, ok := a.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.ASSIGN {
+			return nil, false // by name: the predefined function's
+		}
+	}
+	args := make([]runtime.Object, 4)
+	for k, a := range n.Args.List {
+		args[k] = forceThunk(eval(a, env))
+		if runtime.IsError(args[k]) {
+			return args[k], true
+		}
+	}
+	inpar, repl := args[0], args[3]
+	if !isStringTemplate(inpar) && !isStringTemplate(repl) {
+		return nil, false
+	}
+	// repl is a specific value, a pattern or AnyValue without matching
+	// attributes (C.4.3).
+	switch repl.(type) {
+	case *runtime.LengthRestricted, *runtime.IfPresent:
+		return runtime.Errorf("replace: repl has a matching attribute (ETSI C.4.3)"), true
+	}
+	if repl == runtime.AnyOrNone {
+		return runtime.Errorf("replace: repl is AnyValueOrNone, not a specific value, a pattern or AnyValue (ETSI C.4.3)"), true
+	}
+	index, iok := args[1].(runtime.Int)
+	count, cok := args[2].(runtime.Int)
+	if !iok || !index.IsInt64() || !cok || !count.IsInt64() {
+		return runtime.Errorf("replace: index or len is not an integer"), true
+	}
+	i, l := int(index.Int64()), int(count.Int64())
+	ifpresent := false
+	if ip, ok := inpar.(*runtime.IfPresent); ok {
+		inpar, ifpresent = ip.Inner, true
+	}
+	core := inpar
+	if lr, ok := core.(*runtime.LengthRestricted); ok {
+		core = lr.Inner
+	}
+	if i < 0 || l < 0 {
+		return runtime.Errorf("replace: index or len is less than 0 (ETSI C.4.3)"), true
+	}
+	kind := stringKindOf(n.Args.List[0], env)
+	if kind == "" {
+		kind = stringKindOfValue(repl)
+	}
+	if repl == runtime.Any {
+		// The two cases of AnyValue in both (C.4.3).
+		if inpar == runtime.Any || inpar == runtime.AnyOrNone {
+			res := runtime.Object(&runtime.LengthRestricted{Inner: inpar, Min: i, Max: -1})
+			if ifpresent {
+				res = &runtime.IfPresent{Inner: res}
+			}
+			return res, true
+		}
+		if kind == "" {
+			kind = stringKindOfValue(core)
+		}
+		switch kind {
+		case "charstring":
+			repl = &runtime.String{Value: []rune("*"), IsPattern: true}
+		case "B", "H", "O":
+			bs, err := runtime.NewBinarystring("'*'" + kind)
+			if err != nil {
+				return runtime.Errorf("replace: %v", err), true
+			}
+			repl = bs
+		default:
+			return runtime.Errorf("replace: AnyValue of a type that is no string type"), true
+		}
+	}
+	length, ok := templateItemCount(inpar)
+	if !ok {
+		return runtime.Errorf("replace: the length of inpar %s is not known (ETSI C.4.2)", inpar.Inspect()), true
+	}
+	if i > length || l > length || i+l > length {
+		return runtime.Errorf("replace: index %d and len %d exceed lengthof(inpar) %d (ETSI C.4.3)", i, l, length), true
+	}
+	left := substrItems(inpar, 0, i, kind)
+	right := substrItems(inpar, i+l, length-i-l, kind)
+	for _, o := range []runtime.Object{left, right} {
+		if runtime.IsError(o) {
+			return o, true
+		}
+	}
+	res := concatObjects(concatObjects(left, repl, env), right, env)
+	if ifpresent && !runtime.IsError(res) {
+		res = &runtime.IfPresent{Inner: res}
+	}
+	return res, true
+}
+
+// isStringTemplate reports whether o is a template of a string type: a
+// pattern, a binary string with matching symbols inside, AnyValue,
+// AnyValueOrNone, or one with a length or ifpresent attribute.
+func isStringTemplate(o runtime.Object) bool {
+	switch v := o.(type) {
+	case *runtime.String:
+		return v.IsPattern
+	case *runtime.Binarystring:
+		return v.Value != nil && v.Value.Sign() < 0
+	case *runtime.LengthRestricted, *runtime.IfPresent:
+		return true
+	}
+	return o == runtime.Any || o == runtime.AnyOrNone
+}
+
+// stringKindOfValue is stringKindOf told by a value: "charstring" for a
+// character string, "B", "H" or "O" for a binary string.
+func stringKindOfValue(o runtime.Object) string {
+	switch v := o.(type) {
+	case *runtime.String:
+		return "charstring"
+	case *runtime.Binarystring:
+		return v.Unit.String()
+	case *runtime.IfPresent:
+		return stringKindOfValue(v.Inner)
+	case *runtime.LengthRestricted:
+		return stringKindOfValue(v.Inner)
+	}
+	return ""
+}
+
+// templateItemCount is lengthof a string template without ifpresent: its
+// indexable items (15.6.1), the fixed length of a wildcard.
+func templateItemCount(o runtime.Object) (int, bool) {
+	switch v := o.(type) {
+	case *runtime.String:
+		if v.IsPattern {
+			items, _ := builtins.PatternItems(v.Value, v.Refs)
+			return len(items), true
+		}
+		return v.Len(), true
+	case *runtime.Binarystring:
+		if v.Value != nil && v.Value.Sign() < 0 {
+			lit := v.String
+			if len(lit) < 3 {
+				return 0, false
+			}
+			body := strings.Join(strings.Fields(lit[1:len(lit)-2]), "")
+			count := 0
+			for k := 0; k < len(body); k++ {
+				if v.Unit == runtime.Octet && body[k] != '?' && body[k] != '*' && k+1 < len(body) {
+					k++
+				}
+				count++
+			}
+			return count, true
+		}
+		return v.Length, true
+	case *runtime.LengthRestricted:
+		if v.Min == v.Max && v.Max >= 0 {
+			return v.Max, true
+		}
+	}
+	return 0, false
+}
+
+// substrItems is substr(o, i, n) on a string value or template counted in
+// its items (15.6.1, C.4.2): a pattern's taken as a pattern, a fixed-length
+// wildcard's as that many ?.
+func substrItems(o runtime.Object, i, n int, kind string) runtime.Object {
+	switch v := o.(type) {
+	case *runtime.String:
+		if !v.IsPattern {
+			break
+		}
+		items, isRef := builtins.PatternItems(v.Value, v.Refs)
+		if i < 0 || n < 0 || i+n > len(items) {
+			return runtime.Errorf("replace: out of range")
+		}
+		var out []rune
+		var refs [][2]int
+		for k := i; k < i+n; k++ {
+			if isRef[k] {
+				refs = append(refs, [2]int{len(out), len(out) + len(items[k])})
+			}
+			out = append(out, items[k]...)
+		}
+		return &runtime.String{Value: out, IsPattern: true, NoCase: v.NoCase, PatternComplex: v.PatternComplex, Refs: refs}
+	case *runtime.LengthRestricted:
+		elems := strings.Repeat("?", n)
+		switch kind {
+		case "charstring":
+			return &runtime.String{Value: []rune(elems), IsPattern: true}
+		case "B", "H", "O":
+			bs, err := runtime.NewBinarystring("'" + elems + "'" + kind)
+			if err != nil {
+				return runtime.Errorf("replace: %v", err)
+			}
+			return bs
+		}
+		return runtime.Errorf("replace: a wildcard of a type that is no string type")
+	}
+	return builtins.Substr(o, runtime.NewInt(i), runtime.NewInt(n))
+}
+
+// concatOperandKeys name, in a scope of their own, the operands
+// concatObjects joins.
+const (
+	concatLeftKey  = "\x00ttcn3:concat-left"
+	concatRightKey = "\x00ttcn3:concat-right"
+)
+
+var concatOperands = &syntax.BinaryExpr{
+	X:  &syntax.Ident{Tok: nameTok(concatLeftKey)},
+	Op: opTok(syntax.CONCAT),
+	Y:  &syntax.Ident{Tok: nameTok(concatRightKey)},
+}
+
+// concatObjects is x & y, as the operator joins values and templates
+// (15.11).
+func concatObjects(x, y runtime.Object, env runtime.Scope) runtime.Object {
+	if runtime.IsError(x) {
+		return x
+	}
+	if runtime.IsError(y) {
+		return y
+	}
+	tmp := runtime.NewEnv(env)
+	tmp.Set(concatLeftKey, x)
+	tmp.Set(concatRightKey, y)
+	return evalBinary(concatOperands, tmp)
 }
 
 // stringKindOf is the string kind of the type the variable, template or
