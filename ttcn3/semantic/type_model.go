@@ -32,12 +32,25 @@ func (r rootType) primitive() bool {
 }
 
 // assignable reports whether a value of root type v may be assigned to a
-// target of root type t, as far as root types tell (6.3.1).
+// target of root type t, as far as root kinds tell (6.3.1, 6.3.2): the
+// same kind, or a charstring into a universal charstring. Values of
+// structured or enumerated types of the same kind may be compatible
+// whatever their names (6.3.2), which kinds do not tell.
 func assignable(t, v rootType) bool {
 	if t.kind == v.kind {
 		return true
 	}
 	return t.kind == "universal charstring" && v.kind == "charstring"
+}
+
+// structured reports whether r is a known structured or enumerated root
+// type, whose kind a value of another kind never matches (6.3.2).
+func (r rootType) structured() bool {
+	switch r.kind {
+	case "record", "set", "union", "record of", "set of", "enumerated":
+		return true
+	}
+	return false
 }
 
 // comparable reports whether values of root types x and y may be
@@ -260,6 +273,18 @@ func (m typeModel) refRoot(id *syntax.Ident) (rootType, bool) {
 // synonyms and subtypes.
 func (m typeModel) typeRoot(tree *ttcn3.Tree, t syntax.Expr, depth int) (rootType, bool) {
 	if depth > 16 || t == nil {
+		return rootType{}, false
+	}
+	switch x := t.(type) {
+	case *syntax.ListSpec:
+		if x.KindTok != nil && x.KindTok.String() == "set" {
+			return rootType{kind: "set of"}, true
+		}
+		return rootType{kind: "record of"}, true
+	case *syntax.StructSpec:
+		if x.KindTok != nil {
+			return rootType{kind: x.KindTok.String()}, true
+		}
 		return rootType{}, false
 	}
 	if name := syntax.Name(t); name != "" {

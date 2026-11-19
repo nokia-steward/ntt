@@ -36,6 +36,13 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 		r, rok := m.exprRoot(y)
 		return l, r, lok && rok && l.primitive() && r.primitive()
 	}
+	// pair of known root types, both basic or string, or both
+	// structured, for assignments.
+	assignPair := func(x, y syntax.Expr) (rootType, rootType, bool) {
+		l, lok := m.exprRoot(x)
+		r, rok := m.exprRoot(y)
+		return l, r, lok && rok && (l.primitive() && r.primitive() || l.structured() && r.structured())
+	}
 	mod.Inspect(func(n syntax.Node) bool {
 		switch x := n.(type) {
 		case *syntax.ValueDecl:
@@ -48,14 +55,14 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 				return true
 			}
 			t, ok := m.typeRoot(tree, x.Type, 0)
-			if !ok || !t.primitive() {
+			if !ok || !t.primitive() && !t.structured() {
 				return true
 			}
 			for _, d := range x.Decls {
 				if d == nil || d.Value == nil || len(d.ArrayDef) > 0 {
 					continue
 				}
-				if v, ok := m.exprRoot(d.Value); ok && v.primitive() && !assignable(t, v) {
+				if v, ok := m.exprRoot(d.Value); ok && (v.primitive() || v.structured()) && t.primitive() == v.primitive() && !assignable(t, v) {
 					add(d, "type-incompatible-value", fmt.Sprintf("a %s value is no initial value of the %s %s (ETSI 6.3.1)", v.kind, t.kind, syntax.Name(d.Name)))
 				}
 			}
@@ -68,7 +75,7 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 				switch target := x.X.(type) {
 				case *syntax.Ident, *syntax.SelectorExpr:
 					if isAssignStatement(tree, x) {
-						if t, v, ok := both(target, x.Y); ok && !assignable(t, v) {
+						if t, v, ok := assignPair(target, x.Y); ok && !assignable(t, v) {
 							add(x, "type-incompatible-assignment", fmt.Sprintf("a %s value is assigned to the %s %s (ETSI 6.3.1, 19.1)", v.kind, t.kind, syntax.Name(target)))
 						}
 					}
