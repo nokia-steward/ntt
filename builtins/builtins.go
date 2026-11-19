@@ -818,6 +818,10 @@ func IsTemplateKind(args ...runtime.Object) runtime.Object {
 		res = inside(func(e runtime.Object) bool { return e == runtime.Any }, '?')
 	case "AnyElementsOrNone":
 		res = inside(func(e runtime.Object) bool { return e == runtime.AnyOrNone }, '*')
+		// A map template holds it beside its elements (6.2.15.4).
+		if m, ok := t.(*runtime.Map); ok {
+			res = m.AnyElementsOrNone
+		}
 	case "permutation":
 		res = inside(func(e runtime.Object) bool {
 			l, ok := e.(*runtime.List)

@@ -1,13 +1,13 @@
 {
- "summary": "ran 5177 files: 5065 matched, 20 skipped (98.22% match rate)",
- "source": "etsi-89.json",
- "miss_count": 112,
+ "summary": "ran 5177 files: 5070 matched, 20 skipped (98.31% match rate)",
+ "source": "etsi-report.json",
+ "miss_count": 107,
  "outcomes": {
-  "reject->pass": 47,
+  "reject->pass": 46,
   "reject->none": 24,
   "->": 20,
-  "pass->fail": 9,
-  "pass->error": 6,
+  "pass->fail": 6,
+  "pass->error": 5,
   "pass->none": 2,
   "pass->parse-error": 2,
   "pass->semantic-error": 2
@@ -35,23 +35,22 @@
    }
   },
   {
-   "chapter": "core_language/15_templates",
-   "misses": 15,
-   "outcomes": {
-    "->": 2,
-    "pass->fail": 4,
-    "reject->none": 3,
-    "reject->pass": 5,
-    "pass->error": 1
-   }
-  },
-  {
    "chapter": "core_language/05_basic_language_elements",
    "misses": 14,
    "outcomes": {
     "reject->pass": 11,
     "reject->none": 1,
     "->": 2
+   }
+  },
+  {
+   "chapter": "core_language/15_templates",
+   "misses": 10,
+   "outcomes": {
+    "->": 2,
+    "pass->fail": 1,
+    "reject->none": 3,
+    "reject->pass": 4
    }
   },
   {
@@ -678,46 +677,6 @@
    "outcome": "reject->pass",
    "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/NegSem_150606_Referencing_map_elements_005.ttcn",
    "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/NegSem_150606_Referencing_map_elements_006.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/Sem_150606_Referencing_map_elements_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/Sem_150606_Referencing_map_elements_003.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "pass",
-   "actual": "fail",
-   "outcome": "pass->fail",
-   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/Sem_150606_Referencing_map_elements_004.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "pass",
-   "actual": "error",
-   "outcome": "pass->error",
-   "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/Sem_150606_Referencing_map_elements_005.ttcn",
-   "message": "Error: the right-hand side  is uninitialised (ETSI 19.1.1 c)"
   },
   {
    "chapter": "core_language/15_templates",

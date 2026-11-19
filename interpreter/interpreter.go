@@ -5905,12 +5905,25 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 		// A key indexes a map, of a map type whatever the key's type
 		// (6.2.15.4): a list or a string is indexed by an integer.
 		_, containerIsMap := container.(*runtime.Map)
-		if _, isInt := idx.(runtime.Int); (!isInt || containerIsMap ||
+		// An element of a map template holding AnyValue or
+		// AnyValueOrNone: the map is expanded, the element given, and
+		// AnyElementsOrNone added (15.6.6 c, d); one holding omit is
+		// expanded as an uninitialised map is (15.6.6 a, 6.2.15.7). With
+		// ifpresent, an error (15.6.6 e).
+		wildMap := false
+		if container == runtime.Any || container == runtime.AnyOrNone || container == runtime.Omit {
+			wildMap = isMapType(lvalueTypeDesc(l.X, env), env)
+		}
+		if _, ok := container.(*runtime.IfPresent); ok && isMapType(lvalueTypeDesc(l.X, env), env) {
+			return runtime.Errorf("%s: referencing an element of a map template with ifpresent (ETSI 15.6.6 e)", syntax.Name(l.X))
+		}
+		if _, isInt := idx.(runtime.Int); (!isInt || containerIsMap || wildMap ||
 			(container == runtime.Undefined || container == nil) && isMapType(lvalueTypeDesc(l.X, env), env)) &&
 			idx != runtime.Undefined && idx != runtime.Any && idx != runtime.AnyOrNone {
 			m, isMap := container.(*runtime.Map)
-			if !isMap && (container == runtime.Undefined || container == nil) {
+			if !isMap && (container == runtime.Undefined || container == nil || wildMap) {
 				m = runtime.NewMap()
+				m.AnyElementsOrNone = container == runtime.Any || container == runtime.AnyOrNone
 				switch lx := l.X.(type) {
 				case *syntax.Ident:
 					assignOrSet(env, lx.String(), m)
@@ -6263,6 +6276,23 @@ func owned(x syntax.Expr, env runtime.Scope) runtime.Object {
 		if runtime.IsError(idx) {
 			return idx
 		}
+		// An element of a map template holding AnyValue, AnyValueOrNone
+		// or omit, or one with AnyElementsOrNone not having it: the map
+		// is expanded and the element is AnyValue, for what follows to
+		// expand in turn (15.6.6 c, d, f; 6.2.15.7).
+		if parent == runtime.Any || parent == runtime.AnyOrNone || parent == runtime.Omit {
+			if declaredTemplate(e.X, env) && isMapType(lvalueTypeDesc(e.X, env), env) {
+				m := runtime.NewMap()
+				m.AnyElementsOrNone = parent != runtime.Omit
+				storeReceiver(e.X, m, env)
+				parent = m
+			}
+		}
+		if m, ok := parent.(*runtime.Map); ok && m.AnyElementsOrNone {
+			if _, has := m.Get(idx); !has {
+				m.Set(idx, runtime.Any)
+			}
+		}
 		v := indexValueOf(parent, idx, env)
 		if runtime.IsShared(v) {
 			v = runtime.Unshare(v)
@@ -6507,6 +6537,10 @@ func storeReceiver(recv syntax.Expr, val runtime.Object, env runtime.Scope) runt
 				}
 				list.Elements[i] = val
 			}
+		}
+		if m, ok := container.(*runtime.Map); ok && idx != nil && !runtime.IsError(idx) {
+			m.Delete(idx)
+			m.Set(idx, val)
 		}
 		return storeReceiver(r.X, container, env)
 	}
@@ -8187,12 +8221,12 @@ func lvalueTypeDesc(lx syntax.Expr, env runtime.Scope) *runtime.TypeDesc {
 		}
 	case *syntax.IndexExpr:
 		parent := lvalueTypeDesc(x.X, env)
-		if parent != nil && parent.Map != nil {
-			home := parent.Home
+		if mt := mapTypeDesc(parent, env); mt != nil && mt.Map != nil {
+			home := mt.Home
 			if home == nil {
 				home = env
 			}
-			return typeDescOfSpec(parent.Map.ToType, home)
+			return typeDescOfSpec(mt.Map.ToType, home)
 		}
 		return elemTypeDesc(parent, env)
 	}
@@ -16071,6 +16105,10 @@ func evalIndexRead(n *syntax.IndexExpr, left runtime.Object, env runtime.Scope) 
 	if left == runtime.Any || left == runtime.AnyOrNone {
 		td := lvalueTypeDesc(n.X, env)
 		if isMapType(td, env) {
+			// AnyValueOrNone has no elements to reference (15.6.6 d).
+			if left == runtime.AnyOrNone {
+				return runtime.Errorf("referencing an element of a map template holding AnyValueOrNone (ETSI 15.6.6 d)")
+			}
 			return runtime.AnyOrNone
 		}
 		// Of a string type: a single AnyElement, or pattern "?", with
@@ -16224,6 +16262,11 @@ func evalIndexRead(n *syntax.IndexExpr, left runtime.Object, env runtime.Scope) 
 		}
 		val, ok := m.Get(index)
 		if !ok || val == nil {
+			// An element a map template with AnyElementsOrNone does not
+			// have is AnyValueOrNone (15.6.6 f).
+			if m.AnyElementsOrNone {
+				return runtime.AnyOrNone
+			}
 			return runtime.Undefined
 		}
 		return val
