@@ -1,11 +1,11 @@
 {
- "summary": "ran 5177 files: 5078 matched, 19 skipped (98.45% match rate)",
- "source": "etsi-report4.json",
- "miss_count": 99,
+ "summary": "ran 5177 files: 5082 matched, 15 skipped (98.45% match rate)",
+ "source": "etsi-report5.json",
+ "miss_count": 95,
  "outcomes": {
   "reject->pass": 40,
   "reject->none": 23,
-  "->": 19,
+  "->": 15,
   "pass->fail": 6,
   "pass->error": 5,
   "pass->none": 2,
@@ -15,9 +15,9 @@
  "chapters": [
   {
    "chapter": "core_language/06_types_and_values",
-   "misses": 38,
+   "misses": 37,
    "outcomes": {
-    "->": 9,
+    "->": 8,
     "reject->pass": 9,
     "reject->none": 12,
     "pass->fail": 4,
@@ -71,13 +71,6 @@
     "reject->pass": 1,
     "pass->fail": 1,
     "pass->error": 1
-   }
-  },
-  {
-   "chapter": "core_language/26_module_control",
-   "misses": 3,
-   "outcomes": {
-    "->": 3
    }
   },
   {
@@ -364,14 +357,6 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060205_unions/06020501_referencing_fields_of_union_type/NegSem_06020501_referencing_fields_of_union_type_005.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "",
-   "actual": "",
-   "outcome": "->",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060205_unions/06020502_option_and_union/NegSyn_06020502_option_and_union_001.ttcn",
    "message": ""
   },
   {
@@ -828,30 +813,6 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/22_communication_operations/2204_the_check_operation/NegSem_2204_the_check_operation_005.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/26_module_control",
-   "expected": "",
-   "actual": "",
-   "outcome": "->",
-   "relpath": "core_language/26_module_control/2602_the_control_part/NegSem_2602_TheControlPart_025.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/26_module_control",
-   "expected": "",
-   "actual": "",
-   "outcome": "->",
-   "relpath": "core_language/26_module_control/2602_the_control_part/NegSem_2602_TheControlPart_028.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/26_module_control",
-   "expected": "",
-   "actual": "",
-   "outcome": "->",
-   "relpath": "core_language/26_module_control/2602_the_control_part/NegSem_2602_TheControlPart_030.ttcn",
    "message": ""
   },
   {

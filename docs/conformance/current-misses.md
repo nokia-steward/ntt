@@ -1,15 +1,15 @@
 # Current Conformance Misses
 
-Generated from `etsi-report4.json` using the current workspace runner.
+Generated from `etsi-report5.json` using the current workspace runner.
 
-- Summary: `ran 5177 files: 5078 matched, 19 skipped (98.45% match rate)`
-- Misses: `99`
+- Summary: `ran 5177 files: 5082 matched, 15 skipped (98.45% match rate)`
+- Misses: `95`
 
 ## Misses By Outcome
 
 - `reject->pass`: `40`
 - `reject->none`: `23`
-- `->`: `19`
+- `->`: `15`
 - `pass->fail`: `6`
 - `pass->error`: `5`
 - `pass->none`: `2`
@@ -18,13 +18,12 @@ Generated from `etsi-report4.json` using the current workspace runner.
 
 ## Misses By Chapter
 
-- `core_language/06_types_and_values`: `38` (`->`=9, `pass->error`=2, `pass->fail`=4, `pass->none`=1, `pass->semantic-error`=1, `reject->none`=12, `reject->pass`=9)
+- `core_language/06_types_and_values`: `37` (`->`=8, `pass->error`=2, `pass->fail`=4, `pass->none`=1, `pass->semantic-error`=1, `reject->none`=12, `reject->pass`=9)
 - `core_language/05_basic_language_elements`: `14` (`->`=2, `reject->none`=1, `reject->pass`=11)
 - `core_language/22_communication_operations`: `11` (`reject->none`=1, `reject->pass`=10)
 - `core_language/15_templates`: `9` (`->`=2, `pass->fail`=1, `reject->none`=3, `reject->pass`=3)
 - `core_language/16_functions_altsteps_testcases`: `6` (`->`=1, `pass->error`=1, `pass->semantic-error`=1, `reject->none`=1, `reject->pass`=2)
 - `core_language/20_statement_and_operations_for_alt`: `3` (`pass->error`=1, `pass->fail`=1, `reject->pass`=1)
-- `core_language/26_module_control`: `3` (`->`=3)
 - `core_language/B_matching_incoming_values`: `3` (`reject->none`=2, `reject->pass`=1)
 - `oo/501_classes_and_objects`: `3` (`pass->parse-error`=2, `reject->pass`=1)
 - `core_language/07_expressions`: `2` (`reject->pass`=2)
@@ -52,13 +51,13 @@ Generated from `etsi-report4.json` using the current workspace runner.
 - `core_language/06_types_and_values/0602_structured_types_and_values/060203_records_and_sets_of_single_types/NegSem_060203_records_and_sets_of_single_types_001.ttcn`: `reject -> none`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060203_records_and_sets_of_single_types/NegSem_060203_records_and_sets_of_single_types_002.ttcn`: `reject -> none`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060205_unions/06020501_referencing_fields_of_union_type/NegSem_06020501_referencing_fields_of_union_type_005.ttcn`: `reject -> pass`
-- `core_language/06_types_and_values/0602_structured_types_and_values/060205_unions/06020502_option_and_union/NegSyn_06020502_option_and_union_001.ttcn`: ` -> `
 - `core_language/06_types_and_values/0602_structured_types_and_values/060205_unions/06020504_embedding_fields/Sem_06020504_embedding_fields_001.ttcn`: `pass -> fail` - a.R is not chosen
 - `core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSyn_060207_arrays_004.ttcn`: ` -> `
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_002.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_003.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_004.ttcn`: `reject -> pass`
-- ... `18` more in `current-misses.json`
+- `core_language/06_types_and_values/0602_structured_types_and_values/060213_subtyping_of_structured_types/06021302_list_subtyping/NegSem_06021302_ListSubtyping_001.ttcn`: ` -> `
+- ... `17` more in `current-misses.json`
 
 ### `core_language/05_basic_language_elements`
 

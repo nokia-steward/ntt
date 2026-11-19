@@ -238,6 +238,7 @@ func (a *Analyzer) Analyze(tree *ttcn3.Tree) []Diagnostic {
 		out = append(out, a.checkDecodedFieldRefRules(mod)...)
 		out = append(out, a.checkCallNotationRules(mod)...)
 		out = append(out, a.checkConcatAndContextRules(mod)...)
+		out = append(out, a.checkMiscStaticRules(mod)...)
 		out = append(out, a.checkVarTemplateTypeRules(mod)...)
 		out = append(out, a.checkTemplateInitCompleteRules(mod)...)
 		out = append(out, a.checkChainedAssignRules(mod)...)
