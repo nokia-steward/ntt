@@ -9164,6 +9164,9 @@ func evalAnyAllFrom(n *syntax.FromExpr, redirect *syntax.RedirectExpr, env runti
 	if op == "receive" || op == "trigger" {
 		return evalAnyAllFromMsg(n, sel, call, op, redirect, env)
 	}
+	if op == "check" {
+		return evalAnyFromCheck(n, sel, call, redirect, env)
+	}
 	switch op {
 	case "alive", "running", "done", "killed":
 	case "timeout":
@@ -9536,6 +9539,41 @@ func portIndices(name string) []int {
 		out = append(out, n)
 		name = name[j+1:]
 	}
+}
+
+// evalAnyFromCheck answers `any from <portArray>.check [(op)]` (ETSI
+// 22.4): the check of each port of the array, the indices from lowest to
+// highest, the first that succeeds binding its index to the `@index`
+// target of the operation's redirect, or of the check's own.
+func evalAnyFromCheck(n *syntax.FromExpr, sel *syntax.SelectorExpr, call *syntax.CallExpr, redirect *syntax.RedirectExpr, env runtime.Scope) (runtime.Object, bool) {
+	base, ok := sel.X.(*syntax.Ident)
+	if !ok {
+		return nil, false
+	}
+	exec := runtime.FindTestcaseExec(env)
+	if exec == nil || strings.ToLower(n.KindTok.String()) != "any" {
+		return nil, false
+	}
+	name := base.String()
+	if call == nil {
+		call = &syntax.CallExpr{Fun: sel}
+	}
+	var inner *syntax.RedirectExpr
+	if call.Args != nil && len(call.Args.List) == 1 {
+		inner = extractCommOp(call.Args.List[0]).redirect
+	}
+	for _, pn := range arrayPortNames(exec, name) {
+		res := evalPortCheck(pn, call, env)
+		if runtime.IsError(res) {
+			return res, true
+		}
+		if b, ok := res.(runtime.Bool); ok && bool(b) {
+			bindProcIndex(inner, pn, name, env)
+			bindProcIndex(redirect, pn, name, env)
+			return res, true
+		}
+	}
+	return runtime.NewBool(false), true
 }
 
 // evalAnyAllFromMsg answers `any from <portArray>.receive` /

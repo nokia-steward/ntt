@@ -57,6 +57,7 @@ func (a *Analyzer) checkIndexRedirectDimRules(mod *syntax.Module) []Diagnostic {
 		localDims := collectFuncBodyArrayDims(fn.Body)
 		localDimLens := collectFuncBodyArrayDimLens(fn.Body)
 		localVarTypes := collectFuncBodyVarTypes(fn.Body)
+		checked := checkRedirectPorts(fn.Body)
 
 		syntax.Inspect(fn.Body, func(n syntax.Node) bool {
 			r, ok := n.(*syntax.RedirectExpr)
@@ -65,7 +66,15 @@ func (a *Analyzer) checkIndexRedirectDimRules(mod *syntax.Module) []Diagnostic {
 			}
 			port := indexRedirectPort(r.X)
 			if port == "" {
+				port = checked[r]
+			}
+			if port == "" {
 				return true
+			}
+			if info, isPort := ports[port]; isPort && info.dims > 0 {
+				if d, ok := indexRangeDiag(r, port, info, localVarTypes, mod); ok {
+					diags = append(diags, d)
+				}
 			}
 			info, isPort := ports[port]
 			if !isPort || info.dims == 0 {
@@ -139,6 +148,89 @@ func (a *Analyzer) checkIndexRedirectDimRules(mod *syntax.Module) []Diagnostic {
 // the receive-shape expression of a RedirectExpr (e.g. `p` in
 // `any from p.getcall(...)` or `p.receive(...)`). Returns ""
 // for anything more complex than `<from> <Ident>.<op>(...)`.
+// checkRedirectPorts maps the redirect of the operation an `any from
+// p.check(op -> @index value v)` checks to the port array p (ETSI 22.4).
+func checkRedirectPorts(body syntax.Node) map[*syntax.RedirectExpr]string {
+	out := map[*syntax.RedirectExpr]string{}
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		fe, ok := n.(*syntax.FromExpr)
+		if !ok || fe == nil {
+			return true
+		}
+		call, ok := fe.X.(*syntax.CallExpr)
+		if !ok || call == nil || call.Args == nil || len(call.Args.List) != 1 {
+			return true
+		}
+		sel, ok := call.Fun.(*syntax.SelectorExpr)
+		if !ok || sel == nil || syntax.Name(sel.Sel) != "check" {
+			return true
+		}
+		if r, ok := call.Args.List[0].(*syntax.RedirectExpr); ok && r != nil {
+			out[r] = identName(sel.X)
+		}
+		return true
+	})
+	return out
+}
+
+// indexRangeDiag reports an `@index value v` target whose type, an
+// integer subtype with a range of literals, cannot hold the highest index
+// of the port array: for a single-dimensional array its size - 1, for a
+// multi-dimensional one the highest of all dimensions (ETSI 22.2.2,
+// 22.3.x, 22.4 restrictions e, f).
+func indexRangeDiag(r *syntax.RedirectExpr, port string, info componentPortInfo, types map[string]string, mod *syntax.Module) (Diagnostic, bool) {
+	target := identName(r.Index)
+	ty := types[target]
+	if target == "" || ty == "" {
+		return Diagnostic{}, false
+	}
+	rng, ok := integerSubtypeRange(ty, mod)
+	if !ok {
+		return Diagnostic{}, false
+	}
+	var highest int64 = -1
+	for _, size := range info.sizes {
+		if size <= 0 {
+			return Diagnostic{}, false
+		}
+		if size-1 > highest {
+			highest = size - 1
+		}
+	}
+	if highest < 0 || rng.contains(highest) && rng.contains(0) {
+		return Diagnostic{}, false
+	}
+	return Diagnostic{
+		Code:     "index-redirect-type-range",
+		Severity: SeverityError,
+		Message: fmt.Sprintf(
+			"@index value %s: type %s cannot hold index %d of port array %s (ETSI 22.4 e, f)",
+			target, ty, highest, port),
+		Node: r,
+		Span: syntax.SpanOf(r),
+	}, true
+}
+
+// integerSubtypeRange is the range of literals the integer subtype named
+// ty, declared in mod, is restricted to: `type integer T (lo..hi)`.
+func integerSubtypeRange(ty string, mod *syntax.Module) (intRange, bool) {
+	for _, d := range mod.Defs {
+		if d == nil {
+			continue
+		}
+		st, ok := d.Def.(*syntax.SubTypeDecl)
+		if !ok || st.Field == nil || st.Field.Name == nil || st.Field.Name.String() != ty {
+			continue
+		}
+		if syntax.Name(st.Field.Type) != "integer" || len(st.Field.ArrayDef) > 0 ||
+			st.Field.ValueConstraint == nil || len(st.Field.ValueConstraint.List) != 1 {
+			return intRange{}, false
+		}
+		return literalIntRange(st.Field.ValueConstraint.List[0])
+	}
+	return intRange{}, false
+}
+
 func indexRedirectPort(x syntax.Expr) string {
 	if from, ok := x.(*syntax.FromExpr); ok && from != nil {
 		x = from.X

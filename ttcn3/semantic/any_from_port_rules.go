@@ -76,7 +76,13 @@ func (a *Analyzer) checkAnyFromPortRules(mod *syntax.Module) []Diagnostic {
 			if kind != syntax.ANYKW && kind != syntax.ALL {
 				return true
 			}
-			sel, ok := fe.X.(*syntax.SelectorExpr)
+			// The bare form `any from p.check` and the one with an
+			// operation, `any from p.check(receive(5))`.
+			x := fe.X
+			if call, ok := x.(*syntax.CallExpr); ok && call != nil {
+				x = call.Fun
+			}
+			sel, ok := x.(*syntax.SelectorExpr)
 			if !ok || sel == nil {
 				return true
 			}
@@ -136,6 +142,7 @@ type componentPortInfo struct {
 	portType string
 	isArray  bool
 	dims     int
+	sizes    []int64 // each dimension's size, 0 when not a literal
 }
 
 func collectComponentPortInfo(mod *syntax.Module) map[string]map[string]componentPortInfo {
@@ -167,10 +174,21 @@ func collectComponentPortInfo(mod *syntax.Module) map[string]map[string]componen
 				if dec == nil || dec.Name == nil {
 					continue
 				}
+				var sizes []int64
+				for _, d := range dec.ArrayDef {
+					var size int64
+					if d != nil && len(d.List) == 1 {
+						if lo, hi, ok := dimRange(d.List[0]); ok {
+							size = hi - lo + 1
+						}
+					}
+					sizes = append(sizes, size)
+				}
 				ports[dec.Name.String()] = componentPortInfo{
 					portType: portType,
 					isArray:  len(dec.ArrayDef) > 0,
 					dims:     len(dec.ArrayDef),
+					sizes:    sizes,
 				}
 			}
 		}
