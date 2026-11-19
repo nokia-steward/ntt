@@ -21,7 +21,7 @@ type rootType struct {
 
 // primitive reports whether r is a basic or string root type, whose
 // values of different root types are never compatible but for charstring
-// into universal charstring (6.3.1).
+// and universal charstring (6.3.1).
 func (r rootType) primitive() bool {
 	switch r.kind {
 	case "integer", "float", "boolean", "verdicttype", "charstring", "universal charstring",
@@ -33,15 +33,19 @@ func (r rootType) primitive() bool {
 
 // assignable reports whether a value of root type v may be assigned to a
 // target of root type t, as far as root kinds tell (6.3.1, 6.3.2): the
-// same kind, or a charstring into a universal charstring. Values of
+// same kind, or charstring and universal charstring. Values of
 // structured or enumerated types of the same kind may be compatible
 // whatever their names (6.3.2), which kinds do not tell.
 func assignable(t, v rootType) bool {
 	if t.kind == v.kind {
 		return true
 	}
-	return t.kind == "universal charstring" && v.kind == "charstring"
+	// charstring and universal charstring values are compatible both
+	// ways, a universal charstring's characters permitting (6.3.1).
+	return isCharKind(t.kind) && isCharKind(v.kind)
 }
+
+func isCharKind(k string) bool { return k == "charstring" || k == "universal charstring" }
 
 // structured reports whether r is a known structured or enumerated root
 // type, whose kind a value of another kind never matches (6.3.2).
@@ -93,6 +97,9 @@ func (m typeModel) exprRoot(e syntax.Expr) (rootType, bool) {
 			break
 		}
 		switch x.Op.Kind() {
+		case syntax.COLON:
+			// An in-line template, `T: v`, is of type T.
+			return m.typeRoot(m.tree, x.X, 0)
 		case syntax.LT, syntax.GT, syntax.LE, syntax.GE, syntax.EQ, syntax.NE, syntax.AND, syntax.OR, syntax.XOR:
 			return rootType{kind: "boolean"}, true
 		case syntax.MOD, syntax.REM:
@@ -174,7 +181,7 @@ func (m typeModel) selectorRoot(x *syntax.SelectorExpr) (rootType, bool) {
 	}
 	for _, f := range st.decl.Fields {
 		if f != nil && f.Name != nil && f.Name.String() == sel && len(f.ArrayDef) == 0 {
-			if e, ok := f.Type.(syntax.Expr); ok {
+			if e := typeSpecExpr(f.Type); e != nil {
 				return m.typeRoot(st.tree, e, 0)
 			}
 		}
@@ -304,13 +311,13 @@ func (m typeModel) typeRoot(tree *ttcn3.Tree, t syntax.Expr, depth int) (rootTyp
 	switch d := def.Node.(type) {
 	case *syntax.SubTypeDecl:
 		if d.Field != nil && len(d.Field.ArrayDef) == 0 {
-			if e, ok := d.Field.Type.(syntax.Expr); ok {
+			if e := typeSpecExpr(d.Field.Type); e != nil {
 				return m.typeRoot(def.Tree, e, depth+1)
 			}
 		}
 	case *syntax.Field:
 		if len(d.ArrayDef) == 0 {
-			if e, ok := d.Type.(syntax.Expr); ok {
+			if e := typeSpecExpr(d.Type); e != nil {
 				return m.typeRoot(def.Tree, e, depth+1)
 			}
 		}
@@ -324,4 +331,62 @@ func (m typeModel) typeRoot(tree *ttcn3.Tree, t syntax.Expr, depth int) (rootTyp
 		}
 	}
 	return rootType{}, false
+}
+
+// compatible reports whether a value of root type v may be assigned to a
+// target of root type t: assignable kinds, and for two record or two set
+// types of different names, fields of the same number and optional
+// aspect, in order, of compatible types (6.3.2.2). What the model cannot
+// tell is taken for compatible.
+func (m typeModel) compatible(t, v rootType, depth int) bool {
+	if !assignable(t, v) {
+		return false
+	}
+	if depth > 8 || t.kind != v.kind || t.name == v.name || t.name == "" || v.name == "" {
+		return true
+	}
+	if t.kind != "record" && t.kind != "set" {
+		return true
+	}
+	ts, vs := m.structNamed(t.name), m.structNamed(v.name)
+	if ts == nil || vs == nil {
+		return true
+	}
+	tf, vf := ts.decl.Fields, vs.decl.Fields
+	if len(tf) != len(vf) {
+		return false
+	}
+	for i := range tf {
+		a, b := tf[i], vf[i]
+		if a == nil || b == nil || len(a.ArrayDef) > 0 || len(b.ArrayDef) > 0 {
+			continue
+		}
+		if (a.Optional != nil) != (b.Optional != nil) {
+			return false
+		}
+		ae, be := typeSpecExpr(a.Type), typeSpecExpr(b.Type)
+		if ae == nil || be == nil {
+			continue
+		}
+		at, aok := m.typeRoot(ts.tree, ae, 0)
+		bt, bok := m.typeRoot(vs.tree, be, 0)
+		if aok && bok && (at.primitive() && bt.primitive() || at.structured() && bt.structured()) && !m.compatible(at, bt, depth+1) {
+			return false
+		}
+	}
+	return true
+}
+
+// typeSpecExpr is the type expression a type specification holds: a
+// reference's, or the nested type definition itself.
+func typeSpecExpr(ts syntax.TypeSpec) syntax.Expr {
+	switch x := ts.(type) {
+	case nil:
+		return nil
+	case *syntax.RefSpec:
+		return x.X
+	case syntax.Expr:
+		return x
+	}
+	return nil
 }

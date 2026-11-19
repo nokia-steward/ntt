@@ -3,7 +3,7 @@
 // only so far:
 //
 //   - a value assigned or given as initial value is of the target's root
-//     type, a charstring into a universal charstring allowed (6.3.1, 19.1);
+//     type, charstring and universal charstring compatible (6.3.1, 19.1);
 //   - the operands of a relational operator are of compatible root types
 //     (7.1.3);
 //   - the operands of and, or, xor and not are boolean (7.1.4);
@@ -62,7 +62,7 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 				if d == nil || d.Value == nil || len(d.ArrayDef) > 0 {
 					continue
 				}
-				if v, ok := m.exprRoot(d.Value); ok && (v.primitive() || v.structured()) && t.primitive() == v.primitive() && !assignable(t, v) {
+				if v, ok := m.exprRoot(d.Value); ok && (v.primitive() || v.structured()) && t.primitive() == v.primitive() && !m.compatible(t, v, 0) {
 					add(d, "type-incompatible-value", fmt.Sprintf("a %s value is no initial value of the %s %s (ETSI 6.3.1)", v.kind, t.kind, syntax.Name(d.Name)))
 				}
 			}
@@ -75,7 +75,7 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 				switch target := x.X.(type) {
 				case *syntax.Ident, *syntax.SelectorExpr:
 					if isAssignStatement(tree, x) {
-						if t, v, ok := assignPair(target, x.Y); ok && !assignable(t, v) {
+						if t, v, ok := assignPair(target, x.Y); ok && !m.compatible(t, v, 0) {
 							add(x, "type-incompatible-assignment", fmt.Sprintf("a %s value is assigned to the %s %s (ETSI 6.3.1, 19.1)", v.kind, t.kind, syntax.Name(target)))
 						}
 					}
@@ -107,9 +107,6 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 				}
 				return true
 			}
-			if !h.primitive() {
-				return true
-			}
 			// The templates of the branches are of the header's type
 			// (19.3.1).
 			for _, c := range x.Body {
@@ -117,7 +114,11 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 					continue
 				}
 				for _, e := range c.Case.List {
-					if v, ok := m.exprRoot(e); ok && v.primitive() && !comparable(h, v) {
+					v, ok := m.exprRoot(e)
+					if !ok || !(h.primitive() && v.primitive() || h.structured() && v.structured()) {
+						continue
+					}
+					if h.primitive() && !comparable(h, v) || h.structured() && !m.compatible(h, v, 0) && !m.compatible(v, h, 0) {
 						add(e, "select-case-type", fmt.Sprintf("a %s branch of a select on a %s value (ETSI 19.3.1)", v.kind, h.kind))
 					}
 				}
@@ -150,7 +151,7 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 				}
 				t, tok := m.typeRoot(tree, p.Type, 0)
 				v, vok := m.exprRoot(arg)
-				if tok && vok && t.primitive() && v.primitive() && !assignable(t, v) {
+				if tok && vok && (t.primitive() && v.primitive() || t.structured() && v.structured()) && !m.compatible(t, v, 0) {
 					add(arg, "type-incompatible-actual", fmt.Sprintf("a %s value is given to the %s formal parameter %s (ETSI 5.4.2 d)", v.kind, t.kind, syntax.Name(p.Name)))
 				}
 			}

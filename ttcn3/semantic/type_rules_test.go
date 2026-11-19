@@ -13,6 +13,7 @@ func TestTypeRules(t *testing.T) {
 		`var integer v_i := 1; var float v_f := 2.0; if (v_i < v_f) {}`: "type-incompatible-comparison",
 		`var boolean b := true; var integer i := 1; if (b or i) {}`:     "type-boolean-operand",
 		`var charstring v_s := "1"; f(v_s);`:                            "type-incompatible-actual",
+		`var R v_r := { 1 }; var R2 v_2 := v_r;`:                        "type-incompatible-value",
 		`var R v_r := { 1 }; var S v_s := v_r;`:                         "type-incompatible-value",
 		`var RoI v_r := { 1 }; var SoI v_s; v_s := v_r;`:                "type-incompatible-assignment",
 		`var integer x := 1; select (x) { case ("two") {} }`:            "select-case-type",
@@ -21,7 +22,7 @@ func TestTypeRules(t *testing.T) {
 		`var integer v := int2float(1);`:                                "type-incompatible-value",
 	}
 	for body, code := range bad {
-		tree := parse(t, `module M { type record R { integer a } type set S { integer a } type record of integer RoI; type set of integer SoI; function f(in integer p_i) {} function g() { `+body+` } }`)
+		tree := parse(t, `module M { type record R { integer a } type record R2 { boolean a } type record R3 { integer b } type set S { integer a } type record of integer RoI; type set of integer SoI; function f(in integer p_i) {} function g() { `+body+` } }`)
 		if diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree); !containsCode(diags, code) {
 			t.Errorf("%s: expected %s, got %v", body, code, codes(diags))
 		}
@@ -33,6 +34,7 @@ func TestTypeRules(t *testing.T) {
 			var MyInt v_m := 5;
 			var integer v_i := v_m;
 			var universal charstring v_u := "abc";
+			var charstring v_back := v_u;
 			var charstring v_c := "x";
 			v_u := v_c;
 			f(v_m, v_c);
