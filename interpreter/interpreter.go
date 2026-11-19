@@ -5326,6 +5326,86 @@ func isNotation(e syntax.Expr) bool {
 	return ok
 }
 
+// shortValueListKeeps is val, the value of rhs assigned to lhs, with the
+// fields of lhs's record the value list rhs does not reach taken from lhs
+// as it is (ETSI 6.2.1.0: in a scope whose optional attribute is
+// "explicit omit", "all remaining fields at the end of the type
+// definition, missing from the value list notation, are left
+// unchanged"). ok is false when rhs is no such value list.
+func shortValueListKeeps(lhs, rhs syntax.Expr, val runtime.Object, env runtime.Scope) (runtime.Object, bool) {
+	for {
+		p, ok := rhs.(*syntax.ParenExpr)
+		if !ok || len(p.List) != 1 {
+			break
+		}
+		rhs = p.List[0]
+	}
+	lit, ok := rhs.(*syntax.CompositeLiteral)
+	if !ok || len(lit.List) == 0 || hasCall(lhs) {
+		return nil, false
+	}
+	for _, e := range lit.List {
+		if b, ok := e.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.ASSIGN {
+			return nil, false
+		}
+	}
+	st := structTypeDecl(lvalueTypeDesc(lhs, env), env)
+	if st == nil || st.KindTok == nil || st.KindTok.Kind() != syntax.RECORD || len(lit.List) >= len(st.Fields) {
+		return nil, false
+	}
+	if lvalueImplicitOmit(lhs, env) {
+		return nil, false
+	}
+	if v := resolveScopeAnnexEAttr("optional", env); v != nil {
+		if l, ok := v.(*runtime.List); ok && len(l.Elements) > 0 {
+			if s, ok := l.Elements[len(l.Elements)-1].(*runtime.String); ok && strings.EqualFold(strings.TrimSpace(s.String()), "implicit omit") {
+				return nil, false
+			}
+		}
+	}
+	var names []string
+	for _, f := range st.Fields {
+		if f == nil || f.Name == nil {
+			return nil, false
+		}
+		names = append(names, fieldName(f))
+	}
+	existing := forceThunk(eval(lhs, env))
+	if runtime.IsError(existing) || existing == runtime.Undefined || existing == runtime.Omit {
+		return nil, false
+	}
+	old, ok := builtins.TemplateRecord(existing, names)
+	if !ok {
+		return nil, false
+	}
+	fresh, ok := builtins.TemplateRecord(val, names)
+	if !ok {
+		// Held by position: the fields it names, in order.
+		l, isList := val.(*runtime.List)
+		if !isList || len(l.Elements) > len(names) {
+			return nil, false
+		}
+		fresh = runtime.NewRecord()
+		for i, e := range l.Elements {
+			fresh.Set(names[i], e)
+		}
+	}
+	out := runtime.NewRecord()
+	out.Order = names
+	for k, name := range names {
+		if k < len(lit.List) {
+			if v, ok := fresh.Fields[name]; ok {
+				out.Set(name, v)
+			}
+			continue
+		}
+		if v, ok := old.Fields[name]; ok {
+			out.Set(name, v)
+		}
+	}
+	return out, true
+}
+
 // hasCall reports whether evaluating x may call a function.
 func hasCall(x syntax.Expr) bool {
 	found := false
@@ -5873,6 +5953,13 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 			cp.IndexOffset = dstTd.IndexOffset
 			val = cp
 		}
+	}
+
+	// A value list naming fewer fields than the record leaves the fields
+	// after them as they are, but where the optional attribute is
+	// "implicit omit" (6.2.1.0).
+	if out, ok := shortValueListKeeps(lhs, rhs, val, env); ok {
+		val = out
 	}
 
 	// A notation assigned to a field or an element merges into what is
