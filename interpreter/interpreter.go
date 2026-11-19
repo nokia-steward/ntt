@@ -2889,6 +2889,14 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 	// loopback model can honour them.
 	if op == syntax.TO || op == syntax.FROM {
 		if info := extractCommOp(n); info.call != nil {
+			// No address of a to or from clause is null at the time of
+			// the operation (22.2.1, 22.2.2, 22.3.x, 22.4).
+			if err := nullAddressError(info.to, env); err != nil {
+				return err
+			}
+			if err := nullAddressError(info.from, env); err != nil {
+				return err
+			}
 			if sel, ok := info.call.Fun.(*syntax.SelectorExpr); ok {
 				if portName, ok := commPortName(sel.X, env); ok {
 					if name, ok := sel.Sel.(*syntax.Ident); ok {
@@ -17319,6 +17327,47 @@ func decodeCachedFor(env runtime.Scope, blob runtime.Object) runtime.Object {
 // fromAddrMatch is fromAddrMatches that also returns the `from` template it
 // evaluated (nil when it evaluated none), so a log can show it without
 // evaluating the clause a second time.
+// nullAddressError is the error of an address of the to or from clause e
+// that is the special value null (ETSI 22.2.1, 22.2.2, 22.3.x, 22.4: "No
+// AddressRef ... shall contain the special value null at the time of the
+// operation"), or nil.
+func nullAddressError(e syntax.Expr, env runtime.Scope) runtime.Object {
+	if e == nil {
+		return nil
+	}
+	if b, ok := e.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.COLON {
+		e = b.Y
+	}
+	if p, ok := e.(*syntax.ParenExpr); ok {
+		for _, x := range p.List {
+			if err := nullAddressError(x, env); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if id, ok := e.(*syntax.Ident); ok && id.Tok != nil && id.String() == "system" {
+		return nil
+	}
+	// Only a reference is looked at here: the operation evaluates its
+	// clauses once (an expression calling a function is not evaluated
+	// twice for this).
+	calls := false
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		if _, ok := n.(*syntax.CallExpr); ok {
+			calls = true
+		}
+		return !calls
+	})
+	if calls {
+		return nil
+	}
+	if v := forceThunk(eval(e, env)); v == runtime.Null {
+		return runtime.Errorf("the address %s of the to or from clause is null (ETSI 22.2.1, 22.2.2, 22.3)", syntax.Name(e))
+	}
+	return nil
+}
+
 func fromAddrMatch(sender runtime.Object, addr syntax.Expr, env runtime.Scope) (bool, runtime.Object) {
 	if addr == nil {
 		return true, nil
@@ -17401,6 +17450,9 @@ func evalPortTrigger(port string, n *syntax.CallExpr, env runtime.Scope) runtime
 func evalPortCheck(port string, n *syntax.CallExpr, env runtime.Scope) runtime.Object {
 	if n.Args != nil && len(n.Args.List) == 1 {
 		info := extractCommOp(n.Args.List[0])
+		if err := nullAddressError(info.from, env); err != nil {
+			return err
+		}
 		if info.call != nil {
 			if name, ok := info.call.Fun.(*syntax.Ident); ok && isReceivingOpName(name.String()) {
 				return evalPortReceiveInfo(port, info, env, false)
