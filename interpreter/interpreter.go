@@ -119,6 +119,11 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 		if referencedAsTemplate(n.RestrictionSpec) || n.RestrictionSpec == nil {
 			markTemplate(env, name)
 		}
+		if n.With != nil {
+			attrs := map[string][]string{}
+			collectWithAttrs(n.With, attrs, nil, nil)
+			recordOwnAttrs(env, name, attrs)
+		}
 		// `template T t2 modifies t1 := { ... }`: take t1's value
 		// as the base, then overlay any field assignments from the
 		// modifier literal. The TTCN-3 spec calls this "modified
@@ -722,6 +727,11 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			}
 		}
 
+		// An attribute of a field reached through a value, `v.f.encode`,
+		// is the one the field has by its type (27.8, 27.1.2).
+		if v, ok := fieldAttributeOfValue(n, env); ok {
+			return v
+		}
 		left := eval(n.X, env)
 		// An attribute (`v.f.encode`) is its type's: a field not there
 		// to read does not keep it from being retrieved (27.8).
@@ -975,6 +985,9 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			}
 			if isAnnexEAttr(name) {
 				if vals, ok := td.Lookup(name); ok {
+					if name == "variant" {
+						vals = unboundVariants(td, vals)
+					}
 					return annexEAttrList(name, vals)
 				}
 				// The type declared no attribute of this kind:
@@ -983,7 +996,8 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 				if v := resolveScopeAnnexEAttr(name, env); v != nil {
 					return v
 				}
-				return runtime.Undefined
+				// Not defined: the empty string or record of (27.8).
+				return annexEAttrList(name, nil)
 			}
 			// `R.field` - return a TypeDesc representing the field so
 			// a trailing `.encode` / `.variant` resolves (ETSI 27.1.2
@@ -1097,6 +1111,10 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			// needs the separate variant(encoding) machinery.
 			if isAnnexEAttr(selName) && selName != "variant" {
 				if base, ok := n.X.(*syntax.Ident); ok {
+					// The definition's own with clause comes first.
+					if vals, ok := ownDefAttr(env, base.String(), strings.ToLower(selName)); ok {
+						return annexEAttrList(selName, vals)
+					}
 					if tn := declaredTypeName(env, base.String()); tn != "" {
 						if td := lookupTypeDesc(tn, env); td != nil {
 							if vals, ok := td.Lookup(selName); ok {
@@ -9294,6 +9312,35 @@ func recordDeclaredVariants(env runtime.Scope, name string, ws *syntax.WithSpec)
 	if v := attrs["variant"]; len(v) > 0 {
 		env.Set(declaredVariantKey(name), runtime.NewCharstring(strings.Join(v, "\x00")))
 	}
+	recordOwnAttrs(env, name, attrs)
+}
+
+// ownAttrsKey names, beside a variable, constant, module parameter or
+// template, the attributes of its own with clause: they are the ones
+// retrieved for it, over its type's (27.8).
+func ownAttrsKey(name string) string { return "\x00ownattrs:" + name }
+
+// recordOwnAttrs records the attributes attrs of the own with clause of
+// the definition name.
+func recordOwnAttrs(env runtime.Scope, name string, attrs map[string][]string) {
+	if len(attrs) > 0 {
+		env.Set(ownAttrsKey(name), &runtime.TypeDesc{Name: name, Attrs: attrs})
+	}
+}
+
+// ownAttr is the attribute attr of the own with clause of the definition
+// name, if it has one.
+func ownDefAttr(env runtime.Scope, name, attr string) ([]string, bool) {
+	v, ok := env.Get(ownAttrsKey(name))
+	if !ok {
+		return nil, false
+	}
+	td, ok := v.(*runtime.TypeDesc)
+	if !ok {
+		return nil, false
+	}
+	vals, ok := td.Attrs[attr]
+	return vals, ok
 }
 
 // declaredVariants returns the variant attributes recorded for a value
@@ -14138,8 +14185,13 @@ func isAnnexEAttr(name string) bool {
 // every other kind returns a record-of universal charstring so
 // callers can index / iterate the values.
 func annexEAttrList(name string, vals []string) runtime.Object {
-	if strings.ToLower(name) == "display" && len(vals) == 1 {
-		return runtime.NewUniversalString(vals[0])
+	// display and optional are present once: a universal charstring,
+	// empty when not defined (27.8).
+	if n := strings.ToLower(name); n == "display" || n == "optional" {
+		if len(vals) == 0 {
+			return runtime.NewUniversalString("")
+		}
+		return runtime.NewUniversalString(vals[len(vals)-1])
 	}
 	list := &runtime.List{}
 	for _, v := range vals {
@@ -14153,6 +14205,89 @@ func annexEAttrList(name string, vals []string) runtime.Object {
 // testcase `with { encode ... }` clause overriding the module's). The
 // NUL prefix keeps it out of the user identifier namespace.
 const activeAttrsKey = "\x00ttcn3:active-attrs"
+
+// unboundVariants are the variant attributes vals of td not bound to an
+// encoding of its, `variant "Codec"."Rule"` held as "Codec.Rule": those
+// `.variant` without a parameter retrieves (27.8).
+func unboundVariants(td *runtime.TypeDesc, vals []string) []string {
+	encs, _ := td.Lookup("encode")
+	var out []string
+	for _, v := range vals {
+		bound := false
+		for _, e := range encs {
+			if e = strings.TrimSpace(e); e != "" && strings.HasPrefix(v, e+".") {
+				bound = true
+				break
+			}
+		}
+		if !bound {
+			out = append(out, v)
+		}
+	}
+	return out
+}
+
+// fieldAttributeOfValue is the attribute n retrieves, `v.f1.f2.encode`
+// with v a variable, constant, template or parameter (ETSI 27.8): the one
+// the field has by v's declared type, as `T.f1.f2.encode` gives it
+// (27.1.2), or else the one in force where it is used; an attribute not
+// defined is the empty string for display and optional, and the empty
+// record of for encode and extension. ok is false for any other
+// reference, variant among them, left to the paths of values and types.
+func fieldAttributeOfValue(n *syntax.SelectorExpr, env runtime.Scope) (runtime.Object, bool) {
+	attr := strings.ToLower(syntax.Name(n.Sel))
+	if !isAnnexEAttr(attr) || attr == "variant" {
+		return nil, false
+	}
+	var fields []string
+	x := n.X
+	for {
+		sel, ok := x.(*syntax.SelectorExpr)
+		if !ok {
+			break
+		}
+		fields = append([]string{syntax.Name(sel.Sel)}, fields...)
+		x = sel.X
+	}
+	root, ok := x.(*syntax.Ident)
+	if !ok {
+		return nil, false
+	}
+	if len(fields) == 0 {
+		// A definition's own with clause; else the paths of values.
+		if vals, ok := ownDefAttr(env, root.String(), attr); ok {
+			return annexEAttrList(attr, vals), true
+		}
+		return nil, false
+	}
+	tn := declaredTypeName(env, root.String())
+	if tn == "" {
+		if t, _, ok := staticTypeOf(root, env, 0); ok {
+			tn = t.name
+		}
+	}
+	td := lookupTypeDesc(tn, env)
+	if td == nil {
+		return nil, false
+	}
+	var obj runtime.Object = td
+	for _, f := range fields {
+		obj = selectValue(obj, &syntax.SelectorExpr{X: slotParent, Sel: &syntax.Ident{Tok: nameTok(f)}}, env)
+		if _, ok := obj.(*runtime.TypeDesc); !ok {
+			obj = nil
+			break
+		}
+	}
+	if ftd, ok := obj.(*runtime.TypeDesc); ok {
+		if vals, ok := ftd.Lookup(attr); ok {
+			return annexEAttrList(attr, vals), true
+		}
+	}
+	if v := resolveScopeAnnexEAttr(attr, env); v != nil {
+		return v, true
+	}
+	return annexEAttrList(attr, nil), true
+}
 
 // resolveScopeAnnexEAttr returns the Annex E attribute (encode /
 // variant / extension / display / optional) in force at the current
