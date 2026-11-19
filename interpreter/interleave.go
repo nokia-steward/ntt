@@ -294,6 +294,11 @@ func evalInterleaveStmtStrict(n *syntax.AltStmt, env runtime.Scope) (result runt
 				}
 			}
 			if commGuardMatches(cc.Comm, env) {
+				// A redirect of the operation taken ending in an
+				// error ends it with that error.
+				if guardErr = takeGuardError(); guardErr != nil {
+					break
+				}
 				matchedIdx = i
 				defaultBranchFire() // no-op unless inside a runDefaults sweep
 				break

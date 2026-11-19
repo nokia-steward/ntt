@@ -17193,6 +17193,28 @@ func applyRedirect(r *syntax.RedirectExpr, msg runtime.PortMessage, env runtime.
 	}
 }
 
+// decodedFormatError is the error of the encoding format params of a
+// @decoded redirect, when it is none of the seven strings decvalue_unichar
+// takes (ETSI 22.2.2), or nil.
+func decodedFormatError(params syntax.Expr, env runtime.Scope) runtime.Object {
+	p, ok := params.(*syntax.ParenExpr)
+	if !ok || len(p.List) != 1 {
+		return nil
+	}
+	v := forceThunk(eval(p.List[0], env))
+	if runtime.IsError(v) {
+		return v
+	}
+	s, ok := v.(*runtime.String)
+	if !ok {
+		return nil
+	}
+	if !builtins.IsUCSEncoding(s.String()) {
+		return runtime.Errorf("@decoded: encoding format %q is none of the strings decvalue_unichar takes (ETSI 22.2.2)", s.String())
+	}
+	return nil
+}
+
 // applyRedirectValueExpr handles a single entry of a `-> value (...)`
 // list. Bare LHS forms (`-> value v`) bind the whole payload; the
 // assignment-list form (`v := field1[1]`) routes through a scratch
@@ -17224,10 +17246,21 @@ func applyRedirectValueExpr(v syntax.Expr, payload runtime.Object, env runtime.S
 		}
 		var rhs runtime.Object
 		if d, ok := b.Y.(*syntax.DecodedExpr); ok {
+			// The encoding format of a universal charstring field is
+			// one of the strings decvalue_unichar takes (22.2.2,
+			// 22.3.2, 22.3.4, 22.3.6): any other value is an error,
+			// which ends the alternative.
+			if err := decodedFormatError(d.Params, env); err != nil {
+				storeGuardError(err)
+				return
+			}
 			raw := eval(d.X, sub)
 			rhs = decodeCachedFor(env, raw)
 			if rhs == nil {
-				rhs = raw
+				// Failure of the decoding is a test case error
+				// (22.2.2).
+				storeGuardError(runtime.Errorf("@decoded: %s cannot be decoded (ETSI 22.2.2)", syntax.Name(d.X)))
+				return
 			}
 		} else {
 			rhs = eval(b.Y, sub)

@@ -3063,6 +3063,11 @@ func evalAltStmtStrict(n *syntax.AltStmt, env runtime.Scope) runtime.Object {
 				}
 			}
 			if commGuardMatches(cc.Comm, env) {
+				// A redirect of the operation taken ending in an
+				// error ends it with that error.
+				if guardErr = takeGuardError(); guardErr != nil {
+					break
+				}
 				matchedClause = cc
 				defaultBranchFire() // no-op unless inside a runDefaults sweep
 				break

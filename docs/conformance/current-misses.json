@@ -1,9 +1,9 @@
 {
- "summary": "ran 5177 files: 5070 matched, 20 skipped (98.31% match rate)",
- "source": "etsi-report.json",
- "miss_count": 107,
+ "summary": "ran 5177 files: 5075 matched, 20 skipped (98.41% match rate)",
+ "source": "etsi-report2.json",
+ "miss_count": 102,
  "outcomes": {
-  "reject->pass": 46,
+  "reject->pass": 41,
   "reject->none": 24,
   "->": 20,
   "pass->fail": 6,
@@ -27,20 +27,20 @@
    }
   },
   {
-   "chapter": "core_language/22_communication_operations",
-   "misses": 16,
-   "outcomes": {
-    "reject->pass": 15,
-    "reject->none": 1
-   }
-  },
-  {
    "chapter": "core_language/05_basic_language_elements",
    "misses": 14,
    "outcomes": {
     "reject->pass": 11,
     "reject->none": 1,
     "->": 2
+   }
+  },
+  {
+   "chapter": "core_language/22_communication_operations",
+   "misses": 11,
+   "outcomes": {
+    "reject->pass": 10,
+    "reject->none": 1
    }
   },
   {
@@ -779,23 +779,7 @@
    "expected": "reject",
    "actual": "pass",
    "outcome": "reject->pass",
-   "relpath": "core_language/22_communication_operations/2202_message_based_communication/220202_receive_operation/NegSem_220202_ReceiveOperation_006.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
    "relpath": "core_language/22_communication_operations/2202_message_based_communication/220202_receive_operation/NegSem_220202_ReceiveOperation_023.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/22_communication_operations/2202_message_based_communication/220203_trigger_operation/NegSem_220203_TriggerOperation_006.ttcn",
    "message": ""
   },
   {
@@ -819,14 +803,6 @@
    "expected": "reject",
    "actual": "pass",
    "outcome": "reject->pass",
-   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_012.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220302_getcall_operation/NegSem_220302_getcall_operation_017.ttcn",
    "message": ""
   },
@@ -843,23 +819,7 @@
    "expected": "reject",
    "actual": "pass",
    "outcome": "reject->pass",
-   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_009.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
    "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_014.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/22_communication_operations",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/22_communication_operations/2203_procedure_based_communication/220304_getreply_operation/NegSem_220304_getreply_operation_016.ttcn",
    "message": ""
   },
   {
