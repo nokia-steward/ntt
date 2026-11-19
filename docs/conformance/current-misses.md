@@ -1,15 +1,15 @@
 # Current Conformance Misses
 
-Generated from `etsi-report2.json` using the current workspace runner.
+Generated from `etsi-report3.json` using the current workspace runner.
 
-- Summary: `ran 5177 files: 5075 matched, 20 skipped (98.41% match rate)`
-- Misses: `102`
+- Summary: `ran 5177 files: 5077 matched, 19 skipped (98.43% match rate)`
+- Misses: `100`
 
 ## Misses By Outcome
 
 - `reject->pass`: `41`
-- `reject->none`: `24`
-- `->`: `20`
+- `reject->none`: `23`
+- `->`: `19`
 - `pass->fail`: `6`
 - `pass->error`: `5`
 - `pass->none`: `2`
@@ -18,7 +18,7 @@ Generated from `etsi-report2.json` using the current workspace runner.
 
 ## Misses By Chapter
 
-- `core_language/06_types_and_values`: `40` (`->`=10, `pass->error`=2, `pass->fail`=4, `pass->none`=1, `pass->semantic-error`=1, `reject->none`=13, `reject->pass`=9)
+- `core_language/06_types_and_values`: `38` (`->`=9, `pass->error`=2, `pass->fail`=4, `pass->none`=1, `pass->semantic-error`=1, `reject->none`=12, `reject->pass`=9)
 - `core_language/05_basic_language_elements`: `14` (`->`=2, `reject->none`=1, `reject->pass`=11)
 - `core_language/22_communication_operations`: `11` (`reject->none`=1, `reject->pass`=10)
 - `core_language/15_templates`: `10` (`->`=2, `pass->fail`=1, `reject->none`=3, `reject->pass`=4)
@@ -58,7 +58,7 @@ Generated from `etsi-report2.json` using the current workspace runner.
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_002.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_003.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_004.ttcn`: `reject -> pass`
-- ... `20` more in `current-misses.json`
+- ... `18` more in `current-misses.json`
 
 ### `core_language/05_basic_language_elements`
 

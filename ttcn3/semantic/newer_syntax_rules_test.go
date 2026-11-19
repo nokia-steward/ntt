@@ -21,7 +21,8 @@ func TestNewerSyntaxRules(t *testing.T) {
 		{"variadic ok", `module M { function f(in integer a, in integer r...) {} function g() { f(1); f(1, 2, 3); f(1, -); } }`, ""},
 		{"automatic type of ?", `module M { modulepar template mpar := ?; }`, "automatic-type-unknown"},
 		{"automatic type of *", `module M { modulepar template mpar := *; }`, "automatic-type-unknown"},
-		{"automatic type ok", `module M { const X := 23; const Y := null; }`, ""},
+		{"automatic type ok", `module M { const X := 23; }`, ""},
+		{"automatic type of null", `module M { const Y := null; }`, "automatic-type-unknown"},
 		{"embedded field's field", `module M { type record B { integer b } type record A { B } const A x := { b := 1 } }`, "embedded-field-name"},
 		{"embedded field", `module M { type record B { integer b } type record A { B } const A x := { B := { b := 1 } } }`, ""},
 		{"lazy reference in a restricted context", `module M {

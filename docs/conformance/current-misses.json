@@ -1,11 +1,11 @@
 {
- "summary": "ran 5177 files: 5075 matched, 20 skipped (98.41% match rate)",
- "source": "etsi-report2.json",
- "miss_count": 102,
+ "summary": "ran 5177 files: 5077 matched, 19 skipped (98.43% match rate)",
+ "source": "etsi-report3.json",
+ "miss_count": 100,
  "outcomes": {
   "reject->pass": 41,
-  "reject->none": 24,
-  "->": 20,
+  "reject->none": 23,
+  "->": 19,
   "pass->fail": 6,
   "pass->error": 5,
   "pass->none": 2,
@@ -15,11 +15,11 @@
  "chapters": [
   {
    "chapter": "core_language/06_types_and_values",
-   "misses": 40,
+   "misses": 38,
    "outcomes": {
-    "->": 10,
+    "->": 9,
     "reject->pass": 9,
-    "reject->none": 13,
+    "reject->none": 12,
     "pass->fail": 4,
     "pass->error": 2,
     "pass->semantic-error": 1,
@@ -512,14 +512,6 @@
   },
   {
    "chapter": "core_language/06_types_and_values",
-   "expected": "reject",
-   "actual": "none",
-   "outcome": "reject->none",
-   "relpath": "core_language/06_types_and_values/0605_automatic_type/060501_expressions/NegSem_060501_expressions_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
    "expected": "pass",
    "actual": "error",
    "outcome": "pass->error",
@@ -564,14 +556,6 @@
    "actual": "none",
    "outcome": "pass->none",
    "relpath": "core_language/06_types_and_values/0605_automatic_type/060506_return_values/Sem_060506_return_values_010.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "",
-   "actual": "",
-   "outcome": "->",
-   "relpath": "core_language/06_types_and_values/0605_automatic_type/NegSem_0605_automatic_type_003.ttcn",
    "message": ""
   },
   {
