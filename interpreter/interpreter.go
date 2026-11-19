@@ -473,6 +473,15 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 
 	case *syntax.Declarator:
 		var val runtime.Object = runtime.Undefined
+		// A @lazy or @fuzzy variable holds its initialiser with the
+		// scope it is in, evaluated at the first use, or at each
+		// (11.0).
+		if fuzzy, lazy := lazyDecls.Load(n); lazy && n.Value != nil && n.Name != nil {
+			name := syntax.Name(n.Name)
+			env.Set(name, &runtime.LazyThunk{Expr: n.Value, Env: env, Fuzzy: fuzzy == true})
+			env.Set(lazyVarKey(name), runtime.NewBool(fuzzy == true))
+			return nil
+		}
 		if n.Value != nil {
 			val = runtime.Share(eval(n.Value, env))
 			if runtime.IsError(val) {
@@ -4012,8 +4021,49 @@ func hasAnyField(r *runtime.Record, st *syntax.StructTypeDecl) bool {
 }
 
 // lazyDecls holds the declarators of @lazy and @fuzzy variables, whose
-// initialiser is evaluated at first use (11.1), not checked when declared.
+// initialiser is evaluated at first use (11.1), not checked when declared;
+// the value tells whether it is @fuzzy.
 var lazyDecls sync.Map // map[*syntax.Declarator]bool
+
+// lazyVarKey binds, beside a @lazy or @fuzzy variable, whether it is
+// @fuzzy: an assignment to it gives it the expression and the scope of
+// the assignment, not a value (11.0).
+func lazyVarKey(name string) string { return "\x00ttcn3:lazy-var:" + name }
+
+// assignLazy is the assignment of rhs to lhs when lhs names a @lazy or
+// @fuzzy variable: it holds rhs with env, evaluated at its first use, or
+// at each. ok is false for any other target.
+func assignLazy(lhs, rhs syntax.Expr, env runtime.Scope) bool {
+	id, ok := lhs.(*syntax.Ident)
+	if !ok {
+		return false
+	}
+	name := id.String()
+	e, ok := env.(*runtime.Env)
+	if !ok {
+		return false
+	}
+	owner := e.Owner(name)
+	if owner == nil || !owner.Binds(lazyVarKey(name)) {
+		return false
+	}
+	// One referring to itself, `v := v + 1`, is the value it has now:
+	// held, it would refer to itself without end.
+	self := false
+	syntax.Inspect(rhs, func(n syntax.Node) bool {
+		if r, ok := n.(*syntax.Ident); ok && r.String() == name {
+			self = true
+		}
+		return !self
+	})
+	if self {
+		return false
+	}
+	fuzzy, _ := owner.Get(lazyVarKey(name))
+	b, _ := fuzzy.(runtime.Bool)
+	owner.Set(name, &runtime.LazyThunk{Expr: rhs, Env: env, Fuzzy: bool(b)})
+	return true
+}
 
 // unboundRHSError is the error of an assignment or initialisation whose
 // right-hand side rhs evaluated to v, a completely uninitialised value
@@ -5738,6 +5788,9 @@ func evalExprList(exprs []syntax.Expr, env runtime.Scope) []runtime.Object {
 }
 
 func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtime.Object) {
+	if assignLazy(lhs, rhs, env) {
+		return nil
+	}
 	// The target gets its own value (ETSI 6): `r2 := r` then `r.a := 3`
 	// leaves r2 as it was.
 	val := runtime.Share(eval(rhs, env))
@@ -7713,7 +7766,7 @@ func evalValueDeclBody(vd *syntax.ValueDecl, env runtime.Scope) runtime.Object {
 	}
 	if vd.Modif != nil && (vd.Modif.String() == "@lazy" || vd.Modif.String() == "@fuzzy") {
 		for _, decl := range vd.Decls {
-			lazyDecls.Store(decl, true)
+			lazyDecls.Store(decl, vd.Modif.String() == "@fuzzy")
 		}
 	}
 	if vd.Type != nil {
