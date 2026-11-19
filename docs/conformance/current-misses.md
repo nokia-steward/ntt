@@ -1,14 +1,14 @@
 # Current Conformance Misses
 
-Generated from `etsi-report7.json` using the current workspace runner.
+Generated from `etsi-report8.json` using the current workspace runner.
 
-- Summary: `ran 5177 files: 5085 matched, 13 skipped (98.47% match rate)`
-- Misses: `92`
+- Summary: `ran 5177 files: 5086 matched, 13 skipped (98.49% match rate)`
+- Misses: `91`
 
 ## Misses By Outcome
 
 - `reject->pass`: `39`
-- `reject->none`: `23`
+- `reject->none`: `22`
 - `->`: `13`
 - `pass->fail`: `6`
 - `pass->error`: `5`
@@ -18,7 +18,7 @@ Generated from `etsi-report7.json` using the current workspace runner.
 
 ## Misses By Chapter
 
-- `core_language/06_types_and_values`: `35` (`->`=6, `pass->error`=2, `pass->fail`=4, `pass->none`=1, `pass->semantic-error`=1, `reject->none`=12, `reject->pass`=9)
+- `core_language/06_types_and_values`: `34` (`->`=6, `pass->error`=2, `pass->fail`=4, `pass->none`=1, `pass->semantic-error`=1, `reject->none`=11, `reject->pass`=9)
 - `core_language/05_basic_language_elements`: `14` (`->`=2, `reject->none`=1, `reject->pass`=11)
 - `core_language/22_communication_operations`: `11` (`reject->none`=1, `reject->pass`=10)
 - `core_language/15_templates`: `9` (`->`=2, `pass->fail`=1, `reject->none`=3, `reject->pass`=3)
@@ -57,7 +57,7 @@ Generated from `etsi-report7.json` using the current workspace runner.
 - `core_language/06_types_and_values/0602_structured_types_and_values/060213_subtyping_of_structured_types/06021302_list_subtyping/NegSem_06021302_ListSubtyping_001.ttcn`: ` -> `
 - `core_language/06_types_and_values/0602_structured_types_and_values/060213_subtyping_of_structured_types/06021302_list_subtyping/NegSem_06021302_ListSubtyping_002.ttcn`: ` -> `
 - `core_language/06_types_and_values/0602_structured_types_and_values/060213_subtyping_of_structured_types/06021302_list_subtyping/NegSem_06021302_ListSubtyping_003.ttcn`: ` -> `
-- ... `15` more in `current-misses.json`
+- ... `14` more in `current-misses.json`
 
 ### `core_language/05_basic_language_elements`
 

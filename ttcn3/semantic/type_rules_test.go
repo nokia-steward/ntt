@@ -13,6 +13,10 @@ func TestTypeRules(t *testing.T) {
 		`var integer v_i := 1; var float v_f := 2.0; if (v_i < v_f) {}`: "type-incompatible-comparison",
 		`var boolean b := true; var integer i := 1; if (b or i) {}`:     "type-boolean-operand",
 		`var charstring v_s := "1"; f(v_s);`:                            "type-incompatible-actual",
+		`var template integer t := ?; var integer v := t;`:              "template-to-value",
+		`var template integer t := 1; var integer v; v := t;`:           "template-to-value",
+		`var integer v; v := ?;`:                                        "template-to-value",
+		`var template integer t := 1; var integer v := t + 1;`:          "template-operand",
 		`var R v_r := { 1 }; var R2 v_2 := v_r;`:                        "type-incompatible-value",
 		`var R v_r := { 1 }; var S v_s := v_r;`:                         "type-incompatible-value",
 		`var RoI v_r := { 1 }; var SoI v_s; v_s := v_r;`:                "type-incompatible-assignment",
@@ -35,6 +39,9 @@ func TestTypeRules(t *testing.T) {
 			var integer v_i := v_m;
 			var universal charstring v_u := "abc";
 			var charstring v_back := v_u;
+			var template integer t_i := ?;
+			t_i := 5;
+			var integer v_val := valueof(t_i);
 			var charstring v_c := "x";
 			v_u := v_c;
 			f(v_m, v_c);
@@ -42,7 +49,7 @@ func TestTypeRules(t *testing.T) {
 		}
 	}`
 	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(parse(t, good))
-	for _, code := range []string{"type-incompatible-value", "type-incompatible-assignment", "type-incompatible-comparison", "type-boolean-operand", "type-incompatible-actual"} {
+	for _, code := range []string{"type-incompatible-value", "type-incompatible-assignment", "type-incompatible-comparison", "type-boolean-operand", "type-incompatible-actual", "template-to-value", "template-operand"} {
 		if containsCode(diags, code) {
 			t.Errorf("valid module: unexpected %s %v", code, codes(diags))
 		}

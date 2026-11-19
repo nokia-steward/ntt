@@ -1,10 +1,10 @@
 {
- "summary": "ran 5177 files: 5085 matched, 13 skipped (98.47% match rate)",
- "source": "etsi-report7.json",
- "miss_count": 92,
+ "summary": "ran 5177 files: 5086 matched, 13 skipped (98.49% match rate)",
+ "source": "etsi-report8.json",
+ "miss_count": 91,
  "outcomes": {
   "reject->pass": 39,
-  "reject->none": 23,
+  "reject->none": 22,
   "->": 13,
   "pass->fail": 6,
   "pass->error": 5,
@@ -15,10 +15,10 @@
  "chapters": [
   {
    "chapter": "core_language/06_types_and_values",
-   "misses": 35,
+   "misses": 34,
    "outcomes": {
     "reject->pass": 9,
-    "reject->none": 12,
+    "reject->none": 11,
     "pass->fail": 4,
     "->": 6,
     "pass->error": 2,
@@ -502,14 +502,6 @@
    "outcome": "pass->error",
    "relpath": "core_language/06_types_and_values/0605_automatic_type/060503_index_lists/Sem_060503_index_lists_002.ttcn",
    "message": "Error: float is not hashable"
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "reject",
-   "actual": "none",
-   "outcome": "reject->none",
-   "relpath": "core_language/06_types_and_values/0605_automatic_type/060504_references/NegSem_060504_references_001.ttcn",
-   "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",

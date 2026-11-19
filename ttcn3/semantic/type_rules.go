@@ -46,6 +46,15 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 	mod.Inspect(func(n syntax.Node) bool {
 		switch x := n.(type) {
 		case *syntax.ValueDecl:
+			// A value variable or constant is not initialised with a
+			// template (11.1, 10).
+			if x.KindTok != nil && x.TemplateRestriction == nil && (x.KindTok.Kind() == syntax.VAR || x.KindTok.Kind() == syntax.CONST) {
+				for _, d := range x.Decls {
+					if d != nil && d.Value != nil && (m.isTemplateRef(d.Value) || isWildcardTemplate(d.Value)) {
+						add(d, "template-to-value", fmt.Sprintf("%s holds a value: a template is no initial value of it (ETSI 11.1, 10)", syntax.Name(d.Name)))
+					}
+				}
+			}
 			if x.KindTok == nil || x.Type == nil || x.TemplateRestriction != nil {
 				return true
 			}
@@ -72,6 +81,10 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 			}
 			switch x.Op.Kind() {
 			case syntax.ASSIGN:
+				// A template is not assigned to a value variable (19.1.1).
+				if isAssignStatement(tree, x) && m.isValueVarRef(x.X) && (m.isTemplateRef(x.Y) || isWildcardTemplate(x.Y)) {
+					add(x, "template-to-value", fmt.Sprintf("%s holds a value: a template is not assigned to it (ETSI 19.1.1)", syntax.Name(x.X)))
+				}
 				switch target := x.X.(type) {
 				case *syntax.Ident, *syntax.SelectorExpr:
 					if isAssignStatement(tree, x) {
@@ -83,6 +96,13 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 			case syntax.LT, syntax.GT, syntax.LE, syntax.GE, syntax.EQ, syntax.NE:
 				if l, r, ok := both(x.X, x.Y); ok && !comparable(l, r) {
 					add(x, "type-incompatible-comparison", fmt.Sprintf("a %s value is compared with a %s value (ETSI 7.1.3)", l.kind, r.kind))
+				}
+			case syntax.ADD, syntax.SUB, syntax.MUL, syntax.DIV, syntax.MOD, syntax.REM:
+				// A template is no operand of an arithmetic operator (7).
+				for _, side := range []syntax.Expr{x.X, x.Y} {
+					if m.isTemplateRef(side) {
+						add(side, "template-operand", fmt.Sprintf("template %s is no operand of %s (ETSI 7)", syntax.Name(side), x.Op.String()))
+					}
 				}
 			case syntax.AND, syntax.OR, syntax.XOR:
 				for _, side := range []syntax.Expr{x.X, x.Y} {

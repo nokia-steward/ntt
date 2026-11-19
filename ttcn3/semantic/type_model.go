@@ -390,3 +390,72 @@ func typeSpecExpr(ts syntax.TypeSpec) syntax.Expr {
 	}
 	return nil
 }
+
+// isTemplateRef reports whether e refers to a template: a template
+// definition, a template variable or a template formal parameter.
+func (m typeModel) isTemplateRef(e syntax.Expr) bool {
+	for {
+		p, ok := e.(*syntax.ParenExpr)
+		if !ok || len(p.List) != 1 {
+			break
+		}
+		e = p.List[0]
+	}
+	id, ok := e.(*syntax.Ident)
+	if !ok {
+		return false
+	}
+	defs := m.tree.LookupWithDB(id, m.db)
+	if len(defs) != 1 {
+		return false
+	}
+	switch d := defs[0].Node.(type) {
+	case *syntax.TemplateDecl:
+		return true
+	case *syntax.ValueDecl:
+		return d.TemplateRestriction != nil
+	case *syntax.FormalPar:
+		return d.TemplateRestriction != nil
+	}
+	return false
+}
+
+// isValueVarRef reports whether e refers to a variable or constant that
+// holds a value, not a template, or to a field or element of one.
+func (m typeModel) isValueVarRef(e syntax.Expr) bool {
+	for {
+		switch x := e.(type) {
+		case *syntax.SelectorExpr:
+			e = x.X
+			continue
+		case *syntax.IndexExpr:
+			e = x.X
+			continue
+		}
+		break
+	}
+	id, ok := e.(*syntax.Ident)
+	if !ok {
+		return false
+	}
+	defs := m.tree.LookupWithDB(id, m.db)
+	if len(defs) != 1 {
+		return false
+	}
+	vd, ok := defs[0].Node.(*syntax.ValueDecl)
+	if !ok || vd.KindTok == nil || vd.TemplateRestriction != nil {
+		return false
+	}
+	k := vd.KindTok.Kind()
+	return k == syntax.VAR || k == syntax.CONST
+}
+
+// isWildcardTemplate reports whether e is ? or *, alone or as an in-line
+// template `T: ?`.
+func isWildcardTemplate(e syntax.Expr) bool {
+	if b, ok := e.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.COLON {
+		e = b.Y
+	}
+	v, ok := e.(*syntax.ValueLiteral)
+	return ok && v.Tok != nil && (v.Tok.Kind() == syntax.ANY || v.Tok.Kind() == syntax.MUL)
+}
