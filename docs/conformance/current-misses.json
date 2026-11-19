@@ -1,11 +1,11 @@
 {
- "summary": "ran 5177 files: 5082 matched, 15 skipped (98.45% match rate)",
- "source": "etsi-report5.json",
- "miss_count": 95,
+ "summary": "ran 5177 files: 5084 matched, 13 skipped (98.45% match rate)",
+ "source": "etsi-report6.json",
+ "miss_count": 93,
  "outcomes": {
   "reject->pass": 40,
   "reject->none": 23,
-  "->": 15,
+  "->": 13,
   "pass->fail": 6,
   "pass->error": 5,
   "pass->none": 2,
@@ -15,12 +15,12 @@
  "chapters": [
   {
    "chapter": "core_language/06_types_and_values",
-   "misses": 37,
+   "misses": 35,
    "outcomes": {
-    "->": 8,
     "reject->pass": 9,
     "reject->none": 12,
     "pass->fail": 4,
+    "->": 6,
     "pass->error": 2,
     "pass->semantic-error": 1,
     "pass->none": 1
@@ -245,22 +245,6 @@
    "actual": "",
    "outcome": "->",
    "relpath": "core_language/05_basic_language_elements/05_toplevel/NegSyn_05_TopLevel_001.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "",
-   "actual": "",
-   "outcome": "->",
-   "relpath": "core_language/06_types_and_values/0601_basic_types_and_values/060100_simple_basic_types_and_values/NegSyn_060100_SimpleBasicTypes_005.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "",
-   "actual": "",
-   "outcome": "->",
-   "relpath": "core_language/06_types_and_values/0601_basic_types_and_values/060100_simple_basic_types_and_values/NegSyn_060100_SimpleBasicTypes_006.ttcn",
    "message": ""
   },
   {

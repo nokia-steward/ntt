@@ -1,15 +1,15 @@
 # Current Conformance Misses
 
-Generated from `etsi-report5.json` using the current workspace runner.
+Generated from `etsi-report6.json` using the current workspace runner.
 
-- Summary: `ran 5177 files: 5082 matched, 15 skipped (98.45% match rate)`
-- Misses: `95`
+- Summary: `ran 5177 files: 5084 matched, 13 skipped (98.45% match rate)`
+- Misses: `93`
 
 ## Misses By Outcome
 
 - `reject->pass`: `40`
 - `reject->none`: `23`
-- `->`: `15`
+- `->`: `13`
 - `pass->fail`: `6`
 - `pass->error`: `5`
 - `pass->none`: `2`
@@ -18,7 +18,7 @@ Generated from `etsi-report5.json` using the current workspace runner.
 
 ## Misses By Chapter
 
-- `core_language/06_types_and_values`: `37` (`->`=8, `pass->error`=2, `pass->fail`=4, `pass->none`=1, `pass->semantic-error`=1, `reject->none`=12, `reject->pass`=9)
+- `core_language/06_types_and_values`: `35` (`->`=6, `pass->error`=2, `pass->fail`=4, `pass->none`=1, `pass->semantic-error`=1, `reject->none`=12, `reject->pass`=9)
 - `core_language/05_basic_language_elements`: `14` (`->`=2, `reject->none`=1, `reject->pass`=11)
 - `core_language/22_communication_operations`: `11` (`reject->none`=1, `reject->pass`=10)
 - `core_language/15_templates`: `9` (`->`=2, `pass->fail`=1, `reject->none`=3, `reject->pass`=3)
@@ -37,8 +37,6 @@ Generated from `etsi-report5.json` using the current workspace runner.
 
 ### `core_language/06_types_and_values`
 
-- `core_language/06_types_and_values/0601_basic_types_and_values/060100_simple_basic_types_and_values/NegSyn_060100_SimpleBasicTypes_005.ttcn`: ` -> `
-- `core_language/06_types_and_values/0601_basic_types_and_values/060100_simple_basic_types_and_values/NegSyn_060100_SimpleBasicTypes_006.ttcn`: ` -> `
 - `core_language/06_types_and_values/0601_basic_types_and_values/060102_subtyping_of_basic_types/06010202_lists_of_types/NegSem_06010202_ListOfTypes_005.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0601_basic_types_and_values/060102_subtyping_of_basic_types/06010205_pattern_subtyping_of_character_string_types/NegSyn_06010205_StringPattern_002.ttcn`: `reject -> none`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060201_record_type_and_values/06020101_referencing_fields_of_record_type/NegSem_06020101_ReferencingRecordFields_001.ttcn`: `reject -> none`
@@ -57,7 +55,9 @@ Generated from `etsi-report5.json` using the current workspace runner.
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_003.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_004.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060213_subtyping_of_structured_types/06021302_list_subtyping/NegSem_06021302_ListSubtyping_001.ttcn`: ` -> `
-- ... `17` more in `current-misses.json`
+- `core_language/06_types_and_values/0602_structured_types_and_values/060213_subtyping_of_structured_types/06021302_list_subtyping/NegSem_06021302_ListSubtyping_002.ttcn`: ` -> `
+- `core_language/06_types_and_values/0602_structured_types_and_values/060213_subtyping_of_structured_types/06021302_list_subtyping/NegSem_06021302_ListSubtyping_003.ttcn`: ` -> `
+- ... `15` more in `current-misses.json`
 
 ### `core_language/05_basic_language_elements`
 
