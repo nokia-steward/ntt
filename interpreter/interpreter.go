@@ -129,7 +129,7 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			if !runtime.IsError(base) && base != nil && !isUnionTyped(n.Base, env) {
 				mod := eval(n.Value, env)
 				if !runtime.IsError(mod) {
-					if merged, ok := builtins.MergeTemplateMod(base, mod); ok {
+					if merged, ok := mergeModified(base, mod, n.Value, typeDescOfSpec(n.Type, env), env); ok {
 						env.Set(name, merged)
 						recordDeclaredType(env, name, n.Type)
 						return nil
@@ -4622,6 +4622,7 @@ func evalModifiedTemplate(n *syntax.ModifiesExpr, env runtime.Scope) runtime.Obj
 		return base
 	}
 	// A template with parameters is a function of its result type.
+	var td *runtime.TypeDesc
 	if e, ok := env.(*runtime.Env); ok && e.Binds(currentFunctionKey) {
 		if v, _ := e.Get(currentFunctionKey); v != nil {
 			if fn, ok := v.(*runtime.Function); ok && fn.IsTemplate {
@@ -4630,6 +4631,7 @@ func evalModifiedTemplate(n *syntax.ModifiesExpr, env runtime.Scope) runtime.Obj
 					home = env
 				}
 				base = expandAnyValueBase(base, fn.Result, home)
+				td = typeDescOfSpec(fn.Result, home)
 			}
 		}
 	}
@@ -4638,11 +4640,204 @@ func evalModifiedTemplate(n *syntax.ModifiesExpr, env runtime.Scope) runtime.Obj
 		return mod
 	}
 	if !union {
-		if merged, ok := builtins.MergeTemplateMod(base, mod); ok {
+		if merged, ok := mergeModified(base, mod, n.Y, td, env); ok {
 			return merged
 		}
 	}
 	return mod
+}
+
+// mergeModified is the template modification mod, written as modExpr,
+// makes of base, a template of the type td (ETSI ES 201 873-1 15.5). ok is
+// false when neither is a record, set, record of or set of template the
+// rules merge, for the caller's fallback. Without a type, the fields of
+// a record are merged one level deep, as before.
+func mergeModified(base, mod runtime.Object, modExpr syntax.Expr, td *runtime.TypeDesc, env runtime.Scope) (runtime.Object, bool) {
+	if td == nil {
+		return builtins.MergeTemplateMod(base, mod)
+	}
+	if !mergeable(base, td, env) || !mergeable(mod, td, env) {
+		return builtins.MergeTemplateMod(base, mod)
+	}
+	return mergeModifiedTemplate(base, mod, modExpr, td, env, 0), true
+}
+
+// mergeable reports whether template o of the type td is one the
+// modification rules merge into, field by field or element by element: a
+// record or set template of a record or set type, a record of or set of
+// one of a list type; not a matching mechanism.
+func mergeable(o runtime.Object, td *runtime.TypeDesc, env runtime.Scope) bool {
+	if st := structTypeDecl(td, env); st != nil {
+		if st.KindTok != nil && st.KindTok.Kind() == syntax.UNION {
+			return false
+		}
+		switch x := o.(type) {
+		case *runtime.Record:
+			return true
+		case *runtime.List:
+			return x.ListType == runtime.RECORD_OF && len(x.Elements) <= len(st.Fields)
+		}
+		return false
+	}
+	if listTypeDesc(td, env) != nil {
+		if m, ok := o.(*runtime.Map); ok {
+			return indexNotationList(m) != nil
+		}
+		l, ok := o.(*runtime.List)
+		return ok && len(l.FieldNames) == 0 && (l.ListType == runtime.RECORD_OF || l.ListType == runtime.SET_OF)
+	}
+	return false
+}
+
+// indexNotationList is a record of template written in index assignment
+// notation, held as a map of its indices, as a list unspecified where it
+// names no index; nil when a key is no index.
+func indexNotationList(m *runtime.Map) *runtime.List {
+	var elems []runtime.Object
+	for _, p := range m.Pairs() {
+		i, ok := p.Key.(runtime.Int)
+		if !ok || !i.IsInt64() || i.Int64() < 0 || i.Int64() > 1<<16 {
+			return nil
+		}
+		for int64(len(elems)) <= i.Int64() {
+			elems = append(elems, runtime.Undefined)
+		}
+		elems[i.Int64()] = p.Value
+	}
+	return &runtime.List{Elements: elems}
+}
+
+// mergeModifiedTemplate is mergeModified at depth: a matching mechanism
+// of mod, or one of a simple, union or enumerated type, replaces what
+// base has (15.5 a); a field of a record or set mod leaves unspecified,
+// implicitly or with "-", is base's, and one of a structured type merges
+// in turn (b); a record of or set of in value list notation is as long as
+// mod, an element "-" leaves base's, and one in index notation changes
+// only the elements it names (c).
+func mergeModifiedTemplate(base, mod runtime.Object, modExpr syntax.Expr, td *runtime.TypeDesc, env runtime.Scope, depth int) runtime.Object {
+	if mod == runtime.Undefined {
+		return base
+	}
+	if base == nil || base == runtime.Undefined || depth > 16 || td == nil ||
+		!mergeable(base, td, env) || !mergeable(mod, td, env) {
+		return mod
+	}
+	for {
+		p, ok := modExpr.(*syntax.ParenExpr)
+		if !ok || len(p.List) != 1 {
+			break
+		}
+		modExpr = p.List[0]
+	}
+	lit, _ := modExpr.(*syntax.CompositeLiteral)
+	home := typeHome(td, env)
+	if st := structTypeDecl(td, env); st != nil {
+		var names []string
+		fieldTypes := map[string]*runtime.TypeDesc{}
+		for _, f := range st.Fields {
+			if f == nil || f.Name == nil {
+				return mod // an embedded field: not modelled here
+			}
+			names = append(names, fieldName(f))
+			if len(f.ArrayDef) == 0 {
+				fieldTypes[fieldName(f)] = typeDescOfSpec(f.Type, home)
+			}
+		}
+		br, ok := builtins.TemplateRecord(base, names)
+		if !ok {
+			if l, isList := base.(*runtime.List); isList && len(l.Elements) <= len(names) {
+				br, ok = builtins.TemplateRecord(l, names[:len(l.Elements)])
+			}
+			if !ok {
+				return mod
+			}
+		}
+		mr, ok := builtins.TemplateRecord(mod, names)
+		if !ok {
+			l, isList := mod.(*runtime.List)
+			if !isList {
+				return mod
+			}
+			// A value list naming fewer fields: the rest unspecified.
+			if mr, ok = builtins.TemplateRecord(l, names[:len(l.Elements)]); !ok {
+				return mod
+			}
+		}
+		exprs := map[string]syntax.Expr{}
+		if lit != nil {
+			for k, e := range lit.List {
+				if be, ok := e.(*syntax.BinaryExpr); ok && be.Op != nil && be.Op.Kind() == syntax.ASSIGN {
+					if id, ok := be.X.(*syntax.Ident); ok {
+						exprs[id.String()] = be.Y
+					}
+				} else if k < len(names) {
+					exprs[names[k]] = e
+				}
+			}
+		}
+		out := runtime.NewRecord()
+		for _, name := range names {
+			b, hasB := br.Fields[name]
+			m, hasM := mr.Fields[name]
+			switch {
+			case hasM && m != runtime.Undefined && hasB:
+				out.Set(name, mergeModifiedTemplate(b, m, exprs[name], fieldTypes[name], env, depth+1))
+			case hasM && m != runtime.Undefined:
+				out.Set(name, m)
+			case hasB:
+				out.Set(name, b)
+			}
+		}
+		return out
+	}
+	lt := listTypeDesc(td, env)
+	bl, _ := base.(*runtime.List)
+	ml, _ := mod.(*runtime.List)
+	var elemTD *runtime.TypeDesc
+	if ls, ok := lt.Spec.(*syntax.ListSpec); ok && ls.ElemType != nil {
+		elemTD = typeDescOfSpec(ls.ElemType, typeHome(lt, env))
+	}
+	indexed := lit != nil && len(lit.List) > 0
+	if lit != nil {
+		for _, e := range lit.List {
+			be, ok := e.(*syntax.BinaryExpr)
+			if !ok || be.Op == nil || be.Op.Kind() != syntax.ASSIGN {
+				indexed = false
+				break
+			}
+			if _, isIdent := be.X.(*syntax.Ident); isIdent {
+				indexed = false
+				break
+			}
+		}
+	}
+	if mm, ok := mod.(*runtime.Map); ok {
+		ml, indexed = indexNotationList(mm), true
+	}
+	n := len(ml.Elements)
+	if indexed && len(bl.Elements) > n {
+		n = len(bl.Elements)
+	}
+	elems := make([]runtime.Object, n)
+	for k := range elems {
+		var b, m runtime.Object = runtime.Undefined, runtime.Undefined
+		if k < len(bl.Elements) {
+			b = bl.Elements[k]
+		}
+		if k < len(ml.Elements) {
+			m = ml.Elements[k]
+		}
+		var e syntax.Expr
+		if lit != nil && !indexed && k < len(lit.List) {
+			e = lit.List[k]
+		}
+		if m == runtime.Undefined {
+			elems[k] = b
+		} else {
+			elems[k] = mergeModifiedTemplate(b, m, e, elemTD, env, depth+1)
+		}
+	}
+	return &runtime.List{ListType: ml.ListType, Elements: elems, IndexOffset: bl.IndexOffset}
 }
 
 // modifiedBase is the value of the base x of a modified template, one
