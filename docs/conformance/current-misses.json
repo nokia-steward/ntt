@@ -1,9 +1,9 @@
 {
- "summary": "ran 5177 files: 5077 matched, 19 skipped (98.43% match rate)",
- "source": "etsi-report3.json",
- "miss_count": 100,
+ "summary": "ran 5177 files: 5078 matched, 19 skipped (98.45% match rate)",
+ "source": "etsi-report4.json",
+ "miss_count": 99,
  "outcomes": {
-  "reject->pass": 41,
+  "reject->pass": 40,
   "reject->none": 23,
   "->": 19,
   "pass->fail": 6,
@@ -45,12 +45,12 @@
   },
   {
    "chapter": "core_language/15_templates",
-   "misses": 10,
+   "misses": 9,
    "outcomes": {
     "->": 2,
     "pass->fail": 1,
     "reject->none": 3,
-    "reject->pass": 4
+    "reject->pass": 3
    }
   },
   {
@@ -660,14 +660,6 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/15_templates/1506_referencing_elements_of_templates_or_template_fields/150606_Referencing_map_elements/NegSem_150606_Referencing_map_elements_005.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/15_templates",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/15_templates/1511_concatenating_templates_of_string_and_list_types/NegSem_1511_ConcatenatingTemplatesOfStringAndListTypes_004.ttcn",
    "message": ""
   },
   {
