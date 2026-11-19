@@ -1411,20 +1411,32 @@ func pairDistinct(n, m int, ok func(i, j int) bool) bool {
 // template b, but a `*`, matches an element of its own of the value a,
 // and, without a `*`, there are no others.
 func matchSetOf(a, b *runtime.List) (bool, error) {
-	containsStar := false
+	// AnyElementsOrNone stands for any number of elements; with a
+	// length, for as many as it allows (B.1.3.3).
+	open := false
+	minExtra, maxExtra := 0, 0
 	var tmpls []runtime.Object
 	for _, y := range b.Elements {
-		if y == runtime.AnyOrNone {
-			containsStar = true
-		} else {
-			tmpls = append(tmpls, y)
+		if lr, star := IsAnyElementsOrNone(y); star {
+			if lr == nil || lr.Max < 0 {
+				open = true
+			}
+			if lr != nil {
+				minExtra += lr.Min
+				if lr.Max >= 0 {
+					maxExtra += lr.Max
+				}
+			}
+			continue
 		}
+		tmpls = append(tmpls, y)
 	}
-	if !containsStar && len(a.Elements) > len(tmpls) {
-		return false, runtime.Errorf("First List contains more Elements than second")
-	}
-	if len(a.Elements) < len(tmpls) {
+	rest := len(a.Elements) - len(tmpls)
+	if rest < minExtra {
 		return false, runtime.Errorf("First List doesn't contain enough elements")
+	}
+	if !open && rest > maxExtra {
+		return false, runtime.Errorf("First List contains more Elements than second")
 	}
 	return supersetOf(a.Elements, tmpls)
 }

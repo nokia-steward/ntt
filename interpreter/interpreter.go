@@ -3068,6 +3068,18 @@ func evalBinary(n *syntax.BinaryExpr, env runtime.Scope) runtime.Object {
 				x = x2
 			}
 		}
+		// Against a record of, set of or array: AnyValue is one
+		// AnyElementsOrNone, a wildcard with a length an
+		// AnyElementsOrNone with that length (15.11).
+		if l, ok := x.(*runtime.List); ok && isSequenceList(l) {
+			if y2, ok := wildcardAsElements(y); ok {
+				y = y2
+			}
+		} else if l, ok := y.(*runtime.List); ok && isSequenceList(l) {
+			if x2, ok := wildcardAsElements(x); ok {
+				x = x2
+			}
+		}
 		if lr, ok := x.(*runtime.LengthRestricted); ok && lr.Inner != nil {
 			x = lr.Inner
 		}
@@ -10380,6 +10392,11 @@ func wildcardAsBinarystring(o runtime.Object, unit runtime.Unit) (*runtime.Binar
 // inside a binary string stands for one unit of that string's type -
 // a whole octet for an octetstring - so one per unit is right.
 func wildcardRunAsBinarystring(o runtime.Object, unit runtime.Unit) (*runtime.Binarystring, bool) {
+	// AnyValue without a length is one AnyElementsOrNone (15.11).
+	if o == runtime.Any {
+		bs, err := runtime.NewBinarystringWithWildcards("'*'"+unit.String(), unit)
+		return bs, err == nil
+	}
 	lr, ok := o.(*runtime.LengthRestricted)
 	if !ok {
 		return nil, false
@@ -10395,6 +10412,27 @@ func wildcardRunAsBinarystring(o runtime.Object, unit runtime.Unit) (*runtime.Bi
 		return nil, false
 	}
 	return bs, true
+}
+
+// isSequenceList reports whether l is a record of, set of or array value
+// or template, not a record held positionally or a template list.
+func isSequenceList(l *runtime.List) bool {
+	return len(l.FieldNames) == 0 && (l.ListType == runtime.RECORD_OF || l.ListType == runtime.SET_OF)
+}
+
+// wildcardAsElements is the elements a wildcard operand of a
+// concatenation of list templates stands for (15.11): AnyValue one
+// AnyElementsOrNone, AnyValue or AnyValueOrNone with a length one
+// AnyElementsOrNone with that length.
+func wildcardAsElements(o runtime.Object) (*runtime.List, bool) {
+	if o == runtime.Any {
+		return &runtime.List{Elements: []runtime.Object{runtime.AnyOrNone}}, true
+	}
+	lr, ok := o.(*runtime.LengthRestricted)
+	if !ok || lr.Inner != runtime.Any && lr.Inner != runtime.AnyOrNone {
+		return nil, false
+	}
+	return &runtime.List{Elements: []runtime.Object{&runtime.LengthRestricted{Inner: runtime.AnyOrNone, Min: lr.Min, Max: lr.Max}}}, true
 }
 
 // allFormalsHaveDefaults reports whether every formal parameter
