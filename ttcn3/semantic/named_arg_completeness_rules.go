@@ -70,6 +70,24 @@ func checkOneNamedCall(call *syntax.CallExpr, fd *syntax.FuncDecl) []Diagnostic 
 	}
 
 	var diags []Diagnostic
+	// Each named actual parameter has a formal of its name (5.4.2).
+	formals := map[string]bool{}
+	for _, p := range fd.Params.List {
+		if p != nil && p.Name != nil {
+			formals[p.Name.String()] = true
+		}
+	}
+	for _, arg := range call.Args.List {
+		if name, ok := namedArgName(arg); ok && !formals[name] {
+			diags = append(diags, Diagnostic{
+				Code:     "named-arg-unknown",
+				Severity: SeverityError,
+				Message:  fmt.Sprintf("%s has no formal parameter %q (ETSI 5.4.2)", fd.Name.String(), name),
+				Node:     arg,
+				Span:     syntax.SpanOf(arg),
+			})
+		}
+	}
 	for i, p := range fd.Params.List {
 		if p == nil || p.Name == nil {
 			continue
