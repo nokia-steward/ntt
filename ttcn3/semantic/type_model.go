@@ -459,3 +459,93 @@ func isWildcardTemplate(e syntax.Expr) bool {
 	v, ok := e.(*syntax.ValueLiteral)
 	return ok && v.Tok != nil && (v.Tok.Kind() == syntax.ANY || v.Tok.Kind() == syntax.MUL)
 }
+
+// declType is the declared type expression of the value id refers to, a
+// variable, constant, module parameter or formal parameter, and the tree
+// it is declared in.
+func (m typeModel) declType(id *syntax.Ident) (syntax.Expr, *ttcn3.Tree) {
+	defs := m.tree.LookupWithDB(id, m.db)
+	if len(defs) != 1 {
+		return nil, nil
+	}
+	switch d := defs[0].Node.(type) {
+	case *syntax.ValueDecl:
+		return d.Type, defs[0].Tree
+	case *syntax.FormalPar:
+		return d.Type, defs[0].Tree
+	}
+	return nil, nil
+}
+
+// listElemRoot is the root type of the elements of the record of or set
+// of value e refers to.
+func (m typeModel) listElemRoot(e syntax.Expr) (rootType, bool) {
+	id, ok := e.(*syntax.Ident)
+	if !ok {
+		return rootType{}, false
+	}
+	t, tree := m.declType(id)
+	for depth := 0; t != nil && depth < 8; depth++ {
+		if ls, ok := t.(*syntax.ListSpec); ok {
+			if el := typeSpecExpr(ls.ElemType); el != nil {
+				return m.typeRoot(tree, el, 0)
+			}
+			return rootType{}, false
+		}
+		defs := tree.LookupWithDB(t, m.db)
+		if len(defs) != 1 {
+			return rootType{}, false
+		}
+		// A subtype's name resolves to it or to its field.
+		var f *syntax.Field
+		switch d := defs[0].Node.(type) {
+		case *syntax.SubTypeDecl:
+			f = d.Field
+		case *syntax.Field:
+			f = d
+		}
+		if f == nil || len(f.ArrayDef) > 0 {
+			return rootType{}, false
+		}
+		t, tree = typeSpecExpr(f.Type), defs[0].Tree
+	}
+	return rootType{}, false
+}
+
+// templateBody is the body of the template definition e refers to, one
+// without parameters, or nil.
+func (m typeModel) templateBody(e syntax.Expr) syntax.Expr {
+	id, ok := e.(*syntax.Ident)
+	if !ok {
+		return nil
+	}
+	defs := m.tree.LookupWithDB(id, m.db)
+	if len(defs) != 1 {
+		return nil
+	}
+	if t, ok := defs[0].Node.(*syntax.TemplateDecl); ok && t.Params == nil && t.Base == nil {
+		return t.Value
+	}
+	return nil
+}
+
+// rootRef is the identifier a reference, through fields and elements,
+// starts at.
+func rootRef(e syntax.Expr) syntax.Expr {
+	for {
+		switch x := e.(type) {
+		case *syntax.SelectorExpr:
+			e = x.X
+			continue
+		case *syntax.IndexExpr:
+			e = x.X
+			continue
+		case *syntax.ParenExpr:
+			if len(x.List) == 1 {
+				e = x.List[0]
+				continue
+			}
+		}
+		return e
+	}
+}

@@ -45,7 +45,60 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 	}
 	mod.Inspect(func(n syntax.Node) bool {
 		switch x := n.(type) {
+		case *syntax.ForRangeStmt:
+			// The loop variable takes the elements of the list (19.4.2).
+			ds, ok := x.Init.(*syntax.DeclStmt)
+			if !ok {
+				return true
+			}
+			vd, ok := ds.Decl.(*syntax.ValueDecl)
+			if !ok || vd.Type == nil {
+				return true
+			}
+			t, tok := m.typeRoot(tree, vd.Type, 0)
+			el, eok := m.listElemRoot(x.Range)
+			if tok && eok && (t.primitive() && el.primitive() || t.structured() && el.structured()) && !m.compatible(t, el, 0) {
+				add(vd, "range-loop-element-type", fmt.Sprintf("the elements of the list are %s values, not %s (ETSI 19.4.2)", el.kind, t.kind))
+			}
+		case *syntax.RedirectExpr:
+			// A verdict redirection stores into a verdicttype (21.3.10).
+			if x.Verdict != nil {
+				if r, ok := m.exprRoot(x.Verdict); ok && (r.primitive() || r.structured()) && r.kind != "verdicttype" {
+					add(x.Verdict, "verdict-redirect-type", fmt.Sprintf("the verdict is stored into a %s, not a verdicttype (ETSI 21.3.10)", r.kind))
+				}
+			}
+			// A value redirection stores the message the in-line
+			// template `T: ...` matches into a variable of a type T is
+			// compatible with (22.2.2, 22.4).
+			if len(x.Value) == 1 {
+				if call, ok := x.X.(*syntax.CallExpr); ok && receivingOpName(call.Fun) != "" && call.Args != nil && len(call.Args.List) == 1 {
+					if b, ok := call.Args.List[0].(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.COLON {
+						t, tok := m.exprRoot(x.Value[0])
+						v, vok := m.typeRoot(tree, b.X, 0)
+						if tok && vok && (t.primitive() && v.primitive() || t.structured() && v.structured()) && !m.compatible(t, v, 0) {
+							add(x.Value[0], "value-redirect-type", fmt.Sprintf("a %s message is stored into a %s (ETSI 22.2.2)", v.kind, t.kind))
+						}
+					}
+				}
+			}
 		case *syntax.ValueDecl:
+			// A template variable or module parameter is initialised
+			// within its restriction (15.8): template(present) excludes
+			// AnyValueOrNone as a whole too.
+			if restr := restrictionTag(x.TemplateRestriction); restr != "" {
+				for _, d := range x.Decls {
+					// A call's arguments are not the initialiser's
+					// matching mechanisms: one with a call is left to
+					// the run time (15.8).
+					if d == nil || d.Value == nil || hasCallExpr(d.Value) {
+						continue
+					}
+					diags = append(diags, restrictionViolationsIn(d.Value, restr, d)...)
+					if v, ok := d.Value.(*syntax.ValueLiteral); ok && restr == "present" && v.Tok != nil && v.Tok.Kind() == syntax.MUL {
+						add(v, "template-restriction-violation", `"*" is not allowed in a template(present) initialiser`)
+					}
+				}
+			}
 			// A value variable or constant is not initialised with a
 			// template (11.1, 10).
 			if x.KindTok != nil && x.TemplateRestriction == nil && (x.KindTok.Kind() == syntax.VAR || x.KindTok.Kind() == syntax.CONST) {
@@ -154,6 +207,25 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 			if !ok || x.Args == nil {
 				return true
 			}
+			switch {
+			case id.String() == "match" && len(x.Args.List) == 2 && funcs["match"] == nil:
+				// The first operand of match is a value, the second a
+				// template of a compatible type (15.9).
+				if m.isTemplateRef(rootRef(x.Args.List[0])) {
+					add(x.Args.List[0], "match-value-is-template", "the first operand of match is a value, not a template (ETSI 15.9)")
+				}
+				l, lok := m.exprRoot(x.Args.List[0])
+				r, rok := m.exprRoot(x.Args.List[1])
+				if lok && rok && (l.primitive() && r.primitive() || l.structured() && r.structured()) && !m.compatible(l, r, 0) && !m.compatible(r, l, 0) {
+					add(x, "match-incompatible", fmt.Sprintf("match of a %s value with a %s template (ETSI 15.9)", l.kind, r.kind))
+				}
+			case id.String() == "valueof" && len(x.Args.List) == 1 && funcs["valueof"] == nil:
+				// valueof of a template that does not resolve to a
+				// specific value (15.10).
+				if body := m.templateBody(x.Args.List[0]); body != nil && isWildcardTemplate(body) {
+					add(x, "valueof-not-specific", fmt.Sprintf("%s does not resolve to a specific value (ETSI 15.10)", syntax.Name(x.Args.List[0])))
+				}
+			}
 			fd := funcs[id.String()]
 			if fd == nil || fd.Params == nil {
 				return true
@@ -190,4 +262,16 @@ func isAssignStatement(tree *ttcn3.Tree, b *syntax.BinaryExpr) bool {
 		return true
 	}
 	return false
+}
+
+// hasCallExpr reports whether e calls a function or template.
+func hasCallExpr(e syntax.Expr) bool {
+	found := false
+	syntax.Inspect(e, func(n syntax.Node) bool {
+		if _, ok := n.(*syntax.CallExpr); ok {
+			found = true
+		}
+		return !found
+	})
+	return found
 }
