@@ -19,6 +19,17 @@ func Lengthof(args ...runtime.Object) runtime.Object {
 	if args[0] == runtime.Undefined {
 		return runtime.NewInt(0)
 	}
+	// A template that matches values of different lengths has none
+	// (ETSI C.2.1).
+	if lo, hi, ok := templateLengths(args[0]); ok {
+		if lo < 0 {
+			return runtime.Errorf("lengthof: the length restriction contradicts the template body, or it holds a matching mechanism lengthof does not take (ETSI C.2.1)")
+		}
+		if lo != hi {
+			return runtime.Errorf("lengthof: the template matches values of different lengths (ETSI C.2.1)")
+		}
+		return runtime.NewInt(lo)
+	}
 	// `lengthof(template length(a..b))`: when the restriction
 	// pins the length exactly (Min == Max) trust it - even an
 	// inner blob with wildcards is asserting that fixed expansion.
@@ -47,6 +58,119 @@ func Lengthof(args ...runtime.Object) runtime.Object {
 		return runtime.NewInt(l.Len())
 	}
 	return runtime.Errorf("%s types have no length", args[0].Type())
+}
+
+// templateLengths is the range of lengths of the values string or record
+// of template t matches, hi -1 for no upper bound, when t is one lengthof
+// has rules for (ETSI C.2.1): AnyValue and AnyValueOrNone, a length
+// attribute, a template list, a binary string or record of with
+// AnyElementsOrNone inside. A pattern and a specific value count their
+// indexable items whatever they match (15.6.1). ok is false for anything
+// else, a value among them, left to the length of values.
+func templateLengths(t runtime.Object) (lo, hi int, ok bool) {
+	switch v := t.(type) {
+	case *runtime.Range:
+		return -1, -1, true // no mechanism lengthof takes
+	case *runtime.LengthRestricted:
+		ilo, ihi, iok := templateLengths(v.Inner)
+		if iok && ilo < 0 {
+			return ilo, ihi, true
+		}
+		if !iok {
+			if v.Inner == nil {
+				return 0, 0, false
+			}
+			n := listExpandedLen(v.Inner)
+			if s, isStr := v.Inner.(*runtime.String); isStr && s.IsPattern {
+				return 0, 0, false // a pattern's items
+			}
+			if n < 0 {
+				return 0, 0, false
+			}
+			ilo, ihi = n, n
+		}
+		lo, hi = v.Min, v.Max
+		if ilo > lo {
+			lo = ilo
+		}
+		if ihi >= 0 && (hi < 0 || ihi < hi) {
+			hi = ihi
+		}
+		if hi >= 0 && lo > hi {
+			return -1, -1, true // contradicting
+		}
+		return lo, hi, true
+	case *runtime.List:
+		switch v.ListType {
+		case runtime.VALUE_LIST:
+			lo, hi = -2, -2
+			for _, e := range v.Elements {
+				var elo, ehi int
+				if l, h, ok := templateLengths(e); ok {
+					if l < 0 {
+						return l, h, true
+					}
+					elo, ehi = l, h
+				} else if n := listExpandedLen(e); n >= 0 {
+					elo, ehi = n, n
+				} else {
+					return 0, 0, false
+				}
+				if lo == -2 {
+					lo, hi = elo, ehi
+				} else if elo != lo || ehi != hi {
+					return 0, 1, true // different lengths
+				}
+			}
+			if lo == -2 {
+				return 0, 0, false
+			}
+			return lo, hi, true
+		case runtime.SUBSET, runtime.SUPERSET:
+			return 0, -1, true
+		case runtime.RECORD_OF, runtime.SET_OF:
+			if len(v.FieldNames) > 0 {
+				return 0, 0, false
+			}
+			open := false
+			for _, e := range v.Elements {
+				if _, isRange := e.(*runtime.Range); isRange {
+					return -1, -1, true
+				}
+				if e == runtime.AnyOrNone {
+					open = true
+				}
+				if lr, ok := e.(*runtime.LengthRestricted); ok && lr.Inner == runtime.AnyOrNone && lr.Min != lr.Max {
+					open = true
+				}
+			}
+			if !open {
+				return 0, 0, false
+			}
+			return listExpandedLen(v), -1, true
+		}
+	case *runtime.Binarystring:
+		if v.Value == nil || v.Value.Sign() >= 0 || !strings.Contains(v.String, "*") {
+			return 0, 0, false
+		}
+		body := strings.Join(strings.Fields(v.String[1:len(v.String)-2]), "")
+		n := 0
+		for k := 0; k < len(body); k++ {
+			switch {
+			case body[k] == '*':
+			case v.Unit == runtime.Octet && body[k] != '?' && k+1 < len(body):
+				k++
+				n++
+			default:
+				n++
+			}
+		}
+		return n, -1, true
+	}
+	if t == runtime.Any || t == runtime.AnyOrNone {
+		return 0, -1, true
+	}
+	return 0, 0, false
 }
 
 // listElementsLen is how many elements of a list the template elements
