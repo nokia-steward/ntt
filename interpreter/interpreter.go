@@ -1043,6 +1043,16 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 					subOv[kind] = td.Override[lc+"."+kind]
 					continue
 				}
+				// A field-qualified one on the record a synonym refers
+				// to: the field has it, the synonym's own does not
+				// replace it (27.1.2.0).
+				if declaring != td {
+					if v, ok := declaring.Attrs[lc+"."+kind]; ok {
+						sub[kind] = v
+						subOv[kind] = declaring.Override[lc+"."+kind]
+						continue
+					}
+				}
 				if td.Override[kind] {
 					if v, ok := td.Attrs[kind]; ok {
 						sub[kind] = v

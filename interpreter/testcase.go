@@ -1754,7 +1754,15 @@ func typeDescForScoped(name string, local *syntax.WithSpec, scopes []*syntax.Wit
 	for _, s := range scopes {
 		one := map[string][]string{}
 		oneOv := map[string]bool{}
-		collectWithAttrs(s, one, oneOv, nil)
+		oneLocal := map[string]bool{}
+		collectWithAttrs(s, one, oneOv, oneLocal)
+		// An @local attribute is the scope unit's own: the definitions
+		// inside it do not inherit it (27.1.2.0).
+		for k := range oneLocal {
+			if oneLocal[k] {
+				delete(one, k)
+			}
+		}
 		merge(one, oneOv)
 	}
 	// The variant attribute is always interpreted in the context of the
