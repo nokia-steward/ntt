@@ -8,7 +8,9 @@
 //     (7.1.3);
 //   - the operands of and, or, xor and not are boolean (7.1.4);
 //   - an actual parameter given to an in formal parameter of a function,
-//     altstep or testcase is of its root type (5.4.2 d).
+//     altstep or testcase is of its root type (5.4.2 d);
+//   - the templates of the branches of a select case are of the header's
+//     type (19.3.1), the header of a select union is a union (19.3.2).
 package semantic
 
 import (
@@ -63,9 +65,12 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 			}
 			switch x.Op.Kind() {
 			case syntax.ASSIGN:
-				if id, ok := x.X.(*syntax.Ident); ok {
-					if t, v, ok := both(id, x.Y); ok && !assignable(t, v) {
-						add(x, "type-incompatible-assignment", fmt.Sprintf("a %s value is assigned to the %s %s (ETSI 6.3.1, 19.1)", v.kind, t.kind, id.String()))
+				switch target := x.X.(type) {
+				case *syntax.Ident, *syntax.SelectorExpr:
+					if isAssignStatement(tree, x) {
+						if t, v, ok := both(target, x.Y); ok && !assignable(t, v) {
+							add(x, "type-incompatible-assignment", fmt.Sprintf("a %s value is assigned to the %s %s (ETSI 6.3.1, 19.1)", v.kind, t.kind, syntax.Name(target)))
+						}
 					}
 				}
 			case syntax.LT, syntax.GT, syntax.LE, syntax.GE, syntax.EQ, syntax.NE:
@@ -76,6 +81,37 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 				for _, side := range []syntax.Expr{x.X, x.Y} {
 					if r, ok := m.exprRoot(side); ok && r.primitive() && r.kind != "boolean" {
 						add(side, "type-boolean-operand", fmt.Sprintf("an operand of %s is a %s value, not boolean (ETSI 7.1.4)", x.Op.String(), r.kind))
+					}
+				}
+			}
+		case *syntax.SelectStmt:
+			if x.Tag == nil {
+				return true
+			}
+			h, ok := m.exprRoot(x.Tag)
+			if !ok {
+				return true
+			}
+			// The header of a select union is of a union type or
+			// anytype (19.3.2).
+			if x.Union != nil {
+				if h.primitive() || h.kind == "enumerated" || h.kind == "record" || h.kind == "set" {
+					add(x.Tag, "select-union-header", fmt.Sprintf("the header of select union is a %s value, not a union (ETSI 19.3.2)", h.kind))
+				}
+				return true
+			}
+			if !h.primitive() {
+				return true
+			}
+			// The templates of the branches are of the header's type
+			// (19.3.1).
+			for _, c := range x.Body {
+				if c == nil || c.Case == nil {
+					continue
+				}
+				for _, e := range c.Case.List {
+					if v, ok := m.exprRoot(e); ok && v.primitive() && !comparable(h, v) {
+						add(e, "select-case-type", fmt.Sprintf("a %s branch of a select on a %s value (ETSI 19.3.1)", v.kind, h.kind))
 					}
 				}
 			}
@@ -115,4 +151,15 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 		return true
 	})
 	return diags
+}
+
+// isAssignStatement reports whether the assignment b is a statement or a
+// for loop's, not a field or parameter assignment of a notation.
+func isAssignStatement(tree *ttcn3.Tree, b *syntax.BinaryExpr) bool {
+	n := &ttcn3.Node{Node: b, Tree: tree}
+	switch n.ParentOf(b).(type) {
+	case *syntax.ExprStmt, *syntax.ForStmt:
+		return true
+	}
+	return false
 }

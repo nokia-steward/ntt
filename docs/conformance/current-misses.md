@@ -1,13 +1,13 @@
 # Current Conformance Misses
 
-Generated from `etsi-report6.json` using the current workspace runner.
+Generated from `etsi-report7.json` using the current workspace runner.
 
-- Summary: `ran 5177 files: 5084 matched, 13 skipped (98.45% match rate)`
-- Misses: `93`
+- Summary: `ran 5177 files: 5085 matched, 13 skipped (98.47% match rate)`
+- Misses: `92`
 
 ## Misses By Outcome
 
-- `reject->pass`: `40`
+- `reject->pass`: `39`
 - `reject->none`: `23`
 - `->`: `13`
 - `pass->fail`: `6`
@@ -22,7 +22,7 @@ Generated from `etsi-report6.json` using the current workspace runner.
 - `core_language/05_basic_language_elements`: `14` (`->`=2, `reject->none`=1, `reject->pass`=11)
 - `core_language/22_communication_operations`: `11` (`reject->none`=1, `reject->pass`=10)
 - `core_language/15_templates`: `9` (`->`=2, `pass->fail`=1, `reject->none`=3, `reject->pass`=3)
-- `core_language/16_functions_altsteps_testcases`: `6` (`->`=1, `pass->error`=1, `pass->semantic-error`=1, `reject->none`=1, `reject->pass`=2)
+- `core_language/16_functions_altsteps_testcases`: `5` (`->`=1, `pass->error`=1, `pass->semantic-error`=1, `reject->none`=1, `reject->pass`=1)
 - `core_language/20_statement_and_operations_for_alt`: `3` (`pass->error`=1, `pass->fail`=1, `reject->pass`=1)
 - `core_language/B_matching_incoming_values`: `3` (`reject->none`=2, `reject->pass`=1)
 - `oo/501_classes_and_objects`: `3` (`pass->parse-error`=2, `reject->pass`=1)

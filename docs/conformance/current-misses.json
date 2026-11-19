@@ -1,9 +1,9 @@
 {
- "summary": "ran 5177 files: 5084 matched, 13 skipped (98.45% match rate)",
- "source": "etsi-report6.json",
- "miss_count": 93,
+ "summary": "ran 5177 files: 5085 matched, 13 skipped (98.47% match rate)",
+ "source": "etsi-report7.json",
+ "miss_count": 92,
  "outcomes": {
-  "reject->pass": 40,
+  "reject->pass": 39,
   "reject->none": 23,
   "->": 13,
   "pass->fail": 6,
@@ -55,10 +55,10 @@
   },
   {
    "chapter": "core_language/16_functions_altsteps_testcases",
-   "misses": 6,
+   "misses": 5,
    "outcomes": {
     "reject->none": 1,
-    "reject->pass": 2,
+    "reject->pass": 1,
     "pass->error": 1,
     "->": 1,
     "pass->semantic-error": 1
@@ -653,14 +653,6 @@
    "actual": "pass",
    "outcome": "reject->pass",
    "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/160102_predefined_functions/NegSem_160102_predefined_functions_039.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/16_functions_altsteps_testcases",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/16_functions_altsteps_testcases/1601_functions/1601_toplevel/NegSem_1601_toplevel_001.ttcn",
    "message": ""
   },
   {

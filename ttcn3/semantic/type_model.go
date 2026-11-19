@@ -93,8 +93,106 @@ func (m typeModel) exprRoot(e syntax.Expr) (rootType, bool) {
 		}
 	case *syntax.Ident:
 		return m.refRoot(x)
+	case *syntax.CallExpr:
+		return m.callRoot(x)
+	case *syntax.SelectorExpr:
+		return m.selectorRoot(x)
 	}
 	return rootType{}, false
+}
+
+// predefinedResult is the root type of the value a predefined function
+// returns, where it is one (annex C).
+var predefinedResult = map[string]string{
+	"int2float": "float", "float2int": "integer", "int2str": "charstring", "str2int": "integer",
+	"int2char": "charstring", "char2int": "integer", "int2unichar": "universal charstring",
+	"unichar2int": "integer", "lengthof": "integer", "sizeof": "integer", "str2float": "float",
+	"float2str": "charstring", "bit2int": "integer", "hex2int": "integer", "oct2int": "integer",
+	"int2bit": "bitstring", "int2hex": "hexstring", "int2oct": "octetstring",
+	"bit2str": "charstring", "hex2str": "charstring", "oct2str": "charstring",
+	"str2oct": "octetstring", "str2hex": "hexstring", "oct2char": "charstring",
+	"char2oct": "octetstring", "unichar2char": "charstring", "testcasename": "charstring",
+	"rnd": "float", "isvalue": "boolean", "isbound": "boolean", "ispresent": "boolean",
+	"ischosen": "boolean", "match": "boolean", "enum2int": "integer",
+}
+
+// callRoot is the root type of the value call returns: a predefined
+// function's, or a function of the module's declared result.
+func (m typeModel) callRoot(call *syntax.CallExpr) (rootType, bool) {
+	id, ok := call.Fun.(*syntax.Ident)
+	if !ok {
+		return rootType{}, false
+	}
+	defs := m.tree.LookupWithDB(id, m.db)
+	if len(defs) == 0 {
+		if k, ok := predefinedResult[id.String()]; ok {
+			return rootType{kind: k}, true
+		}
+		return rootType{}, false
+	}
+	if len(defs) != 1 {
+		return rootType{}, false
+	}
+	fd, ok := defs[0].Node.(*syntax.FuncDecl)
+	if !ok || fd.Return == nil || fd.Return.Type == nil || fd.Return.Restriction != nil || len(fd.Return.ArrayDef) > 0 {
+		return rootType{}, false
+	}
+	return m.typeRoot(defs[0].Tree, fd.Return.Type, 0)
+}
+
+// selectorRoot is the root type of `t.read` for a timer t (23.4), and of
+// a field of a record or set value.
+func (m typeModel) selectorRoot(x *syntax.SelectorExpr) (rootType, bool) {
+	sel := syntax.Name(x.Sel)
+	if id, ok := x.X.(*syntax.Ident); ok && sel == "read" {
+		if defs := m.tree.LookupWithDB(id, m.db); len(defs) == 1 {
+			if vd, ok := defs[0].Node.(*syntax.ValueDecl); ok && (vd.KindTok != nil && vd.KindTok.Kind() == syntax.TIMER || isTimerType(vd.Type)) {
+				return rootType{kind: "float"}, true
+			}
+		}
+	}
+	parent, ok := m.exprRoot(x.X)
+	if !ok || parent.kind != "record" && parent.kind != "set" || parent.name == "" {
+		return rootType{}, false
+	}
+	st := m.structNamed(parent.name)
+	if st == nil {
+		return rootType{}, false
+	}
+	for _, f := range st.decl.Fields {
+		if f != nil && f.Name != nil && f.Name.String() == sel && len(f.ArrayDef) == 0 {
+			if e, ok := f.Type.(syntax.Expr); ok {
+				return m.typeRoot(st.tree, e, 0)
+			}
+		}
+	}
+	return rootType{}, false
+}
+
+type structDecl struct {
+	decl *syntax.StructTypeDecl
+	tree *ttcn3.Tree
+}
+
+// structNamed is the record, set or union declaration of the module
+// named name.
+func (m typeModel) structNamed(name string) *structDecl {
+	var out *structDecl
+	m.tree.Root.Inspect(func(n syntax.Node) bool {
+		if out != nil {
+			return false
+		}
+		if st, ok := n.(*syntax.StructTypeDecl); ok && st.Name != nil && st.Name.String() == name {
+			out = &structDecl{decl: st, tree: m.tree}
+		}
+		return true
+	})
+	return out
+}
+
+func isTimerType(t syntax.Expr) bool {
+	id, ok := t.(*syntax.Ident)
+	return ok && id.Tok != nil && id.Tok.Kind() == syntax.TIMER
 }
 
 // refRoot is the root type of the value the identifier id refers to: a
