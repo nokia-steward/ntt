@@ -12233,6 +12233,76 @@ func evalDecValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 	if enc == runtime.Undefined {
 		return runtime.NewInt(1)
 	}
+	if fn == "decvalue_unichar" {
+		return decvalueUnichar(n, enc, env)
+	}
+	return decodeValue(fn, n, enc, env)
+}
+
+// codecBuffer names, in a scope of its own, the bitstring decvalue_unichar
+// has decvalue decode.
+const codecBufferKey = "\x00ttcn3:codec-buffer"
+
+var codecBuffer = &syntax.Ident{Tok: nameTok(codecBufferKey)}
+
+// decvalueUnichar is decvalue_unichar(encoded_value, decoded_value,
+// string_serialization, decoding_info, dynamic_encoding) for enc, the
+// value of encoded_value: decvalue of the characters' octets in the
+// serialization, the characters of the octets it leaves the rest of
+// encoded_value (ETSI C.5.4):
+//
+//	var bitstring v_str := oct2bit(unichar2oct(encoded_value, string_serialization));
+//	var integer v_result := decvalue(v_str, decoded_value, decoding_info, dynamic_encoding);
+//	if (v_result == 0) { encoded_value := oct2unichar(bit2oct(v_str), string_serialization) }
+func decvalueUnichar(n *syntax.CallExpr, enc runtime.Object, env runtime.Scope) runtime.Object {
+	args := n.Args.List
+	ser, err := stringSerialization("decvalue_unichar", args, 2, env)
+	if err != nil {
+		return err
+	}
+	s, ok := enc.(*runtime.String)
+	if !ok {
+		return runtime.NewInt(1)
+	}
+	// Into a JSON-encoded value: the characters are JSON text
+	// (encvalueUnichar).
+	if _, ok := jsonEncodedTypeOf("decvalue_unichar", args[1], n, env); ok {
+		return decodeValue("decvalue_unichar", n, enc, env)
+	}
+	res := runtime.Object(runtime.NewInt(1))
+	if oct := builtins.Unichar2Oct(s, runtime.NewCharstring(ser)); !runtime.IsError(oct) {
+		bits := builtins.Oct2Bit(oct)
+		buf := runtime.NewEnv(env)
+		buf.Set(codecBufferKey, bits)
+		list := append([]syntax.Expr{codecBuffer, args[1]}, args[min(3, len(args)):]...)
+		res = decodeValue("decvalue", &syntax.CallExpr{Fun: n.Fun, Args: &syntax.ParenExpr{List: list}}, bits, buf)
+		if r, ok := res.(runtime.Int); ok && r.Int64() == 0 {
+			rest, _ := buf.Get(codecBufferKey)
+			rb, ok := rest.(*runtime.Binarystring)
+			if !ok {
+				return runtime.Errorf("decvalue_unichar: decvalue left no bitstring")
+			}
+			u := builtins.Oct2Unichar(builtins.Bit2Oct(rb), runtime.NewCharstring(ser))
+			if runtime.IsError(u) {
+				return runtime.Errorf("decvalue_unichar: the undecoded octets are no %s text: %v", ser, u)
+			}
+			assignToLHS(args[0], u, env)
+			return res
+		}
+	}
+	// What encvalue_unichar gave for a value the engine has no encoding
+	// of: its placeholder, which the round-trip cache reads back.
+	if orig, ok := recallEncodedString(env, s); ok {
+		assignToLHS(args[0], runtime.NewUniversalString(""), env)
+		assignToLHS(args[1], orig, env)
+		return runtime.NewInt(0)
+	}
+	return res
+}
+
+// decodeValue is decvalue (fn "decvalue") or decvalue_o of enc, the value
+// of the call's first argument.
+func decodeValue(fn string, n *syntax.CallExpr, enc runtime.Object, env runtime.Scope) runtime.Object {
 	// We only honour the round-trip cache: decvalue succeeds when
 	// the encoded value was produced by a matching encvalue earlier
 	// in the same testcase. Any other input (hand-coded bitstrings,
@@ -12628,9 +12698,10 @@ func decodeRawInteger(n *syntax.CallExpr, enc runtime.Object, env runtime.Scope)
 	return runtime.NewInt(0), true
 }
 
-// decodeRawIntegerBits decodes the most-significant `width` bits of a
-// bitstring into an integer-typed slot, where `width` is the slot
-// type's `variant "N bit"` field width. It consumes those bits and
+// decodeRawIntegerBits decodes the first `width` bits of a bitstring
+// into an integer-typed slot, where `width` is the slot type's
+// `variant "N bit"` field width; whole octets are little-endian, as
+// encodeInteger writes them. It consumes those bits and
 // leaves any excess in the caller's slot (ETSI 16.1.2 / Annex C
 // decvalue). With fewer than `width` bits available it returns the
 // "not enough bits" code 2 and leaves both slots untouched, so the
@@ -12652,6 +12723,10 @@ func decodeRawIntegerBits(n *syntax.CallExpr, bs *runtime.Binarystring, env runt
 	mask.Sub(mask, big.NewInt(1))
 	rest := new(big.Int).And(full, mask)
 	val := new(big.Int).Rsh(full, uint(excess))
+	if width%8 == 0 {
+		// Whole octets are little-endian, as encodeInteger writes them.
+		val = reverseOctets(val, width/8)
+	}
 	assignToLHS(n.Args.List[1], runtime.Int{Int: val}, env)
 	assignToLHS(n.Args.List[0], &runtime.Binarystring{Unit: runtime.Bit, Value: rest, Length: excess}, env)
 	return runtime.NewInt(0), true
@@ -12673,6 +12748,16 @@ func intDecodeWidthBits(arg syntax.Expr, env runtime.Scope) int {
 		return w
 	}
 	td := lookupTypeDesc(declaredTypeName(env, id.String()), env)
+	if td == nil {
+		// A parameter's type is its function's.
+		if t, _, ok := staticTypeOf(arg, env, 0); ok && t.name != "" {
+			scope := env
+			if t.scope != nil {
+				scope = t.scope
+			}
+			td = lookupTypeDesc(t.name, scope)
+		}
+	}
 	if td == nil {
 		return 0
 	}
@@ -12702,11 +12787,21 @@ func isIntegerTypedSlot(arg syntax.Expr, env runtime.Scope) bool {
 		return false
 	}
 	name := declaredTypeName(env, id.String())
+	scope := env
+	if name == "" {
+		// A parameter's type is its function's.
+		if t, _, ok := staticTypeOf(arg, env, 0); ok {
+			name = t.name
+			if t.scope != nil {
+				scope = t.scope
+			}
+		}
+	}
 	for i := 0; i < 16 && name != ""; i++ {
 		if strings.EqualFold(name, "integer") {
 			return true
 		}
-		td := lookupTypeDesc(name, env)
+		td := lookupTypeDesc(name, scope)
 		if td == nil || td.Underlying == "" {
 			return false
 		}
@@ -12891,6 +12986,23 @@ func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 	if lexec := tlExec(env); lexec != nil {
 		defer func() { tlEncode(lexec, n, v, res, env) }()
 	}
+	// The value to encode is a specific value (C.5.1, C.5.3, C.5.5):
+	// an uninitialised one is none.
+	if v == runtime.Undefined {
+		return runtime.Errorf("%s: the value to encode is uninitialised (ETSI C.5, 16.1.2)", fn)
+	}
+	if fn == "encvalue_unichar" {
+		return encvalueUnichar(n, v, env)
+	}
+	res, _ = encodeValue(fn, n, v, env)
+	return res
+}
+
+// encodeValue is what encvalue (fn "encvalue"), or encvalue_o, gives for
+// v, the value of the call's first argument. encoded is false when the
+// engine has no encoding for v and gives a placeholder that only its own
+// decvalue reads back.
+func encodeValue(fn string, n *syntax.CallExpr, v runtime.Object, env runtime.Scope) (res runtime.Object, encoded bool) {
 	// A value of a JSON-encoded type is encoded as JSON (ES 201 873-11).
 	if t, ok := jsonEncodedTypeOf(fn, n.Args.List[0], n, env); ok {
 		if text, err := encodeJSON(v, t, env); err == nil {
@@ -12901,17 +13013,15 @@ func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 			case *runtime.Binarystring:
 				rememberEncoded(env, o, v)
 			}
-			return out
+			return out, true
 		}
 	}
-	// Raw ints get a placeholder byte filled with their low byte:
-	// a number of fixtures compare the encoded blob byte-for-byte
-	// (e.g. `match(encvalue_o(10), '0A000000'O)`) so we at least
-	// try to land the first octet right. We don't have a faithful
-	// codec, but the value is still cached so a follow-up
-	// `decvalue` / `@decoded` round-trip can recover the int.
+	// An integer: the bits its type's `variant "N bit"` gives it, or a
+	// 32-bit little-endian word (`encvalue_o(10)` is '0A000000'O). The
+	// value is cached so a follow-up `decvalue` / `@decoded` round-trip
+	// can recover the int.
 	if iv, ok := v.(runtime.Int); ok {
-		return encodePlaceholderForInt(env, fn, iv, v)
+		return encodeInteger(env, fn, iv, intDecodeWidthBits(n.Args.List[0], env)), true
 	}
 	// Strings / records / unions / enums all flow through the
 	// generic cache so a follow-up `decvalue` (or `@decoded`
@@ -12919,17 +13029,6 @@ func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 	// a faithful byte sequence without a real codec, but the
 	// round-trip is what the conformance fixtures check.
 	switch fn {
-	case "encvalue_unichar":
-		s := runtime.NewUniversalString("\x00\x00\x00\x00")
-		if mode, ok := xmlHeaderControlArg(n, env); ok {
-			if mode == "xmlHeader" {
-				s = runtime.NewUniversalString(`<?xml version="1.0"?><value/>`)
-			} else {
-				s = runtime.NewUniversalString(`<value/>`)
-			}
-		}
-		rememberEncodedString(env, s, v)
-		return s
 	case "encvalue_o":
 		// A bitstring whose length is not a multiple of 8 is
 		// left-aligned in the result, and the low (8 - len mod 8) bits
@@ -12941,13 +13040,13 @@ func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 		if bits, ok := v.(*runtime.Binarystring); ok && bits.Unit == runtime.Bit {
 			if bs, ok := encodeBitstringToOctetstring(bits); ok {
 				rememberEncoded(env, bs, v)
-				return bs
+				return bs, true
 			}
 		}
 		if rec, ok := v.(*runtime.List); ok && len(rec.FieldNames) > 0 {
 			if bs, ok := encodeRecordToOctetstring(rec); ok {
 				rememberEncoded(env, bs, v)
-				return bs
+				return bs, true
 			}
 		}
 		bs := &runtime.Binarystring{
@@ -12956,7 +13055,7 @@ func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 			Length: 1,
 		}
 		rememberEncoded(env, bs, v)
-		return bs
+		return bs, false
 	default:
 		// The bits encvalue_o packs into octets (ETSI Annex C.5.5): a
 		// bitstring's count and bits as they are, a record's octets.
@@ -12970,6 +13069,7 @@ func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 		}
 		// What the engine cannot encode is the one zero octet
 		// encvalue_o gives for it, as bits.
+		encoded := bs != nil
 		if bs == nil {
 			bs = &runtime.Binarystring{
 				Unit:   runtime.Bit,
@@ -12978,8 +13078,95 @@ func evalEncValue(fn string, n *syntax.CallExpr, env runtime.Scope) (res runtime
 			}
 		}
 		rememberEncoded(env, bs, v)
-		return bs
+		return bs, encoded
 	}
+}
+
+// encvalueUnichar is encvalue_unichar(inpar, string_serialization,
+// encoding_info, dynamic_encoding) for v, the value of inpar: the octets
+// of encvalue(inpar, encoding_info, dynamic_encoding) read as characters
+// in the serialization (ETSI C.5.3), which is
+//
+//	oct2unichar(bit2oct(encvalue(inpar, encoding_info, dynamic_encoding)), string_serialization)
+func encvalueUnichar(n *syntax.CallExpr, v runtime.Object, env runtime.Scope) runtime.Object {
+	args := n.Args.List
+	ser, err := stringSerialization("encvalue_unichar", args, 1, env)
+	if err != nil {
+		return err
+	}
+	var s *runtime.String
+	if mode, ok := xmlHeaderControlArg(n, env); ok {
+		// The XML header control of an XML-encoded value (ES 201 873-9
+		// B.3.29), which no codec of the engine's encodes.
+		if mode == "xmlHeader" {
+			s = runtime.NewUniversalString(`<?xml version="1.0"?><value/>`)
+		} else {
+			s = runtime.NewUniversalString(`<value/>`)
+		}
+		rememberEncodedString(env, s, v)
+		return s
+	}
+	// JSON is text (ES 201 873-11): the characters of a JSON-encoded
+	// value are its JSON text, in whichever serialization.
+	if t, ok := jsonEncodedTypeOf("encvalue_unichar", args[0], n, env); ok {
+		if text, err := encodeJSON(v, t, env); err == nil {
+			s = runtime.NewUniversalString(text)
+			rememberEncodedString(env, s, v)
+			return s
+		}
+	}
+	call := &syntax.CallExpr{Fun: n.Fun, Args: &syntax.ParenExpr{List: append([]syntax.Expr{args[0]}, args[min(2, len(args)):]...)}}
+	enc, encoded := encodeValue("encvalue", call, v, env)
+	if runtime.IsError(enc) {
+		return enc
+	}
+	bits, ok := enc.(*runtime.Binarystring)
+	if !encoded || !ok {
+		// No encoding of the engine's: a placeholder the round-trip
+		// cache reads back.
+		s = runtime.NewUniversalString("\x00\x00\x00\x00")
+		rememberEncodedString(env, s, v)
+		return s
+	}
+	u := builtins.Oct2Unichar(builtins.Bit2Oct(bits), runtime.NewCharstring(ser))
+	if runtime.IsError(u) {
+		return runtime.Errorf("encvalue_unichar: the encoded octets are no %s text: %v", ser, u)
+	}
+	s, ok = u.(*runtime.String)
+	if !ok {
+		return runtime.Errorf("encvalue_unichar: the encoded octets are no %s text", ser)
+	}
+	rememberEncodedString(env, s, v)
+	return s
+}
+
+// isNotUsed reports whether the actual parameter e is the not-used symbol
+// `-`, which takes the formal parameter's default (5.4.2).
+func isNotUsed(e syntax.Expr) bool {
+	vl, ok := e.(*syntax.ValueLiteral)
+	return ok && vl.Tok != nil && vl.Tok.Kind() == syntax.SUB
+}
+
+// stringSerialization is the string_serialization argument at index i of
+// encvalue_unichar or decvalue_unichar, "UTF-8" when it is omitted, or the
+// error of a value none of the seven UCS encoding schemes allowed (ETSI
+// C.5.3, C.5.4).
+func stringSerialization(fn string, args []syntax.Expr, i int, env runtime.Scope) (string, runtime.Object) {
+	if i >= len(args) || isNotUsed(args[i]) {
+		return "UTF-8", nil
+	}
+	v := eval(args[i], env)
+	if runtime.IsError(v) {
+		return "", v
+	}
+	s, ok := v.(*runtime.String)
+	if !ok {
+		return "", runtime.Errorf("%s: the string serialization is not a charstring", fn)
+	}
+	if !builtins.IsUCSEncoding(s.String()) {
+		return "", runtime.Errorf("%s: string serialization %q is none of the seven allowed (ETSI C.5.3, C.5.4)", fn, s.String())
+	}
+	return s.String(), nil
 }
 
 // encodeBitstringToBits is the bitstring encvalue returns for a bitstring:
@@ -16257,41 +16444,43 @@ func applyRedirectValueExpr(v syntax.Expr, payload runtime.Object, env runtime.S
 	assignToLHS(v, runtime.Share(payload), env)
 }
 
-// encodePlaceholderForInt returns the encvalue / encvalue_o /
-// encvalue_unichar placeholder blob for the integer iv. The blob is
-// fixed-shape (4 octets little-endian, 32 bits little-endian, 4-byte
-// UTF-32 codepoint) so callers comparing against a hand-picked
-// expected encoding land in the right ballpark. The original int is
-// cached so a follow-up `decvalue` can recover it.
-func encodePlaceholderForInt(env runtime.Scope, fn string, iv runtime.Int, v runtime.Object) runtime.Object {
-	n := iv.Int64()
-	switch fn {
-	case "encvalue_unichar":
-		b := []byte{byte(n), byte(n >> 8), byte(n >> 16), byte(n >> 24)}
-		s := runtime.NewUniversalString(string(b))
-		rememberEncodedString(env, s, v)
-		return s
-	case "encvalue_o":
-		lit := fmt.Sprintf("'%02X%02X%02X%02X'O",
-			byte(n), byte(n>>8), byte(n>>16), byte(n>>24))
-		bs, err := runtime.NewBinarystring(lit)
-		if err != nil {
-			bs = &runtime.Binarystring{Unit: runtime.Octet, Value: big.NewInt(n), Length: 4}
-		}
-		rememberEncoded(env, bs, v)
-		return bs
+// encodeInteger is what encvalue (fn "encvalue") or encvalue_o gives for
+// the integer iv: the width bits of a `variant "N bit"`, 32 without one,
+// little-endian when they are whole octets, so that encvalue_o(10) is
+// '0A000000'O; decvalue reads them back (decodeRawIntegerBits). encvalue_o
+// is encvalue's bits left-aligned into octets (ETSI C.5.5). The value is
+// cached for decvalue / @decoded.
+func encodeInteger(env runtime.Scope, fn string, iv runtime.Int, width int) runtime.Object {
+	if width <= 0 {
+		width = 32
 	}
-	bits := fmt.Sprintf("%032b", uint32(n))
-	rev := make([]byte, len(bits))
-	for i := 0; i < len(bits); i++ {
-		rev[i] = bits[len(bits)-1-i]
+	// A negative value: its two's complement in width bits.
+	mod := new(big.Int).Lsh(big.NewInt(1), uint(width))
+	val := new(big.Int).Mod(iv.Int, mod)
+	if width%8 == 0 {
+		val = reverseOctets(val, width/8)
 	}
-	bs, err := runtime.NewBinarystring("'" + string(rev) + "'B")
+	lit := fmt.Sprintf("'%0*b'B", width, val)
+	if fn == "encvalue_o" {
+		pad := (8 - width%8) % 8
+		lit = fmt.Sprintf("'%0*X'O", (width+pad)/4, new(big.Int).Lsh(val, uint(pad)))
+	}
+	out, err := runtime.NewBinarystring(lit)
 	if err != nil {
-		bs = &runtime.Binarystring{Unit: runtime.Bit, Value: big.NewInt(n), Length: 32}
+		return runtime.Errorf("%s: %v", fn, err)
 	}
-	rememberEncoded(env, bs, v)
-	return bs
+	rememberEncoded(env, out, iv)
+	return out
+}
+
+// reverseOctets is v, of n octets, with its octets in reverse order.
+func reverseOctets(v *big.Int, n int) *big.Int {
+	buf := make([]byte, n)
+	v.FillBytes(buf)
+	for i, j := 0, n-1; i < j; i, j = i+1, j-1 {
+		buf[i], buf[j] = buf[j], buf[i]
+	}
+	return new(big.Int).SetBytes(buf)
 }
 
 // projectDecodedField walks the RHS of `=> Type.field` (or `=>

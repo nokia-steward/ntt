@@ -119,10 +119,10 @@ func TestJSONTypeOfAnExpression(t *testing.T) {
 			var P d;
 			if (dec("{""x"":3,""y"":4}", d) != 0 or d.y != 4) { setverdict(fail, "out parameter ", d); stop }
 			var Plain pl := { x := 9 };
-			var universal charstring e := encvalue_unichar(pl, "", "", "JSON");
+			var universal charstring e := encvalue_unichar(pl, "UTF-8", "", "JSON");
 			if (e != "{""x"":9}") { setverdict(fail, "dynamic encoding ", e); stop }
 			var Plain pd;
-			if (decvalue_unichar("{""x"":10}", pd, "", "", "JSON") != 0 or pd.x != 10) { setverdict(fail, "dynamic decoding ", pd); stop }
+			if (decvalue_unichar("{""x"":10}", pd, "UTF-8", "", "JSON") != 0 or pd.x != 10) { setverdict(fail, "dynamic decoding ", pd); stop }
 			setverdict(pass);
 		}
 	}`

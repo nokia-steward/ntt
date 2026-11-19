@@ -931,6 +931,11 @@ func hasSignature(enc string) bool {
 	return false
 }
 
+// IsUCSEncoding reports whether enc names one of the seven UCS encoding
+// schemes of oct2unichar, unichar2oct, encvalue_unichar and
+// decvalue_unichar (ETSI C.1.31, C.1.32, C.5.3, C.5.4).
+func IsUCSEncoding(enc string) bool { return ucsEncoding(enc) }
+
 // ucsEncoding reports whether enc names one of the UCS encoding schemes
 // oct2unichar and unichar2oct take (ETSI C.1.31, C.1.32): UTF-8, UTF-16,
 // UTF-16LE, UTF-16BE, UTF-32, UTF-32LE or UTF-32BE.
