@@ -1188,9 +1188,22 @@ func eval(n syntax.Node, env runtime.Scope) runtime.Object {
 			}
 			return evalIndexRead(n, x.Inner, env)
 		case *runtime.IfPresent:
-			switch x.Inner.(type) {
+			inner := x.Inner
+			if lr, ok := inner.(*runtime.LengthRestricted); ok {
+				if lr.Max >= 0 {
+					index := eval(n.Index, env)
+					if runtime.IsError(index) {
+						return index
+					}
+					if i, ok := index.(runtime.Int); ok && i.IsInt64() && i.Int64() >= int64(lr.Max) {
+						return runtime.Errorf("index %d is not below the length of the template, %d at most", i.Int64(), lr.Max)
+					}
+				}
+				inner = lr.Inner
+			}
+			switch inner.(type) {
 			case *runtime.String, *runtime.Binarystring:
-				el := evalIndexRead(n, x.Inner, env)
+				el := evalIndexRead(n, inner, env)
 				if runtime.IsError(el) || el == runtime.Undefined {
 					return el
 				}
@@ -5722,6 +5735,21 @@ func evalAssign(lhs syntax.Expr, rhs syntax.Expr, env runtime.Scope) (res runtim
 					return ret
 				}
 				return nil
+			}
+		}
+		// An element of a template of a string type (ETSI 15.6.1).
+		if i, isInt := idx.(runtime.Int); isInt && i.IsInt64() && declaredTemplate(l.X, env) {
+			if kind := stringKindOf(l.X, env); kind != "" {
+				if out, ok := stringTemplateWithElement(container, i.Int64(), val, kind); ok {
+					if runtime.IsError(out) {
+						return out
+					}
+					if store != nil {
+						store(out)
+						return nil
+					}
+					return storeReceiver(l.X, out, env)
+				}
 			}
 		}
 		// An element assigned in a record of template holding `?` or
@@ -15812,6 +15840,24 @@ func evalIndexRead(n *syntax.IndexExpr, left runtime.Object, env runtime.Scope) 
 		if isMapType(td, env) {
 			return runtime.AnyOrNone
 		}
+		// Of a string type: a single AnyElement, or pattern "?", with
+		// ifpresent for AnyValueOrNone (15.6.1 c-f).
+		if kind := stringKindOf(n.X, env); kind != "" {
+			var el runtime.Object
+			if kind == "charstring" {
+				el = &runtime.String{Value: []rune("?"), IsPattern: true}
+			} else {
+				bs, err := runtime.NewBinarystring("'?'" + kind)
+				if err != nil {
+					return runtime.Errorf("element of a template: %v", err)
+				}
+				el = bs
+			}
+			if left == runtime.AnyOrNone {
+				el = &runtime.IfPresent{Inner: el}
+			}
+			return el
+		}
 		// No element of a record of, set of or array holding `*`
 		// may be referenced on the right hand side (15.6.3 d).
 		if left == runtime.AnyOrNone && listTypeDesc(td, env) != nil {
@@ -16014,6 +16060,140 @@ func stringWithElement(s *runtime.String, i int64, val runtime.Object) runtime.O
 		return runtime.Errorf("assigning element %d of a string of length %d", i, s.Len())
 	}
 	return s.WithRuneAt(int(i), r.Value[0], true)
+}
+
+// stringTemplateWithElement is template container, of the string type
+// kind ("charstring", "B", "H" or "O"), with its item i set to val (ETSI
+// ES 201 873-1 15.6.1, left hand side): an item of a specific value or a
+// pattern replaced, or appended after as many AnyElement or ? as fill the
+// gap; a character string specific value made a pattern when the item is
+// a pattern or lies past the end; AnyValue and AnyValueOrNone taken for
+// the empty string, AnyValueOrNone adding ifpresent; a length attribute's
+// maximum raised to i + 1 when i reaches it; ifpresent kept. Any other
+// matching mechanism is an error. ok is false when container is none of
+// these, for the paths of values.
+func stringTemplateWithElement(container runtime.Object, i int64, val runtime.Object, kind string) (runtime.Object, bool) {
+	ifpresent := false
+	var lr *runtime.LengthRestricted
+	core := container
+	for {
+		if ip, ok := core.(*runtime.IfPresent); ok {
+			ifpresent, core = true, ip.Inner
+			continue
+		}
+		if l, ok := core.(*runtime.LengthRestricted); ok {
+			lr, core = l, l.Inner
+			continue
+		}
+		break
+	}
+	if i < 0 {
+		return runtime.Errorf("assigning element %d of a template: the index is negative (ETSI 15.6.1)", i), true
+	}
+	if core == runtime.Any || core == runtime.AnyOrNone {
+		if core == runtime.AnyOrNone {
+			ifpresent = true
+		}
+		if kind == "charstring" {
+			core = &runtime.String{IsPattern: true}
+		} else {
+			empty, err := runtime.NewBinarystring("''" + kind)
+			if err != nil {
+				return runtime.Errorf("assigning an element of a template: %v", err), true
+			}
+			core = empty
+		}
+	}
+	var out runtime.Object
+	switch x := core.(type) {
+	case *runtime.String:
+		r, ok := val.(*runtime.String)
+		if !ok {
+			return runtime.Errorf("assigning %s to an element of a character string template (ETSI 15.6.1)", val.Inspect()), true
+		}
+		switch {
+		case x.IsPattern || r.IsPattern || i > int64(x.Len()):
+			out = builtins.WithPatternItem(x, int(i), r)
+		case r.Len() != 1:
+			out = runtime.Errorf("assigning a string of length %d to an element of a string (ETSI 15.6.1)", r.Len())
+		default:
+			out = x.WithRuneAt(int(i), r.Value[0], true)
+		}
+	case *runtime.Binarystring:
+		out = binaryTemplateWithItem(x, int(i), val)
+	case *runtime.List:
+		return runtime.Errorf("assigning element %d of a %s template of a string type (ETSI 15.6.1)", i, x.ListType), true
+	default:
+		if core == runtime.Omit {
+			return runtime.Errorf("assigning element %d of omit (ETSI 15.6.1)", i), true
+		}
+		return nil, false
+	}
+	if runtime.IsError(out) {
+		return out, true
+	}
+	if lr != nil {
+		hi := lr.Max
+		if hi >= 0 && i >= int64(hi) {
+			hi = int(i) + 1
+		}
+		out = &runtime.LengthRestricted{Inner: out, Min: lr.Min, Max: hi}
+	}
+	if ifpresent {
+		out = &runtime.IfPresent{Inner: out}
+	}
+	return out, true
+}
+
+// binaryItems are the indexable items of binary string bs, a value or a
+// template with matching mechanisms inside (ETSI 15.6.1): its bits, hex
+// digits or octets, and each ? and * one item.
+func binaryItems(bs *runtime.Binarystring) []string {
+	if bs.Length == 0 && (bs.Value == nil || bs.Value.Sign() >= 0) {
+		return nil
+	}
+	body := digitString(bs)
+	if bs.Value != nil && bs.Value.Sign() < 0 {
+		body = strings.Join(strings.Fields(trimBinaryLiteral(bs.String)), "")
+	}
+	var items []string
+	for k := 0; k < len(body); k++ {
+		if bs.Unit == runtime.Octet && body[k] != '?' && body[k] != '*' && k+1 < len(body) {
+			items = append(items, body[k:k+2])
+			k++
+			continue
+		}
+		items = append(items, body[k:k+1])
+	}
+	return items
+}
+
+// binaryTemplateWithItem is binary string template bs with item i set to
+// val, a binary string of one item, past the end after as many
+// AnyElement as fill the gap (ETSI 15.6.1 a, b).
+func binaryTemplateWithItem(bs *runtime.Binarystring, i int, val runtime.Object) runtime.Object {
+	r, ok := val.(*runtime.Binarystring)
+	if !ok || r.Unit != bs.Unit {
+		return runtime.Errorf("assigning %s to an element of a %s template (ETSI 15.6.1)", val.Inspect(), bs.Unit)
+	}
+	item := binaryItems(r)
+	if len(item) != 1 {
+		return runtime.Errorf("assigning %d items to an element of a binary string template (ETSI 15.6.1)", len(item))
+	}
+	items := binaryItems(bs)
+	for len(items) < i {
+		items = append(items, "?")
+	}
+	if i < len(items) {
+		items[i] = item[0]
+	} else {
+		items = append(items, item[0])
+	}
+	res, err := runtime.NewBinarystring("'" + strings.Join(items, "") + "'" + bs.Unit.String())
+	if err != nil {
+		return runtime.Errorf("assigning an element of a binary string template: %v", err)
+	}
+	return res
 }
 
 // withElementUnderAttribute is template container, a list or string with
