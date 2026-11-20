@@ -32,6 +32,7 @@ func TestRunsOnCompatibility(t *testing.T) {
 	for name, c := range map[string]struct{ src, code string }{
 		"a component missing a definition": {`testcase tc() runs on Empty { f_base() }`, "runs-on-incompatible"},
 		"a port of another type":           {`testcase tc() runs on OtherPort { f_base() }`, "runs-on-incompatible"},
+		"another initial value":            {`testcase tc() runs on Other { f_base() }`, "runs-on-incompatible"},
 		"a variable where a port is":       {`testcase tc() runs on VarNotPort { f_base() }`, "runs-on-incompatible"},
 		"a base calling the extended":      {`testcase tc() runs on Base { f_ext() }`, "runs-on-incompatible"},
 		"an mtc without the port":          {`testcase tc() runs on Empty { f_mtc() }`, "mtc-incompatible"},
@@ -53,7 +54,6 @@ func TestRunsOnCompatibilityAllowed(t *testing.T) {
 		testcase t1() runs on Base { f_base() }
 		testcase t2() runs on Ext { f_base(); f_ext() }
 		testcase t3() runs on Same { f_base() }
-		testcase t6() runs on Other { f_base() }
 		testcase t4() runs on Ports { f_mtc(); f_sys() }
 		testcase t5() runs on Empty { var Base c := Base.create; c.start(f_base()); c.done }
 		function f_h() runs on Base { f_mtc() }

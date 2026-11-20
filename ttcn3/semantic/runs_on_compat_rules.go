@@ -10,6 +10,7 @@ package semantic
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/nokia/ntt/ttcn3"
@@ -144,19 +145,26 @@ func componentNode(tree *ttcn3.Tree, db *ttcn3.DB, e syntax.Expr) (*syntax.Compo
 }
 
 // componentDef is what a definition of a component type is, as far as the
-// rule compares it: its kind and, of a port, the declaration of its type.
+// rule compares it: its kind; of a port, the declaration of its type; of
+// the others, the type, resolved, and the initial value, duration or
+// template body when it is a literal (initKnown).
 type componentDef struct {
-	kind     string
-	portType syntax.Node
+	kind      string
+	portType  syntax.Node
+	typ       any
+	init      string
+	initKnown bool
 }
 
 // componentCompatibleWith reports whether every definition of want, or
 // with portsOnly every port definition, has a definition in have of its
-// name and kind, and a port of the same port type (6.3.3 a-d). The types,
-// initial values and durations of the others are not compared: their
-// text differs where they do not (`M.T` and `T`, `(0)` and `0`). A
-// component type whose definitions cannot all be found (an extended type
-// not resolved) is compatible.
+// name and kind, and a port of the same port type (6.3.3 a-d); the others
+// of the same type, as resolved, and of identical initial values,
+// durations and template bodies where those are literals or absent. What
+// does not resolve is taken for identical: texts differ where definitions
+// do not (`M.T` and `T`, `(0)` and `0`). A component type whose
+// definitions cannot all be found (an extended type not resolved) is
+// compatible.
 func componentCompatibleWith(tree *ttcn3.Tree, db *ttcn3.DB, have, want *syntax.ComponentTypeDecl, portsOnly bool) bool {
 	if have == want {
 		return true
@@ -178,6 +186,15 @@ func componentCompatibleWith(tree *ttcn3.Tree, db *ttcn3.DB, have, want *syntax.
 			return false
 		}
 		if w.portType != nil && h.portType != nil && w.portType != h.portType {
+			return false
+		}
+		if portsOnly {
+			continue
+		}
+		if w.typ != nil && h.typ != nil && w.typ != h.typ {
+			return false
+		}
+		if w.initKnown && h.initKnown && w.init != h.init {
 			return false
 		}
 	}
@@ -236,16 +253,77 @@ func componentDefinitions(tree *ttcn3.Tree, db *ttcn3.DB, ct *syntax.ComponentTy
 					def.portType = defs[0].Node
 				}
 			}
+			if def.kind != "port" {
+				def.typ = resolvedType(tree, db, x.Type)
+			}
 			for _, dec := range x.Decls {
 				if dec != nil && dec.Name != nil {
-					out[dec.Name.String()] = def
+					d := def
+					if len(dec.ArrayDef) > 0 {
+						d.typ = nil
+					}
+					if def.kind != "port" {
+						d.init, d.initKnown = literalKey(dec.Value)
+					}
+					out[dec.Name.String()] = d
 				}
 			}
 		case *syntax.TemplateDecl:
 			if x.Name != nil {
-				out[x.Name.String()] = componentDef{kind: "template"}
+				def := componentDef{kind: "template", typ: resolvedType(tree, db, x.Type)}
+				if x.Params == nil && x.Base == nil {
+					def.init, def.initKnown = literalKey(x.Value)
+				}
+				out[x.Name.String()] = def
 			}
 		}
 	}
 	return out, true
+}
+
+// resolvedType identifies the type t names: a predefined type's name, or
+// the declaration a reference resolves to; nil when unknown.
+func resolvedType(tree *ttcn3.Tree, db *ttcn3.DB, t syntax.Expr) any {
+	if t == nil {
+		return nil
+	}
+	if id, ok := t.(*syntax.Ident); ok && id.Tok != nil {
+		switch id.String() {
+		case "integer", "float", "boolean", "charstring", "bitstring", "hexstring", "octetstring", "verdicttype", "default", "anytype", "timer":
+			return id.String()
+		}
+	}
+	if defs := tree.LookupWithDB(t, db); len(defs) == 1 {
+		return defs[0].Node
+	}
+	return nil
+}
+
+// literalKey renders an initial value that is absent or a literal, a
+// number by its value; ok false for any other expression.
+func literalKey(e syntax.Expr) (string, bool) {
+	if e == nil {
+		return "", true
+	}
+	e = unparen(e)
+	neg := ""
+	if u, ok := e.(*syntax.UnaryExpr); ok && u.Op != nil && u.Op.Kind() == syntax.SUB {
+		neg, e = "-", unparen(u.X)
+	}
+	v, ok := e.(*syntax.ValueLiteral)
+	if !ok || v.Tok == nil {
+		return "", false
+	}
+	switch v.Tok.Kind() {
+	case syntax.INT, syntax.FLOAT:
+		f, err := strconv.ParseFloat(v.Tok.String(), 64)
+		if err != nil {
+			return "", false
+		}
+		return neg + strconv.FormatFloat(f, 'g', -1, 64), true
+	}
+	if neg != "" {
+		return "", false
+	}
+	return v.Tok.Kind().String() + " " + v.Tok.String(), true
 }
