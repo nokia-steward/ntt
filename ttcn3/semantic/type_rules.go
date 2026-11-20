@@ -167,6 +167,15 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 				if l, r, ok := both(x.X, x.Y); ok && !comparable(l, r) {
 					add(x, "type-incompatible-comparison", fmt.Sprintf("a %s value is compared with a %s value (ETSI 7.1.3)", l.kind, r.kind))
 				}
+				// Structured values are compared for equality when
+				// compatible one way or the other (7.1.3).
+				if k := x.Op.Kind(); k == syntax.EQ || k == syntax.NE {
+					l, lok := m.exprRoot(x.X)
+					r, rok := m.exprRoot(x.Y)
+					if lok && rok && l.structured() && r.structured() && !m.compatible(l, r, 0) && !m.compatible(r, l, 0) {
+						add(x, "type-incompatible-comparison", fmt.Sprintf("a %s value is compared with a %s value of an incompatible type (ETSI 7.1.3)", l.kind, r.kind))
+					}
+				}
 			case syntax.ADD, syntax.SUB, syntax.MUL, syntax.DIV, syntax.MOD, syntax.REM:
 				// A template is no operand of an arithmetic operator (7).
 				for _, side := range []syntax.Expr{x.X, x.Y} {
@@ -255,13 +264,22 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 				if p == nil || p.Type == nil || len(p.ArrayDef) > 0 || p.TemplateRestriction != nil {
 					continue
 				}
-				if p.Direction != nil && p.Direction.Kind() != syntax.IN {
-					continue
-				}
 				t, tok := m.typeRoot(tree, p.Type, 0)
 				v, vok := m.exprRoot(arg)
-				if tok && vok && sameFamily(t, v) && !m.compatible(t, v, 0) {
-					add(arg, "type-incompatible-actual", fmt.Sprintf("a %s value is given to the %s formal parameter %s (ETSI 5.4.2 d)", v.kind, t.kind, syntax.Name(p.Name)))
+				if !tok || !vok || !sameFamily(t, v) {
+					continue
+				}
+				// An in parameter takes the actual's value, an out
+				// parameter gives its value to the actual, an inout
+				// parameter both (5.4.2).
+				dir, dirName := syntax.IN, "in"
+				if p.Direction != nil {
+					dir, dirName = p.Direction.Kind(), p.Direction.String()
+				}
+				in := dir == syntax.IN || dir == syntax.INOUT
+				out := dir == syntax.OUT || dir == syntax.INOUT
+				if in && !m.compatible(t, v, 0) || out && !m.compatible(v, t, 0) {
+					add(arg, "type-incompatible-actual", fmt.Sprintf("a %s value is given to the %s %s formal parameter %s (ETSI 5.4.2)", v.kind, dirName, t.kind, syntax.Name(p.Name)))
 				}
 			}
 		}

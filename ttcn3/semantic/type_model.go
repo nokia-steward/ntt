@@ -55,7 +55,7 @@ func isCharKind(k string) bool { return k == "charstring" || k == "universal cha
 // type, whose kind a value of another kind never matches (6.3.2).
 func (r rootType) structured() bool {
 	switch r.kind {
-	case "record", "set", "union", "record of", "set of", "enumerated":
+	case "record", "set", "union", "record of", "set of", "enumerated", "anytype":
 		return true
 	}
 	return false
@@ -282,8 +282,11 @@ func (m typeModel) typeRoot(tree *ttcn3.Tree, t syntax.Expr, depth int) (rootTyp
 	if name := syntax.Name(t); name != "" {
 		if p, ok := types.Predefined[name]; ok {
 			switch name {
-			case "any", "default", "timer", "anytype":
+			case "any", "default", "timer":
 				return rootType{}, false
+			case "anytype":
+				// anytype is compatible with anytype only (6.3.2.5).
+				return rootType{kind: "anytype"}, true
 			}
 			return rootType{kind: p.String()}, true
 		}
@@ -319,18 +322,23 @@ func (m typeModel) typeRoot(tree *ttcn3.Tree, t syntax.Expr, depth int) (rootTyp
 }
 
 // compatible reports whether a value of root type v may be assigned to a
-// target of root type t: assignable kinds, and for two different record or
+// target of root type t: assignable kinds; for two different record or
 // two different set types, fields of the same number and optional
-// aspect, in order, of compatible types (6.3.2.2). What the model cannot
-// tell is taken for compatible.
+// aspect, in order, of compatible types (6.3.2.2); for two different
+// union types, an alternative of v the name of which t has, of a
+// compatible type (6.3.2.4: the one selected is not known statically).
+// What the model cannot tell is taken for compatible.
 func (m typeModel) compatible(t, v rootType, depth int) bool {
 	if !assignable(t, v) {
 		return false
 	}
-	if depth > 8 || t.kind != v.kind || t.kind != "record" && t.kind != "set" {
+	if depth > 8 || t.kind != v.kind || t.decl == nil || v.decl == nil || t.decl == v.decl {
 		return true
 	}
-	if t.decl == nil || v.decl == nil || t.decl == v.decl {
+	if t.kind == "union" {
+		return m.unionCompatible(t, v, depth)
+	}
+	if t.kind != "record" && t.kind != "set" {
 		return true
 	}
 	tf, vf := t.decl.Fields, v.decl.Fields
@@ -356,6 +364,40 @@ func (m typeModel) compatible(t, v rootType, depth int) bool {
 		}
 	}
 	return true
+}
+
+// unionCompatible reports whether some alternative of union v has an
+// alternative of the same name and a compatible type in union t.
+func (m typeModel) unionCompatible(t, v rootType, depth int) bool {
+	alts := map[string]*syntax.Field{}
+	for _, f := range t.decl.Fields {
+		if f == nil || f.Name == nil {
+			return true
+		}
+		alts[f.Name.String()] = f
+	}
+	for _, b := range v.decl.Fields {
+		if b == nil || b.Name == nil {
+			return true
+		}
+		a := alts[b.Name.String()]
+		if a == nil {
+			continue
+		}
+		if len(a.ArrayDef) > 0 || len(b.ArrayDef) > 0 {
+			return true
+		}
+		ae, be := typeSpecExpr(a.Type), typeSpecExpr(b.Type)
+		if ae == nil || be == nil {
+			return true
+		}
+		at, aok := m.typeRoot(t.tree, ae, 0)
+		bt, bok := m.typeRoot(v.tree, be, 0)
+		if !aok || !bok || !sameFamily(at, bt) || m.compatible(at, bt, depth+1) {
+			return true
+		}
+	}
+	return false
 }
 
 // typeSpecExpr is the type expression a type specification holds: a
