@@ -83,6 +83,12 @@ func (a *Analyzer) checkSignatureTemplateRules(mod *syntax.Module) []Diagnostic 
 			forbid = map[syntax.Kind]bool{syntax.OUT: true, syntax.INOUT: true}
 		}
 		diags = append(diags, sigTemplateBodyDiags(body, params, forbid, op, sigName, tmplBodies)...)
+		// The return value of a reply is specific too (15.2, 22.3.3).
+		if ve, ok := first.(*syntax.ValueExpr); ok && op == "reply" {
+			if mech := deepMatchingMechanism(ve.Y, tmplBodies); mech != "" {
+				diags = append(diags, signatureTemplateDiag(op, sigName, sigParamInfo{Name: "return value", Dir: syntax.OUT}, mech, ve.Y))
+			}
+		}
 		return true
 	})
 	return diags
@@ -190,6 +196,10 @@ func collectTemplateTypes(mod *syntax.Module) map[string]string {
 func resolveSignatureTemplate(actual syntax.Expr, tmplTypes map[string]string, tmplBodies map[string]syntax.Expr) (string, syntax.Expr) {
 	if pe, ok := actual.(*syntax.ParenExpr); ok && len(pe.List) == 1 {
 		return resolveSignatureTemplate(pe.List[0], tmplTypes, tmplBodies)
+	}
+	// `reply(t value v)`: the template is t.
+	if ve, ok := actual.(*syntax.ValueExpr); ok {
+		return resolveSignatureTemplate(ve.X, tmplTypes, tmplBodies)
 	}
 	if be, ok := actual.(*syntax.BinaryExpr); ok && be.Op != nil && be.Op.Kind() == syntax.COLON {
 		if id, ok := be.X.(*syntax.Ident); ok && id != nil && id.Tok != nil {
@@ -309,10 +319,32 @@ func deepMatchingMechanism(expr syntax.Expr, tmplBodies map[string]syntax.Expr) 
 				}
 			}
 		case *syntax.ParenExpr:
+			// A value list, or a range (B.1.2.1, B.1.2.5).
+			if len(v.List) > 1 {
+				return "value list"
+			}
 			for _, c := range v.List {
+				if b, ok := c.(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.RANGE {
+					return "range"
+				}
 				if mech := walk(c); mech != "" {
 					return mech
 				}
+			}
+		case *syntax.CallExpr:
+			switch name := syntax.Name(v.Fun); name {
+			case "complement", "superset", "subset", "permutation":
+				return name
+			}
+		case *syntax.PatternExpr:
+			return "pattern"
+		case *syntax.LengthExpr:
+			return "length"
+		case *syntax.DecmatchExpr:
+			return "decmatch"
+		case *syntax.UnaryExpr:
+			if v.Op != nil && v.Op.Kind() == syntax.IFPRESENT {
+				return "ifpresent"
 			}
 		case *syntax.Ident:
 			name := v.String()
