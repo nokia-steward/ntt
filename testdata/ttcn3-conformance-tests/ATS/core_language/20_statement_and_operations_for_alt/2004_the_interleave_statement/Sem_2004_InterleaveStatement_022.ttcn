@@ -1,0 +1,64 @@
+/*****************************************************************
+ ** @author   TTF T056
+ ** @version  0.0.1
+ ** @purpose  1:20.4, Verify that @nodefault on an interleave statement ignores active defaults at subsequent reception statements inside branches (CR7991).
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+// The following requirements are tested:
+// Clause 20.4 rule b) & NOTE 2 (CR7991):
+// If the interleave statement contains the @nodefault modifier, all active default
+// alternatives are ignored for the execution of this interleave statement (equivalent
+// to all replacement alt statements having the @nodefault modifier).
+
+module Sem_2004_InterleaveStatement_022 {
+
+    type port MyPort message {
+        inout integer
+    }
+
+    type component GeneralComp {
+        port MyPort pt_In, pt_Out;
+    }
+
+    altstep a_failOnDefault() runs on GeneralComp {
+        [] pt_In.receive(integer:?) {
+            setverdict(fail, "Active default must not be invoked inside interleave @nodefault");
+            break;
+        }
+    }
+
+    testcase TC_Sem_2004_InterleaveStatement_022() runs on GeneralComp {
+        timer t_guard := 0.1;
+        var integer v_step := 0;
+        connect(mtc:pt_In, mtc:pt_Out);
+        activate(a_failOnDefault());
+
+        // Message 1 matches Branch 1 step 1; then message 99 does NOT match Branch 1 step 2 (integer:2).
+        // Because of @nodefault, a_failOnDefault() must be ignored on the second receive as well,
+        // allowing Branch 2 (t_guard.timeout) to fire and break out of the interleave.
+        pt_Out.send(integer:1);
+        pt_Out.send(integer:99);
+        t_guard.start;
+
+        interleave @nodefault {
+            [] pt_In.receive(integer:1) {
+                v_step := 1;
+                pt_In.receive(integer:2);
+                setverdict(fail, "Should not receive 2");
+            }
+            [] t_guard.timeout {
+                if (v_step == 1) {
+                    setverdict(pass);
+                } else {
+                    setverdict(fail, "Branch 1 step 1 did not execute before timeout");
+                }
+                break;
+            }
+        }
+    }
+
+    control {
+        execute(TC_Sem_2004_InterleaveStatement_022());
+    }
+}

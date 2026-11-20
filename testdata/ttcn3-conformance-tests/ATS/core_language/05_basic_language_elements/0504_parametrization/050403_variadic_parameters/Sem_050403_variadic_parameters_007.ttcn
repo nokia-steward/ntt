@@ -1,0 +1,23 @@
+// @author   TTF T023
+// @purpose  1:5.4.3, Ensure omitted variadic parameter results in an empty record of.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_050403_variadic_parameters_007 {
+
+type component GeneralComp {}
+
+testcase TC_Sem_050403_variadic_parameters_007() runs on GeneralComp {
+
+	if (len() == 0) {
+		setverdict(pass);
+	} else {
+		setverdict(fail, "len() != 0");
+	}
+}
+
+function len(in integer args...) return integer { return lengthof(args) }
+
+control {
+	execute(TC_Sem_050403_variadic_parameters_007());
+}
+
+}

@@ -70,7 +70,9 @@ func SetGlobalLevel(level Level) {
 		if err != nil {
 			panic(err)
 		}
-		trace.Start(tracer)
+		if err := trace.Start(tracer); err != nil {
+			panic(err)
+		}
 	}
 
 	// If new log level is debug and user requested a debug file, use it.
@@ -92,17 +94,19 @@ func Close() {
 	}
 }
 
-func Print(v ...interface{})                 { std.Output(PrintLevel, fmt.Sprint(v...)) }
-func Printf(format string, v ...interface{}) { std.Output(PrintLevel, fmt.Sprintf(format, v...)) }
-func Println(v ...interface{})               { std.Output(PrintLevel, fmt.Sprintln(v...)) }
+func Print(v ...interface{})                 { _ = std.Output(PrintLevel, fmt.Sprint(v...)) }
+func Printf(format string, v ...interface{}) { _ = std.Output(PrintLevel, fmt.Sprintf(format, v...)) }
+func Println(v ...interface{})               { _ = std.Output(PrintLevel, fmt.Sprintln(v...)) }
 
-func Verbose(v ...interface{})                 { std.Output(VerboseLevel, fmt.Sprint(v...)) }
-func Verbosef(format string, v ...interface{}) { std.Output(VerboseLevel, fmt.Sprintf(format, v...)) }
-func Verboseln(v ...interface{})               { std.Output(VerboseLevel, fmt.Sprintln(v...)) }
+func Verbose(v ...interface{}) { _ = std.Output(VerboseLevel, fmt.Sprint(v...)) }
+func Verbosef(format string, v ...interface{}) {
+	_ = std.Output(VerboseLevel, fmt.Sprintf(format, v...))
+}
+func Verboseln(v ...interface{}) { _ = std.Output(VerboseLevel, fmt.Sprintln(v...)) }
 
-func Debug(v ...interface{})                 { std.Output(DebugLevel, fmt.Sprint(v...)) }
-func Debugf(format string, v ...interface{}) { std.Output(DebugLevel, fmt.Sprintf(format, v...)) }
-func Debugln(v ...interface{})               { std.Output(DebugLevel, fmt.Sprintln(v...)) }
+func Debug(v ...interface{})                 { _ = std.Output(DebugLevel, fmt.Sprint(v...)) }
+func Debugf(format string, v ...interface{}) { _ = std.Output(DebugLevel, fmt.Sprintf(format, v...)) }
+func Debugln(v ...interface{})               { _ = std.Output(DebugLevel, fmt.Sprintln(v...)) }
 
 func Trace(ctx context.Context, category string, v ...interface{}) {
 	outputTrace(ctx, category, fmt.Sprint(v...))
@@ -116,7 +120,7 @@ func Traceln(ctx context.Context, category string, v ...interface{}) {
 
 func outputTrace(ctx context.Context, category, msg string) {
 	trace.Log(ctx, category, strings.TrimSpace(msg))
-	std.Output(TraceLevel, fmt.Sprintf("%s: %s", category, msg))
+	_ = std.Output(TraceLevel, fmt.Sprintf("%s: %s", category, msg))
 }
 
 func init() {

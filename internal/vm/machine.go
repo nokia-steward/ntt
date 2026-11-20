@@ -5,11 +5,11 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"io"
 	"github.com/nokia/ntt/internal/k3log"
 	"github.com/nokia/ntt/internal/runtime"
 	"github.com/nokia/ntt/internal/t3xf"
 	"github.com/nokia/ntt/internal/t3xf/opcode"
+	"io"
 	"math"
 	"os"
 	"slices"
@@ -764,7 +764,8 @@ func (m *Machine) store(target any, value any) {
 		case []any:
 			slice = m.unshareSlice(c)
 			for len(slice) < len(fields) {
-				slice = append(slice, runtime.Undefined{})
+				slice = append(slice, runtime.Undefined{}) //nolint:makezero // pads the elements c has
+
 			}
 		case string, runtime.Binary:
 			s, err := runtime.SetElement(c, intIdx, value)
@@ -1081,12 +1082,10 @@ func (m *Machine) run(stopPC int) (err error) {
 					case marker == "__port_index":
 						m.SP--
 						m.Push(portIndex(m.comm.port.Name))
-						break
 					case strings.HasPrefix(marker, "__port_from:"):
 						m.SP--
 						name := strings.TrimPrefix(marker, "__port_from:")
 						m.Push(m.comm.port.Name == name || strings.HasPrefix(m.comm.port.Name, name+"["))
-						break
 					}
 					if marker == "__port_index" || strings.HasPrefix(marker, "__port_from:") {
 						break
@@ -1813,7 +1812,7 @@ func (m *Machine) run(stopPC int) (err error) {
 				m.Pop() // unmap actual parameter list
 			}
 			opnd := m.Pop()
-			name := "all"
+			var name string
 			switch value := m.deref(opnd).(type) {
 			case *runtime.Port:
 				name = value.String()

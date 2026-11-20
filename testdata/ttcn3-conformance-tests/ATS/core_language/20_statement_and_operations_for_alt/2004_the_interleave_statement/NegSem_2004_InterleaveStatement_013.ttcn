@@ -1,46 +1,49 @@
 /*****************************************************************
- ** @author   STF 584
+ ** @author   TTF T056
  ** @version  0.0.1
- ** @purpose  1:20.4, verify that conditional goto cannot be inside interleave
+ ** @purpose  1:20.4, Verify that invoking an altstep as an alternative inside an embedded alt statement within an interleave statement is rejected (CR7195).
  ** @verdict  pass reject
  *****************************************************************/
 
 // The following requirement is tested:
-// Restriction d)
-// The restricted use of the control transfer statements for, while, do-while, and goto within interleave
-// statements is allowed under the following conditions:
-// b. The goto statement can be used for defining unconditional jumps within statements blocks that do not
-// contain reception statements and for specifying unconditional jumps out of interleave statements.
+// Clause 20.4 restriction a) (CR7195):
+// Control transfer statements activate, deactivate, repeat, all calls of altsteps and
+// (direct and indirect) calls of user-defined functions, which include reception statements,
+// shall not be present in interleave statements.
 
 module NegSem_2004_InterleaveStatement_013 {
 
     type port MyPort message {
-        inout charstring
+        inout integer
     }
 
     type component GeneralComp {
-        port MyPort p;
+        port MyPort pt_In, pt_Out;
+    }
+
+    altstep a_innerStep() runs on GeneralComp {
+        [] pt_In.receive(integer:2) {}
     }
 
     testcase TC_NegSem_2004_InterleaveStatement_013() runs on GeneralComp {
-		var boolean v_cond := true;
-        p.send(charstring:"foo");
-        p.send(charstring:"bar");
+        connect(mtc:pt_In, mtc:pt_Out);
+        pt_Out.send(integer:1);
+        pt_Out.send(integer:2);
+        pt_Out.send(integer:3);
 
         interleave {
-            [] p.receive(charstring:"bar") {
-				if (v_cond) {
-					goto L1;
-				}
+            [] pt_In.receive(integer:1) {
+                alt {
+                    [] a_innerStep() { // error: all calls of altsteps are forbidden in interleave (CR7195)
+                        setverdict(pass);
+                    }
+                }
             }
-            [] p.receive(charstring:"foo") {
-            }
+            [] pt_In.receive(integer:3) {}
         }
-		label L1;
-        setverdict(pass);
     }
 
-    control{
+    control {
         execute(TC_NegSem_2004_InterleaveStatement_013());
     }
 }

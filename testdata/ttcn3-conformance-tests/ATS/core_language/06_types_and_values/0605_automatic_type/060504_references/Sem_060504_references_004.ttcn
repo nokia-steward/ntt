@@ -1,0 +1,24 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for module parameter references.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060504_references_004 {
+
+type component GeneralComp {}
+
+modulepar integer mp := 2;
+
+testcase TC_Sem_060504_references_004() runs on GeneralComp {
+	var i := mp;
+	i := i + 1;
+	if (i == 3) {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+}
+
+control {
+	execute(TC_Sem_060504_references_004());
+}
+
+}

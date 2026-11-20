@@ -29,7 +29,6 @@ func EncValue(v any, typ Type) (Binary, error) {
 // failure, and 2 when typ uses the "32 bit" variant and fewer than 32 bits
 // are available. On non-success the target is left unchanged.
 func DecValue(enc Binary, typ Type, target *any) (code int, rest Binary) {
-	rest = enc
 	if typ == nil {
 		typ = IntegerType
 	}

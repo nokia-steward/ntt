@@ -1,0 +1,11 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure template variables provide automatic type inference.
+// @verdict  pass accept
+module Sem_0605_automatic_type_002 {
+
+function f() {
+	var template t1 := 1;
+	var omit t2 := 2;
+}
+
+}

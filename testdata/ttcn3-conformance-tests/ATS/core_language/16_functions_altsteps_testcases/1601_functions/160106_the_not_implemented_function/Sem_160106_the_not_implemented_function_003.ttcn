@@ -1,0 +1,20 @@
+// @author   TTF T023
+// @purpose  1:16.1.6, Ensure ??? allows optional parameter
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_160106_the_not_implemented_function_003 {
+
+type component GeneralComp {}
+
+testcase TC_Sem_160106_the_not_implemented_function_003() runs on GeneralComp {
+	if (false) {
+		var universal charstring s := "abc";
+		???(s);
+	}
+	setverdict(pass);
+}
+
+control {
+	execute(TC_Sem_160106_the_not_implemented_function_003());
+}
+
+}

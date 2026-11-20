@@ -19,19 +19,15 @@ module Sem_1512_TheOmitOperation_001 {
 		boolean b optional
 	}
 
-	template ExampleType m_originalOmit := omit;
-	template(omit) ExampleType m_targetOmit := omit(m_originalOmit);
-
 	testcase TC_Sem_1512_TheOmitOperation_001() runs on GeneralComp {
 
-		var template(omit) ExampleType v_omit;
+		template ExampleType m_originalOmit := omit;
+		template(omit) ExampleType m_targetOmit := omit(m_originalOmit);
 
-		v_omit := m_targetOmit;
-
-		if ( ispresent(v_omit) ) {
-			setverdict(fail);
-		} else {
+		if (istemplatekind(m_targetOmit, "omit")) {
 			setverdict(pass);
+		} else {
+			setverdict(fail);
 		}
 	}
 

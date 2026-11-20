@@ -1,0 +1,111 @@
+/*****************************************************************
+ ** @author   TTF T056
+ ** @version  0.0.1
+ ** @purpose  1:20.4, Verify parallel activities across upper and lower interfaces where branches switch ports mid-branch and share a lower-interface port (Open Session Slide 22).
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+// The following requirements are tested:
+// Clause 20.4 rules a) & c):
+// Interleaved branches may receive on one port (upper interface), send on a second port
+// (lower interface), and subsequently receive on that second port while another branch
+// also receives on the shared lower-interface port and continues on a third port.
+
+module Sem_2004_InterleaveStatement_024 {
+
+    type enumerated MsgType {
+        e_dialledNumber,
+        e_callEstablishmentRequest,
+        e_callEstablishmentAccept,
+        e_paging,
+        e_callerName,
+        e_callAccept
+    }
+
+    type port InterfacePort message {
+        inout MsgType
+    }
+
+    type record of MsgType MsgList;
+
+    type component GeneralComp {
+        port InterfacePort pt_keyboardIn, pt_keyboardOut;
+        port InterfacePort pt_radioIn, pt_radioOut;
+        port InterfacePort pt_displayIn, pt_displayOut;
+    }
+
+    function f_runUpperLowerScenario(in MsgList p_stimuli) runs on GeneralComp {
+        var MsgList v_trace := {};
+        var MsgType v_sentRadio := e_dialledNumber;
+        var MsgType v_sentDisplay := e_dialledNumber;
+
+        for (var integer i := 0; i < lengthof(p_stimuli); i := i + 1) {
+            var MsgType v_m := p_stimuli[i];
+            select (v_m) {
+                case (e_dialledNumber) {
+                    pt_keyboardOut.send(v_m);
+                }
+                case (e_callEstablishmentAccept, e_paging) {
+                    pt_radioOut.send(v_m);
+                }
+                case (e_callAccept) {
+                    pt_displayOut.send(v_m);
+                }
+            }
+        }
+
+        // Handling parallel activities on lower (pt_radioIn) and upper (pt_keyboardIn, pt_displayIn) interfaces:
+        interleave {
+            [] pt_keyboardIn.receive(MsgType:e_dialledNumber) {
+                v_trace[lengthof(v_trace)] := e_dialledNumber;
+                pt_radioIn.send(MsgType:e_callEstablishmentRequest);
+                pt_radioIn.receive(MsgType:e_callEstablishmentAccept);
+                v_trace[lengthof(v_trace)] := e_callEstablishmentAccept;
+            }
+            [] pt_radioIn.receive(MsgType:e_paging) {
+                v_trace[lengthof(v_trace)] := e_paging;
+                pt_displayIn.send(MsgType:e_callerName);
+                pt_displayIn.receive(MsgType:e_callAccept);
+                v_trace[lengthof(v_trace)] := e_callAccept;
+            }
+        }
+
+        pt_radioOut.receive(MsgType:e_callEstablishmentRequest) -> value v_sentRadio;
+        pt_displayOut.receive(MsgType:e_callerName) -> value v_sentDisplay;
+
+        if (lengthof(v_trace) != 4 or v_sentRadio != e_callEstablishmentRequest or v_sentDisplay != e_callerName) {
+            setverdict(fail, "Unexpected trace for stimuli: ", p_stimuli, v_trace);
+        }
+    }
+
+    testcase TC_Sem_2004_InterleaveStatement_024() runs on GeneralComp {
+        connect(mtc:pt_keyboardIn, mtc:pt_keyboardOut);
+        connect(mtc:pt_radioIn, mtc:pt_radioOut);
+        connect(mtc:pt_displayIn, mtc:pt_displayOut);
+
+        // 1. Outgoing call completes before incoming paging:
+        f_runUpperLowerScenario({ e_dialledNumber, e_callEstablishmentAccept, e_paging, e_callAccept });
+
+        // 2. Outgoing call starts on keyboard, then Paging arrives on shared radio port BEFORE
+        //    callEstablishmentAccept, then callEstablishmentAccept arrives on radio, then callAccept on display:
+        f_runUpperLowerScenario({ e_dialledNumber, e_paging, e_callEstablishmentAccept, e_callAccept });
+
+        // 3. Outgoing call starts on keyboard, then full Paging -> callAccept completes, then callEstablishmentAccept:
+        f_runUpperLowerScenario({ e_dialledNumber, e_paging, e_callAccept, e_callEstablishmentAccept });
+
+        // 4. Incoming Paging starts on radio, then keyboard dialledNumber, then callAccept, then callEstablishmentAccept:
+        f_runUpperLowerScenario({ e_paging, e_dialledNumber, e_callAccept, e_callEstablishmentAccept });
+
+        // 5. Incoming Paging starts on radio, then keyboard dialledNumber, then callEstablishmentAccept on radio, then callAccept:
+        f_runUpperLowerScenario({ e_paging, e_dialledNumber, e_callEstablishmentAccept, e_callAccept });
+
+        // 6. Incoming Paging completes before outgoing call starts:
+        f_runUpperLowerScenario({ e_paging, e_callAccept, e_dialledNumber, e_callEstablishmentAccept });
+
+        setverdict(pass);
+    }
+
+    control {
+        execute(TC_Sem_2004_InterleaveStatement_024());
+    }
+}

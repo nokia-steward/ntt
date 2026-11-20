@@ -1,0 +1,39 @@
+/*****************************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.8.2, Ensure that referenced mandatory fields of template(value) base templates are not allowed to implicite restrict to template(omit)
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+/*
+ * Reference mandatory field of a record of a template with value restriction.
+ * (see Table 13C: Implicit restrictions)
+ *
+ */
+
+module NegSem_150802_ImplicitRestrictions_003 {
+
+type component GeneralComp { }
+
+type set ExampleType {
+	integer a,
+	boolean b optional
+}
+
+// parent templates
+template(value) ExampleType exampleValue := {1, true};
+
+testcase TC_NegSem_150802_ImplicitRestrictions_003() runs on GeneralComp {
+
+	var template(omit) integer v_omit_a :=  exampleValue.a;  //Not allowed
+
+	setverdict(pass);
+
+}
+
+control{
+	execute(TC_NegSem_150802_ImplicitRestrictions_003());
+}
+
+
+}

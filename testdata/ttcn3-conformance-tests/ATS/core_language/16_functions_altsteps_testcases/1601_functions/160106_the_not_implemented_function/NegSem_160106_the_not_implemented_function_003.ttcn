@@ -1,0 +1,18 @@
+// @author   TTF T023
+// @purpose  1:16.1.6, Ensure ??? can be used as value in module parameters
+// @verdict  pass accept, ttcn3verdict:error
+module NegSem_160106_the_not_implemented_function_003 {
+
+modulepar charstring reason := ???;
+
+type component GeneralComp {}
+
+testcase TC_NegSem_160106_the_not_implemented_function_003() runs on GeneralComp {
+	setverdict(pass, reason);
+}
+
+control {
+	execute(TC_NegSem_160106_the_not_implemented_function_003());
+}
+
+}

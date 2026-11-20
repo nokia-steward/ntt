@@ -1,0 +1,11 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for timer.
+// @verdict  pass accept
+module Sem_060504_references_009 {
+
+type component GeneralComp {
+	timer t;
+	var v := t;
+}
+
+}

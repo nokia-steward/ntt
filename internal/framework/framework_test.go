@@ -42,12 +42,10 @@ func initStage(t *testing.T) (string, string) {
 		t.Fatal(err)
 	}
 
-	old, err = filepath.Rel(dir, old)
-	if err != nil {
-		t.Fatal(err)
-	}
+	// The source directory, absolute: on Windows the temporary
+	// directory can be on another drive, which no relative path reaches.
 	t.Cleanup(func() {
-		os.Chdir(old)
+		_ = os.Chdir(old)
 	})
 
 	return old, dir

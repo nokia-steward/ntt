@@ -1,0 +1,21 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for execute.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060506_return_values_006 {
+
+type component GeneralComp {}
+
+testcase TC_Sem_060506_return_values_006(inout verdicttype v) runs on GeneralComp {
+	setverdict(v);
+}
+
+testcase TC_Sem_060506_return_values_006_dummy() runs on GeneralComp {
+	setverdict(pass);
+}
+
+control {
+	var v := execute(TC_Sem_060506_return_values_006_dummy());
+	execute(TC_Sem_060506_return_values_006(v));
+}
+
+}

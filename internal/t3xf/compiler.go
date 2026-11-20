@@ -268,7 +268,7 @@ func (c *Compiler) applyPatches() {
 			c.errorf("%q undefined", p.name)
 			continue
 		}
-		c.e.Patch(p.addr, sym.op, sym.arg)
+		_ = c.e.Patch(p.addr, sym.op, sym.arg) // Patch never fails
 	}
 }
 
@@ -410,7 +410,7 @@ func (c *Compiler) compile(n syntax.Node) error {
 		}
 
 		for _, decl := range n.Decls {
-			fn(k, n.TemplateRestriction, n.Modif, n.Type, decl, n.With)
+			_ = fn(k, n.TemplateRestriction, n.Modif, n.Type, decl, n.With) // errors go to c.err
 		}
 
 	case *syntax.ControlPart:
@@ -1774,7 +1774,6 @@ func (c *Compiler) compilePortSend(expr syntax.Expr) bool {
 	op := opcode.SEND
 	if id, ok := destination.(*syntax.Ident); ok && id.String() == "all component" {
 		op = opcode.SENDA
-		destination = nil
 	} else if list, ok := destination.(*syntax.ParenExpr); ok {
 		c.emit(opcode.MARK, 0)
 		for _, item := range list.List {

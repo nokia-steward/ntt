@@ -1,0 +1,22 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for modified templates.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060504_references_006 {
+
+type component GeneralComp {}
+
+function verifyType(inout template integer ti) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_060504_references_006() runs on GeneralComp {
+	var template integer t1 := ?;
+	var template v := modifies t1 := 2;
+	verifyType(v);
+}
+
+control {
+	execute(TC_Sem_060504_references_006());
+}
+
+}

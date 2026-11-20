@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -83,15 +84,15 @@ func TestAutomaticEnv(t *testing.T) {
 	})
 
 	t.Run("K3_NAME", func(t *testing.T) {
-		os.Setenv("K3_NAME", "k3")
+		os.Setenv("K3_NAME", "legacy")
 		defer os.Unsetenv("K3_NAME")
 		c := &Config{}
 		assert.Nil(t, AutomaticEnv()(c))
-		assert.Equal(t, "k3", c.Name)
+		assert.Equal(t, "legacy", c.Name)
 	})
 
 	t.Run("NTT_NAME/K3_NAME", func(t *testing.T) {
-		os.Setenv("K3_NAME", "k3")
+		os.Setenv("K3_NAME", "legacy")
 		os.Setenv("NTT_NAME", "ntt")
 		defer os.Unsetenv("K3_NAME")
 		defer os.Unsetenv("NTT_NAME")
@@ -229,7 +230,9 @@ func TestWithManifest(t *testing.T) {
 	t.Run("paths", func(t *testing.T) {
 		c, err := manifest("foo/bar/package.yml", "hooks_file: file")
 		assert.Nil(t, err)
-		assert.Equal(t, "foo/bar/file", c.HooksFile)
+		// hooks_file is resolved relative to the manifest, so the
+		// expectation must use the host's native separator.
+		assert.Equal(t, filepath.FromSlash("foo/bar/file"), c.HooksFile)
 	})
 	t.Run("paths", func(t *testing.T) {
 		c, err := manifest("foo/bar/package.yml", "hooks_file: $VAR")
@@ -239,7 +242,14 @@ func TestWithManifest(t *testing.T) {
 	t.Run("paths", func(t *testing.T) {
 		c, err := manifest("foo/bar/package.yml", "hooks_file: /file")
 		assert.Nil(t, err)
-		assert.Equal(t, "/file", c.HooksFile)
+		// On POSIX "/file" is absolute and stays as-is; on Windows
+		// it lacks a drive letter so it's treated as relative and
+		// joined with the manifest directory.
+		want := "/file"
+		if runtime.GOOS == "windows" {
+			want = filepath.FromSlash("foo/bar/file")
+		}
+		assert.Equal(t, want, c.HooksFile)
 	})
 	t.Run("paths", func(t *testing.T) {
 		c, err := manifest("foo/bar/package.yml", "hooks_file: https://file.txt")
@@ -260,7 +270,7 @@ func TestWithManifest(t *testing.T) {
               VAR: file
             hooks_file: $VAR`)
 		assert.Nil(t, err)
-		assert.Equal(t, "foo/bar/file", c.HooksFile)
+		assert.Equal(t, filepath.FromSlash("foo/bar/file"), c.HooksFile)
 	})
 }
 
@@ -322,7 +332,7 @@ func TestParametersMergeRules(t *testing.T) {
 }
 
 func TestParametersDescription(t *testing.T) {
-  // A "description" field (as used by k3 in .paramters execute entries)
+  // A "description" field (as used in .parameters execute entries)
   // must be accepted by the strict YAML parser and preserved
   p := NewParameters(t, `
   execute:

@@ -1,0 +1,91 @@
+/*****************************************************************
+ ** @author   TTF T056
+ ** @version  0.0.1
+ ** @purpose  1:20.4, Verify multi-step interleave execution across all 6 valid interleavings of two 2-receive branches (Clause 20.4 Example).
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+// The following requirements are tested:
+// Clause 20.4:
+// Interleaved behaviour can always be replaced by an equivalent set of nested alt statements.
+// a) Whenever a reception statement is executed, the following non-reception statements are
+// subsequently executed until the next reception statement is reached, a break statement is
+// reached, or the interleaved sequence ends.
+
+module Sem_2004_InterleaveStatement_015 {
+
+    type port MyPort message {
+        inout integer
+    }
+
+    type record of integer IntList;
+
+    type component GeneralComp {
+        port MyPort pt_pCO1In, pt_pCO1Out;
+        port MyPort pt_pCO2In, pt_pCO2Out;
+    }
+
+    function f_runInterleave(in IntList p_schedule) runs on GeneralComp {
+        var IntList v_trace := {};
+        var integer v_sent1 := 0;
+        var integer v_sent2 := 0;
+
+        // Enqueue stimuli in the specified permutation order:
+        // 1, 3 belong to pCO1; 4, 7 belong to pCO2 (matching Clause 20.4 EXAMPLE)
+        for (var integer i := 0; i < lengthof(p_schedule); i := i + 1) {
+            var integer v_msg := p_schedule[i];
+            if (v_msg == 1 or v_msg == 3) {
+                pt_pCO1Out.send(v_msg);
+            } else {
+                pt_pCO2Out.send(v_msg);
+            }
+        }
+
+        interleave {
+            [] pt_pCO1In.receive(integer:1) {
+                v_trace[lengthof(v_trace)] := 1;
+                pt_pCO1In.send(integer:2);
+                v_trace[lengthof(v_trace)] := 2;
+                pt_pCO1In.receive(integer:3);
+                v_trace[lengthof(v_trace)] := 3;
+            }
+            [] pt_pCO2In.receive(integer:4) {
+                v_trace[lengthof(v_trace)] := 4;
+                pt_pCO2In.send(integer:5);
+                pt_pCO2In.send(integer:6);
+                v_trace[lengthof(v_trace)] := 5;
+                v_trace[lengthof(v_trace)] := 6;
+                pt_pCO2In.receive(integer:7);
+                v_trace[lengthof(v_trace)] := 7;
+            }
+        }
+
+        // Verify the non-reception send operations occurred on both ports
+        pt_pCO1Out.receive(integer:2) -> value v_sent1;
+        pt_pCO2Out.receive(integer:5) -> value v_sent2;
+        pt_pCO2Out.receive(integer:6) -> value v_sent2;
+
+        if (lengthof(v_trace) != 7 or v_sent1 != 2 or v_sent2 != 6) {
+            setverdict(fail, "Unexpected trace or sent messages for schedule: ", p_schedule, v_trace);
+        }
+    }
+
+    testcase TC_Sem_2004_InterleaveStatement_015() runs on GeneralComp {
+        connect(mtc:pt_pCO1In, mtc:pt_pCO1Out);
+        connect(mtc:pt_pCO2In, mtc:pt_pCO2Out);
+
+        // All 6 valid topological interleavings of (1 -> 3) and (4 -> 7):
+        f_runInterleave({ 1, 3, 4, 7 });
+        f_runInterleave({ 1, 4, 3, 7 });
+        f_runInterleave({ 1, 4, 7, 3 });
+        f_runInterleave({ 4, 7, 1, 3 });
+        f_runInterleave({ 4, 1, 7, 3 });
+        f_runInterleave({ 4, 1, 3, 7 });
+
+        setverdict(pass);
+    }
+
+    control {
+        execute(TC_Sem_2004_InterleaveStatement_015());
+    }
+}

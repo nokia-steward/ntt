@@ -22,8 +22,8 @@ Note, if bash-completion is not installed on Linux, please install the
 'bash-completion' package via your distribution's package manager.
 
 `,
-	Run: func(cmd *cobra.Command, args []string) {
-		RootCommand.GenBashCompletion(os.Stdout)
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return RootCommand.GenBashCompletion(os.Stdout)
 	},
 }
 

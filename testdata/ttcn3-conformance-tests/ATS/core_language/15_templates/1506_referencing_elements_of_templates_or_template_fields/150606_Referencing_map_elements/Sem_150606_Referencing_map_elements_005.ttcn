@@ -1,0 +1,53 @@
+/*****************************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:15.6.6, Expanding map containing AnyElementsOrNone on the RHS
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+// The following requirements are tested:
+// When referencing an element of a map template or field that contains AnyElementsOrNone,
+// if the referenced element is not present and the reference occurs on the right-hand side
+// of an assignment, AnyValueOrNone shall be returned.
+
+module Sem_150606_Referencing_map_elements_005 {
+
+    type record ProductInfo {
+        charstring producer,
+        charstring model,
+        charstring description optional
+    };
+
+    type map from charstring to ProductInfo TMap;
+
+    type record TRec {
+        integer a,
+        TMap b optional
+    }
+
+    type component GeneralComp {
+    }
+
+    testcase TC_Sem_150606_Referencing_map_elements_005() runs on GeneralComp {
+        var template TRec v_template := {
+            a := ?,
+            b := {
+                *,
+                ["XS125"] := ?,
+                ["DZ506"] := ?
+            }
+        };
+        // expanding AnyElementsOrNone on the RHS (key YU046 not present in the map)
+        var template ProductInfo v_productTemplate := v_template.b["YU046"];
+        log (v_productTemplate); // expecting *
+        if (istemplatekind(v_productTemplate, "*")) {
+            setverdict(pass);
+         } else {
+             setverdict(fail);
+         }
+    }
+
+    control{
+        execute(TC_Sem_150606_Referencing_map_elements_005());
+    }
+}

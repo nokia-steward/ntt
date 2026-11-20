@@ -1,0 +1,19 @@
+/***************************************************
+ ** @author   TTF T014
+ ** @version  0.0.1
+ ** @purpose  1:6.2.1.3, Verify that it is possible to use a nested subtype constraints for record fields
+ ** @verdict  pass accept, noexecution
+ ***************************************************/
+
+// The following requirement is tested:
+// TTCN 3 supports the definition of types for record fields nested within the record definition.
+// ... the specification of subtype constraints [is] possible.
+
+module Sem_06020103_nested_type_definitions_for_field_types_002 {
+    // Example from the specification, 2nd part
+	type record MyRecordTypeWithSubtypedFields
+	{
+		integer    field1 (1 .. 100),
+		charstring field2 length ( 2 .. 255 )
+	}
+}
