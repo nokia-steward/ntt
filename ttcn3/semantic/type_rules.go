@@ -41,10 +41,37 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 	assignPair := func(x, y syntax.Expr) (rootType, rootType, bool) {
 		l, lok := m.exprRoot(x)
 		r, rok := m.exprRoot(y)
-		return l, r, lok && rok && (l.primitive() && r.primitive() || l.structured() && r.structured())
+		return l, r, lok && rok && sameFamily(l, r)
+	}
+	// An assignment statement, not a field or parameter assignment of a
+	// notation (19.1).
+	checkAssign := func(st syntax.Stmt) {
+		es, ok := st.(*syntax.ExprStmt)
+		if !ok {
+			return
+		}
+		x, ok := es.Expr.(*syntax.BinaryExpr)
+		if !ok || x.Op == nil || x.Op.Kind() != syntax.ASSIGN {
+			return
+		}
+		// A template is not assigned to a value variable (19.1.1).
+		if m.isValueVarRef(x.X) && (m.isTemplateRef(x.Y) || isWildcardTemplate(x.Y)) {
+			add(x, "template-to-value", fmt.Sprintf("%s holds a value: a template is not assigned to it (ETSI 19.1.1)", syntax.Name(x.X)))
+		}
+		switch target := x.X.(type) {
+		case *syntax.Ident, *syntax.SelectorExpr:
+			if t, v, ok := assignPair(target, x.Y); ok && !m.compatible(t, v, 0) {
+				add(x, "type-incompatible-assignment", fmt.Sprintf("a %s value is assigned to the %s %s (ETSI 6.3.1, 19.1)", v.kind, t.kind, syntax.Name(target)))
+			}
+		}
 	}
 	mod.Inspect(func(n syntax.Node) bool {
 		switch x := n.(type) {
+		case *syntax.ExprStmt:
+			checkAssign(x)
+		case *syntax.ForStmt:
+			checkAssign(x.Init)
+			checkAssign(x.Post)
 		case *syntax.ForRangeStmt:
 			// The loop variable takes the elements of the list (19.4.2).
 			ds, ok := x.Init.(*syntax.DeclStmt)
@@ -57,7 +84,7 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 			}
 			t, tok := m.typeRoot(tree, vd.Type, 0)
 			el, eok := m.listElemRoot(x.Range)
-			if tok && eok && (t.primitive() && el.primitive() || t.structured() && el.structured()) && !m.compatible(t, el, 0) {
+			if tok && eok && sameFamily(t, el) && !m.compatible(t, el, 0) {
 				add(vd, "range-loop-element-type", fmt.Sprintf("the elements of the list are %s values, not %s (ETSI 19.4.2)", el.kind, t.kind))
 			}
 		case *syntax.RedirectExpr:
@@ -75,7 +102,7 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 					if b, ok := call.Args.List[0].(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.COLON {
 						t, tok := m.exprRoot(x.Value[0])
 						v, vok := m.typeRoot(tree, b.X, 0)
-						if tok && vok && (t.primitive() && v.primitive() || t.structured() && v.structured()) && !m.compatible(t, v, 0) {
+						if tok && vok && sameFamily(t, v) && !m.compatible(t, v, 0) {
 							add(x.Value[0], "value-redirect-type", fmt.Sprintf("a %s message is stored into a %s (ETSI 22.2.2)", v.kind, t.kind))
 						}
 					}
@@ -108,7 +135,10 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 					}
 				}
 			}
-			if x.KindTok == nil || x.Type == nil || x.TemplateRestriction != nil {
+			// A template variable's initial value is type compatible
+			// too (11.2 l); its matching mechanisms have no known root
+			// type.
+			if x.KindTok == nil || x.Type == nil {
 				return true
 			}
 			switch x.KindTok.Kind() {
@@ -133,19 +163,6 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 				return true
 			}
 			switch x.Op.Kind() {
-			case syntax.ASSIGN:
-				// A template is not assigned to a value variable (19.1.1).
-				if isAssignStatement(tree, x) && m.isValueVarRef(x.X) && (m.isTemplateRef(x.Y) || isWildcardTemplate(x.Y)) {
-					add(x, "template-to-value", fmt.Sprintf("%s holds a value: a template is not assigned to it (ETSI 19.1.1)", syntax.Name(x.X)))
-				}
-				switch target := x.X.(type) {
-				case *syntax.Ident, *syntax.SelectorExpr:
-					if isAssignStatement(tree, x) {
-						if t, v, ok := assignPair(target, x.Y); ok && !m.compatible(t, v, 0) {
-							add(x, "type-incompatible-assignment", fmt.Sprintf("a %s value is assigned to the %s %s (ETSI 6.3.1, 19.1)", v.kind, t.kind, syntax.Name(target)))
-						}
-					}
-				}
 			case syntax.LT, syntax.GT, syntax.LE, syntax.GE, syntax.EQ, syntax.NE:
 				if l, r, ok := both(x.X, x.Y); ok && !comparable(l, r) {
 					add(x, "type-incompatible-comparison", fmt.Sprintf("a %s value is compared with a %s value (ETSI 7.1.3)", l.kind, r.kind))
@@ -188,7 +205,7 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 				}
 				for _, e := range c.Case.List {
 					v, ok := m.exprRoot(e)
-					if !ok || !(h.primitive() && v.primitive() || h.structured() && v.structured()) {
+					if !ok || !sameFamily(h, v) {
 						continue
 					}
 					if h.primitive() && !comparable(h, v) || h.structured() && !m.compatible(h, v, 0) && !m.compatible(v, h, 0) {
@@ -216,7 +233,7 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 				}
 				l, lok := m.exprRoot(x.Args.List[0])
 				r, rok := m.exprRoot(x.Args.List[1])
-				if lok && rok && (l.primitive() && r.primitive() || l.structured() && r.structured()) && !m.compatible(l, r, 0) && !m.compatible(r, l, 0) {
+				if lok && rok && sameFamily(l, r) && !m.compatible(l, r, 0) && !m.compatible(r, l, 0) {
 					add(x, "match-incompatible", fmt.Sprintf("match of a %s value with a %s template (ETSI 15.9)", l.kind, r.kind))
 				}
 			case id.String() == "valueof" && len(x.Args.List) == 1 && funcs["valueof"] == nil:
@@ -243,7 +260,7 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 				}
 				t, tok := m.typeRoot(tree, p.Type, 0)
 				v, vok := m.exprRoot(arg)
-				if tok && vok && (t.primitive() && v.primitive() || t.structured() && v.structured()) && !m.compatible(t, v, 0) {
+				if tok && vok && sameFamily(t, v) && !m.compatible(t, v, 0) {
 					add(arg, "type-incompatible-actual", fmt.Sprintf("a %s value is given to the %s formal parameter %s (ETSI 5.4.2 d)", v.kind, t.kind, syntax.Name(p.Name)))
 				}
 			}
@@ -251,17 +268,6 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 		return true
 	})
 	return diags
-}
-
-// isAssignStatement reports whether the assignment b is a statement or a
-// for loop's, not a field or parameter assignment of a notation.
-func isAssignStatement(tree *ttcn3.Tree, b *syntax.BinaryExpr) bool {
-	n := &ttcn3.Node{Node: b, Tree: tree}
-	switch n.ParentOf(b).(type) {
-	case *syntax.ExprStmt, *syntax.ForStmt:
-		return true
-	}
-	return false
 }
 
 // hasCallExpr reports whether e calls a function or template.

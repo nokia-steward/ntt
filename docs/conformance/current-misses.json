@@ -1,11 +1,11 @@
 {
- "summary": "ran 5177 files: 5086 matched, 13 skipped (98.49% match rate)",
- "source": "etsi-report8.json",
- "miss_count": 91,
+ "summary": "ran 5177 files: 5087 matched, 12 skipped (98.49% match rate)",
+ "source": "report38.json",
+ "miss_count": 90,
  "outcomes": {
   "reject->pass": 39,
   "reject->none": 22,
-  "->": 13,
+  "->": 12,
   "pass->fail": 6,
   "pass->error": 5,
   "pass->none": 2,
@@ -15,12 +15,12 @@
  "chapters": [
   {
    "chapter": "core_language/06_types_and_values",
-   "misses": 34,
+   "misses": 33,
    "outcomes": {
     "reject->pass": 9,
     "reject->none": 11,
     "pass->fail": 4,
-    "->": 6,
+    "->": 5,
     "pass->error": 2,
     "pass->semantic-error": 1,
     "pass->none": 1
@@ -350,14 +350,6 @@
    "outcome": "pass->fail",
    "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060205_unions/06020504_embedding_fields/Sem_06020504_embedding_fields_001.ttcn",
    "message": "a.R is not chosen"
-  },
-  {
-   "chapter": "core_language/06_types_and_values",
-   "expected": "",
-   "actual": "",
-   "outcome": "->",
-   "relpath": "core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSyn_060207_arrays_004.ttcn",
-   "message": ""
   },
   {
    "chapter": "core_language/06_types_and_values",

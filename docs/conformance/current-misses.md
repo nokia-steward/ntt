@@ -1,15 +1,15 @@
 # Current Conformance Misses
 
-Generated from `etsi-report8.json` using the current workspace runner.
+Generated from `report38.json` using the current workspace runner.
 
-- Summary: `ran 5177 files: 5086 matched, 13 skipped (98.49% match rate)`
-- Misses: `91`
+- Summary: `ran 5177 files: 5087 matched, 12 skipped (98.49% match rate)`
+- Misses: `90`
 
 ## Misses By Outcome
 
 - `reject->pass`: `39`
 - `reject->none`: `22`
-- `->`: `13`
+- `->`: `12`
 - `pass->fail`: `6`
 - `pass->error`: `5`
 - `pass->none`: `2`
@@ -18,7 +18,7 @@ Generated from `etsi-report8.json` using the current workspace runner.
 
 ## Misses By Chapter
 
-- `core_language/06_types_and_values`: `34` (`->`=6, `pass->error`=2, `pass->fail`=4, `pass->none`=1, `pass->semantic-error`=1, `reject->none`=11, `reject->pass`=9)
+- `core_language/06_types_and_values`: `33` (`->`=5, `pass->error`=2, `pass->fail`=4, `pass->none`=1, `pass->semantic-error`=1, `reject->none`=11, `reject->pass`=9)
 - `core_language/05_basic_language_elements`: `14` (`->`=2, `reject->none`=1, `reject->pass`=11)
 - `core_language/22_communication_operations`: `11` (`reject->none`=1, `reject->pass`=10)
 - `core_language/15_templates`: `9` (`->`=2, `pass->fail`=1, `reject->none`=3, `reject->pass`=3)
@@ -50,14 +50,14 @@ Generated from `etsi-report8.json` using the current workspace runner.
 - `core_language/06_types_and_values/0602_structured_types_and_values/060203_records_and_sets_of_single_types/NegSem_060203_records_and_sets_of_single_types_002.ttcn`: `reject -> none`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060205_unions/06020501_referencing_fields_of_union_type/NegSem_06020501_referencing_fields_of_union_type_005.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060205_unions/06020504_embedding_fields/Sem_06020504_embedding_fields_001.ttcn`: `pass -> fail` - a.R is not chosen
-- `core_language/06_types_and_values/0602_structured_types_and_values/060207_arrays/NegSyn_060207_arrays_004.ttcn`: ` -> `
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_002.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_003.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060212_addressing_entities_inside_sut/NegSem_060212_AddressingEntitiesInsideSut_004.ttcn`: `reject -> pass`
 - `core_language/06_types_and_values/0602_structured_types_and_values/060213_subtyping_of_structured_types/06021302_list_subtyping/NegSem_06021302_ListSubtyping_001.ttcn`: ` -> `
 - `core_language/06_types_and_values/0602_structured_types_and_values/060213_subtyping_of_structured_types/06021302_list_subtyping/NegSem_06021302_ListSubtyping_002.ttcn`: ` -> `
 - `core_language/06_types_and_values/0602_structured_types_and_values/060213_subtyping_of_structured_types/06021302_list_subtyping/NegSem_06021302_ListSubtyping_003.ttcn`: ` -> `
-- ... `14` more in `current-misses.json`
+- `core_language/06_types_and_values/0602_structured_types_and_values/060215_map_types/06021501_map_type_definition/NegSem_06021501_map_type_definition_001.ttcn`: ` -> `
+- ... `13` more in `current-misses.json`
 
 ### `core_language/05_basic_language_elements`
 

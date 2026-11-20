@@ -4,23 +4,18 @@
 // be caught with no type resolution beyond the declared name of
 // the left-hand side variable.
 //
-// Rules implemented here:
+// Rule implemented here (a float assigned to an integer is
+// type_rules.go's type-incompatible-value and -assignment):
 //
-//   - assign-float-to-integer: a float literal (`1.5`, `1.0e2`)
-//     cannot be assigned (or used as initializer) for a variable
-//     declared as `integer` - the two basic types are not
-//     compatible (ETSI 6.3.1 / 19.1).
 //   - positional-omit-on-list-element: each `omit` element of a
 //     positional CompositeLiteral assigned to a `record of T`,
 //     `set of T`, or fixed-size array variable is forbidden,
 //     because list / array elements are mandatory (only `record`
 //     and `set` named fields can be marked `optional`).
 //
-// The collateral damage surface is intentionally small: the
-// integer-float check only triggers on literal RHS expressions
-// (no operator chains, no function calls); the list-of-omit
-// check only triggers on positional literals (no field := value
-// form which is already covered by `checkOmitValueRules`).
+// The collateral damage surface is intentionally small: the check
+// only triggers on positional literals (no field := value form,
+// which is already covered by `checkOmitValueRules`).
 package semantic
 
 import (
@@ -30,7 +25,6 @@ import (
 )
 
 func (a *Analyzer) checkAssignmentPrimitiveRules(mod *syntax.Module) []Diagnostic {
-	intVars := collectIntegerVarNames(mod)
 	listVarKinds := collectListLikeVarKinds(mod)
 	var diags []Diagnostic
 	syntax.Inspect(mod, func(n syntax.Node) bool {
@@ -47,18 +41,11 @@ func (a *Analyzer) checkAssignmentPrimitiveRules(mod *syntax.Module) []Diagnosti
 				v.TemplateRestriction.TemplateTok.Kind() != syntax.ILLEGAL {
 				return true
 			}
-			declTypeName := identName(v.Type)
-			declIsInt := declTypeName == "integer"
 			for _, d := range v.Decls {
 				if d == nil || d.Value == nil {
 					continue
 				}
 				declHasArray := len(d.ArrayDef) > 0
-				if declIsInt && !declHasArray {
-					if isFloatLiteralLike(d.Value) {
-						diags = append(diags, floatToIntDiag(d.Value, declName(d)))
-					}
-				}
 				// `var integer x[2] := {11, omit}` --
 				// the LHS is an array, omit is forbidden.
 				if cl, ok := d.Value.(*syntax.CompositeLiteral); ok {
@@ -80,9 +67,6 @@ func (a *Analyzer) checkAssignmentPrimitiveRules(mod *syntax.Module) []Diagnosti
 				return true
 			}
 			name := lhsId.String()
-			if intVars[name] && isFloatLiteralLike(v.Y) {
-				diags = append(diags, floatToIntDiag(v.Y, name))
-			}
 			if cl, ok := v.Y.(*syntax.CompositeLiteral); ok {
 				if kind, ok := listVarKinds[name]; ok {
 					diags = append(diags, positionalOmitDiags(
@@ -93,36 +77,6 @@ func (a *Analyzer) checkAssignmentPrimitiveRules(mod *syntax.Module) []Diagnosti
 		return true
 	})
 	return diags
-}
-
-// collectIntegerVarNames builds the set of `var integer name`
-// declarations in the module. Arrays are excluded (`var integer x[2]`
-// is a list of integers, where `x := 1.5` is a different category).
-func collectIntegerVarNames(mod *syntax.Module) map[string]bool {
-	out := map[string]bool{}
-	syntax.Inspect(mod, func(n syntax.Node) bool {
-		vd, ok := n.(*syntax.ValueDecl)
-		if !ok || vd == nil || vd.KindTok == nil ||
-			vd.KindTok.Kind() != syntax.VAR {
-			return true
-		}
-		if vd.TemplateRestriction != nil &&
-			vd.TemplateRestriction.TemplateTok != nil &&
-			vd.TemplateRestriction.TemplateTok.Kind() != syntax.ILLEGAL {
-			return true
-		}
-		if identName(vd.Type) != "integer" {
-			return true
-		}
-		for _, d := range vd.Decls {
-			if d == nil || d.Name == nil || len(d.ArrayDef) > 0 {
-				continue
-			}
-			out[d.Name.String()] = true
-		}
-		return true
-	})
-	return out
 }
 
 // collectListLikeVarKinds maps every variable declared with a list-
@@ -216,42 +170,6 @@ func collectListSubtypeKinds(mod *syntax.Module) map[string]string {
 		}
 	}
 	return out
-}
-
-// isFloatLiteralLike reports whether e is a float literal,
-// optionally with a leading unary +/-. Nested expressions and
-// function calls are not treated as literals.
-func isFloatLiteralLike(e syntax.Expr) bool {
-	switch x := e.(type) {
-	case *syntax.UnaryExpr:
-		if x == nil || x.Op == nil || x.X == nil {
-			return false
-		}
-		switch x.Op.Kind() {
-		case syntax.ADD, syntax.SUB:
-			return isFloatLiteralLike(x.X)
-		}
-		return false
-	case *syntax.ValueLiteral:
-		if x == nil || x.Tok == nil {
-			return false
-		}
-		return x.Tok.Kind() == syntax.FLOAT
-	}
-	return false
-}
-
-// floatToIntDiag formats the assign-float-to-integer diagnostic.
-func floatToIntDiag(rhs syntax.Expr, name string) Diagnostic {
-	return Diagnostic{
-		Code:     "assign-float-to-integer",
-		Severity: SeverityError,
-		Message: fmt.Sprintf(
-			"integer variable %q cannot be assigned a float literal (ETSI 6.3.1 / 19.1)",
-			name),
-		Node: rhs,
-		Span: syntax.SpanOf(rhs),
-	}
 }
 
 // positionalOmitDiags scans a positional composite literal for

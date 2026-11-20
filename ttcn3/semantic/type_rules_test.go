@@ -27,6 +27,7 @@ func TestTypeRules(t *testing.T) {
 		`var integer x := 1; select union (x) { case (a) {} }`:          "select-union-header",
 		`timer T := 1.0; var integer v; v := T.read;`:                   "type-incompatible-assignment",
 		`var integer v := int2float(1);`:                                "type-incompatible-value",
+		`var template integer v_t := "abc";`:                            "type-incompatible-value",
 	}
 	for body, code := range bad {
 		tree := parse(t, `module M { type record R { integer a } type record R2 { boolean a } type record R3 { integer b } type set S { integer a } type record of integer RoI; type set of integer SoI; function f(in integer p_i) {} function g() { `+body+` } }`)

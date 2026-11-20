@@ -14,9 +14,13 @@ import (
 // rootType is the root type of a value: its kind ("integer", "float",
 // "boolean", "verdicttype", "charstring", "universal charstring",
 // "bitstring", "hexstring", "octetstring", or a structured kind) and, for
-// a user-defined structured or enumerated type, the declaration's name.
+// a user-defined structured or enumerated type, the declaration's name;
+// for a record, set or union type, the declaration itself and the tree it
+// is in, which tell two types of the same name in different modules apart.
 type rootType struct {
 	kind, name string
+	decl       *syntax.StructTypeDecl
+	tree       *ttcn3.Tree
 }
 
 // primitive reports whether r is a basic or string root type, whose
@@ -55,6 +59,12 @@ func (r rootType) structured() bool {
 		return true
 	}
 	return false
+}
+
+// sameFamily reports whether x and y are both basic or string root types,
+// or both structured ones: the pairs the type rules compare.
+func sameFamily(x, y rootType) bool {
+	return x.primitive() && y.primitive() || x.structured() && y.structured()
 }
 
 // comparable reports whether values of root types x and y may be
@@ -172,42 +182,17 @@ func (m typeModel) selectorRoot(x *syntax.SelectorExpr) (rootType, bool) {
 		}
 	}
 	parent, ok := m.exprRoot(x.X)
-	if !ok || parent.kind != "record" && parent.kind != "set" || parent.name == "" {
+	if !ok || parent.kind != "record" && parent.kind != "set" || parent.decl == nil {
 		return rootType{}, false
 	}
-	st := m.structNamed(parent.name)
-	if st == nil {
-		return rootType{}, false
-	}
-	for _, f := range st.decl.Fields {
+	for _, f := range parent.decl.Fields {
 		if f != nil && f.Name != nil && f.Name.String() == sel && len(f.ArrayDef) == 0 {
 			if e := typeSpecExpr(f.Type); e != nil {
-				return m.typeRoot(st.tree, e, 0)
+				return m.typeRoot(parent.tree, e, 0)
 			}
 		}
 	}
 	return rootType{}, false
-}
-
-type structDecl struct {
-	decl *syntax.StructTypeDecl
-	tree *ttcn3.Tree
-}
-
-// structNamed is the record, set or union declaration of the module
-// named name.
-func (m typeModel) structNamed(name string) *structDecl {
-	var out *structDecl
-	m.tree.Root.Inspect(func(n syntax.Node) bool {
-		if out != nil {
-			return false
-		}
-		if st, ok := n.(*syntax.StructTypeDecl); ok && st.Name != nil && st.Name.String() == name {
-			out = &structDecl{decl: st, tree: m.tree}
-		}
-		return true
-	})
-	return out
 }
 
 func isTimerType(t syntax.Expr) bool {
@@ -327,32 +312,28 @@ func (m typeModel) typeRoot(tree *ttcn3.Tree, t syntax.Expr, depth int) (rootTyp
 		}
 	case *syntax.StructTypeDecl:
 		if d.Name != nil && d.KindTok != nil {
-			return rootType{kind: d.KindTok.String(), name: d.Name.String()}, true
+			return rootType{kind: d.KindTok.String(), name: d.Name.String(), decl: d, tree: def.Tree}, true
 		}
 	}
 	return rootType{}, false
 }
 
 // compatible reports whether a value of root type v may be assigned to a
-// target of root type t: assignable kinds, and for two record or two set
-// types of different names, fields of the same number and optional
+// target of root type t: assignable kinds, and for two different record or
+// two different set types, fields of the same number and optional
 // aspect, in order, of compatible types (6.3.2.2). What the model cannot
 // tell is taken for compatible.
 func (m typeModel) compatible(t, v rootType, depth int) bool {
 	if !assignable(t, v) {
 		return false
 	}
-	if depth > 8 || t.kind != v.kind || t.name == v.name || t.name == "" || v.name == "" {
+	if depth > 8 || t.kind != v.kind || t.kind != "record" && t.kind != "set" {
 		return true
 	}
-	if t.kind != "record" && t.kind != "set" {
+	if t.decl == nil || v.decl == nil || t.decl == v.decl {
 		return true
 	}
-	ts, vs := m.structNamed(t.name), m.structNamed(v.name)
-	if ts == nil || vs == nil {
-		return true
-	}
-	tf, vf := ts.decl.Fields, vs.decl.Fields
+	tf, vf := t.decl.Fields, v.decl.Fields
 	if len(tf) != len(vf) {
 		return false
 	}
@@ -368,9 +349,9 @@ func (m typeModel) compatible(t, v rootType, depth int) bool {
 		if ae == nil || be == nil {
 			continue
 		}
-		at, aok := m.typeRoot(ts.tree, ae, 0)
-		bt, bok := m.typeRoot(vs.tree, be, 0)
-		if aok && bok && (at.primitive() && bt.primitive() || at.structured() && bt.structured()) && !m.compatible(at, bt, depth+1) {
+		at, aok := m.typeRoot(t.tree, ae, 0)
+		bt, bok := m.typeRoot(v.tree, be, 0)
+		if aok && bok && sameFamily(at, bt) && !m.compatible(at, bt, depth+1) {
 			return false
 		}
 	}
@@ -394,14 +375,7 @@ func typeSpecExpr(ts syntax.TypeSpec) syntax.Expr {
 // isTemplateRef reports whether e refers to a template: a template
 // definition, a template variable or a template formal parameter.
 func (m typeModel) isTemplateRef(e syntax.Expr) bool {
-	for {
-		p, ok := e.(*syntax.ParenExpr)
-		if !ok || len(p.List) != 1 {
-			break
-		}
-		e = p.List[0]
-	}
-	id, ok := e.(*syntax.Ident)
+	id, ok := unparen(e).(*syntax.Ident)
 	if !ok {
 		return false
 	}
@@ -423,18 +397,7 @@ func (m typeModel) isTemplateRef(e syntax.Expr) bool {
 // isValueVarRef reports whether e refers to a variable or constant that
 // holds a value, not a template, or to a field or element of one.
 func (m typeModel) isValueVarRef(e syntax.Expr) bool {
-	for {
-		switch x := e.(type) {
-		case *syntax.SelectorExpr:
-			e = x.X
-			continue
-		case *syntax.IndexExpr:
-			e = x.X
-			continue
-		}
-		break
-	}
-	id, ok := e.(*syntax.Ident)
+	id, ok := rootRef(e).(*syntax.Ident)
 	if !ok {
 		return false
 	}
@@ -462,7 +425,7 @@ func isWildcardTemplate(e syntax.Expr) bool {
 
 // declType is the declared type expression of the value id refers to, a
 // variable, constant, module parameter or formal parameter, and the tree
-// it is declared in.
+// it is declared in; nil for an array, whose elements are of that type.
 func (m typeModel) declType(id *syntax.Ident) (syntax.Expr, *ttcn3.Tree) {
 	defs := m.tree.LookupWithDB(id, m.db)
 	if len(defs) != 1 {
@@ -470,8 +433,23 @@ func (m typeModel) declType(id *syntax.Ident) (syntax.Expr, *ttcn3.Tree) {
 	}
 	switch d := defs[0].Node.(type) {
 	case *syntax.ValueDecl:
+		for _, x := range d.Decls {
+			if x != nil && x.Name != nil && x.Name.String() == id.String() && len(x.ArrayDef) > 0 {
+				return nil, nil
+			}
+		}
 		return d.Type, defs[0].Tree
+	case *syntax.Declarator:
+		if len(d.ArrayDef) > 0 {
+			return nil, nil
+		}
+		if vd, ok := defs[0].ParentOf(d).(*syntax.ValueDecl); ok {
+			return vd.Type, defs[0].Tree
+		}
 	case *syntax.FormalPar:
+		if len(d.ArrayDef) > 0 {
+			return nil, nil
+		}
 		return d.Type, defs[0].Tree
 	}
 	return nil, nil

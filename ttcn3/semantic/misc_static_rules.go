@@ -2,9 +2,9 @@
 // look at the syntax decides:
 //
 //   - the number of actual parameters of a predefined function (annex C);
-//   - setverdict, getverdict and the port operations clear, halt and
-//     checkstate are not allowed in a control part, execute not in a
-//     testcase (clauses 16.1.5, 19, 26.1, table 15);
+//   - getverdict and the port operations clear, halt and checkstate are
+//     not allowed in a control part, execute not in a testcase (clauses
+//     16.1.5, 19, 26.1, table 15; setverdict is control_part_ops.go's);
 //   - start applies to no `all component`, stop and kill to no `any
 //     component` (21.3);
 //   - a union alternative is not optional, and not every alternative is
@@ -24,6 +24,7 @@ package semantic
 import (
 	"fmt"
 
+	"github.com/nokia/ntt/ttcn3"
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
@@ -42,8 +43,8 @@ var predefinedArity = map[string][2]int{
 	"get_stringencoding": {1, 1}, "remove_bom": {1, 1}, "float2str": {1, 1},
 }
 
-func (a *Analyzer) checkMiscStaticRules(mod *syntax.Module) []Diagnostic {
-	if mod == nil {
+func (a *Analyzer) checkMiscStaticRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagnostic {
+	if tree == nil || mod == nil {
 		return nil
 	}
 	var diags []Diagnostic
@@ -71,6 +72,7 @@ func (a *Analyzer) checkMiscStaticRules(mod *syntax.Module) []Diagnostic {
 	}
 	indexOK := indexRedirectsWithAnyFrom(mod)
 	wholeOnly := wholeMatchingTemplates(mod)
+	m := typeModel{tree: tree, db: a.db()}
 
 	mod.Inspect(func(n syntax.Node) bool {
 		switch x := n.(type) {
@@ -78,8 +80,16 @@ func (a *Analyzer) checkMiscStaticRules(mod *syntax.Module) []Diagnostic {
 			// A template matching a received message is no AnyValueOrNone,
 			// omit or ifpresent as a whole (B.1.2.4, B.1.2.8, B.1.4.2).
 			if op := receivingOpName(x.Fun); op != "" && x.Args != nil && len(x.Args.List) > 0 {
-				if ref, ok := unparen(x.Args.List[0]).(*syntax.Ident); ok {
-					if what := wholeOnly[ref.String()]; what != "" {
+				if ref, ok := unparen(x.Args.List[0]).(*syntax.Ident); ok && len(wholeOnly) > 0 {
+					// The reference may be a parameter or local of
+					// the same name: resolve it.
+					what := ""
+					if defs := tree.LookupWithDB(ref, a.db()); len(defs) == 1 {
+						if t, ok := defs[0].Node.(*syntax.TemplateDecl); ok {
+							what = wholeOnly[t]
+						}
+					}
+					if what != "" {
 						add(x, "whole-template-in-receive", fmt.Sprintf("template %s is %s as a whole: no template of a %s (ETSI B.1.2.4, B.1.2.8, B.1.4.2)", ref.String(), what, op))
 					}
 				}
@@ -103,23 +113,31 @@ func (a *Analyzer) checkMiscStaticRules(mod *syntax.Module) []Diagnostic {
 				}
 			}
 		case *syntax.ControlPart:
-			syntax.Inspect(x.Body, func(m syntax.Node) bool {
-				switch y := m.(type) {
+			// A selector names a field, not a function or operation.
+			fieldSel := map[syntax.Node]bool{}
+			syntax.Inspect(x.Body, func(n syntax.Node) bool {
+				switch y := n.(type) {
 				case *syntax.FuncDecl:
 					return false
 				case *syntax.Ident:
-					if s := y.String(); s == "setverdict" || s == "getverdict" {
-						add(y, "control-part-verdict", fmt.Sprintf("%s is not allowed in a control part (ETSI 16.1.5, table 15)", s))
+					if y.String() == "getverdict" && !fieldSel[y] && userFuncs["getverdict"] == nil {
+						add(y, "control-part-verdict", "getverdict is not allowed in a control part (ETSI 16.1.5, table 15)")
 					}
 				case *syntax.SelectorExpr:
+					fieldSel[y.Sel] = true
 					switch syntax.Name(y.Sel) {
 					case "clear", "halt", "checkstate":
-						add(y, "control-part-port-op", fmt.Sprintf("port operation %s is not allowed in a control part (ETSI table 15)", syntax.Name(y.Sel)))
+						// A field of a record or set value of the
+						// name is no port operation.
+						if _, isValue := m.exprRoot(y.X); !isValue {
+							add(y, "control-part-port-op", fmt.Sprintf("port operation %s is not allowed in a control part (ETSI table 15)", syntax.Name(y.Sel)))
+						}
 					}
 				}
 				return true
 			})
-			return false
+			// The rules below apply in the control part too.
+			return true
 		case *syntax.FuncDecl:
 			// Functions and altsteps may be called from the control part
 			// and execute test cases (26.1 c); a testcase is test
@@ -184,7 +202,8 @@ func (a *Analyzer) checkMiscStaticRules(mod *syntax.Module) []Diagnostic {
 				}
 			}
 		case *syntax.RedirectExpr:
-			if x.Index != nil && !indexOK[x] {
+			// A port operation's is receive_redirect_rules.go's.
+			if x.Index != nil && !indexOK[x] && !isPortOperationName(redirectOpName(x.X)) {
 				add(x, "index-redirect-without-any-from", "@index is used with any from only (ETSI 21.3, 22, 23)")
 			}
 		case *syntax.SelectStmt:
@@ -295,10 +314,10 @@ func receivingOpName(fun syntax.Expr) string {
 	return ""
 }
 
-// wholeMatchingTemplates are the templates without parameters, by name,
-// that are AnyValueOrNone, omit or have ifpresent as a whole, and which.
-func wholeMatchingTemplates(mod *syntax.Module) map[string]string {
-	out := map[string]string{}
+// wholeMatchingTemplates are the templates without parameters that are
+// AnyValueOrNone, omit or have ifpresent as a whole, and which.
+func wholeMatchingTemplates(mod *syntax.Module) map[*syntax.TemplateDecl]string {
+	out := map[*syntax.TemplateDecl]string{}
 	mod.Inspect(func(n syntax.Node) bool {
 		t, ok := n.(*syntax.TemplateDecl)
 		if !ok || t.Name == nil || t.Params != nil || t.Base != nil || t.Value == nil {
@@ -307,14 +326,14 @@ func wholeMatchingTemplates(mod *syntax.Module) map[string]string {
 		switch v := t.Value.(type) {
 		case *syntax.ValueLiteral:
 			if v.Tok != nil && v.Tok.Kind() == syntax.MUL {
-				out[t.Name.String()] = "AnyValueOrNone"
+				out[t] = "AnyValueOrNone"
 			}
 			if v.Tok != nil && v.Tok.Kind() == syntax.OMIT {
-				out[t.Name.String()] = "omit"
+				out[t] = "omit"
 			}
 		case *syntax.UnaryExpr:
 			if v.Op != nil && v.Op.Kind() == syntax.IFPRESENT {
-				out[t.Name.String()] = "ifpresent"
+				out[t] = "ifpresent"
 			}
 		}
 		return true

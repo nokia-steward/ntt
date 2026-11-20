@@ -42,6 +42,7 @@ func (a *Analyzer) checkConcatAndContextRules(mod *syntax.Module) []Diagnostic {
 				if why := concatProblem(b, syntax.Name(x.Type)); why != "" {
 					add(b, "concat-operand", why+" (ETSI 15.11)")
 				}
+				inner[b] = true
 				markInner(b, inner)
 			}
 		case *syntax.BinaryExpr:

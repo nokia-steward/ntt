@@ -22,7 +22,7 @@ func TestMiscStaticRules(t *testing.T) {
 		`type component C {} testcase tc() runs on C { all component.start(f()); }`: "all-component-start",
 		`type component C {} testcase tc() runs on C { any component.kill; }`:       "any-component-stop-kill",
 		`type component C {} testcase tc() runs on C { execute(tc()); }`:            "execute-in-test-behaviour",
-		`control { setverdict(pass); }`:                                             "control-part-verdict",
+		`control { var verdicttype v := getverdict; }`:                              "control-part-verdict",
 		`control { all port.clear; }`:                                               "control-part-port-op",
 		`type port P message { inout integer } type component C { port P p; timer T } testcase tc() runs on C { T.timeout -> @index value v; }`: "index-redirect-without-any-from",
 	}

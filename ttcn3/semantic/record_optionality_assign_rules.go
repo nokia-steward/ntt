@@ -1,8 +1,9 @@
 // record_optionality_assign_rules.go enforces ETSI ES 201 873-1
-// clause 6.3.2: two record/set types are assignment-compatible
-// only when all corresponding fields have identical optionality.
-// We flag the narrow shape `vT2 := vT1;` (and `var T2 vT2 := vT1`)
-// where T1 and T2 are sibling record/set types with:
+// clause 6.3.2: two record/set types are compatible only when all
+// corresponding fields have identical optionality. Assignments and
+// initial values are type_rules.go's; we flag union assignments and
+// actual parameters `f(vT1)` to a formal of type T2, where T1 and T2
+// are sibling record/set types with:
 //
 //   - the same field count;
 //   - the same per-field base type names;
@@ -118,17 +119,6 @@ func (a *Analyzer) checkRecordOptionalityAssignRules(mod *syntax.Module) []Diagn
 					continue
 				}
 				rhsType := varTypes[rhsID.String()]
-				if isRec && mismatch(lhsType, rhsType) {
-					diags = append(diags, Diagnostic{
-						Code:     "record-assign-optionality-mismatch",
-						Severity: SeverityError,
-						Message: fmt.Sprintf(
-							"cannot assign value of type %q to variable of type %q: field optionality differs (ETSI 6.3.2)",
-							rhsType, lhsType),
-						Node: dec.Value,
-						Span: syntax.SpanOf(dec.Value),
-					})
-				}
 				if isUnion && unionMismatch(lhsType, rhsType) {
 					diags = append(diags, Diagnostic{
 						Code:     "union-assign-name-mismatch",
@@ -159,17 +149,6 @@ func (a *Analyzer) checkRecordOptionalityAssignRules(mod *syntax.Module) []Diagn
 			}
 			lhsType := varTypes[lhsID.String()]
 			rhsType := varTypes[rhsID.String()]
-			if mismatch(lhsType, rhsType) {
-				diags = append(diags, Diagnostic{
-					Code:     "record-assign-optionality-mismatch",
-					Severity: SeverityError,
-					Message: fmt.Sprintf(
-						"cannot assign value of type %q to variable of type %q: field optionality differs (ETSI 6.3.2)",
-						rhsType, lhsType),
-					Node: be,
-					Span: syntax.SpanOf(be),
-				})
-			}
 			if unionMismatch(lhsType, rhsType) {
 				diags = append(diags, Diagnostic{
 					Code:     "union-assign-name-mismatch",

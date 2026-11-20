@@ -78,21 +78,8 @@ func (a *Analyzer) checkReceiveRedirectRules(mod *syntax.Module) []Diagnostic {
 		// only flag when both sides are recognised primitives.
 		if r.ValueTok != nil && len(r.Value) > 0 && (op == "receive" || op == "trigger" || op == "check") {
 			if tyFromTemplate := templateInstanceType(r.X); tyFromTemplate != "" {
-				if target := identName(r.Value[0]); target != "" {
-					if ty, ok := varTypes[target]; ok && ty != "" &&
-						isPrimitiveType(ty) && isPrimitiveType(tyFromTemplate) &&
-						ty != tyFromTemplate {
-						diags = append(diags, Diagnostic{
-							Code:     "value-redirect-type-mismatch",
-							Severity: SeverityError,
-							Message: fmt.Sprintf(
-								"value redirect target %q has type %q; expected %q to match the receive template",
-								target, ty, tyFromTemplate),
-							Node: r,
-							Span: syntax.SpanOf(r),
-						})
-					}
-				}
+				// A whole-value target is type_rules.go's
+				// (value-redirect-type).
 				// Field-destructuring shape:
 				// `-> value ( v1 := f1, v2 := f2[..] )`
 				// (ETSI 22.2.2 / 22.2.3). For each entry
