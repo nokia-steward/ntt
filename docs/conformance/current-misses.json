@@ -1,9 +1,9 @@
 {
- "summary": "ran 5177 files: 5087 matched, 12 skipped (98.49% match rate)",
- "source": "report38.json",
- "miss_count": 90,
+ "summary": "ran 5177 files: 5088 matched, 12 skipped (98.51% match rate)",
+ "source": "etsi.json",
+ "miss_count": 89,
  "outcomes": {
-  "reject->pass": 39,
+  "reject->pass": 38,
   "reject->none": 22,
   "->": 12,
   "pass->fail": 6,
@@ -74,14 +74,6 @@
    }
   },
   {
-   "chapter": "core_language/B_matching_incoming_values",
-   "misses": 3,
-   "outcomes": {
-    "reject->pass": 1,
-    "reject->none": 2
-   }
-  },
-  {
    "chapter": "oo/501_classes_and_objects",
    "misses": 3,
    "outcomes": {
@@ -110,6 +102,13 @@
    "outcomes": {
     "->": 1,
     "reject->none": 1
+   }
+  },
+  {
+   "chapter": "core_language/B_matching_incoming_values",
+   "misses": 2,
+   "outcomes": {
+    "reject->none": 2
    }
   },
   {
@@ -789,14 +788,6 @@
    "actual": "none",
    "outcome": "reject->none",
    "relpath": "core_language/27_specifying_attributes/2707_optional_attributes/NegSem_2707_OptionalAttributes_002.ttcn",
-   "message": ""
-  },
-  {
-   "chapter": "core_language/B_matching_incoming_values",
-   "expected": "reject",
-   "actual": "pass",
-   "outcome": "reject->pass",
-   "relpath": "core_language/B_matching_incoming_values/B01_template_matching/B0102_matching_mechanisms/B010201_value_list/NegSem_B010201_value_list_001.ttcn",
    "message": ""
   },
   {

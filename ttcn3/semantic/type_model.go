@@ -505,6 +505,12 @@ func (m typeModel) listElemRoot(e syntax.Expr) (rootType, bool) {
 		return rootType{}, false
 	}
 	t, tree := m.declType(id)
+	return m.elemRootOfType(tree, t)
+}
+
+// elemRootOfType is the root type of the elements of the record of or set
+// of type t, declared in tree.
+func (m typeModel) elemRootOfType(tree *ttcn3.Tree, t syntax.Expr) (rootType, bool) {
 	for depth := 0; t != nil && depth < 8; depth++ {
 		if ls, ok := t.(*syntax.ListSpec); ok {
 			if el := typeSpecExpr(ls.ElemType); el != nil {
