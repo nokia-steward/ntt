@@ -184,6 +184,7 @@ func (a *Analyzer) Analyze(tree *ttcn3.Tree) []Diagnostic {
 		out = append(out, a.checkAllFromSourceRules(mod)...)
 		out = append(out, a.checkIndexRedirectDimRules(mod)...)
 		out = append(out, a.checkIndexRedirectTargetTypeRules(mod)...)
+		out = append(out, a.checkIndexRedirectArrayRules(tree, mod)...)
 		out = append(out, a.checkConstKindRules(tree, mod)...)
 		out = append(out, a.checkAssignmentPrimitiveRules(mod)...)
 		out = append(out, a.checkTypeCompatRules(mod)...)
