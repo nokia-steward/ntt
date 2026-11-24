@@ -10,7 +10,8 @@ import (
 // Functions without a return value are invoked directly (16.1.1 a); all
 // component goes with all port, alone (21.1.2); configuration operations
 // take one component reference (6.2.11); sending operations have a port
-// and a value (22.1.4.1).
+// and a value (22.1.4.1); any port and all port go with the operations of
+// table 26; ports are not assigned (6.2.10.1).
 func TestOperationShapeRules(t *testing.T) {
 	cases := []struct {
 		name, stmt, want string
@@ -24,6 +25,10 @@ func TestOperationShapeRules(t *testing.T) {
 		{"send without port", "send(integer:1);", "sending-operation-without-port"},
 		{"send without value", "p.send();", "sending-operation-without-value"},
 		{"call without signature", "q.call();", "sending-operation-without-value"},
+		{"any port in disconnect", "disconnect(self:any port);", "any-port-not-allowed"},
+		{"any port stopped", "any port.stop;", "any-port-not-allowed"},
+		{"all port received from", "alt { [] all port.receive { } }", "all-port-not-allowed"},
+		{"port assigned", "p := p;", "port-assigned"},
 
 		{"void function invoked directly", "f_void();", ""},
 		{"value function in an expression", "var integer v := 1 + f_int();", ""},
@@ -31,6 +36,9 @@ func TestOperationShapeRules(t *testing.T) {
 		{"disconnect without arguments", "disconnect;", ""},
 		{"connect on an element", "connect(self:p, v_ptcs[0]:p);", ""},
 		{"send with a value", "p.send(1);", ""},
+		{"all port stopped", "all port.stop;", ""},
+		{"any port received from", "alt { [] any port.receive { } }", ""},
+		{"variable assigned", "var integer v; v := 1;", ""},
 	}
 	for _, c := range cases {
 		tree := parse(t, `module M {
@@ -48,7 +56,8 @@ func TestOperationShapeRules(t *testing.T) {
 		}`)
 		got := codes(NewAnalyzer(&ttcn3.DB{}).Analyze(tree))
 		ruleCodes := []string{"void-function-in-expression", "all-component-without-all-port", "all-component-not-alone",
-			"configuration-on-component-array", "sending-operation-without-port", "sending-operation-without-value"}
+			"configuration-on-component-array", "sending-operation-without-port", "sending-operation-without-value",
+			"any-port-not-allowed", "all-port-not-allowed", "port-assigned"}
 		var hit []string
 		for _, code := range got {
 			if slices.Contains(ruleCodes, code) {
