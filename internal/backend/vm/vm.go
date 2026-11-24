@@ -120,9 +120,11 @@ func NewRuntime(t3xf string, opts ...Option) (*Runtime, error) {
 		r.closed = true
 		r.mu.Unlock()
 
+		// done before events: once a consumer sees Events closed, Err
+		// already returns the exit error.
 		r.err = err
-		close(r.events)
 		close(r.done)
+		close(r.events)
 	}()
 
 	return r, nil
