@@ -65,3 +65,19 @@ func TestMapWithSystemAccepted(t *testing.T) {
 		t.Fatalf("unexpected map-requires-one-system-port, got %v", codes(diags))
 	}
 }
+
+// A variable set to system is the system side of a map (9.2).
+func TestMapWithSystemVariableAccepted(t *testing.T) {
+	tree := parse(t, `module M {
+		type port P message { inout integer }
+		type component C { port P p }
+		type component S { port P p_sys }
+		testcase tc() runs on C system S {
+			var S v_sys := system;
+			map(mtc:p, v_sys:p_sys);
+		}
+	}`)
+	if diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree); containsCode(diags, "map-requires-one-system-port") {
+		t.Fatalf("unexpected map-requires-one-system-port: %v", codes(diags))
+	}
+}

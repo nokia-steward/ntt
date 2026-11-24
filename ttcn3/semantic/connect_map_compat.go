@@ -93,6 +93,7 @@ func checkConnectMapInBody(
 	portTypes map[string]*portDirs,
 ) []Diagnostic {
 	var diags []Diagnostic
+	systemVars := variablesSetToSystem(body)
 	syntax.Inspect(body, func(n syntax.Node) bool {
 		if n == nil {
 			return true
@@ -207,8 +208,10 @@ func checkConnectMapInBody(
 			// system port. Two component-side refs (no
 			// `system:` qualifier) or two `system:` refs
 			// both violate the rule.
-			leftSys := left.compVar == "system"
-			rightSys := right.compVar == "system"
+			// A variable the behaviour sets to system
+			// (`var S v := system`) is the system side too.
+			leftSys := left.compVar == "system" || systemVars[left.compVar]
+			rightSys := right.compVar == "system" || systemVars[right.compVar]
 			if leftSys == rightSys {
 				diags = append(diags, Diagnostic{
 					Code:     "map-requires-one-system-port",
@@ -539,4 +542,35 @@ func collectVarComponentTypes(
 		return true
 	})
 	return out
+}
+
+// variablesSetToSystem is the variables body initialises or assigns with
+// the system component reference, and with nothing else.
+func variablesSetToSystem(body syntax.Node) map[string]bool {
+	set := map[string]bool{}
+	other := map[string]bool{}
+	note := func(name string, v syntax.Expr) {
+		if id, ok := v.(*syntax.Ident); ok && id.String() == "system" {
+			set[name] = true
+		} else {
+			other[name] = true
+		}
+	}
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		switch x := n.(type) {
+		case *syntax.Declarator:
+			if x.Name != nil && x.Value != nil {
+				note(x.Name.String(), x.Value)
+			}
+		case *syntax.BinaryExpr:
+			if id, ok := x.X.(*syntax.Ident); ok && x.Op != nil && x.Op.Kind() == syntax.ASSIGN {
+				note(id.String(), x.Y)
+			}
+		}
+		return true
+	})
+	for name := range other {
+		delete(set, name)
+	}
+	return set
 }
