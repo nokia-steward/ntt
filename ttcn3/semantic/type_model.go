@@ -125,8 +125,27 @@ func (m typeModel) exprRoot(e syntax.Expr) (rootType, bool) {
 		return m.refRoot(x)
 	case *syntax.CallExpr:
 		return m.callRoot(x)
+	case *syntax.RegexpExpr:
+		// The root type of inpar (C.4.1).
+		if args, ok := x.X.(*syntax.ParenExpr); ok && len(args.List) == 3 {
+			return m.stringArgRoot(args.List[0])
+		}
 	case *syntax.SelectorExpr:
 		return m.selectorRoot(x)
+	}
+	return rootType{}, false
+}
+
+// stringArgRoot is the root type of a string argument e of a predefined
+// function, when it is a basic string kind.
+func (m typeModel) stringArgRoot(e syntax.Expr) (rootType, bool) {
+	r, ok := m.exprRoot(e)
+	if !ok {
+		return rootType{}, false
+	}
+	switch r.kind {
+	case "bitstring", "hexstring", "octetstring", "charstring", "universal charstring":
+		return r, true
 	}
 	return rootType{}, false
 }
@@ -157,6 +176,13 @@ func (m typeModel) callRoot(call *syntax.CallExpr) (rootType, bool) {
 	if len(defs) == 0 {
 		if k, ok := predefinedResult[id.String()]; ok {
 			return rootType{kind: k}, true
+		}
+		switch id.String() {
+		case "substr", "replace":
+			// Of the root type of inpar (C.4.2, C.4.3).
+			if call.Args != nil && len(call.Args.List) > 0 {
+				return m.stringArgRoot(call.Args.List[0])
+			}
 		}
 		return rootType{}, false
 	}
