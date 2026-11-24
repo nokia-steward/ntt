@@ -192,6 +192,7 @@ func (a *Analyzer) Analyze(tree *ttcn3.Tree) []Diagnostic {
 		out = append(out, a.checkMtcSystemClauseRules(tree, mod)...)
 		out = append(out, a.checkScopeVisibilityRules(tree, mod)...)
 		out = append(out, a.checkCallContextRules(mod)...)
+		out = append(out, a.checkPredefinedArgTypeRules(tree, mod)...)
 		out = append(out, a.checkConstKindRules(tree, mod)...)
 		out = append(out, a.checkAssignmentPrimitiveRules(mod)...)
 		out = append(out, a.checkTypeCompatRules(mod)...)
