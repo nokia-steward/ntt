@@ -16,8 +16,10 @@
 //
 // Map-to-map type compatibility is delegated to the existing
 // `map` collector: two maps are considered compatible iff their
-// from-type and to-type names match literally. A future
-// structural-equivalence pass can broaden this.
+// from-type and to-type names match literally, are equivalent
+// records, or are charstring and universal charstring, which are
+// compatible both ways (6.3.1). A future structural-equivalence
+// pass can broaden this.
 package semantic
 
 import (
@@ -193,8 +195,10 @@ func (a *Analyzer) checkMapAssignCompatRules(mod *syntax.Module) []Diagnostic {
 					continue
 				}
 				if lhsMap.from != rhsMap.from || lhsMap.to != rhsMap.to {
-					if recordEquivalent(lhsMap.from, rhsMap.from, records) &&
-						recordEquivalent(lhsMap.to, rhsMap.to, records) {
+					compatible := func(a, b string) bool {
+						return a == b || isCharKind(a) && isCharKind(b) || recordEquivalent(a, b, records)
+					}
+					if compatible(lhsMap.from, rhsMap.from) && compatible(lhsMap.to, rhsMap.to) {
 						continue
 					}
 					diags = append(diags, Diagnostic{
