@@ -294,10 +294,20 @@ func sigTemplateBodyDiags(body syntax.Expr, params []sigParamInfo, forbid map[sy
 // instead of a flat matchingMechanismName so a signature-field
 // value like `{ field1 := 0, field2 := ? }` is rejected too.
 //
+// Inside a record or set value omit is the value of an optional field,
+// not a matching mechanism; only the whole slot's omit is one.
+//
 // A visited set guards against template-ref cycles.
 func deepMatchingMechanism(expr syntax.Expr, tmplBodies map[string]syntax.Expr) string {
 	visited := map[string]bool{}
 	var walk func(e syntax.Expr) string
+	// field walks an element of a composite value.
+	field := func(e syntax.Expr) string {
+		if matchingMechanismName(e) == "omit" {
+			return ""
+		}
+		return walk(e)
+	}
 	walk = func(e syntax.Expr) string {
 		if e == nil {
 			return ""
@@ -309,12 +319,12 @@ func deepMatchingMechanism(expr syntax.Expr, tmplBodies map[string]syntax.Expr) 
 		case *syntax.CompositeLiteral:
 			for _, c := range v.List {
 				if be, ok := c.(*syntax.BinaryExpr); ok && be.Op != nil && be.Op.Kind() == syntax.ASSIGN {
-					if mech := walk(be.Y); mech != "" {
+					if mech := field(be.Y); mech != "" {
 						return mech
 					}
 					continue
 				}
-				if mech := walk(c); mech != "" {
+				if mech := field(c); mech != "" {
 					return mech
 				}
 			}

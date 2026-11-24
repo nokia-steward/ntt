@@ -36,3 +36,21 @@ func TestSignatureTemplateMechanisms(t *testing.T) {
 		t.Errorf("valid module: unexpected %v", codes(diags))
 	}
 }
+
+// omit of an optional field inside an in parameter's value is a value,
+// not a matching mechanism (15.2 c).
+func TestSignatureTemplateOmitInField(t *testing.T) {
+	tree := parse(t, `module M {
+		type record Rec { integer field1 optional, charstring field2 }
+		signature RecProc(in Rec Par1);
+		type port P procedure { inout RecProc }
+		type component C { port P p }
+		template RecProc s_explicit := { Par1 := { field1 := omit, field2 := "a" } }
+		function f() runs on C { p.call(s_explicit, nowait); }
+	}`)
+	for _, d := range NewAnalyzer(&ttcn3.DB{}).Analyze(tree) {
+		if d.Code == "signature-template-matching-not-allowed" {
+			t.Errorf("unexpected %s: %s", d.Code, d.Message)
+		}
+	}
+}
