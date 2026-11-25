@@ -8,26 +8,27 @@
 // is rejected because a timer duration must be >= 0.0 (the
 // language doesn't support negative timer durations).
 //
-// We only flag the case where the right-hand side is a
-// directly visible negative literal (a UnaryExpr with a
-// minus operator over a numeric ValueLiteral). Expressions
-// that compute the duration at runtime are left to the
-// runtime semantic check; this rule's job is the trivially
-// static "minus literal" case the conformance suite cares
-// about.
+// We flag a directly visible negative literal (a UnaryExpr
+// with a minus operator over a numeric ValueLiteral) and a
+// float expression over literals and constants that folds to a
+// negative value (`c_base - 1.0`). Expressions that compute the
+// duration at runtime are left to the runtime semantic check.
 package semantic
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
+	"github.com/nokia/ntt/ttcn3"
 	"github.com/nokia/ntt/ttcn3/syntax"
 )
 
-func (a *Analyzer) checkTimerInitRules(mod *syntax.Module) []Diagnostic {
+func (a *Analyzer) checkTimerInitRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagnostic {
 	if mod == nil {
 		return nil
 	}
+	m := typeModel{tree: tree, db: a.db()}
 	var diags []Diagnostic
 	syntax.Inspect(mod, func(n syntax.Node) bool {
 		vd, ok := n.(*syntax.ValueDecl)
@@ -64,6 +65,20 @@ func (a *Analyzer) checkTimerInitRules(mod *syntax.Module) []Diagnostic {
 					Span: syntax.SpanOf(dc),
 				})
 				continue
+			}
+			if tree != nil {
+				if v, ok := m.constFloat(dc.Value, 0); ok && v < 0 {
+					diags = append(diags, Diagnostic{
+						Code:     "timer-negative-default",
+						Severity: SeverityError,
+						Message: "timer " + quoted(name) +
+							": default duration " + tokenText(dc.Value) + " resolves to " +
+							strconv.FormatFloat(v, 'g', -1, 64) + ", it must be non-negative (ETSI 12)",
+						Node: dc,
+						Span: syntax.SpanOf(dc),
+					})
+					continue
+				}
 			}
 			if integerOnlyLiteral(dc.Value) {
 				diags = append(diags, Diagnostic{
@@ -129,6 +144,66 @@ func checkTimerArrayInit(dc *syntax.Declarator, name string) []Diagnostic {
 		}
 	}
 	return diags
+}
+
+// constFloat is the value of the float expression e built from float
+// literals and constants with + - * /, ok false when it is anything
+// else.
+func (m typeModel) constFloat(e syntax.Expr, depth int) (float64, bool) {
+	if depth > 8 {
+		return 0, false
+	}
+	switch x := e.(type) {
+	case *syntax.ValueLiteral:
+		if x.Tok == nil || x.Tok.Kind() != syntax.FLOAT {
+			return 0, false
+		}
+		v, err := strconv.ParseFloat(x.Tok.String(), 64)
+		return v, err == nil
+	case *syntax.Ident:
+		vd, dc, _, ok := m.valueDeclOf(x)
+		if !ok || vd.KindTok == nil || vd.KindTok.Kind() != syntax.CONST || dc.Value == nil || len(dc.ArrayDef) > 0 {
+			return 0, false
+		}
+		return m.constFloat(dc.Value, depth+1)
+	case *syntax.ParenExpr:
+		if len(x.List) == 1 {
+			return m.constFloat(x.List[0], depth+1)
+		}
+	case *syntax.UnaryExpr:
+		if x.Op == nil {
+			return 0, false
+		}
+		v, ok := m.constFloat(x.X, depth+1)
+		switch {
+		case ok && x.Op.Kind() == syntax.SUB:
+			return -v, true
+		case ok && x.Op.Kind() == syntax.ADD:
+			return v, true
+		}
+	case *syntax.BinaryExpr:
+		if x.Op == nil {
+			return 0, false
+		}
+		l, lok := m.constFloat(x.X, depth+1)
+		r, rok := m.constFloat(x.Y, depth+1)
+		if !lok || !rok {
+			return 0, false
+		}
+		switch x.Op.Kind() {
+		case syntax.ADD:
+			return l + r, true
+		case syntax.SUB:
+			return l - r, true
+		case syntax.MUL:
+			return l * r, true
+		case syntax.DIV:
+			if r != 0 {
+				return l / r, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // isTimerValueDecl reports whether vd declares a timer. The

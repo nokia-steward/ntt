@@ -24,6 +24,7 @@ func (a *Analyzer) checkRaiseOperationRules(mod *syntax.Module) []Diagnostic {
 	}
 	sigExcTypes := collectSignatureExceptionTypes(mod)
 	varTypes := collectModuleVarTypes(mod)
+	tmpls := collectTemplateBodies(mod)
 	var diags []Diagnostic
 	syntax.Inspect(mod, func(n syntax.Node) bool {
 		ce, ok := n.(*syntax.CallExpr)
@@ -73,9 +74,9 @@ func (a *Analyzer) checkRaiseOperationRules(mod *syntax.Module) []Diagnostic {
 		}
 		// The exception value (second arg of raise) must
 		// conform to the template(value) restriction (22.3.5
-		// f). We flag obvious matching mechanisms; the deep
-		// wildcard check is shared with the signature
-		// template rule.
+		// f). We flag obvious matching mechanisms, inline or in
+		// a template definition; the deep wildcard check is
+		// shared with the signature template rule.
 		if len(ce.Args.List) >= 2 {
 			expr := ce.Args.List[1]
 			typeQual := ""
@@ -84,7 +85,7 @@ func (a *Analyzer) checkRaiseOperationRules(mod *syntax.Module) []Diagnostic {
 				typeQual = identName(be.X)
 				expr = be.Y
 			}
-			if mech := deepMatchingMechanism(expr, nil); mech != "" {
+			if mech := deepMatchingMechanism(expr, tmpls); mech != "" {
 				diags = append(diags, Diagnostic{
 					Code:     "raise-exception-not-specific",
 					Severity: SeverityError,

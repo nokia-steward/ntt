@@ -43,11 +43,11 @@ func (a *Analyzer) checkAttributeRetrievalRules(tree *ttcn3.Tree, mod *syntax.Mo
 		switch op {
 		case "setencode":
 			if r, ok := m.exprRoot(sel.X); ok && (r.primitive() || r.structured()) {
-				add(sel.X, "setencode-not-a-port", fmt.Sprintf("%s.setencode: %s is of type %s, not a port type (ETSI 27.9 c)", sel.X, sel.X, r.kind))
+				add(sel.X, "setencode-not-a-port", fmt.Sprintf("%s.setencode: %s is of type %s, not a port type (ETSI 27.9 c)", tokenText(sel.X), tokenText(sel.X), r.kind))
 			}
 		case "encode", "display", "extension", "optional":
 			if attributeOperation(sel.Sel) && len(call.Args.List) > 0 {
-				add(call.Args, "attribute-parameter-not-variant", fmt.Sprintf("%s.%s: only variant takes a parameter (ETSI 27.8 a)", sel.X, op))
+				add(call.Args, "attribute-parameter-not-variant", fmt.Sprintf("%s.%s: only variant takes a parameter (ETSI 27.8 a)", tokenText(sel.X), op))
 			}
 		case "variant":
 			if !attributeOperation(sel.Sel) || len(call.Args.List) != 1 {
@@ -55,7 +55,7 @@ func (a *Analyzer) checkAttributeRetrievalRules(tree *ttcn3.Tree, mod *syntax.Mo
 			}
 			arg := call.Args.List[0]
 			if r, ok := m.exprRoot(arg); ok && r.primitive() && !isCharKind(r.kind) {
-				add(arg, "attribute-parameter-type", fmt.Sprintf("%s.variant: the parameter is of root type %s, not universal charstring (ETSI 27.8 b)", sel.X, r.kind))
+				add(arg, "attribute-parameter-type", fmt.Sprintf("%s.variant: the parameter is of root type %s, not universal charstring (ETSI 27.8 b)", tokenText(sel.X), r.kind))
 				return true
 			}
 			lit, ok := arg.(*syntax.ValueLiteral)
@@ -68,7 +68,7 @@ func (a *Analyzer) checkAttributeRetrievalRules(tree *ttcn3.Tree, mod *syntax.Mo
 			}
 			name := unquote(lit.Tok.String())
 			if !valid[name] {
-				add(arg, "attribute-parameter-unknown-encoding", fmt.Sprintf("%s.variant(%s): %q is not an encode attribute of the type (ETSI 27.8 c)", sel.X, lit, name))
+				add(arg, "attribute-parameter-unknown-encoding", fmt.Sprintf("%s.variant(%s): %q is not an encode attribute of the type (ETSI 27.8 c)", tokenText(sel.X), lit, name))
 			}
 		}
 		return true

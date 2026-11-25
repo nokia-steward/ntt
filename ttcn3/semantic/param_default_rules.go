@@ -42,9 +42,9 @@ func (a *Analyzer) checkParamDefaultRules(tree *ttcn3.Tree, mod *syntax.Module) 
 		if bad == nil {
 			return true
 		}
-		msg := fmt.Sprintf("default of %s parameter %s: %s is not null (ETSI 5.4.1.1 g)", kind, p.Name, bad)
+		msg := fmt.Sprintf("default of %s parameter %s: %s is not null (ETSI 5.4.1.1 g)", kind, p.Name, tokenText(bad))
 		if kind == "component" {
-			msg = fmt.Sprintf("default of component parameter %s: %s is not null, mtc, self or system (ETSI 5.4.1.1 f, 5.4.1.2 e)", p.Name, bad)
+			msg = fmt.Sprintf("default of component parameter %s: %s is not null, mtc, self or system (ETSI 5.4.1.1 f, 5.4.1.2 e)", p.Name, tokenText(bad))
 		}
 		diags = append(diags, Diagnostic{
 			Code:     "param-default-not-special-value",

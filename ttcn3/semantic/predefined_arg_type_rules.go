@@ -80,7 +80,7 @@ func (a *Analyzer) checkPredefinedArgTypeRules(tree *ttcn3.Tree, mod *syntax.Mod
 			if name == "ischosen" && len(x.Args.List) == 1 {
 				if sel, ok := x.Args.List[0].(*syntax.SelectorExpr); ok {
 					if r, ok := m.exprRoot(sel.X); ok && (r.kind == "record" || r.kind == "set") {
-						add(sel, "ischosen-not-an-alternative", fmt.Sprintf("ischosen(%s): a field of a %s, not a union alternative (ETSI 7.1.8.2)", sel, r.kind))
+						add(sel, "ischosen-not-an-alternative", fmt.Sprintf("ischosen(%s): a field of a %s, not a union alternative (ETSI 7.1.8.2)", tokenText(sel), r.kind))
 					}
 				}
 				return true
@@ -105,7 +105,7 @@ func (a *Analyzer) checkPredefinedArgTypeRules(tree *ttcn3.Tree, mod *syntax.Mod
 		case *syntax.BinaryExpr:
 			if x.Op != nil && x.Op.Kind() == syntax.ASSIGN {
 				if y, ok := x.X.(*syntax.BinaryExpr); ok && y.Op != nil && y.Op.Kind() == syntax.DECODE {
-					add(y, "decoded-field-reference-assigned", fmt.Sprintf("%s: a decoded field reference is not the target of an assignment (ETSI A.1.6.8.3)", y))
+					add(y, "decoded-field-reference-assigned", fmt.Sprintf("%s: a decoded field reference is not the target of an assignment (ETSI A.1.6.8.3)", tokenText(y)))
 				}
 				return true
 			}

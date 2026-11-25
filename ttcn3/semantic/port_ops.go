@@ -347,8 +347,10 @@ func checkPortOpsInBody(body *syntax.BlockStmt, ports map[string]string, portTyp
 		typeName := typedFormType(first)
 
 		// ETSI 22.2.1: `port.send(...)` requires a specific
-		// value. A template with wildcards (`?` / `*`) at any
-		// depth is rejected. We follow named template
+		// value. A template with wildcards (`?` / `*`) or another
+		// matching mechanism (a range, a value list, a pattern)
+		// at any depth is rejected; the uninitialised `-` is
+		// send-partial-template's. We follow named template
 		// references so `port.send(mw_t)` catches the same
 		// shape as the inline form.
 		if op.String() == "send" {
@@ -364,6 +366,16 @@ func checkPortOpsInBody(body *syntax.BlockStmt, ports map[string]string, portTyp
 					Message: fmt.Sprintf(
 						"send on port %q: argument contains a wildcard; send requires a specific value",
 						portIdent.String()),
+					Node: first,
+					Span: syntax.SpanOf(first),
+				})
+			} else if mech := deepMatchingMechanism(payload, tmpls); mech != "" && mech != "-" && mech != "omit" {
+				diags = append(diags, Diagnostic{
+					Code:     "send-template-not-specific",
+					Severity: SeverityError,
+					Message: fmt.Sprintf(
+						"send on port %q: argument uses %s; send requires a specific value (ETSI 22.2.1)",
+						portIdent.String(), mech),
 					Node: first,
 					Span: syntax.SpanOf(first),
 				})
