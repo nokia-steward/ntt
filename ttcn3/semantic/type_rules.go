@@ -59,9 +59,9 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 			add(x, "template-to-value", fmt.Sprintf("%s holds a value: a template is not assigned to it (ETSI 19.1.1)", syntax.Name(x.X)))
 		}
 		switch target := x.X.(type) {
-		case *syntax.Ident, *syntax.SelectorExpr:
+		case *syntax.Ident, *syntax.SelectorExpr, *syntax.IndexExpr:
 			if t, v, ok := assignPair(target, x.Y); ok && !m.compatible(t, v, 0) {
-				add(x, "type-incompatible-assignment", fmt.Sprintf("a %s value is assigned to the %s %s (ETSI 6.3.1, 19.1)", v.kind, t.kind, syntax.Name(target)))
+				add(x, "type-incompatible-assignment", fmt.Sprintf("a %s value is assigned to the %s %s (ETSI 6.3.1, 19.1)", v.kind, t.kind, sourceText(target)))
 			}
 		}
 	}

@@ -33,7 +33,7 @@ func (a *Analyzer) checkArrayValueShapeRules(tree *ttcn3.Tree, mod *syntax.Modul
 				Code:     "array-dimension-not-braced",
 				Severity: SeverityError,
 				Message: fmt.Sprintf("value of %d-dimensional array %s: %s is not a list of values enclosed in curly braces (ETSI 6.2.7)",
-					dims, name, tokenText(e)),
+					dims, name, sourceText(e)),
 				Node: e,
 				Span: syntax.SpanOf(e),
 			})

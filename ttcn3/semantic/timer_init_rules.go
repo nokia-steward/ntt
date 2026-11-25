@@ -72,7 +72,7 @@ func (a *Analyzer) checkTimerInitRules(tree *ttcn3.Tree, mod *syntax.Module) []D
 						Code:     "timer-negative-default",
 						Severity: SeverityError,
 						Message: "timer " + quoted(name) +
-							": default duration " + tokenText(dc.Value) + " resolves to " +
+							": default duration " + sourceText(dc.Value) + " resolves to " +
 							strconv.FormatFloat(v, 'g', -1, 64) + ", it must be non-negative (ETSI 12)",
 						Node: dc,
 						Span: syntax.SpanOf(dc),

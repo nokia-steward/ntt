@@ -132,6 +132,36 @@ func (m typeModel) exprRoot(e syntax.Expr) (rootType, bool) {
 		}
 	case *syntax.SelectorExpr:
 		return m.selectorRoot(x)
+	case *syntax.IndexExpr:
+		return m.arrayElemRoot(x)
+	}
+	return rootType{}, false
+}
+
+// arrayElemRoot is the root type of the element e selects, all
+// dimensions of an array variable, constant or module parameter indexed.
+func (m typeModel) arrayElemRoot(e *syntax.IndexExpr) (rootType, bool) {
+	n := 0
+	var x syntax.Expr = e
+	for {
+		ix, ok := x.(*syntax.IndexExpr)
+		if !ok {
+			break
+		}
+		n++
+		x = ix.X
+	}
+	id, ok := x.(*syntax.Ident)
+	if !ok {
+		return rootType{}, false
+	}
+	vd, dc, def, ok := m.valueDeclOf(id)
+	if !ok || vd.KindTok == nil || vd.Type == nil || len(dc.ArrayDef) != n {
+		return rootType{}, false
+	}
+	switch vd.KindTok.Kind() {
+	case syntax.VAR, syntax.CONST, syntax.MODULEPAR:
+		return m.typeRoot(def.Tree, vd.Type, 0)
 	}
 	return rootType{}, false
 }

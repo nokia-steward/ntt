@@ -198,6 +198,7 @@ func (a *Analyzer) Analyze(tree *ttcn3.Tree) []Diagnostic {
 		out = append(out, a.checkAttributeRetrievalRules(tree, mod)...)
 		out = append(out, a.checkTypeDefRefRules(tree, mod)...)
 		out = append(out, a.checkArrayValueShapeRules(tree, mod)...)
+		out = append(out, a.checkSignatureParamRefRules(tree, mod)...)
 		out = append(out, a.checkConstKindRules(tree, mod)...)
 		out = append(out, a.checkAssignmentPrimitiveRules(mod)...)
 		out = append(out, a.checkTypeCompatRules(mod)...)

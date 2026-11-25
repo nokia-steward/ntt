@@ -416,6 +416,33 @@ func tokenText(n syntax.Node) string {
 	return sb.String()
 }
 
+// sourceText is the source of n with comments dropped and the blanks
+// between tokens kept, for diagnostics.
+func sourceText(n syntax.Node) string {
+	if syntax.IsNil(n) {
+		return ""
+	}
+	first, last := n.FirstTok(), n.LastTok()
+	if syntax.IsNil(first) || syntax.IsNil(last) {
+		return ""
+	}
+	var sb strings.Builder
+	var prev syntax.Token
+	for tok := first; !syntax.IsNil(tok); tok = tok.NextTok() {
+		if k := tok.Kind(); k != syntax.COMMENT && k != syntax.PREPROC {
+			if prev != nil && tok.Pos() > prev.End() {
+				sb.WriteByte(' ')
+			}
+			sb.WriteString(tok.String())
+			prev = tok
+		}
+		if tok.Pos() >= last.Pos() {
+			break
+		}
+	}
+	return sb.String()
+}
+
 // runsOnCompatible reports whether a behaviour that runs on
 // `target` may be started on a component of type `recv`: either
 // `recv` extends `target`, or every definition of `target` has an
