@@ -9,7 +9,8 @@
 //   - a decoded field reference `x => T` applies to a bitstring,
 //     hexstring, octetstring, charstring or universal charstring, its
 //     optional encoding format `x => (T, f)` is a charstring and is only
-//     given for a universal charstring x (7.3);
+//     given for a universal charstring x (7.3), and it is not the target
+//     of an assignment (A.1.6.8.3);
 //   - ischosen applies to a union field reference or an anytype
 //     alternative, not to the field of a record or set (7.1.8.2).
 package semantic
@@ -102,6 +103,12 @@ func (a *Analyzer) checkPredefinedArgTypeRules(tree *ttcn3.Tree, mod *syntax.Mod
 				}
 			}
 		case *syntax.BinaryExpr:
+			if x.Op != nil && x.Op.Kind() == syntax.ASSIGN {
+				if y, ok := x.X.(*syntax.BinaryExpr); ok && y.Op != nil && y.Op.Kind() == syntax.DECODE {
+					add(y, "decoded-field-reference-assigned", fmt.Sprintf("%s: a decoded field reference is not the target of an assignment (ETSI A.1.6.8.3)", y))
+				}
+				return true
+			}
 			if x.Op == nil || x.Op.Kind() != syntax.DECODE {
 				return true
 			}
