@@ -798,6 +798,12 @@ func (p *parser) parseExprList() (list []Expr) {
 // parseDelimitedExprList parses an ExprList up to the closing token close.
 // An empty list is reported as missing operand, unless allowEmpty is set.
 func (p *parser) parseDelimitedExprList(close Kind, allowEmpty bool) []Expr {
+	return p.parseDelimitedList(close, allowEmpty, p.parseExpr)
+}
+
+// parseDelimitedList parses a comma separated list of items, which are
+// expressions, up to close.
+func (p *parser) parseDelimitedList(close Kind, allowEmpty bool, item func() Expr) []Expr {
 	if p.trace {
 		defer un(trace(p, "ExprList"))
 	}
@@ -807,9 +813,9 @@ func (p *parser) parseDelimitedExprList(close Kind, allowEmpty bool) []Expr {
 	defer func() { p.noMatchAttr = saved }()
 
 	if p.tok == close && !allowEmpty {
-		return []Expr{p.parseExpr()}
+		return []Expr{item()}
 	}
-	return parseList(p, "expression", close, exprStart, listRecovery, p.parseExpr, func(x *ErrorNode) Expr { return x })
+	return parseList(p, "expression", close, exprStart, listRecovery, item, func(x *ErrorNode) Expr { return x })
 }
 
 // Expr ::= BinaryExpr
@@ -1068,7 +1074,9 @@ func (p *parser) parseOperand() Expr {
 		UNMAP:
 		return p.make_use(p.consume())
 
-	case IDENT:
+	// "control" refers to a module control function: "control()",
+	// "import from M { function control }" (8.3, 8.2.3.2).
+	case IDENT, CONTROL:
 		return p.parseRef()
 
 	case INT,
@@ -1184,9 +1192,25 @@ func (p *parser) parseUniversalCharstring() *Ident {
 func (p *parser) parseCompositeLiteral() *CompositeLiteral {
 	c := new(CompositeLiteral)
 	c.LBrace = p.expect(LBRACE)
-	c.List = p.parseDelimitedExprList(RBRACE, true)
+	c.List = p.parseDelimitedList(RBRACE, true, p.parseFieldSpec)
 	c.RBrace = p.expect(RBRACE)
 	return c
+}
+
+// parseFieldSpec parses an element of a composite literal. A field
+// assignment may be prefixed by "@fuzzy" (6.2.1.0, 15.5).
+func (p *parser) parseFieldSpec() Expr {
+	if p.tok != MODIF || p.lit(1) != "@fuzzy" {
+		return p.parseExpr()
+	}
+	modif := p.consume()
+	x := p.parseExpr()
+	if b, ok := x.(*BinaryExpr); ok && b.Op.Kind() == ASSIGN {
+		b.Modif = modif
+	} else {
+		p.error(modif, "@fuzzy is only allowed before a field assignment")
+	}
+	return x
 }
 
 func (p *parser) parseCallRegexp() *RegexpExpr {
@@ -1499,12 +1523,27 @@ func (p *parser) parseRefList() []Expr {
 			break
 		}
 		p.consume()
-		switch p.tok {
-		case LBRACE, RBRACE, SEMICOLON:
+		// A trailing comma may also precede the next element of an
+		// import list: "const a, b, testcase t" (8.2.3.2).
+		if p.tok == LBRACE || p.tok == RBRACE || p.tok == SEMICOLON || importKind[p.tok] {
 			return l
 		}
 	}
 	return l
+}
+
+// importKind holds the keywords that start an element of an import list.
+var importKind = map[Kind]bool{
+	ALTSTEP:   true,
+	CONST:     true,
+	FUNCTION:  true,
+	GROUP:     true,
+	IMPORT:    true,
+	MODULEPAR: true,
+	SIGNATURE: true,
+	TEMPLATE:  true,
+	TESTCASE:  true,
+	TYPE:      true,
 }
 
 func (p *parser) parseTypeRef() Expr {
@@ -1897,8 +1936,7 @@ func (p *parser) parseImportStmt() *DefKindExpr {
 				break
 			}
 			p.consume()
-			switch p.tok {
-			case RBRACE, SEMICOLON:
+			if p.tok == RBRACE || p.tok == SEMICOLON || importKind[p.tok] {
 				return x
 			}
 		}
@@ -3133,6 +3171,10 @@ func (p *parser) parseStmt() Stmt {
 		}
 		fallthrough
 	default:
+		// "control()" invokes a module control function explicitly (8.3).
+		if p.tok == CONTROL && p.peek(2).Kind() == LPAREN {
+			return p.parseSimpleStmt()
+		}
 		switch p.tok {
 		case TYPE, FUNCTION, ALTSTEP, SIGNATURE, IMPORT, MODULEPAR, GROUP, FRIEND, EXTERNAL, CONTROL, PRIVATE, PUBLIC:
 			p.errorExpected("statement")

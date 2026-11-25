@@ -212,9 +212,10 @@ type (
 	// A BinaryExpr represents a binary expression.
 	// Possible operands are all tokens with a precedence value, TO and FROM.
 	BinaryExpr struct {
-		X  Expr  // First operand
-		Op Token // Operator token
-		Y  Expr  // Second operand
+		Modif Token // "@fuzzy" before a field assignment, or nil
+		X     Expr  // First operand
+		Op    Token // Operator token
+		Y     Expr  // Second operand
 	}
 
 	// A ParenExpr represents parenthized expression lists.

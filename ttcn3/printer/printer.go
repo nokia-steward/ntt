@@ -111,6 +111,7 @@ func (p *printer) print(values ...interface{}) {
 			if n == nil {
 				return
 			}
+			p.print(n.Modif)
 			p.print(n.X)
 			p.print(n.Op)
 			p.print(n.Y)
