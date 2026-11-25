@@ -415,6 +415,9 @@ func (n *BinaryExpr) Kind() Kind {
 func (n *BinaryExpr) FirstTok() Token {
 	switch {
 
+	case n.Modif != nil:
+		return n.Modif
+
 	case n.X != nil:
 		return n.X.FirstTok()
 
@@ -441,13 +444,20 @@ func (n *BinaryExpr) LastTok() Token {
 	case n.X != nil:
 		return n.X.LastTok()
 
+	case n.Modif != nil:
+		return n.Modif
+
 	default:
 		return nil
 	}
 }
 
 func (n *BinaryExpr) Children() []Node {
-	ret := make([]Node, 0, 3)
+	ret := make([]Node, 0, 4)
+
+	if n.Modif != nil {
+		ret = append(ret, n.Modif)
+	}
 
 	if n.X != nil {
 		ret = append(ret, n.X)

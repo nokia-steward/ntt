@@ -114,6 +114,10 @@ func TestExprs(t *testing.T) {
 		{pass, `{x := 1,}`},
 		{pass, `{a := 1, b := 2,}`},
 		{pass, `{1, 2, 3,}`},
+		{pass, `{num := 5, @fuzzy str := "abc"}`},
+		{pass, `{@fuzzy str := m_base.str & "_used"}`},
+		{fail, `{@fuzzy 1}`},
+		{fail, `{@lazy str := "abc"}`},
 		{pass, `match(ptc.alive, false)`},
 		{pass, `f(r...)`},
 		{pass, `f({1, 2, 3}...)`},
@@ -216,6 +220,10 @@ func TestModuleDefs(t *testing.T) {
                         type      all }`},
 		{pass, `import from m {
                         group x except { group all }, y }`},
+		{pass, `import from m { const a, b, testcase t; function f }`},
+		{pass, `import from m { group x, testcase t }`},
+		{pass, `import from m { function control }`},
+		{pass, `import from m { function f, control }`},
 
 		{pass, `friend module m;`},
 		{pass, `public modulepar integer x;`},
@@ -584,6 +592,12 @@ func TestStmts(t *testing.T) {
 		// Not implemented statement
 		{pass, `???;`},
 		{pass, `???("reason");`},
+
+		// Explicit invocation of a module control function
+		{pass, `control();`},
+		{pass, `control(1);`},
+		{pass, `m.control();`},
+		{fail, `control {}`},
 	}
 	testParse(t, stmts, func(p *parser) { p.parseStmt() })
 }
@@ -619,6 +633,20 @@ func TestStmtFields(t *testing.T) {
 	}
 	if s := parseStmt(`select union (var U v := {}; v) {}`).(*SelectStmt); s.Init == nil || s.InitSemi == nil || s.Tag == nil || s.Union == nil {
 		t.Errorf("SelectStmt: Init=%v InitSemi=%v Tag=%v", s.Init, s.InitSemi, s.Tag)
+	}
+}
+
+func TestFuzzyFieldSpec(t *testing.T) {
+	p := NewParser([]byte(`{num := 5, @fuzzy str := "abc"}`))
+	c, ok := p.parseExpr().(*CompositeLiteral)
+	if err := p.Err(); err != nil || !ok {
+		t.Fatalf("parse: %v", err)
+	}
+	if b := c.List[0].(*BinaryExpr); b.Modif != nil {
+		t.Errorf("num: Modif = %v, want nil", b.Modif)
+	}
+	if b := c.List[1].(*BinaryExpr); b.Modif == nil || b.Modif.String() != "@fuzzy" || Name(b.X) != "str" {
+		t.Errorf("str: Modif = %v, X = %v, want @fuzzy str", b.Modif, b.X)
 	}
 }
 

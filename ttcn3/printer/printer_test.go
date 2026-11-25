@@ -50,6 +50,11 @@ func TestRoundTrip(t *testing.T) {
 				var integer i;
 			}
 			template @fuzzy @deterministic integer t(integer i) modifies b := @dynamic { return 1 };
+			template R r modifies b := { num := 5, @fuzzy str := "abc" };
+		}`,
+		`module M {
+			import from A { const a, b, testcase t; function control };
+			function f() { control(); A.control(1) }
 		}`,
 	}
 
