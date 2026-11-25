@@ -1,6 +1,8 @@
 // const_kind_rules.go enforces ETSI ES 201 873-1 clause 10
 // restrictions on `const` declarations:
 //
+//   - A constant is assigned a value at its declaration (outside
+//     classes, whose constant members a constructor may assign).
 //   - A constant shall not be of port type.
 //   - A constant's value shall only be assigned once at the
 //     declaration site; later `c := expr` statements are
@@ -25,6 +27,28 @@ func (a *Analyzer) checkConstKindRules(tree *ttcn3.Tree, mod *syntax.Module) []D
 	db := a.db()
 
 	var diags []Diagnostic
+	syntax.Inspect(mod, func(n syntax.Node) bool {
+		switch v := n.(type) {
+		case *syntax.ClassTypeDecl:
+			return false
+		case *syntax.ValueDecl:
+			if v.KindTok == nil || v.KindTok.Kind() != syntax.CONST {
+				return true
+			}
+			for _, d := range v.Decls {
+				if d != nil && d.Name != nil && d.Value == nil {
+					diags = append(diags, Diagnostic{
+						Code:     "const-without-value",
+						Severity: SeverityError,
+						Message:  fmt.Sprintf("constant %s is not assigned a value at its declaration (ETSI 10)", d.Name),
+						Node:     d,
+						Span:     syntax.SpanOf(d),
+					})
+				}
+			}
+		}
+		return true
+	})
 	syntax.Inspect(mod, func(n syntax.Node) bool {
 		switch v := n.(type) {
 		case *syntax.ValueDecl:

@@ -16,15 +16,25 @@ func (a *Analyzer) checkModuleDefs(tree *ttcn3.Tree, mod *syntax.Module) []Diagn
 	report := func(n syntax.Node, code, format string, args ...any) {
 		diags = append(diags, Diagnostic{Code: code, Severity: SeverityError, Message: fmt.Sprintf(format, args...), Node: n, Span: syntax.SpanOf(n)})
 	}
-	for _, d := range mod.Defs {
-		if d == nil {
-			continue
-		}
-		// No variables in the module definitions part (8.2.0).
-		if vd, ok := d.Def.(*syntax.ValueDecl); ok && vd.KindTok != nil && vd.KindTok.Kind() == syntax.VAR {
-			report(vd, "module-variable", "a variable is not declared in the module definitions part (ETSI 8.2.0)")
+	// No variables in the module definitions part, groups included
+	// (8.2.0, 11.1 c).
+	var moduleVars func([]*syntax.ModuleDef)
+	moduleVars = func(defs []*syntax.ModuleDef) {
+		for _, d := range defs {
+			if d == nil {
+				continue
+			}
+			switch x := d.Def.(type) {
+			case *syntax.ValueDecl:
+				if x.KindTok != nil && x.KindTok.Kind() == syntax.VAR {
+					report(x, "module-variable", "a variable is not declared in the module definitions part (ETSI 8.2.0, 11.1 c)")
+				}
+			case *syntax.GroupDecl:
+				moduleVars(x.Defs)
+			}
 		}
 	}
+	moduleVars(mod.Defs)
 	syntax.Inspect(mod, func(n syntax.Node) bool {
 		switch x := n.(type) {
 		case *syntax.BinaryExpr:
