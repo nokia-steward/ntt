@@ -1,18 +1,16 @@
 // lazy_fuzzy_rules.go checks lazy and fuzzy variables and parameters
-// (ETSI ES 201 873-1 clauses 11.2 i, j, 5.4.1.1 n and 5.4.1.2 j):
+// (ETSI ES 201 873-1 clauses 11.2 i, j, 5.4.1.1 n and 5.4.1.2 j). One
+// used in a deterministic context, the template of a receiving operation,
+// an alt guard or a global template that is not fuzzy, is declared
+// @deterministic:
 //
-//   - the initialisation or assignment of a lazy or fuzzy variable calls
-//     no function with out or inout parameters;
+//	var template @fuzzy integer v_t := 1;
+//	p.receive(v_t); // error: v_t is not @deterministic
 //
-//   - one used in a deterministic context, the template of a receiving
-//     operation, an alt guard or a global template that is not fuzzy, is
-//     declared @deterministic;
-//
-//   - and a @deterministic one is initialised with no operation 16.1.4
-//     forbids in such a context, the predefined rnd among them.
-//
-//     var template @fuzzy integer v_t := 1;
-//     p.receive(v_t); // error: v_t is not @deterministic
+// A @deterministic one is initialised with no operation 16.1.4 forbids in
+// such a context, the predefined rnd among them; and the initialisation or
+// assignment of any lazy or fuzzy variable calls no function with out or
+// inout parameters.
 package semantic
 
 import (

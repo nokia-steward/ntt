@@ -17,6 +17,10 @@
 // them as anytype selectors is forbidden. The default- / timer-
 // based subtypes (`type default Mydef;`, `type timer MyTimer;`)
 // inherit that ban.
+//
+// In a module that imports nothing, the known types are its own and the
+// predefined ones, so a selector naming neither is rejected too (6.2.5.1,
+// 6.0).
 package semantic
 
 import (
@@ -31,6 +35,7 @@ func (a *Analyzer) checkAnytypeSelectorRules(mod *syntax.Module) []Diagnostic {
 		return nil
 	}
 	info := collectModuleTypeKinds(mod)
+	declared, imports := declaredTypeNames(mod)
 	var diags []Diagnostic
 	syntax.Inspect(mod, func(n syntax.Node) bool {
 		sel, ok := n.(*syntax.SelectorExpr)
@@ -49,7 +54,11 @@ func (a *Analyzer) checkAnytypeSelectorRules(mod *syntax.Module) []Diagnostic {
 			return true
 		}
 		name := field.String()
-		switch reason := anytypeFieldRejection(name, info); reason {
+		reason := anytypeFieldRejection(name, info)
+		if reason == "" && !imports && !declared[name] && !isBuiltinAnytypeMember(name) && field.Tok2 == nil && name != "objid" {
+			reason = "no type of that name is known in the module"
+		}
+		switch reason {
 		case "":
 			// allowed
 		default:
@@ -66,6 +75,43 @@ func (a *Analyzer) checkAnytypeSelectorRules(mod *syntax.Module) []Diagnostic {
 		return true
 	})
 	return diags
+}
+
+// declaredTypeNames are the names of the types mod declares, at any
+// level, and whether it imports anything.
+func declaredTypeNames(mod *syntax.Module) (map[string]bool, bool) {
+	out := map[string]bool{}
+	imports := false
+	syntax.Inspect(mod, func(n syntax.Node) bool {
+		var name *syntax.Ident
+		switch x := n.(type) {
+		case *syntax.ImportDecl:
+			imports = true
+		case *syntax.StructTypeDecl:
+			name = x.Name
+		case *syntax.SubTypeDecl:
+			if x.Field != nil {
+				name = x.Field.Name
+			}
+		case *syntax.EnumTypeDecl:
+			name = x.Name
+		case *syntax.ClassTypeDecl:
+			name = x.Name
+		case *syntax.MapTypeDecl:
+			name = x.Name
+		case *syntax.BehaviourTypeDecl:
+			name = x.Name
+		case *syntax.PortTypeDecl:
+			name = x.Name
+		case *syntax.ComponentTypeDecl:
+			name = x.Name
+		}
+		if name != nil {
+			out[name.String()] = true
+		}
+		return true
+	})
+	return out, imports
 }
 
 // collectAnytypeVarNames returns the set of variable identifiers
