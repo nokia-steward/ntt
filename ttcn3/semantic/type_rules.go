@@ -55,7 +55,7 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 			return
 		}
 		// A template is not assigned to a value variable (19.1.1).
-		if m.isValueVarRef(x.X) && (m.isTemplateRef(x.Y) || isWildcardTemplate(x.Y)) {
+		if m.isValueVarRef(x.X) && (m.isTemplateRef(x.Y) || isWildcardTemplate(x.Y) || inlineMatching(x.Y) != "") {
 			add(x, "template-to-value", fmt.Sprintf("%s holds a value: a template is not assigned to it (ETSI 19.1.1)", syntax.Name(x.X)))
 		}
 		switch target := x.X.(type) {
@@ -130,7 +130,7 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 			// template (11.1, 10).
 			if x.KindTok != nil && x.TemplateRestriction == nil && (x.KindTok.Kind() == syntax.VAR || x.KindTok.Kind() == syntax.CONST) {
 				for _, d := range x.Decls {
-					if d != nil && d.Value != nil && (m.isTemplateRef(d.Value) || isWildcardTemplate(d.Value)) {
+					if d != nil && d.Value != nil && (m.isTemplateRef(d.Value) || isWildcardTemplate(d.Value) || inlineMatching(d.Value) != "") {
 						add(d, "template-to-value", fmt.Sprintf("%s holds a value: a template is no initial value of it (ETSI 11.1, 10)", syntax.Name(d.Name)))
 					}
 				}

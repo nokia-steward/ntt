@@ -1,6 +1,7 @@
 // runs_on_compat_rules.go checks that a function is invoked on a
-// component it may run on, with an mtc and a system it may have (ETSI ES
-// 201 873-1 6.3.3, 16.1.1 d, f): every definition of the component type
+// component it may run on, and a function or altstep with an mtc and a
+// system it may have (ETSI ES 201 873-1 6.3.3, 16.1.1 d, f, 16.2.0):
+// every definition of the component type
 // of its runs on clause has an identical definition in the caller's, and
 // every port definition of the types of its mtc and system clauses in the
 // caller's mtc and system types. Component types are resolved by the
@@ -44,13 +45,17 @@ func (a *Analyzer) checkRunsOnCompatibility(tree *ttcn3.Tree, mod *syntax.Module
 				return true
 			}
 			callee, ok := defs[0].Node.(*syntax.FuncDecl)
-			if !ok || callee.KindTok == nil || callee.KindTok.Kind() != syntax.FUNCTION {
+			if !ok || callee.KindTok == nil {
+				return true
+			}
+			kind := callee.KindTok.Kind()
+			if kind != syntax.FUNCTION && kind != syntax.ALTSTEP {
 				return true
 			}
 			report := func(code, format string, args ...any) {
 				diags = append(diags, Diagnostic{Code: code, Severity: SeverityError, Message: fmt.Sprintf(format, args...), Node: call, Span: syntax.SpanOf(call)})
 			}
-			if callee.RunsOn != nil && runsOn != nil {
+			if kind == syntax.FUNCTION && callee.RunsOn != nil && runsOn != nil {
 				if want := componentDecl(defs[0].Tree, db, callee.RunsOn.Comp); want != nil && !componentCompatibleWith(tree, db, runsOn, want, false) {
 					report("runs-on-incompatible", "%s runs on %s, which the caller's component %s does not have all definitions of (ETSI 6.3.3, 16.1.1 d)", id.String(), want.Name.String(), runsOn.Name.String())
 				}

@@ -521,6 +521,22 @@ func isWildcardTemplate(e syntax.Expr) bool {
 	return ok && v.Tok != nil && (v.Tok.Kind() == syntax.ANY || v.Tok.Kind() == syntax.MUL)
 }
 
+// inlineMatching is the matching mechanism the in-line template e,
+// `T: ...`, is made of, or "" when it is a value or not an in-line
+// template (15.4).
+func inlineMatching(e syntax.Expr) string {
+	b, ok := e.(*syntax.BinaryExpr)
+	if !ok || b.Op == nil || b.Op.Kind() != syntax.COLON {
+		return ""
+	}
+	switch mech := deepMatchingMechanism(b.Y, nil); mech {
+	case "-", "omit":
+		return ""
+	default:
+		return mech
+	}
+}
+
 // declType is the declared type expression of the value id refers to, a
 // variable, constant, module parameter or formal parameter, and the tree
 // it is declared in; nil for an array, whose elements are of that type.

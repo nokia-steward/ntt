@@ -19,6 +19,8 @@ func TestTypeRules(t *testing.T) {
 		`var template integer t := ?; var integer v := t;`:                 "template-to-value",
 		`var template integer t := 1; var integer v; v := t;`:              "template-to-value",
 		`var integer v; v := ?;`:                                           "template-to-value",
+		`var integer v; v := integer:(1 .. 10);`:                           "template-to-value",
+		`var R v := R:{ a := (1, 2) };`:                                    "template-to-value",
 		`var template integer t := 1; var integer v := t + 1;`:             "template-operand",
 		`var R v_r := { 1 }; var R2 v_2 := v_r;`:                           "type-incompatible-value",
 		`var R v_r := { 1 }; var S v_s := v_r;`:                            "type-incompatible-value",
@@ -54,6 +56,8 @@ func TestTypeRules(t *testing.T) {
 			var template integer t_i := ?;
 			t_i := 5;
 			var integer v_val := valueof(t_i);
+			v_val := integer:5;
+			t_i := integer:(1 .. 10);
 			var charstring v_c := "x";
 			v_u := v_c;
 			f(v_m, v_c);

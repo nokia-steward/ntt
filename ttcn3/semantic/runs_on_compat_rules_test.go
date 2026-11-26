@@ -21,22 +21,24 @@ const runsOnDecls = `
 	function f_ext() runs on Ext {}
 	function f_mtc() mtc Ports {}
 	function f_sys() system Ports {}
+	altstep a_mtc() mtc Ports { [] any timer.timeout {} }
 	function f_g() runs on Base { f_base() }
 `
 
 // A function is invoked on a component of a type that has identical
-// definitions of all those of its runs on type, and its mtc and system
-// clauses' port definitions in the caller's mtc and system types (ETSI
-// 6.3.3, 16.1.1 d, f).
+// definitions of all those of its runs on type, and a function or altstep
+// with its mtc and system clauses' port definitions in the caller's mtc
+// and system types (ETSI 6.3.3, 16.1.1 d, f, 16.2.0).
 func TestRunsOnCompatibility(t *testing.T) {
 	for name, c := range map[string]struct{ src, code string }{
-		"a component missing a definition": {`testcase tc() runs on Empty { f_base() }`, "runs-on-incompatible"},
-		"a port of another type":           {`testcase tc() runs on OtherPort { f_base() }`, "runs-on-incompatible"},
-		"another initial value":            {`testcase tc() runs on Other { f_base() }`, "runs-on-incompatible"},
-		"a variable where a port is":       {`testcase tc() runs on VarNotPort { f_base() }`, "runs-on-incompatible"},
-		"a base calling the extended":      {`testcase tc() runs on Base { f_ext() }`, "runs-on-incompatible"},
-		"an mtc without the port":          {`testcase tc() runs on Empty { f_mtc() }`, "mtc-incompatible"},
-		"a system without the port":        {`testcase tc() runs on Ports system Empty { f_sys() }`, "system-incompatible"},
+		"a component missing a definition":  {`testcase tc() runs on Empty { f_base() }`, "runs-on-incompatible"},
+		"a port of another type":            {`testcase tc() runs on OtherPort { f_base() }`, "runs-on-incompatible"},
+		"another initial value":             {`testcase tc() runs on Other { f_base() }`, "runs-on-incompatible"},
+		"a variable where a port is":        {`testcase tc() runs on VarNotPort { f_base() }`, "runs-on-incompatible"},
+		"a base calling the extended":       {`testcase tc() runs on Base { f_ext() }`, "runs-on-incompatible"},
+		"an mtc without the port":           {`testcase tc() runs on Empty { f_mtc() }`, "mtc-incompatible"},
+		"a system without the port":         {`testcase tc() runs on Ports system Empty { f_sys() }`, "system-incompatible"},
+		"an altstep's mtc without the port": {`testcase tc() runs on Empty { a_mtc() }`, "mtc-incompatible"},
 	} {
 		tree := parse(t, "module M {"+runsOnDecls+c.src+"\n}")
 		if diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree); !containsCode(diags, c.code) {
@@ -54,7 +56,7 @@ func TestRunsOnCompatibilityAllowed(t *testing.T) {
 		testcase t1() runs on Base { f_base() }
 		testcase t2() runs on Ext { f_base(); f_ext() }
 		testcase t3() runs on Same { f_base() }
-		testcase t4() runs on Ports { f_mtc(); f_sys() }
+		testcase t4() runs on Ports { f_mtc(); f_sys(); a_mtc() }
 		testcase t5() runs on Empty { var Base c := Base.create; c.start(f_base()); c.done }
 		function f_h() runs on Base { f_mtc() }
 	}`)

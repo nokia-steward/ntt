@@ -5,6 +5,11 @@
 //
 //	template S s_sig := { par1 := 1, par2 := 2 };
 //	template integer t_par := s_sig.par1; // error
+//
+// An in-line template or a value written in place has no name: neither
+// is referenced, its fields and elements not either (15.4).
+//
+//	var template integer v_t := R:{ f1 := ?, f2 := 1 }.f1; // error
 package semantic
 
 import (
@@ -21,6 +26,29 @@ func (a *Analyzer) checkSignatureParamRefRules(tree *ttcn3.Tree, mod *syntax.Mod
 	m := typeModel{tree: tree, db: a.db()}
 	var diags []Diagnostic
 	syntax.Inspect(mod, func(n syntax.Node) bool {
+		var x syntax.Expr
+		switch r := n.(type) {
+		case *syntax.SelectorExpr:
+			x = r.X
+		case *syntax.IndexExpr:
+			x = r.X
+		case *syntax.WithSpec:
+			// The encodings a variant is of, `{"C1", "C2"}."rule"`
+			// (27.5), are no template.
+			return false
+		default:
+			return true
+		}
+		if _, ok := x.(*syntax.CompositeLiteral); ok {
+			diags = append(diags, Diagnostic{
+				Code:     "inline-template-reference",
+				Severity: SeverityError,
+				Message:  fmt.Sprintf("%s: an in-line template or value has no name and is not referenced (ETSI 15.4)", sourceText(n)),
+				Node:     n,
+				Span:     syntax.SpanOf(n),
+			})
+			return true
+		}
 		sel, ok := n.(*syntax.SelectorExpr)
 		if !ok {
 			return true
