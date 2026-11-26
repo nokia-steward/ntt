@@ -97,6 +97,18 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 			// A value redirection stores the message the in-line
 			// template `T: ...` matches into a variable of a type T is
 			// compatible with (22.2.2, 22.4).
+			// The return value a getreply matches is stored into a
+			// variable of a type the signature's return type is
+			// compatible with (22.3.4).
+			if call, ok := x.X.(*syntax.CallExpr); ok && len(x.Value) == 1 && receivingOpName(call.Fun) == "getreply" && call.Args != nil && len(call.Args.List) == 1 {
+				if sig := m.signatureOf(call.Args.List[0]); sig != nil && sig.Return != nil && sig.Return.Type != nil {
+					t, tok := m.exprRoot(x.Value[0])
+					v, vok := m.typeRoot(tree, sig.Return.Type, 0)
+					if tok && vok && sameFamily(t, v) && !m.compatible(t, v, 0) {
+						add(x.Value[0], "value-redirect-type", fmt.Sprintf("the %s return value of %s is stored into a %s (ETSI 22.3.4)", v.kind, syntax.Name(sig.Name), t.kind))
+					}
+				}
+			}
 			if len(x.Value) == 1 {
 				if call, ok := x.X.(*syntax.CallExpr); ok && receivingOpName(call.Fun) != "" && call.Args != nil && len(call.Args.List) == 1 {
 					if b, ok := call.Args.List[0].(*syntax.BinaryExpr); ok && b.Op != nil && b.Op.Kind() == syntax.COLON {
@@ -181,6 +193,13 @@ func (a *Analyzer) checkTypeRules(tree *ttcn3.Tree, mod *syntax.Module) []Diagno
 				for _, side := range []syntax.Expr{x.X, x.Y} {
 					if m.isTemplateRef(side) {
 						add(side, "template-operand", fmt.Sprintf("template %s is no operand of %s (ETSI 7)", syntax.Name(side), x.Op.String()))
+					}
+				}
+			case syntax.RANGE:
+				// A boundary is a specific value or infinity (B.1.2.5 a).
+				for _, side := range []syntax.Expr{x.X, x.Y} {
+					if m.isTemplateRef(side) && m.templateRestriction(side) != "value" {
+						add(side, "range-bound-template", fmt.Sprintf("the boundary %s is a template, not a specific value (ETSI B.1.2.5 a)", syntax.Name(side)))
 					}
 				}
 			case syntax.AND, syntax.OR, syntax.XOR:

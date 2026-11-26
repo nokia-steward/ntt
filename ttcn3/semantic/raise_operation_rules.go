@@ -101,6 +101,19 @@ func (a *Analyzer) checkRaiseOperationRules(mod *syntax.Module) []Diagnostic {
 				if valueTy == "" {
 					valueTy = inferRaiseValueType(expr, varTypes)
 				}
+				if cl, ok := expr.(*syntax.CompositeLiteral); ok && typeQual == "" {
+					if fits := compositeCandidates(mod, cl, excList); len(fits) > 1 {
+						diags = append(diags, Diagnostic{
+							Code:     "raise-exception-ambiguous",
+							Severity: SeverityError,
+							Message: fmt.Sprintf(
+								"raise(%s, ...): the exception value could be of any of %v; give its type, T:{...} (ETSI 22.3.5)",
+								sigName, fits),
+							Node: ce.Args.List[1],
+							Span: syntax.SpanOf(ce.Args.List[1]),
+						})
+					}
+				}
 				if valueTy != "" {
 					match := false
 					for _, t := range excList {
@@ -126,6 +139,59 @@ func (a *Analyzer) checkRaiseOperationRules(mod *syntax.Module) []Diagnostic {
 		return true
 	})
 	return diags
+}
+
+// compositeCandidates are the types among names, declared in mod, a
+// value written as cl could be of: a record, set or union with the
+// fields it assigns, or a record or set of the number of fields it
+// lists, or a record of or set of.
+func compositeCandidates(mod *syntax.Module, cl *syntax.CompositeLiteral, names []string) []string {
+	var assigned []string
+	positional := 0
+	for _, el := range cl.List {
+		if be, ok := el.(*syntax.BinaryExpr); ok && be.Op != nil && be.Op.Kind() == syntax.ASSIGN {
+			assigned = append(assigned, syntax.Name(be.X))
+		} else {
+			positional++
+		}
+	}
+	if len(assigned) > 0 && positional > 0 {
+		return nil
+	}
+	decls := map[string]syntax.Node{}
+	syntax.Inspect(mod, func(n syntax.Node) bool {
+		switch x := n.(type) {
+		case *syntax.StructTypeDecl:
+			decls[syntax.Name(x.Name)] = x
+		case *syntax.SubTypeDecl:
+			if x.Field != nil {
+				decls[syntax.Name(x.Field.Name)] = x.Field
+			}
+		}
+		return true
+	})
+	var out []string
+	for _, name := range names {
+		switch d := decls[name].(type) {
+		case *syntax.StructTypeDecl:
+			if len(assigned) > 0 {
+				all := true
+				for _, f := range assigned {
+					all = all && fieldNamed(d.Fields, f) != nil
+				}
+				if all {
+					out = append(out, name)
+				}
+			} else if d.KindTok != nil && d.KindTok.Kind() != syntax.UNION && len(d.Fields) == positional {
+				out = append(out, name)
+			}
+		case *syntax.Field:
+			if _, ok := d.Type.(*syntax.ListSpec); ok && len(assigned) == 0 && len(d.ArrayDef) == 0 {
+				out = append(out, name)
+			}
+		}
+	}
+	return out
 }
 
 // inferRaiseValueType guesses the static type identifier of an

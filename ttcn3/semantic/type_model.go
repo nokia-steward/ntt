@@ -492,6 +492,28 @@ func (m typeModel) isTemplateRef(e syntax.Expr) bool {
 	return false
 }
 
+// templateRestriction is the restriction of the template e refers to,
+// "" when it has none or is not known.
+func (m typeModel) templateRestriction(e syntax.Expr) string {
+	id, ok := unparen(e).(*syntax.Ident)
+	if !ok {
+		return ""
+	}
+	defs := m.tree.LookupWithDB(id, m.db)
+	if len(defs) != 1 {
+		return ""
+	}
+	switch d := defs[0].Node.(type) {
+	case *syntax.TemplateDecl:
+		return restrictionTag(d.RestrictionSpec)
+	case *syntax.ValueDecl:
+		return restrictionTag(d.TemplateRestriction)
+	case *syntax.FormalPar:
+		return restrictionTag(d.TemplateRestriction)
+	}
+	return ""
+}
+
 // isValueVarRef reports whether e refers to a variable or constant that
 // holds a value, not a template, or to a field or element of one.
 func (m typeModel) isValueVarRef(e syntax.Expr) bool {

@@ -72,6 +72,50 @@ func (a *Analyzer) checkSignatureParamRefRules(tree *ttcn3.Tree, mod *syntax.Mod
 	return diags
 }
 
+// signatureOf is the signature the template e of a procedure operation,
+// `S:{...}`, `S:{...} value v` or a template definition, is of, or nil.
+func (m typeModel) signatureOf(e syntax.Expr) *syntax.SignatureDecl {
+	if ve, ok := e.(*syntax.ValueExpr); ok {
+		e = ve.X
+	}
+	var id *syntax.Ident
+	switch x := e.(type) {
+	case *syntax.BinaryExpr:
+		if x.Op == nil || x.Op.Kind() != syntax.COLON {
+			return nil
+		}
+		id, _ = x.X.(*syntax.Ident)
+	case *syntax.Ident:
+		defs := m.tree.LookupWithDB(x, m.db)
+		if len(defs) != 1 {
+			return nil
+		}
+		td, ok := defs[0].Node.(*syntax.TemplateDecl)
+		if !ok {
+			return nil
+		}
+		id, _ = td.Type.(*syntax.Ident)
+		if id == nil {
+			return nil
+		}
+		types := defs[0].Tree.LookupWithDB(id, m.db)
+		if len(types) != 1 {
+			return nil
+		}
+		sig, _ := types[0].Node.(*syntax.SignatureDecl)
+		return sig
+	}
+	if id == nil {
+		return nil
+	}
+	defs := m.tree.LookupWithDB(id, m.db)
+	if len(defs) != 1 {
+		return nil
+	}
+	sig, _ := defs[0].Node.(*syntax.SignatureDecl)
+	return sig
+}
+
 // signatureOfTemplate is the name of the signature the template
 // definition id refers to is of, or "".
 func (m typeModel) signatureOfTemplate(id *syntax.Ident) string {

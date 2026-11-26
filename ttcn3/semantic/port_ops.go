@@ -345,6 +345,11 @@ func checkPortOpsInBody(body *syntax.BlockStmt, ports map[string]string, portTyp
 		// / `sender v` redirects we don't validate here.
 		first := ce.Args.List[0]
 		typeName := typedFormType(first)
+		// An exception is raised for the signature named first
+		// (22.3.5).
+		if id, ok := first.(*syntax.Ident); ok && typeName == "" && op.String() == "raise" {
+			typeName = id.String()
+		}
 
 		// ETSI 22.2.1: `port.send(...)` requires a specific
 		// value. A template with wildcards (`?` / `*`) or another
