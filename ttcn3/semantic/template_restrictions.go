@@ -382,6 +382,12 @@ func isDashDefault(expr syntax.Expr) bool {
 // per-field `omit` value is only flagged at the top level, because
 // inner optional fields are allowed to carry `omit`.
 func restrictionViolationsIn(expr syntax.Expr, restr string, anchor syntax.Node) []Diagnostic {
+	return restrictionViolationsWhere(expr, restr, fmt.Sprintf("a template(%s) initialiser", restr))
+}
+
+// restrictionViolationsWhere is restrictionViolationsIn for expr used
+// where, a template restricted to restr.
+func restrictionViolationsWhere(expr syntax.Expr, restr, where string) []Diagnostic {
 	var diags []Diagnostic
 	if expr == nil {
 		return diags
@@ -391,11 +397,9 @@ func restrictionViolationsIn(expr syntax.Expr, restr string, anchor syntax.Node)
 		diags = append(diags, Diagnostic{
 			Code:     "template-restriction-violation",
 			Severity: SeverityError,
-			Message: fmt.Sprintf(
-				"%q is not allowed in a template(%s) initialiser",
-				what, restr),
-			Node: node,
-			Span: syntax.SpanOf(node),
+			Message:  fmt.Sprintf("%q is not allowed in %s", what, where),
+			Node:     node,
+			Span:     syntax.SpanOf(node),
 		})
 	}
 

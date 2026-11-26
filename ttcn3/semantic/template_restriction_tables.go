@@ -19,9 +19,10 @@
 // A restriction is known for a reference to a template, a template
 // variable or a formal template parameter, for a call of a template or
 // of a function returning a template, and for the presentness
-// conversion `t.present` (15.14). Constants, value variables, value
-// parameters and `t.value` (15.15) are values. Anything else, a field
-// reference among them, is left alone.
+// conversion `t.present` (15.14), and, by table 13c, for a field,
+// alternative or element of one whose type the module declares.
+// Constants, value variables, value parameters and `t.value` (15.15) are
+// values. Anything else is left alone.
 package semantic
 
 import (
@@ -40,6 +41,8 @@ func (a *Analyzer) checkTemplateRestrictionTables(mod *syntax.Module) []Diagnost
 	}
 	c := &restrChecker{
 		module:    map[string]string{},
+		mtypes:    map[string]declShape{},
+		vtypes:    map[string]declShape{},
 		templates: map[string]*syntax.TemplateDecl{},
 		funcs:     map[string]*syntax.FuncDecl{},
 		local:     map[string]*syntax.TemplateDecl{},
@@ -53,12 +56,14 @@ func (a *Analyzer) checkTemplateRestrictionTables(mod *syntax.Module) []Diagnost
 		case *syntax.FuncDecl:
 			if x.Body != nil {
 				c.local = map[string]*syntax.TemplateDecl{}
+				c.vtypes = map[string]declShape{}
 				c.checkBody(x.Body, c.params(x.Params, c.runsOnScope(x)))
 			}
 			return false
 		case *syntax.ControlPart:
 			if x.Body != nil {
 				c.local = map[string]*syntax.TemplateDecl{}
+				c.vtypes = map[string]declShape{}
 				c.checkBody(x.Body, map[string]string{})
 			}
 			return false
@@ -74,7 +79,12 @@ func (a *Analyzer) checkTemplateRestrictionTables(mod *syntax.Module) []Diagnost
 }
 
 type restrChecker struct {
-	module    map[string]string
+	module map[string]string
+	// mtypes are the declared types of the module's templates,
+	// constants and module parameters, vtypes those of the formal
+	// parameters and local declarations of the body being checked.
+	mtypes    map[string]declShape
+	vtypes    map[string]declShape
 	templates map[string]*syntax.TemplateDecl
 	// local are the templates declared in the body being checked.
 	local map[string]*syntax.TemplateDecl
@@ -103,6 +113,7 @@ func (c *restrChecker) collect(mod *syntax.Module) {
 				if x.Name != nil {
 					c.templates[x.Name.String()] = x
 					c.module[x.Name.String()] = restrictionTag(x.RestrictionSpec)
+					c.mtypes[x.Name.String()] = declShape{typ: x.Type}
 				}
 			case *syntax.FuncDecl:
 				if x.Name != nil {
@@ -120,6 +131,7 @@ func (c *restrChecker) collect(mod *syntax.Module) {
 				for _, dec := range x.Decls {
 					if dec != nil && dec.Name != nil {
 						c.module[dec.Name.String()] = valueDeclRestriction(x)
+						c.mtypes[dec.Name.String()] = declShape{x.Type, len(dec.ArrayDef)}
 					}
 				}
 			case *syntax.ModuleParameterGroup:
@@ -127,6 +139,7 @@ func (c *restrChecker) collect(mod *syntax.Module) {
 					for _, dec := range vd.Decls {
 						if dec != nil && dec.Name != nil {
 							c.module[dec.Name.String()] = valueDeclRestriction(vd)
+							c.mtypes[dec.Name.String()] = declShape{vd.Type, len(dec.ArrayDef)}
 						}
 					}
 				}
@@ -216,6 +229,7 @@ func (c *restrChecker) params(fps *syntax.FormalPars, scope map[string]string) m
 		for _, p := range fps.List {
 			if p != nil && p.Name != nil {
 				out[p.Name.String()] = formalRestriction(p)
+				c.vtypes[p.Name.String()] = declShape{p.Type, len(p.ArrayDef)}
 			}
 		}
 	}
@@ -283,8 +297,75 @@ func (c *restrChecker) restrictionOf(e syntax.Expr, scope map[string]string) (st
 			}
 			return r, true
 		}
+		r, _, ok := c.refRestriction(x, scope)
+		return r, ok
+	case *syntax.IndexExpr:
+		r, _, ok := c.refRestriction(x, scope)
+		return r, ok
 	}
 	return "", false
+}
+
+// declShape is a declared type, with the number of array dimensions
+// the declarator adds to it.
+type declShape struct {
+	typ  syntax.Node
+	dims int
+}
+
+// refRestriction is the restriction class of the template, value or
+// field, alternative or element e refers to, by table 13c, and its type.
+func (c *restrChecker) refRestriction(e syntax.Expr, scope map[string]string) (string, declShape, bool) {
+	switch x := e.(type) {
+	case *syntax.Ident:
+		r, ok := c.restrictionOf(x, scope)
+		if !ok {
+			return "", declShape{}, false
+		}
+		if _, local := scope[x.String()]; local {
+			t, ok := c.vtypes[x.String()]
+			return r, t, ok && t.typ != nil
+		}
+		t, ok := c.mtypes[x.String()]
+		return r, t, ok && t.typ != nil
+	case *syntax.SelectorExpr:
+		sel, ok := x.Sel.(*syntax.Ident)
+		if !ok || sel.Tok == nil || sel.Tok.Kind() != syntax.IDENT {
+			return "", declShape{}, false
+		}
+		pr, ps, ok := c.refRestriction(x.X, scope)
+		if !ok || ps.dims > 0 {
+			return "", declShape{}, false
+		}
+		fields, union, _ := c.shapeOf(ps.typ, 0)
+		f := fieldNamed(fields, sel.String())
+		if f == nil {
+			return "", declShape{}, false
+		}
+		t := declShape{f.Type, len(f.ArrayDef)}
+		if pr == restrValue {
+			return restrValue, t, true
+		}
+		return implicitRestriction(pr, f.Optional != nil && !union, true), t, true
+	case *syntax.IndexExpr:
+		pr, ps, ok := c.refRestriction(x.X, scope)
+		if !ok {
+			return "", declShape{}, false
+		}
+		t := declShape{ps.typ, ps.dims - 1}
+		if ps.dims == 0 {
+			_, _, elem := c.shapeOf(ps.typ, 0)
+			if elem == nil {
+				return "", declShape{}, false
+			}
+			t = declShape{typ: elem}
+		}
+		if pr == restrValue {
+			return restrValue, t, true
+		}
+		return implicitRestriction(pr, false, true), t, true
+	}
+	return "", declShape{}, false
 }
 
 // fits is table 13: may a template or value of class rhs be assigned
@@ -363,7 +444,7 @@ func implicitRestriction(parent string, optional, known bool) string {
 			return "omit"
 		}
 		return "value"
-	case "present":
+	case "present", "":
 		if known && !optional {
 			return "present"
 		}
@@ -557,6 +638,7 @@ func (c *restrChecker) checkBody(body *syntax.BlockStmt, scope map[string]string
 				}
 				c.checkInit(r, dec.Value, typ, fmt.Sprintf("%q", dec.Name.String()), scope)
 				scope[dec.Name.String()] = r
+				c.vtypes[dec.Name.String()] = declShape{x.Type, len(dec.ArrayDef)}
 			}
 			return true
 		case *syntax.TemplateDecl:
@@ -564,15 +646,12 @@ func (c *restrChecker) checkBody(body *syntax.BlockStmt, scope map[string]string
 				c.checkTemplateDecl(x, scope)
 				scope[x.Name.String()] = restrictionTag(x.RestrictionSpec)
 				c.local[x.Name.String()] = x
+				c.vtypes[x.Name.String()] = declShape{typ: x.Type}
 			}
 			return false
 		case *syntax.ExprStmt:
 			if be, ok := x.Expr.(*syntax.BinaryExpr); ok && be.Op != nil && be.Op.Kind() == syntax.ASSIGN {
-				if id, ok := be.X.(*syntax.Ident); ok {
-					if r, ok := scope[id.String()]; ok {
-						c.checkInit(r, be.Y, nil, fmt.Sprintf("%q", id.String()), scope)
-					}
-				}
+				c.checkAssign(be, scope)
 			}
 			return true
 		case *syntax.CallExpr:
@@ -581,6 +660,58 @@ func (c *restrChecker) checkBody(body *syntax.BlockStmt, scope map[string]string
 		}
 		return true
 	})
+}
+
+// checkAssign checks the assignment of be.Y to a template variable or
+// to a field, alternative or element of one, restricted as table 13c
+// says: a template it refers to by table 13, otherwise the matching
+// mechanisms it is made of.
+func (c *restrChecker) checkAssign(be *syntax.BinaryExpr, scope map[string]string) {
+	root := be.X
+	for {
+		if sel, ok := root.(*syntax.SelectorExpr); ok {
+			root = sel.X
+		} else if ix, ok := root.(*syntax.IndexExpr); ok {
+			root = ix.X
+		} else {
+			break
+		}
+	}
+	id, ok := root.(*syntax.Ident)
+	if !ok {
+		return
+	}
+	// A field of an unrestricted template is not assigned any less
+	// than the template is.
+	if r, local := scope[id.String()]; !local || r == "" {
+		return
+	}
+	var r string
+	var typ syntax.Node
+	if root == be.X {
+		r = scope[id.String()]
+	} else {
+		var t declShape
+		if r, t, ok = c.refRestriction(be.X, scope); !ok {
+			return
+		}
+		if t.dims == 0 {
+			typ = t.typ
+		}
+	}
+	if r == "" || r == restrValue {
+		return
+	}
+	what := fmt.Sprintf("%q", sourceText(be.X))
+	if _, ok := c.restrictionOf(be.Y, scope); ok || hasCallExpr(be.Y) {
+		c.checkInit(r, be.Y, typ, what, scope)
+		return
+	}
+	c.diags = append(c.diags, restrictionViolationsWhere(be.Y, r, fmt.Sprintf("%s, a template(%s)", what, r))...)
+	if v, ok := be.Y.(*syntax.ValueLiteral); ok && r == "present" && v.Tok != nil && v.Tok.Kind() == syntax.MUL {
+		c.reportf("template-restriction-violation", v, `"*" is not allowed in %s, a template(present)`, what)
+	}
+	c.checkFields(r, be.Y, typ, what, scope)
 }
 
 // checkCalls checks the calls inside a template body.
