@@ -623,6 +623,9 @@ func deterministicArgViolation(arg syntax.Expr, mod *syntax.Module) string {
 	if callee == "" {
 		return ""
 	}
+	if callee == "rnd" {
+		return "a call of the predefined rnd function (ETSI 16.1.4 j)"
+	}
 	body, params := funcBodyAndParamsByName(mod, callee)
 	if body == nil {
 		return ""

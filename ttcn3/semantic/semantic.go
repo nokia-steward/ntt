@@ -204,6 +204,7 @@ func (a *Analyzer) Analyze(tree *ttcn3.Tree) []Diagnostic {
 		out = append(out, a.checkRedirectTargetRules(tree, mod)...)
 		out = append(out, a.checkTemplateDataTypeRules(tree, mod)...)
 		out = append(out, a.checkInvocationPlaceRules(tree, mod)...)
+		out = append(out, a.checkLazyFuzzyRules(tree, mod)...)
 		out = append(out, a.checkConstKindRules(tree, mod)...)
 		out = append(out, a.checkAssignmentPrimitiveRules(mod)...)
 		out = append(out, a.checkTypeCompatRules(mod)...)
