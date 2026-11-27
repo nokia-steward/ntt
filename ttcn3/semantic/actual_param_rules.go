@@ -231,6 +231,24 @@ func (a *Analyzer) checkActualParameterRules(mod *syntax.Module) []Diagnostic {
 					}
 				}
 			}
+			// For out formal template parameters the actual's
+			// restriction is not more restrictive than the
+			// formal's (5.4.2).
+			if p.dir == "out" && p.hasTemplate {
+				if name := identName(arg); name != "" {
+					if actualRestr, known := tmplVarRestr[name]; known && restrictionStricter(actualRestr, p.restriction) {
+						diags = append(diags, Diagnostic{
+							Code:     "out-template-restriction-stricter",
+							Severity: SeverityError,
+							Message: fmt.Sprintf(
+								"argument %d of %s: actual %q is restricted to template(%s), more than the out formal %q (ETSI 5.4.2)",
+								i+1, callee, name, actualRestr, p.name),
+							Node: arg,
+							Span: syntax.SpanOf(arg),
+						})
+					}
+				}
+			}
 		}
 		return true
 	})
@@ -846,6 +864,13 @@ func collectModuleSigs(mod *syntax.Module) map[string][]formalSig {
 		return true
 	})
 	return out
+}
+
+// restrictionStricter reports whether template restriction a admits
+// fewer templates than f: every restriction is stricter than none, and
+// value stricter than omit and present.
+func restrictionStricter(a, f string) bool {
+	return f == "" && a != "" || a == "value" && (f == "omit" || f == "present")
 }
 
 // collectTemplateVarRestrictions returns a map from variable name
