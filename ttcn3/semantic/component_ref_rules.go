@@ -10,7 +10,8 @@
 // The component reference of a port in connect, disconnect, map or unmap
 // is of a component type. A communication operation names the port it
 // takes place at, and the value it sends is of a data type, not an
-// object.
+// object. The sender variable of a receiving operation is compatible
+// with the component its from clause names.
 package semantic
 
 import (
@@ -73,6 +74,27 @@ func (a *Analyzer) checkComponentRefRules(tree *ttcn3.Tree, mod *syntax.Module) 
 				case "send", "receive", "trigger", "check", "call", "getcall", "reply", "getreply", "raise", "catch":
 					add(e, "port-op-without-port", fmt.Sprintf("%s names the port it takes place at, p.%s (ETSI 22.1.4.2 a)", id, id))
 				}
+			}
+		case *syntax.RedirectExpr:
+			// The sender variable is compatible with the component
+			// the from clause names (22.2.2, 22.4 h).
+			from, ok := x.X.(*syntax.BinaryExpr)
+			sender, sok := x.Sender.(*syntax.Ident)
+			if !ok || !sok || from.Op == nil || from.Op.Kind() != syntax.FROM {
+				return true
+			}
+			src, ok := from.Y.(*syntax.Ident)
+			if !ok {
+				return true
+			}
+			st, stree := m.declType(src)
+			vt, vtree := m.declType(sender)
+			if st == nil || vt == nil {
+				return true
+			}
+			have, want := componentDecl(stree, db, st), componentDecl(vtree, db, vt)
+			if have != nil && want != nil && !componentCompatibleWith(tree, db, have, want, false) {
+				add(sender, "sender-type-incompatible", fmt.Sprintf("the sender variable %s of type %s is not compatible with %s of type %s in the from clause (ETSI 22.4 h)", sender, want.Name, src, have.Name))
 			}
 		case *syntax.CallExpr:
 			if sel, ok := x.Fun.(*syntax.SelectorExpr); ok && syntax.Name(sel.Sel) == "send" && x.Args != nil && len(x.Args.List) > 0 {

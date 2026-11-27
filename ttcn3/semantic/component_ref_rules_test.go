@@ -8,7 +8,8 @@ import (
 )
 
 // Component references (6.2.11), ports of communication operations
-// (22.1.4.2, 22.2.1) and out template parameters (5.4.2).
+// (22.1.4.2, 22.2.1), sender variables (22.4 h) and out template
+// parameters (5.4.2).
 func TestComponentRefRules(t *testing.T) {
 	cases := []struct {
 		name, stmt, want string
@@ -19,13 +20,15 @@ func TestComponentRefRules(t *testing.T) {
 		{"receive without a port", "receive(integer:?);", "port-op-without-port"},
 		{"object sent", "var MyClass v_obj := MyClass.create(); p.send(v_obj);", "send-non-data-type"},
 		{"value restricted actual for an out template", "var template(value) integer v_t := 0; f_out(v_t);", "out-template-restriction-stricter"},
+		{"sender of a type the from component lacks", "var CA v_src; var CB v_s; p.receive(integer:?) from v_src -> sender v_s;", "sender-type-incompatible"},
 
 		{"reference to a component of a compatible type", "var CA v_ref := CAx.create;", ""},
 		{"component reference", "var CA v_ref := CA.create; connect(self:p, v_ref:p);", ""},
+		{"sender of a type the from component has", "var CAx v_src; var CA v_s; p.receive(integer:?) from v_src -> sender v_s;", ""},
 		{"unrestricted actual for an out template", "var template integer v_t := 0; f_out(v_t);", ""},
 		{"value restricted actual for a value restricted out template", "var template(value) integer v_t := 0; f_outv(v_t);", ""},
 	}
-	ruleCodes := []string{"component-ref-incompatible", "port-ref-not-component", "port-op-without-port", "send-non-data-type", "out-template-restriction-stricter"}
+	ruleCodes := []string{"component-ref-incompatible", "port-ref-not-component", "port-op-without-port", "send-non-data-type", "out-template-restriction-stricter", "sender-type-incompatible"}
 	for _, c := range cases {
 		tree := parse(t, `module M {
 			type port P message { inout integer }
