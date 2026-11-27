@@ -210,6 +210,7 @@ func (a *Analyzer) Analyze(tree *ttcn3.Tree) []Diagnostic {
 		out = append(out, a.checkOperandTypeRules(tree, mod)...)
 		out = append(out, a.checkPredefinedTemplateArgRules(tree, mod)...)
 		out = append(out, a.checkSendValueTypeRules(tree, mod)...)
+		out = append(out, a.checkStatementOperandRules(tree, mod)...)
 		out = append(out, a.checkConstKindRules(tree, mod)...)
 		out = append(out, a.checkAssignmentPrimitiveRules(mod)...)
 		out = append(out, a.checkTypeCompatRules(mod)...)
