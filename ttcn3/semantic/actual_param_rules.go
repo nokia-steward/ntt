@@ -95,6 +95,24 @@ func (a *Analyzer) checkActualParameterRules(mod *syntax.Module) []Diagnostic {
 		}
 		args := ce.Args.List
 		for i, arg := range args {
+			// An argument in assignment notation is checked against
+			// the formal parameter it names.
+			if be, ok := arg.(*syntax.BinaryExpr); ok && be.Op != nil && be.Op.Kind() == syntax.ASSIGN {
+				for _, q := range params {
+					if q.name != syntax.Name(be.X) {
+						continue
+					}
+					if v := violationForArg(be.Y, q); v != "" {
+						diags = append(diags, Diagnostic{
+							Code:     "actual-parameter-restriction-violation",
+							Severity: SeverityError,
+							Message:  fmt.Sprintf("argument %s of %s: %s is not allowed for %s", q.name, callee, v, describeRestriction(q)),
+							Node:     be.Y,
+							Span:     syntax.SpanOf(be.Y),
+						})
+					}
+				}
+			}
 			if i >= len(params) {
 				break
 			}
