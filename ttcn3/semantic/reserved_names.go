@@ -2,7 +2,8 @@
 // predefined function identifiers defined in table 15 and described in
 // annex C shall also be treated as reserved words." A module may not
 // declare anything - a definition, a field, a parameter, an enumerated
-// value, a label - by one of those names.
+// value, a label - by one of those names, nor, in edition 4, by a
+// keyword of table A.3.
 package semantic
 
 import (
@@ -28,10 +29,44 @@ var predefinedFunctionNames = map[string]bool{
 	"remove_bom": true, "rnd": true, "testcasename": true, "hostid": true,
 }
 
+// tableA3Keywords are the keywords of table A.3 (edition 4) that the
+// lexer reads as identifiers, for they also name operations, types or
+// values; they are reserved words all the same (A.1.5.0).
+var tableA3Keywords = map[string]bool{
+	"action": true, "activate": true, "anytype": true, "bitstring": true,
+	"boolean": true, "call": true, "catch": true, "char": true, "check": true,
+	"clear": true, "complement": true, "connect": true, "deactivate": true,
+	"default": true, "disconnect": true, "done": true, "execute": true,
+	"external": true, "float": true, "getcall": true, "getreply": true,
+	"getverdict": true, "halt": true, "hexstring": true, "infinity": true,
+	"integer": true, "isbound": true, "ischosen": true, "ispresent": true,
+	"isvalue": true, "kill": true, "killed": true, "log": true, "match": true,
+	"mtc": true, "nowait": true, "octetstring": true, "permutation": true,
+	"raise": true, "read": true, "receive": true, "recursive": true,
+	"reply": true, "running": true, "runs": true, "self": true, "send": true,
+	"setencode": true, "setverdict": true, "start": true, "stop": true,
+	"subset": true, "superset": true, "timeout": true, "trigger": true,
+	"valueof": true, "verdicttype": true,
+}
+
 func (a *Analyzer) checkPredefinedNamesReserved(mod *syntax.Module) []Diagnostic {
 	var diags []Diagnostic
+	v4 := mod.Edition() == syntax.V4
 	check := func(id *syntax.Ident) {
-		if id == nil || !predefinedFunctionNames[id.String()] {
+		if id == nil {
+			return
+		}
+		if v4 && tableA3Keywords[id.String()] {
+			diags = append(diags, Diagnostic{
+				Code:     "keyword-as-identifier",
+				Severity: SeverityError,
+				Message:  fmt.Sprintf("%q is a keyword of table A.3, a reserved word (ETSI ES 201 873-1 A.1.5.0)", id.String()),
+				Node:     id,
+				Span:     syntax.SpanOf(id),
+			})
+			return
+		}
+		if !predefinedFunctionNames[id.String()] {
 			return
 		}
 		diags = append(diags, Diagnostic{
