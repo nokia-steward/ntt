@@ -83,6 +83,11 @@ type TestcaseOptions struct {
 	// so the caller can aggregate it into a report.
 	OnProfile func(map[string]runtime.PortStat)
 
+	// OnLogs, if non-nil, is called once at the end of each testcase run
+	// with the lines its log() statements wrote, in order, on every exit
+	// path.
+	OnLogs func([]string)
+
 	// TestLogger, when non-nil, receives the testcase's TCI-TL events
 	// (ETSI ES 201 873-6): one per TTCN-3 operation performed, see
 	// runtime/tl. Nil turns test logging off.
@@ -358,6 +363,9 @@ func runTestcaseIn(env runtime.Scope, exec *runtime.TestcaseExec, trees []*ttcn3
 		if opts.OnProfile != nil {
 			defer func() { opts.OnProfile(exec.ProfileStats()) }()
 		}
+	}
+	if opts.OnLogs != nil {
+		defer func() { opts.OnLogs(exec.Logs()) }()
 	}
 	// The cooperative scheduler is engaged after SetMTCID below (it needs
 	// the MTC's component id as the root participant).

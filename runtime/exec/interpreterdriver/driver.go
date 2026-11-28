@@ -25,6 +25,7 @@ type Driver struct {
 	trees    map[string]*ttcn3.Tree // file path -> parsed tree
 	files    []string               // the parsed files, in the order given
 	modParam map[string]string      // cfg [MODULE_PARAMETERS]
+	lastLogs []string               // log() lines of the last Run
 }
 
 // CollectTTCN3Files walks each argument and returns every TTCN-3 source
@@ -167,17 +168,25 @@ func (d *Driver) Run(ctx context.Context, name string) (report.Verdict, string, 
 	// Deliberately leaves DeterministicClock and DeterministicScheduler
 	// off: this driver executes real test suites, so timers must pace real
 	// I/O rather than jump a virtual clock. Semantics default to strict.
+	d.lastLogs = nil
 	opts := interpreter.TestcaseOptions{
 		ModuleParameters: d.modParam,
 		ModuleParamWarning: func(msg string) {
 			fmt.Fprintf(os.Stderr, "module parameter: %s\n", msg)
 		},
+		OnLogs: func(lines []string) { d.lastLogs = append(d.lastLogs, lines...) },
 	}
 	v, reason, err := interpreter.RunTestcaseWith(trees, name, opts)
 	if err != nil {
 		return report.Error, err.Error(), nil
 	}
 	return mapVerdict(v), reason, nil
+}
+
+// LastLogs returns the lines the testcase of the last Run wrote with
+// log().
+func (d *Driver) LastLogs() []string {
+	return d.lastLogs
 }
 
 func mapVerdict(v runtime.Verdict) report.Verdict {

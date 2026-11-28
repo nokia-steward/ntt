@@ -231,3 +231,36 @@ func TestRenderHTMLNoMetricsSection(t *testing.T) {
 		t.Fatalf("unexpected profile section in a functional report:\n%s", buf.String())
 	}
 }
+
+func TestRenderLogs(t *testing.T) {
+	s := sampleSuite()
+	s.Cases[0].Logs = []string{"heapAlloc=1234", `"x"`}
+	render := map[string]func(*bytes.Buffer) error{
+		"json":  func(b *bytes.Buffer) error { return report.RenderJSON(b, s) },
+		"junit": func(b *bytes.Buffer) error { return report.RenderJUnit(b, s) },
+		"tap":   func(b *bytes.Buffer) error { return report.RenderTAP(b, s) },
+		"text":  func(b *bytes.Buffer) error { return report.RenderText(b, s, true) },
+	}
+	want := map[string]string{
+		"json":  `"logs": [` + "\n" + `        "heapAlloc=1234",`,
+		"junit": "<system-out>heapAlloc=1234&#xA;&#34;x&#34;&#xA;</system-out>",
+		"tap":   "ok 1 - M.tc_pass\n  ---\n  logs:\n    - \"heapAlloc=1234\"\n",
+		"text":  "M.tc_pass\t\n            heapAlloc=1234\n",
+	}
+	for name, r := range render {
+		var buf bytes.Buffer
+		if err := r(&buf); err != nil {
+			t.Fatalf("%s: %v", name, err)
+		}
+		if !strings.Contains(buf.String(), want[name]) {
+			t.Errorf("%s: missing %q in:\n%s", name, want[name], buf.String())
+		}
+	}
+	var buf bytes.Buffer
+	if err := report.RenderText(&buf, s, false); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(buf.String(), "heapAlloc") {
+		t.Errorf("text without logs shows them:\n%s", buf.String())
+	}
+}

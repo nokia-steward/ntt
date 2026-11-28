@@ -65,6 +65,13 @@ type MetricsProvider interface {
 	LastMetrics() *report.Metrics
 }
 
+// LogsProvider is the optional surface a Driver implements to expose the
+// lines a testcase wrote with log(). The executor calls LastLogs right
+// after each Run and attaches them to that testcase's report.Case.
+type LogsProvider interface {
+	LastLogs() []string
+}
+
 // Options configures one executor invocation.
 type Options struct {
 	SuiteName string
@@ -144,6 +151,9 @@ func Run(ctx context.Context, opts Options) (*report.Suite, error) {
 		}
 		if mp, ok := opts.Driver.(MetricsProvider); ok {
 			c.Metrics = mp.LastMetrics()
+		}
+		if lp, ok := opts.Driver.(LogsProvider); ok {
+			c.Logs = lp.LastLogs()
 		}
 		suite.Cases = append(suite.Cases, c)
 	}

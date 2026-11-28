@@ -36,6 +36,7 @@ var (
 	execProfile  bool
 	execLog      string
 	execLogFmt   string
+	execShowLogs bool
 
 	// deterministicSafetyTimeout bounds a testcase when the user gave no
 	// --timeout, so a body the scheduler does not yet fully model can't
@@ -116,6 +117,9 @@ func init() {
 			"events, one JSON object per line) or lines (one event per line, its "+
 			"fields separated by |, to read in a pager or split with awk); "+
 			"default from the --log file extension (.jsonl, .lines), xml otherwise")
+	ExecCommand.Flags().BoolVar(&execShowLogs, "show-logs", false,
+		"list each testcase's log() lines under it in the text report (the json, "+
+			"junit and tap reports always carry them)")
 }
 
 // openTestLog opens the --log file and starts a TCI-TL log in the
@@ -247,7 +251,7 @@ func runExec(cmd *cobra.Command, args []string) (err error) {
 		out = f
 	}
 
-	if err := writeReport(out, execFormat, suite); err != nil {
+	if err := writeReport(out, execFormat, suite, execShowLogs); err != nil {
 		return err
 	}
 	// A test runner must signal failure through its exit status, or CI
@@ -520,7 +524,7 @@ func tcpPortRule(port, comp string, params map[string]string) (tcpport.Rule, boo
 	return rule, true
 }
 
-func writeReport(w io.Writer, format string, suite *rreport.Suite) error {
+func writeReport(w io.Writer, format string, suite *rreport.Suite, showLogs bool) error {
 	switch strings.ToLower(format) {
 	case "junit", "xml":
 		return rreport.RenderJUnit(w, suite)
@@ -533,11 +537,7 @@ func writeReport(w io.Writer, format string, suite *rreport.Suite) error {
 	case "profile":
 		return rreport.RenderProfile(w, suite)
 	case "text", "":
-		fmt.Fprintf(w, "suite %q: %s (%d cases in %s)\n", suite.Name, suite.Verdict(), len(suite.Cases), suite.Duration())
-		for _, c := range suite.Cases {
-			fmt.Fprintf(w, "  %-7s %s.%s\t%s\n", c.Verdict, c.Module, c.Name, c.Reason)
-		}
-		return nil
+		return rreport.RenderText(w, suite, showLogs)
 	}
 	return fmt.Errorf("unknown format %q", format)
 }
@@ -564,6 +564,7 @@ type staticDriver struct {
 
 	profiling   bool             // --profile: capture per-port performance metrics
 	lastMetrics *rreport.Metrics // metrics from the most recent Run, for LastMetrics
+	lastLogs    []string         // log() lines of the most recent Run, for LastLogs
 
 	testLogger tl.Logger // --log: TCI-TL events of every testcase; nil when off
 }
@@ -707,6 +708,9 @@ func (d *staticDriver) Run(ctx context.Context, name string) (rreport.Verdict, s
 	// them (with the wall-clock duration for throughput) into report
 	// metrics that LastMetrics hands to the executor.
 	d.lastMetrics = nil
+	d.lastLogs = nil
+	// A control part runs each of its testcases in turn: their lines, in order.
+	opts.OnLogs = func(lines []string) { d.lastLogs = append(d.lastLogs, lines...) }
 	var rawStats map[string]runtime.PortStat
 	if d.profiling {
 		opts.Profiling = true
@@ -762,6 +766,9 @@ func (d *staticDriver) moduleFile(mod string) string {
 // when profiling is off or the run captured nothing). Implements
 // exec.MetricsProvider; the executor calls it right after each Run.
 func (d *staticDriver) LastMetrics() *rreport.Metrics { return d.lastMetrics }
+
+// LastLogs implements exec.LogsProvider.
+func (d *staticDriver) LastLogs() []string { return d.lastLogs }
 
 // buildMetrics aggregates the interpreter's raw per-port capture into a
 // report profile: latency percentiles per port, and throughput as

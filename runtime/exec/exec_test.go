@@ -232,3 +232,37 @@ func (d *listDriver) Run(_ context.Context, name string) (report.Verdict, string
 	d.ran++
 	return report.Pass, "", nil
 }
+
+// logsDriver is a fakeDriver that reports log lines per testcase.
+type logsDriver struct {
+	fakeDriver
+	logs map[string][]string
+	last string
+}
+
+func (l *logsDriver) Run(ctx context.Context, name string) (report.Verdict, string, error) {
+	l.last = name
+	return l.fakeDriver.Run(ctx, name)
+}
+
+func (l *logsDriver) LastLogs() []string { return l.logs[l.last] }
+
+func TestRun_AttachesLogs(t *testing.T) {
+	d := &logsDriver{
+		fakeDriver: fakeDriver{
+			cases:   []string{"M.a", "M.b"},
+			results: map[string]report.Verdict{"M.a": report.Pass, "M.b": report.Pass},
+		},
+		logs: map[string][]string{"M.a": {"x=1"}},
+	}
+	suite, err := exec.Run(context.Background(), exec.Options{Driver: d})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range suite.Cases {
+		want := d.logs["M."+c.Name]
+		if len(c.Logs) != len(want) || (len(want) > 0 && c.Logs[0] != want[0]) {
+			t.Errorf("%s: Logs = %q, want %q", c.Name, c.Logs, want)
+		}
+	}
+}

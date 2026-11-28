@@ -69,7 +69,9 @@ type Case struct {
 	Verdict  Verdict
 	Duration time.Duration
 	Reason   string
-	Logs     []string
+
+	// Logs are the lines the testcase wrote with log(), in order.
+	Logs []string
 
 	// Metrics carries per-port performance data from a profiling run
 	// (ntt exec --profile). Nil for a functional run.
@@ -145,6 +147,34 @@ func (s *Suite) CountBy() map[Verdict]int {
 }
 
 // ---------------------------------------------------------------------------
+// Text
+// ---------------------------------------------------------------------------
+
+// RenderText writes the suite as one line, then one line per case with
+// its verdict and reason. With logs, each case's log() lines follow it,
+// indented.
+func RenderText(w io.Writer, s *Suite, logs bool) error {
+	fmt.Fprintf(w, "suite %q: %s (%d cases in %s)\n", s.Name, s.Verdict(), len(s.Cases), s.Duration())
+	for _, c := range s.Cases {
+		fmt.Fprintf(w, "  %-7s %s.%s\t%s\n", c.Verdict, c.Module, c.Name, c.Reason)
+		if logs {
+			for _, l := range c.Logs {
+				fmt.Fprintf(w, "            %s\n", l)
+			}
+		}
+	}
+	return nil
+}
+
+// logText joins log lines into one text block, a line each.
+func logText(lines []string) string {
+	if len(lines) == 0 {
+		return ""
+	}
+	return strings.Join(lines, "\n") + "\n"
+}
+
+// ---------------------------------------------------------------------------
 // JUnit XML
 // ---------------------------------------------------------------------------
 
@@ -166,6 +196,7 @@ type junitCase struct {
 	Failure   *junitMsg `xml:"failure,omitempty"`
 	Errored   *junitMsg `xml:"error,omitempty"`
 	Skipped   *struct{} `xml:"skipped,omitempty"`
+	SystemOut string    `xml:"system-out,omitempty"`
 }
 
 type junitMsg struct {
@@ -186,6 +217,7 @@ func RenderJUnit(w io.Writer, s *Suite) error {
 			ClassName: c.Module,
 			Name:      c.Name,
 			Time:      c.Duration.Seconds(),
+			SystemOut: logText(c.Logs),
 		}
 		switch c.Verdict {
 		case Fail, Inconc:
@@ -239,8 +271,18 @@ func RenderTAP(w io.Writer, s *Suite) error {
 			name = c.Module + "." + name
 		}
 		fmt.Fprintf(w, "%s %d - %s%s\n", status, i+1, name, directive)
-		if c.Reason != "" {
-			fmt.Fprintf(w, "  ---\n  message: %q\n  ...\n", c.Reason)
+		if c.Reason != "" || len(c.Logs) > 0 {
+			fmt.Fprintf(w, "  ---\n")
+			if c.Reason != "" {
+				fmt.Fprintf(w, "  message: %q\n", c.Reason)
+			}
+			if len(c.Logs) > 0 {
+				fmt.Fprintf(w, "  logs:\n")
+				for _, l := range c.Logs {
+					fmt.Fprintf(w, "    - %q\n", l)
+				}
+			}
+			fmt.Fprintf(w, "  ...\n")
 		}
 	}
 	return nil
@@ -274,6 +316,7 @@ func RenderJSON(w io.Writer, s *Suite) error {
 		Verdict  string     `json:"verdict"`
 		Duration float64    `json:"duration_seconds"`
 		Reason   string     `json:"reason,omitempty"`
+		Logs     []string   `json:"logs,omitempty"`
 		Ports    []wirePort `json:"ports,omitempty"`
 	}
 	ms := func(d time.Duration) float64 { return float64(d) / float64(time.Millisecond) }
@@ -292,6 +335,7 @@ func RenderJSON(w io.Writer, s *Suite) error {
 			Verdict:  c.Verdict.String(),
 			Duration: c.Duration.Seconds(),
 			Reason:   c.Reason,
+			Logs:     c.Logs,
 		}
 		if c.Metrics != nil {
 			for _, p := range c.Metrics.Ports {
