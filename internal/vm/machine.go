@@ -655,6 +655,28 @@ func (m *Machine) store(target any, value any) {
 		}
 		return
 	}
+	// An element in assignment notation is a block that assigns the
+	// fields of its own element, once the list is stored; like a whole
+	// value block, it keeps the fields it does not assign.
+	if s, ok := value.([]any); ok && slices.ContainsFunc(s, isAssignBlock) {
+		prev, _ := m.deref(target).([]any)
+		elems := slices.Clone(s)
+		for i, e := range elems {
+			if isAssignBlock(e) {
+				elems[i] = runtime.Undefined{}
+				if i < len(prev) {
+					elems[i] = prev[i]
+				}
+			}
+		}
+		m.store(target, elems)
+		for i, e := range s {
+			if isAssignBlock(e) {
+				m.store(&ElementRef{Container: target, Index: i}, e)
+			}
+		}
+		return
+	}
 	switch t := target.(type) {
 	case *slotRef:
 		if err := runtime.IsCompatible(value, t.Type); err != nil {
@@ -784,6 +806,13 @@ func (m *Machine) store(target any, value any) {
 	default:
 		panic(fmt.Errorf("invalid store target: %T", target))
 	}
+}
+
+// isAssignBlock reports whether x is a non-empty value block, a value in
+// assignment notation.
+func isAssignBlock(x any) bool {
+	blk, ok := x.(Block)
+	return ok && blk.Begin < blk.End
 }
 
 // operand returns x, or the operand block x leaves on the stack. A run
@@ -2929,7 +2958,13 @@ func (m *Machine) execMatch(logEvent bool) (bool, error) {
 			m.store(v, blk)
 			return v.Value
 		}
-		return m.deref(opnd)
+		val := m.deref(opnd)
+		if s, ok := val.([]any); ok && slices.ContainsFunc(s, isAssignBlock) {
+			v := &runtime.Var{Name: "(anon)", Type: runtime.TemplateType{BaseType: runtime.BaseType(typ)}, Index: -1}
+			m.store(v, s)
+			return v.Value
+		}
+		return val
 	}
 	exprVal := evalOp(exprOp)
 	tmplVal := evalOp(tmplOp)

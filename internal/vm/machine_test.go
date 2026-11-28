@@ -1633,6 +1633,29 @@ func TestRunModule(t *testing.T) {
 			want: []string{`"x"1`, `"r="2`},
 		},
 		{
+			name: "record of elements in assignment notation",
+			src: `module M {
+  type record R { integer a, integer b }
+  type record of R RL;
+  template RL t := { { 1, ? } };
+  control {
+    var RL s := { { a := 1, b := 2 } };
+    var RL c := s;
+    c[0].a := 9;
+    log(s[0].a, c[0].a, s[0].b);
+    log(match({ { a := 1, b := 9 } }, t));
+  }
+}
+`,
+			want: []string{
+				"cpen|k3r|M.control()",
+				"ulog|k3r|192",
+				"matc|k3r|{{1,9}}|{{1,?}}|",
+				"ulog|k3r|true",
+				"cplv|k3r|M.control()",
+			},
+		},
+		{
 			name: "nested block local",
 			src: `module M {
   control { var integer a := 1; if (true) { var integer b := 2 }; log(a) }
