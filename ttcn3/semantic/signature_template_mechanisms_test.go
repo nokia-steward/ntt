@@ -54,3 +54,32 @@ func TestSignatureTemplateOmitInField(t *testing.T) {
 		}
 	}
 }
+
+// The signature argument of getreply names no variable for an out or
+// inout parameter (22.3.4 b).
+func TestGetreplyVariableInSignature(t *testing.T) {
+	for args, reject := range map[string]bool{
+		`S:{ v_out, v_inout }`:     true,
+		`S:{ p_inout := v_inout }`: true,
+		`S:{ ?, ? } value v_out`:   false,
+		`S:{ c_one, ? }`:           false,
+		`S:{ p_out := t_any, ? }`:  false,
+	} {
+		tree := parse(t, `module M {
+			signature S(out integer p_out, inout integer p_inout) return integer;
+			type port P procedure { inout S }
+			type component C { port P p }
+			const integer c_one := 1;
+			template integer t_any := ?;
+			testcase TC() runs on C {
+				var integer v_out, v_inout;
+				p.call(S:{ -, 0 }, 1.0) {
+					[] p.getreply(`+args+`) {}
+				}
+			}
+		}`)
+		if got := containsCode(NewAnalyzer(&ttcn3.DB{}).Analyze(tree), "getreply-variable-in-signature"); got != reject {
+			t.Errorf("getreply(%s): reported %v, want %v", args, got, reject)
+		}
+	}
+}

@@ -11,6 +11,9 @@
 //     parameter slots, plus the return value, must be specific.
 //   - `raise(Sig, expr)` -> the exception value must be specific
 //     (handled in port_ops.go's wildcard rule, not here).
+//   - `getreply(Sig:{...})` -> an `out` or `inout` parameter slot does
+//     not name a variable (22.3.4 b): the values are matched, not
+//     assigned; a value redirect assigns them.
 //
 // We rely on the syntactic shape of the actual: either the inline form
 // `Sig:{...}` or a reference to a `template Sig t := {...}` declaration (the
@@ -41,6 +44,7 @@ func (a *Analyzer) checkSignatureTemplateRules(mod *syntax.Module) []Diagnostic 
 	tmplTypes := collectTemplateTypes(mod)
 	tmplBodies := collectAllTemplateBodies(mod)
 
+	vars := valueVariableNames(mod)
 	var diags []Diagnostic
 	syntax.Inspect(mod, func(n syntax.Node) bool {
 		ce, ok := n.(*syntax.CallExpr)
@@ -56,6 +60,10 @@ func (a *Analyzer) checkSignatureTemplateRules(mod *syntax.Module) []Diagnostic 
 			return true
 		}
 		op := opIdent.String()
+		if op == "getreply" && ce.Args != nil && len(ce.Args.List) > 0 {
+			diags = append(diags, getreplyVariableDiags(ce.Args.List[0], sigParams, vars)...)
+			return true
+		}
 		if op != "call" && op != "reply" {
 			return true
 		}
@@ -92,6 +100,79 @@ func (a *Analyzer) checkSignatureTemplateRules(mod *syntax.Module) []Diagnostic 
 		return true
 	})
 	return diags
+}
+
+// getreplyVariableDiags reports a variable named in an out or inout
+// parameter slot of the inline signature template arg of a getreply.
+func getreplyVariableDiags(arg syntax.Expr, sigParams map[string][]sigParamInfo, vars map[string]bool) []Diagnostic {
+	if ve, ok := arg.(*syntax.ValueExpr); ok {
+		arg = ve.X
+	}
+	be, ok := arg.(*syntax.BinaryExpr)
+	if !ok || be.Op == nil || be.Op.Kind() != syntax.COLON {
+		return nil
+	}
+	cl, ok := be.Y.(*syntax.CompositeLiteral)
+	params := sigParams[identName(be.X)]
+	if !ok || len(params) == 0 {
+		return nil
+	}
+	var diags []Diagnostic
+	for i, item := range cl.List {
+		p, v := sigParamInfo{}, item
+		if a, ok := item.(*syntax.BinaryExpr); ok && a.Op != nil && a.Op.Kind() == syntax.ASSIGN {
+			v = a.Y
+			for _, q := range params {
+				if q.Name == identName(a.X) {
+					p = q
+				}
+			}
+		} else if i < len(params) {
+			p = params[i]
+		}
+		id, ok := v.(*syntax.Ident)
+		if !ok || p.Dir != syntax.OUT && p.Dir != syntax.INOUT || !vars[id.String()] {
+			continue
+		}
+		diags = append(diags, Diagnostic{
+			Code:     "getreply-variable-in-signature",
+			Severity: SeverityError,
+			Message:  fmt.Sprintf("the %s parameter %s of getreply names the variable %s: the signature argument is matched, a value redirect assigns (ETSI 22.3.4)", dirName(p.Dir), p.Name, id.String()),
+			Node:     id,
+			Span:     syntax.SpanOf(id),
+		})
+	}
+	return diags
+}
+
+// valueVariableNames are the names of mod's value variables, but for
+// names also given to a template, constant or other definition.
+func valueVariableNames(mod *syntax.Module) map[string]bool {
+	vars, others := map[string]bool{}, map[string]bool{}
+	syntax.Inspect(mod, func(n syntax.Node) bool {
+		switch x := n.(type) {
+		case *syntax.ValueDecl:
+			isVar := x.KindTok != nil && x.KindTok.Kind() == syntax.VAR && x.TemplateRestriction == nil
+			for _, d := range x.Decls {
+				if d != nil && d.Name != nil {
+					if isVar {
+						vars[d.Name.String()] = true
+					} else {
+						others[d.Name.String()] = true
+					}
+				}
+			}
+		case *syntax.TemplateDecl:
+			others[syntax.Name(x.Name)] = true
+		case *syntax.FormalPar:
+			others[syntax.Name(x.Name)] = true
+		}
+		return true
+	})
+	for name := range others {
+		delete(vars, name)
+	}
+	return vars
 }
 
 // sigParamInfo captures the bits of a signature formal parameter
