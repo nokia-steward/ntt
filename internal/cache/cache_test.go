@@ -2,6 +2,7 @@ package cache_test
 
 import (
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/nokia/ntt/internal/cache"
@@ -14,7 +15,10 @@ func init() {
 }
 
 func TestLookup(t *testing.T) {
-	os.Setenv("NTT_CACHE", "testdata/cache")
+	// The cache directory is joined with filepath.Join in the
+	// implementation, so on Windows the expected separator is "\".
+	cacheDir := filepath.FromSlash("testdata/cache")
+	os.Setenv("NTT_CACHE", cacheDir)
 	assert.Equal(t, "./file", cache.Lookup("./file"))
 	assert.Equal(t, "./cache.go", cache.Lookup("./cache.go"))
 
@@ -23,5 +27,5 @@ func TestLookup(t *testing.T) {
 	assert.Equal(t, ".", cache.Lookup("."))
 	assert.Equal(t, "..", cache.Lookup(".."))
 	assert.Equal(t, "cache.go", cache.Lookup("cache.go"))
-	assert.Equal(t, "testdata/cache/other.go", cache.Lookup("other.go"))
+	assert.Equal(t, filepath.Join(cacheDir, "other.go"), cache.Lookup("other.go"))
 }

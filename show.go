@@ -134,7 +134,7 @@ func printJSON(report *ConfigReport, keys []string) error {
 func printShellScript(report *ConfigReport, keys []string) error {
 	const shellTemplate = `# This is a generated output of ntt show. Args: {{ .Args }}
 
-# k3-hook calls the K3 test hook (if defined) with action passed by $1.
+# k3-hook calls the test hook (if defined) with action passed by $1.
 function k3-hook()
 {
     if [ -n "$K3_HOOKS_FILE" ]; then
@@ -184,7 +184,7 @@ false
 		return fmt.Errorf("command line option --sh does not accept additional command line arguments")
 	}
 
-	t := template.Must(template.New("k3-sh-setup").Parse(shellTemplate))
+	t := template.Must(template.New("sh-setup").Parse(shellTemplate))
 	if err := t.Execute(os.Stdout, report); err != nil {
 		fmt.Printf(`
 # ERROR: Internal template did not compile: %s
@@ -214,26 +214,36 @@ func get(c *project.Config, key string) ([]string, error) {
 		return nil, err
 	}
 
-	for _, k := range strings.Split(key, ".") {
+	// Decoded JSON holds lists as []interface{} and objects as
+	// map[string]interface{}: a list gives one value per element, an
+	// object at the end of the key one 'key=value' per entry.
+	keys := strings.Split(key, ".")
+	for i, k := range keys {
 		v, ok := conf[k]
 		if !ok {
 			return nil, fmt.Errorf("key %q not found", k)
 		}
 
 		switch v := v.(type) {
-		case []string:
-			return v, nil
-		case map[string]string:
+		case []interface{}:
+			s := make([]string, 0, len(v))
+			for _, e := range v {
+				s = append(s, fmt.Sprint(e))
+			}
+			return s, nil
+		case map[string]interface{}:
+			if i < len(keys)-1 {
+				conf = v
+				continue
+			}
 			s := make([]string, 0, len(v))
 			for key, val := range v {
-				s = append(s, fmt.Sprintf("'%s=%s'", key, val))
+				s = append(s, fmt.Sprintf("'%s=%v'", key, val))
 			}
 			sort.Strings(s)
 			return s, nil
-		case map[string]interface{}:
-			conf = v
 		default:
-			return []string{fmt.Sprintf("%v", v)}, nil
+			return []string{fmt.Sprint(v)}, nil
 		}
 	}
 	return nil, fmt.Errorf("value of key %q is not of type string or list of strings", key)
@@ -258,9 +268,7 @@ func printKeyValues(c *project.Config, keys []string) error {
 		if err != nil {
 			return err
 		}
-		if len(s) > 0 {
-			fmt.Printf("NTT_%s=\"%s\"\n", strings.ToUpper(key), strings.Join(s, " "))
-		}
+		fmt.Printf("NTT_%s=\"%s\"\n", strings.ToUpper(key), strings.Join(s, " "))
 	}
 
 	return nil

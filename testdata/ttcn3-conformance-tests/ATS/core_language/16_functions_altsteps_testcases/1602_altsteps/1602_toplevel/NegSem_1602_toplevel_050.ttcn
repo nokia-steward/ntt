@@ -1,7 +1,7 @@
 /***************************************************
  ** @author   STF 548
  ** @version  0.0.1
- ** @purpose  1:16.2, verify that a external function used in a default parameter of an altstep cannot contain fuzzy parameters
+ ** @purpose  1:16.2, verify that an external function used in a default parameter of an altstep cannot contain fuzzy parameters
  ** @verdict  pass reject
  ***************************************************/
 

@@ -1,0 +1,39 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:19.3.2, verify that it is possible to use a select union statement with init statement and with several branches
+ ** @verdict  pass accept, ttcn3verdict:pass
+ ***************************************************/
+
+// The following requirement is tested:
+// The statement contains a header part and zero or more branches.
+
+module Sem_190302_select_union_statement_007 {
+
+    type component GeneralComp {
+	}
+
+    type union U {
+        integer intOption,
+        charstring strOption,
+        boolean boolOption
+    }
+
+    testcase TC_Sem_190302_select_union_statement_007() runs on GeneralComp {
+
+        select union (var U v_un := { strOption := "abc" }; v_un) {  // use of init statement
+            case (intOption) {
+                setverdict(fail);
+            } case (strOption) {
+                setverdict(pass);
+            } case (boolOption) {
+                setverdict(fail);
+            }
+        }
+	}
+
+	control {
+		execute(TC_Sem_190302_select_union_statement_007());
+	}
+}
+

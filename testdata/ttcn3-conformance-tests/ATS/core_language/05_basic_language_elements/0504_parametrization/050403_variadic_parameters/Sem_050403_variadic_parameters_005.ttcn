@@ -1,0 +1,8 @@
+// @author   TTF T023
+// @purpose  1:5.4.3, Ensure variadic formal parameters may have default values.
+// @verdict  pass accept
+module Sem_050403_variadic_parameters_005 {
+
+function f(in integer i... := {1, 2, 3}) {}
+
+}

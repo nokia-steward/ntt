@@ -1,0 +1,27 @@
+// @author   TTF T023
+// @purpose  1:6.2.1.4, Ensure the unqualified type name acts as the field name.
+// @verdict  pass accept
+module Sem_06020104_embedding_fields_001 {
+
+type component GeneralComp {}
+
+type record R {
+	integer,
+	R optional,
+	Sem_06020104_embedding_fields_001.GeneralComp
+}
+
+testcase TC_Sem_06020104_embedding_fields_001() runs on GeneralComp {
+	var R r := {
+		integer := 23,
+		R := {}
+	}
+	r.GeneralComp := GeneralComp.create
+	setverdict(pass)
+}
+
+control {
+	execute(TC_Sem_06020104_embedding_fields_001());
+}
+
+}

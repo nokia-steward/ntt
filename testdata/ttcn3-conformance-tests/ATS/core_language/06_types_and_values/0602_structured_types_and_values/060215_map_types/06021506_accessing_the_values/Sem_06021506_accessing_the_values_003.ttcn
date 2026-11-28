@@ -1,0 +1,30 @@
+/***************************************************
+ ** @author   TTF T014
+ ** @version  0.0.1
+ ** @purpose  1:6.2.15.6, Verify that map values don't have to be unique
+ ** @verdict  pass accept, ttcn3verdict: pass
+ ***************************************************/
+
+// The following requirement is tested:
+// Since two different keys might be mapped to the same value in a map value, the values in the set of
+// values might not be unique. The set of values will contain one value for each key value pair in
+// the map. The length of the map value is equal to the length of the set of values.
+
+module Sem_06021506_accessing_the_values_003 {
+	type map from charstring to integer MapValueType;
+	type component C {}
+
+	testcase TC_Sem_06021506_accessing_the_values_003() runs on C {
+		var MapValueType v_map := { ["a"] := 0, ["b"] := 0, ["c"] := 1 };
+		var MapValueType.to v_values := v_map.to;
+		if (match(v_values, {0,1,0})) { // yields true
+			setverdict(pass);
+		} else {
+			setverdict(fail);
+		}
+	}
+
+	control {
+		execute(TC_Sem_06021506_accessing_the_values_003());
+	}
+}

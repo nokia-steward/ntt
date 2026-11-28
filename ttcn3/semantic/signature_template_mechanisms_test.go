@@ -1,0 +1,85 @@
+package semantic
+
+import (
+	"testing"
+
+	"github.com/nokia/ntt/ttcn3"
+)
+
+// TestSignatureTemplateMechanisms: value lists, ranges and other
+// matching mechanisms, directly or through a template, in a slot of a
+// call or reply that needs a specific value (15.2, 22.3).
+func TestSignatureTemplateMechanisms(t *testing.T) {
+	const decls = `signature S(in integer p1, out integer p2, inout integer p3) return integer;
+		type port P procedure { inout S } type component C { port P p }
+		template integer mw_range := (1 .. 5); template integer mw_any := ?;`
+	bad := []string{
+		`p.call(S:{ p1 := (1, 2), p2 := -, p3 := 3 }, nowait);`,
+		`p.call(S:{ p1 := mw_range, p2 := -, p3 := 3 }, nowait);`,
+		`p.call(S:{ p1 := complement(1), p2 := -, p3 := 3 }, nowait);`,
+		`p.reply(S:{ p1 := -, p2 := ?, p3 := 30 } value 1);`,
+		`p.reply(S:{ p1 := -, p2 := 2, p3 := mw_any } value 1);`,
+		`p.reply(S:{ p1 := -, p2 := 2, p3 := 3 } value ?);`,
+	}
+	for _, body := range bad {
+		src := `module M { ` + decls + ` testcase tc() runs on C { ` + body + ` } }`
+		if diags := NewAnalyzer(&ttcn3.DB{}).Analyze(parse(t, src)); !containsCode(diags, "signature-template-matching-not-allowed") {
+			t.Errorf("%s: expected signature-template-matching-not-allowed, got %v", body, codes(diags))
+		}
+	}
+	good := `module M { ` + decls + ` testcase tc() runs on C {
+		p.call(S:{ p1 := 1, p2 := (1 .. 5), p3 := 3 }, nowait);
+		p.reply(S:{ p1 := (1, 2), p2 := 2, p3 := 3 } value 1);
+		p.getreply(S:{ p1 := -, p2 := ?, p3 := (1 .. 2) } value ?);
+	} }`
+	if diags := NewAnalyzer(&ttcn3.DB{}).Analyze(parse(t, good)); containsCode(diags, "signature-template-matching-not-allowed") {
+		t.Errorf("valid module: unexpected %v", codes(diags))
+	}
+}
+
+// omit of an optional field inside an in parameter's value is a value,
+// not a matching mechanism (15.2 c).
+func TestSignatureTemplateOmitInField(t *testing.T) {
+	tree := parse(t, `module M {
+		type record Rec { integer field1 optional, charstring field2 }
+		signature RecProc(in Rec Par1);
+		type port P procedure { inout RecProc }
+		type component C { port P p }
+		template RecProc s_explicit := { Par1 := { field1 := omit, field2 := "a" } }
+		function f() runs on C { p.call(s_explicit, nowait); }
+	}`)
+	for _, d := range NewAnalyzer(&ttcn3.DB{}).Analyze(tree) {
+		if d.Code == "signature-template-matching-not-allowed" {
+			t.Errorf("unexpected %s: %s", d.Code, d.Message)
+		}
+	}
+}
+
+// The signature argument of getreply names no variable for an out or
+// inout parameter (22.3.4 b).
+func TestGetreplyVariableInSignature(t *testing.T) {
+	for args, reject := range map[string]bool{
+		`S:{ v_out, v_inout }`:     true,
+		`S:{ p_inout := v_inout }`: true,
+		`S:{ ?, ? } value v_out`:   false,
+		`S:{ c_one, ? }`:           false,
+		`S:{ p_out := t_any, ? }`:  false,
+	} {
+		tree := parse(t, `module M {
+			signature S(out integer p_out, inout integer p_inout) return integer;
+			type port P procedure { inout S }
+			type component C { port P p }
+			const integer c_one := 1;
+			template integer t_any := ?;
+			testcase TC() runs on C {
+				var integer v_out, v_inout;
+				p.call(S:{ -, 0 }, 1.0) {
+					[] p.getreply(`+args+`) {}
+				}
+			}
+		}`)
+		if got := containsCode(NewAnalyzer(&ttcn3.DB{}).Analyze(tree), "getreply-variable-in-signature"); got != reject {
+			t.Errorf("getreply(%s): reported %v, want %v", args, got, reject)
+		}
+	}
+}

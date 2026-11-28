@@ -1,0 +1,19 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure index list with integer key type is a record of.
+// @verdict  pass accept
+module Sem_060503_index_lists_001 {
+
+type component GeneralComp {}
+
+type record of universal charstring RoUC;
+
+testcase TC_Sem_060503_index_lists_001() runs on GeneralComp {
+	var v := { [1] := "Hello", [3] := -, [5] := "Wörld" };
+	var RoUC r := v;
+}
+
+control {
+	execute(TC_Sem_060503_index_lists_001());
+}
+
+}

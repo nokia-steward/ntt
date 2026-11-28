@@ -163,24 +163,34 @@ func TestMatch(t *testing.T) {
 		{List(runtime.SET_OF, 1, 2, 3), List(runtime.SUBSET, runtime.AnyOrNone), true},
 		{List(runtime.SET_OF), List(runtime.SUBSET, runtime.AnyOrNone), true},
 
-		// Strings
+		// Strings. A plain charstring template compares literally:
+		// `?` / `*` only act as wildcards inside `pattern "..."`
+		// templates (ETSI 15.11 / B.1.5; the conformance suite pins
+		// the literal behaviour via Sem_1511_*_010).
 		{makeObj(""), makeObj(""), true},
 		{makeObj(""), makeObj("abc"), false},
 		{makeObj("abc"), makeObj(""), false},
 		{makeObj("abc"), makeObj("abc"), true},
 		{makeObj("abc"), makeObj("abd"), false},
-		{makeObj("abc"), makeObj("ab?"), true},
-		{makeObj("abc"), makeObj("a?c"), true},
-		{makeObj(""), makeObj("?"), false},
-		{makeObj("abc"), makeObj("abc*"), true},
-		{makeObj("abc"), makeObj("*abc"), true},
-		{makeObj("abc"), makeObj("a*c"), true},
-		{makeObj("abc"), makeObj("a*"), true},
-		{makeObj("abc"), makeObj("*"), true},
-		{makeObj(""), makeObj("*"), true},
-		{makeObj("abcdef"), makeObj("a*d*ef"), true},
-		{makeObj("abcdcdefaf"), makeObj("a*de*f"), true},
-		{makeObj("abcdcdefab"), makeObj("a*de*f"), false},
+		{makeObj("abc"), makeObj("ab?"), false},
+		{makeObj("ab?"), makeObj("ab?"), true},
+		{makeObj("abc"), makeObj("a*c"), false},
+		{makeObj("a*c"), makeObj("a*c"), true},
+
+		// `pattern "..."` charstring templates: `?` matches exactly
+		// one character, `*` any run (including none).
+		{makeObj("abc"), patObj("ab?"), true},
+		{makeObj("abc"), patObj("a?c"), true},
+		{makeObj(""), patObj("?"), false},
+		{makeObj("abc"), patObj("abc*"), true},
+		{makeObj("abc"), patObj("*abc"), true},
+		{makeObj("abc"), patObj("a*c"), true},
+		{makeObj("abc"), patObj("a*"), true},
+		{makeObj("abc"), patObj("*"), true},
+		{makeObj(""), patObj("*"), true},
+		{makeObj("abcdef"), patObj("a*d*ef"), true},
+		{makeObj("abcdcdefaf"), patObj("a*de*f"), true},
+		{makeObj("abcdcdefab"), patObj("a*de*f"), false},
 	}
 
 	for _, test := range tests {
@@ -194,6 +204,16 @@ func TestMatch(t *testing.T) {
 			t.Errorf("Error verification not implemented yet. Sorry")
 		}
 	}
+}
+
+
+// patObj builds a `pattern "..."` charstring template, where `?` and
+// `*` act as wildcards - unlike plain charstring templates, which
+// compare literally.
+func patObj(s string) runtime.Object {
+	p := runtime.NewCharstring(s)
+	p.IsPattern = true
+	return p
 }
 
 func Record(a ...interface{}) *runtime.Record {
@@ -225,5 +245,43 @@ func makeObj(v interface{}) runtime.Object {
 		return runtime.NewFloat(fmt.Sprint(v))
 	default:
 		return v.(runtime.Object)
+	}
+}
+
+// TestSetMatchingKeepsItsOperands: matching a set of, superset or
+// subset changes neither the value — a message may still be queued —
+// nor the template, and finds a pairing where the first choice fails.
+// The value lost an element per matched template element, so a second
+// match of it failed.
+func TestSetMatchingKeepsItsOperands(t *testing.T) {
+	ints := func(v ...int) []runtime.Object {
+		var l []runtime.Object
+		for _, x := range v {
+			l = append(l, runtime.NewInt(x))
+		}
+		return l
+	}
+	oneOrTwo := &runtime.List{ListType: runtime.VALUE_LIST, Elements: ints(1, 2)}
+	for _, c := range []struct {
+		val, pat *runtime.List
+		want     bool
+	}{
+		{runtime.NewSetOf(ints(1, 2)...), runtime.NewList(ints(2, 1)...), true},
+		{runtime.NewSetOf(ints(1, 2)...), runtime.NewSetOf(ints(2, 1)...), true},
+		{runtime.NewSetOf(ints(1, 2, 2)...), runtime.NewSetOf(append([]runtime.Object{oneOrTwo}, ints(1, 2)...)...), true},
+		{runtime.NewSetOf(ints(1, 2)...), runtime.NewSetOf(ints(2, 2)...), false},
+		{runtime.NewSetOf(ints(1, 2, 3)...), runtime.NewSuperset(ints(3, 1)...), true},
+		{runtime.NewSetOf(ints(1, 3)...), runtime.NewSubset(ints(3, 2, 1)...), true},
+		{runtime.NewSetOf(ints(1, 1)...), runtime.NewSubset(ints(1, 2)...), false},
+	} {
+		val, pat := c.val.Inspect(), c.pat.Inspect()
+		for round := 0; round < 2; round++ {
+			if got, _ := match(c.val, c.pat); got != c.want {
+				t.Errorf("match(%s, %s) round %d: %v, want %v", val, pat, round, got, c.want)
+			}
+		}
+		if c.val.Inspect() != val || c.pat.Inspect() != pat {
+			t.Errorf("match(%s, %s) changed them to %s, %s", val, pat, c.val.Inspect(), c.pat.Inspect())
+		}
 	}
 }

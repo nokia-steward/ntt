@@ -1,0 +1,18 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for templates.
+// @verdict  pass reject
+module NegSem_060504_references_001 {
+
+type component GeneralComp {}
+
+template integer t_int := ?;
+
+testcase TC_NegSem_060504_references_001() runs on GeneralComp {
+	var v := t_int; // error: v must be declared as template explicitly.
+}
+
+control {
+	execute(TC_NegSem_060504_references_001());
+}
+
+}

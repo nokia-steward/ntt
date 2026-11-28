@@ -1,0 +1,37 @@
+/*****************************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:15.6.6, Expanding map containing null on the LHS
+ ** @verdict  pass reject
+ *****************************************************************/
+
+// The following requirements are tested:
+// Special value null: referencing an element of an address type that is derived
+// from a map type and whose actual value is null shall cause an error.
+
+module NegSem_150606_Referencing_map_elements_010 {
+
+    type record HostInfo {
+        charstring ipAddr,
+        charstring domain,
+        integer portNr
+    };
+
+    type map from charstring to HostInfo address;
+
+
+    type component GeneralComp {
+    }
+
+    testcase TC_NegSem_150606_Referencing_map_elements_010() runs on GeneralComp {
+        var template address v_template := null;
+        // expanding null on the LHS
+        v_template["Station1"].ipAddr := "127.0.0.1"; // shall cause an error
+        log (v_template);
+        setverdict(pass);
+    }
+
+    control{
+        execute(TC_NegSem_150606_Referencing_map_elements_010());
+    }
+}

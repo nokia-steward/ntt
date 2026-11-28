@@ -1,0 +1,34 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:6.2.15.4, Using asterisk as an index in ispresent
+ ** @verdict  pass accept, ttcn3verdict:pass
+ ***************************************************/
+
+// The following requirement is tested:
+// Presence of the AnyElementsOrNone in a map template can be checked by using the isbound
+// or ispresent operation with an index notation containing the asterisk symbol as its
+// argument.
+
+module Sem_06021504_index_notation_009 {
+	type map from charstring to charstring TMap;
+	type component C {}
+
+	testcase TC_Sem_06021504_index_notation_009() runs on C {
+		var template TMap v_map := {
+			*,
+            ["first_name"] := "John",
+            ["surname"] := "Doe"
+        }
+
+        if (ispresent(v_map[*])) { // AnyElementsOrNone is present
+		    setverdict(pass);
+        } else {
+            setverdict(fail);
+        }
+	}
+
+	control {
+		execute(TC_Sem_06021504_index_notation_009());
+	}
+}

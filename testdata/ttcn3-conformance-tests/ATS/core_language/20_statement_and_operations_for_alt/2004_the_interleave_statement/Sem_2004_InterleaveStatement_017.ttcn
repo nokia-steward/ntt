@@ -1,0 +1,71 @@
+/*****************************************************************
+ ** @author   TTF T056
+ ** @version  0.0.1
+ ** @purpose  1:20.4, Verify that if-else statements containing reception statements inside an interleave branch interleave properly with other branches.
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+// The following requirements are tested:
+// Clause 20.4 & ES 201 873-4 Clause 7.5 (Figures 2 and 6):
+// Compound if-else statements containing reception statements are allowed inside
+// interleave branches and their active branch interleaves with remaining branches.
+
+module Sem_2004_InterleaveStatement_017 {
+
+    type port MyPort message {
+        inout integer
+    }
+
+    type record of integer IntList;
+
+    type component GeneralComp {
+        port MyPort pt_p1In, pt_p1Out;
+        port MyPort pt_p2In, pt_p2Out;
+    }
+
+    function f_runConditionalInterleave(in boolean p_takeThen, in integer p_secondMsg) runs on GeneralComp return IntList {
+        var IntList v_trace := {};
+
+        pt_p1Out.send(integer:1);
+        pt_p2Out.send(integer:4);
+        pt_p1Out.send(p_secondMsg);
+
+        interleave {
+            [] pt_p1In.receive(integer:1) {
+                v_trace[lengthof(v_trace)] := 1;
+                if (p_takeThen) {
+                    pt_p1In.receive(integer:2);
+                    v_trace[lengthof(v_trace)] := 2;
+                } else {
+                    pt_p1In.receive(integer:3);
+                    v_trace[lengthof(v_trace)] := 3;
+                }
+                v_trace[lengthof(v_trace)] := 9;
+            }
+            [] pt_p2In.receive(integer:4) {
+                v_trace[lengthof(v_trace)] := 4;
+            }
+        }
+        return v_trace;
+    }
+
+    testcase TC_Sem_2004_InterleaveStatement_017() runs on GeneralComp {
+        connect(mtc:pt_p1In, mtc:pt_p1Out);
+        connect(mtc:pt_p2In, mtc:pt_p2Out);
+
+        var IntList v_thenTrace := f_runConditionalInterleave(true, 2);
+        var IntList v_elseTrace := f_runConditionalInterleave(false, 3);
+        const IntList c_expectedThen := { 1, 4, 2, 9 };
+        const IntList c_expectedElse := { 1, 4, 3, 9 };
+
+        if (v_thenTrace == c_expectedThen and v_elseTrace == c_expectedElse) {
+            setverdict(pass);
+        } else {
+            setverdict(fail, "Unexpected traces: ", v_thenTrace, v_elseTrace);
+        }
+    }
+
+    control {
+        execute(TC_Sem_2004_InterleaveStatement_017());
+    }
+}

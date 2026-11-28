@@ -8,10 +8,18 @@ import (
 )
 
 // EncValue encodes v according to the TTCN-3 type attributes on typ, as k3r does
-// with the default ttcn3 codec (ASCII value syntax) and the ETSI "32 bit" integer variant.
+// with the default ttcn3 codec (ASCII value syntax) and the ETSI "32 bit" integer
+// variant, and as JSON text in UTF-8 for a type with the JSON encode attribute.
 func EncValue(v any, typ Type) (Binary, error) {
 	if typ == nil {
 		typ = IntegerType
+	}
+	if isJSON(typ) {
+		s, err := EncodeJSON(v, typ)
+		if err != nil {
+			return Binary{}, err
+		}
+		return Binary{Unit: 'B', Digits: asciiBits(s)}, nil
 	}
 	if attrs := typeAttributes(typ); attrs.Variant.Value == "32 bit" {
 		if isIntegerType(BaseType(typ)) {
@@ -27,13 +35,24 @@ func EncValue(v any, typ Type) (Binary, error) {
 
 // DecValue decodes bits into target using typ. It returns 0 on success, 1 on
 // failure, and 2 when typ uses the "32 bit" variant and fewer than 32 bits
-// are available. On non-success the target is left unchanged.
+// are available. On non-success the target is left unchanged. A type with
+// the JSON encode attribute decodes the whole input as JSON text in UTF-8.
 func DecValue(enc Binary, typ Type, target *any) (code int, rest Binary) {
-	rest = enc
 	if typ == nil {
 		typ = IntegerType
 	}
 	bits := enc.bits()
+	if isJSON(typ) {
+		if len(bits)%8 != 0 {
+			return 1, enc
+		}
+		v, err := DecodeJSON(bitsToASCII(bits), typ)
+		if err != nil {
+			return 1, enc
+		}
+		*target = v
+		return 0, Binary{Unit: 'B'}
+	}
 	if attrs := typeAttributes(typ); attrs.Variant.Value == "32 bit" {
 		if isIntegerType(BaseType(typ)) {
 			if len(bits) < 32 {

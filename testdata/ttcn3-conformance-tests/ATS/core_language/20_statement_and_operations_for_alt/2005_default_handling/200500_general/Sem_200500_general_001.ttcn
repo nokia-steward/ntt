@@ -1,0 +1,54 @@
+/***************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:20.5.0, order of default after re-activating suspended default
+ ** @verdict  pass accept, ttcn3verdict:pass
+ ***************************************************/
+
+// The following requirement is tested:
+// Re-activated defaults that were previously suspended retain their position in the list.
+// The deactivate operation either removes a default from the list or suspends it in which
+// case the default remains in the list, but is temporarily inactive.
+
+module Sem_200500_general_001 {
+
+	type port P message {
+		inout integer;
+	}
+
+	type component GeneralComp {
+		port P p;
+	}
+
+	altstep a() runs on GeneralComp {
+		[] p.receive(integer:?) {
+			log ("in altstep a");
+            setverdict(pass);
+		}
+	}
+
+    altstep b() runs on GeneralComp {
+		[] p.receive(integer:?) {
+            log ("in altstep b");
+			setverdict(fail);
+		}
+	}
+
+	testcase TC_Sem_200500_general_001() runs on GeneralComp system GeneralComp {
+		connect(self:p, self:p);
+        var default v_default := activate(b());
+        activate(a());
+		p.send(integer:5);
+        deactivate(v_default);
+        activate(v_default);
+		alt {
+			[] p.receive(integer:0) { // not expected: leads to default invocation
+				setverdict(fail);
+			}
+		}
+	}
+
+	control{
+		execute(TC_Sem_200500_general_001());
+	}
+}

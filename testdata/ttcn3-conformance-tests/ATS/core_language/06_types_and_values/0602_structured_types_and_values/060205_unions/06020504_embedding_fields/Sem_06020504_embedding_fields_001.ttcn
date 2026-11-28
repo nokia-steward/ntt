@@ -1,0 +1,42 @@
+// @author   TTF T023
+// @purpose  1:6.2.5.4, Ensure union defintions allow embedded fields and handle promotion correctly.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_06020504_embedding_fields_001 {
+
+type component GeneralComp {}
+
+type union Anytype {
+	integer,
+	boolean,
+	R
+}
+
+type record R {
+	integer,
+	verdicttype
+}
+
+testcase TC_Sem_06020504_embedding_fields_001() runs on GeneralComp {
+
+	var Anytype a := { boolean := false };
+
+	a.verdicttype := pass; // Equivalent to a.R.verdicttype := pass;
+	if (ischosen(a.R)) {
+		setverdict(pass)
+	} else {
+		setverdict(fail, "a.R is not chosen")
+	}
+
+	a.integer := 1; // Not equivalent to a.R.integer := 1;
+	if (ischosen(a.integer)) {
+		setverdict(pass)
+	} else {
+		setverdict(fail, "a.integer is not chosen")
+	}
+}
+
+control {
+	execute(TC_Sem_06020504_embedding_fields_001());
+}
+
+}

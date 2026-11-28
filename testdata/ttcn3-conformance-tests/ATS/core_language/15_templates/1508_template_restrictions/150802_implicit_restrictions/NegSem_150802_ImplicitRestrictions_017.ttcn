@@ -1,0 +1,38 @@
+/*****************************************************************
+ ** @author   TTF 014
+ ** @version  0.0.1
+ ** @purpose  1:15.8.2, Ensure that referenced optional fields of templates are not allowed to implicite restrict to template(value)
+ ** @verdict  pass reject
+ *****************************************************************/
+
+/*
+ * Reference optional field of a record of a template without restriction.
+ * (see Table 13C: Implicit restrictions)
+ *
+ */
+
+module NegSem_150802_ImplicitRestrictions_017 {
+
+type component GeneralComp { }
+
+type set ExampleType {
+	integer a,
+	boolean b optional
+}
+
+template ExampleType example := {1, false};
+
+testcase TC_NegSem_150802_ImplicitRestrictions_017() runs on GeneralComp {
+
+	var template (value) boolean v_value_b :=  example.b; // Not allowed
+
+	setverdict(fail);
+
+}
+
+control{
+	execute(TC_NegSem_150802_ImplicitRestrictions_017());
+}
+
+
+}

@@ -150,7 +150,10 @@ func TestRuntimeStopsAtUnknownRequest(t *testing.T) {
 	testcase A() runs on C { setverdict(pass); }`))
 
 	require.NoError(t, r.Start("example.Missing"))
-	require.NoError(t, r.Start("example.A"))
+	// The runtime may have stopped at the unknown request already.
+	if err := r.Start("example.A"); err != nil {
+		require.ErrorIs(t, err, backend.ErrClosed)
+	}
 	events := collect(t, r)
 
 	assert.Empty(t, eventIDs(events, "tcst"))

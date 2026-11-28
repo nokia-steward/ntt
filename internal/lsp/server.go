@@ -24,6 +24,16 @@ import (
 func NewServer(stream jsonrpc2.Stream) *Server {
 	return &Server{
 		conn: jsonrpc2.NewConn(stream),
+		// Default-on for the features that used to live behind
+		// `ttcn3.experimental.*.enabled`. Users can still opt out
+		// via the new `ttcn3.<feature>.enabled` keys (see
+		// configuration.go).
+		serverConfig: Config{
+			DiagnosticsEnabled:    true,
+			FormatEnabled:         true,
+			SemanticTokensEnabled: true,
+			InlayHintEnabled:      true,
+		},
 	}
 }
 
@@ -79,6 +89,10 @@ type Config struct {
 	FormatEnabled         bool
 	SemanticTokensEnabled bool
 	InlayHintEnabled      bool
+
+	// FormatPrintWidth is the soft right margin used by the wrapping
+	// formatter. Zero falls back to the default (100 columns).
+	FormatPrintWidth int
 }
 
 // Server implements the protocol.Server interface.
@@ -102,21 +116,21 @@ type Server struct {
 }
 
 func (s *Server) Fatal(ctx context.Context, msg string) {
-	s.client.ShowMessage(ctx, &protocol.ShowMessageParams{
+	_ = s.client.ShowMessage(ctx, &protocol.ShowMessageParams{
 		Type:    protocol.Error,
 		Message: msg,
 	})
 }
 
 func (s *Server) Info(ctx context.Context, msg string) {
-	s.client.ShowMessage(ctx, &protocol.ShowMessageParams{
+	_ = s.client.ShowMessage(ctx, &protocol.ShowMessageParams{
 		Type:    protocol.Info,
 		Message: msg,
 	})
 }
 
 func (s *Server) Log(ctx context.Context, msg string) {
-	s.client.LogMessage(ctx, &protocol.LogMessageParams{
+	_ = s.client.LogMessage(ctx, &protocol.LogMessageParams{
 		Type:    protocol.Log,
 		Message: stripansi.Strip(msg),
 	})
@@ -134,10 +148,6 @@ func (s *Server) Write(p []byte) (n int, err error) {
 	s.Log(context.Background(), str)
 	return len(str), nil
 
-}
-
-func (s *Server) cancelRequest(ctx context.Context, params *protocol.CancelParams) error {
-	return nil
 }
 
 func (s *Server) nonstandardRequest(ctx context.Context, method string, params interface{}) (interface{}, error) {

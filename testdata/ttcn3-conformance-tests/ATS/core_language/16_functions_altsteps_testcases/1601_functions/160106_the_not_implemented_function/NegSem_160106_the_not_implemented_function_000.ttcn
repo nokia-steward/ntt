@@ -1,0 +1,16 @@
+// @author   TTF T023
+// @purpose  1:16.1.6, Ensure optional parameter is universal charstring
+// @verdict  pass accept, ttcn3verdict:error
+module NegSem_160106_the_not_implemented_function_000 {
+
+type component GeneralComp {}
+
+testcase TC_NegSem_160106_the_not_implemented_function_000() runs on GeneralComp {
+	???("Hello " & ???);
+}
+
+control {
+	execute(TC_NegSem_160106_the_not_implemented_function_000());
+}
+
+}

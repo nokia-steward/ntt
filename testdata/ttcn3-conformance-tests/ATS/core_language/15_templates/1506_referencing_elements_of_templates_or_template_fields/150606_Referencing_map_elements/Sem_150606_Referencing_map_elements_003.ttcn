@@ -1,0 +1,65 @@
+/*****************************************************************
+ ** @author   TTF T023
+ ** @version  0.0.1
+ ** @purpose  1:15.6.6, Expanding map containing AnyValue on the LHS
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+// The following requirements are tested:
+// When referencing an element within a map template or field to which AnyValue is assigned,
+// at the left hand side of an assignment, the template or field is implicitly expanded
+// recursively up to and including, the depth of the referenced subfield and AnyValue is
+// assigned to the referenced field. Then the value or matching mechanism at the right hand
+// side of the assignment shall be assigned to the referenced field and  AnyElementsOrNone
+// shall be added to the map template.
+
+module Sem_150606_Referencing_map_elements_003 {
+
+    type map from charstring to record {
+        charstring producer,
+        charstring model,
+        charstring description optional
+    } TMap;
+
+    type record TRec {
+        integer a,
+        TMap b optional
+    }
+
+    type component GeneralComp {
+    }
+
+    testcase TC_Sem_150606_Referencing_map_elements_003() runs on GeneralComp {
+        var template TRec v_template := {
+            a := 1,
+            b := ?
+        };
+        // expanding ? on the LHS
+        v_template.b["XS125"].producer := "Yoomstick Tec";
+        log (v_template); // expecting { a := 1, b := {*, ["XS125"] := { producer := "Yoomstick Tec", model := ?, description := * } }
+        var TRec v_val := {
+            a := 1,
+            b := {
+                ["XS125"] := {
+                    producer := "Yoomstick Tec",
+                    model := "BrooMAX 194",
+                    description := omit
+                },
+                ["DZ506"] := {
+                    producer := "XanDonHua Mechanics",
+                    model := "RS-469-23",
+                    description := "Top quality product with many outstanging features"
+                }
+            }
+        };
+        if (match(v_val, v_template)) {
+            setverdict(pass);
+         } else {
+             setverdict(fail);
+         }
+    }
+
+    control{
+        execute(TC_Sem_150606_Referencing_map_elements_003());
+    }
+}

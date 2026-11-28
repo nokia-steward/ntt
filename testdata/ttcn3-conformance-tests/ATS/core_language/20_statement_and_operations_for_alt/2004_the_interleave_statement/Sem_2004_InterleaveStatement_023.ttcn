@@ -1,0 +1,63 @@
+/*****************************************************************
+ ** @author   TTF T056
+ ** @version  0.0.1
+ ** @purpose  1:20.4, Verify that user-defined functions containing send operations (CR5970) and loops without reception statements followed by a receive statement in the same block (CR7688) are allowed in interleave.
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+// The following requirements are tested:
+// Clause 20.4 restriction a) (CR5970):
+// Only user-defined functions which include reception statements are forbidden; functions
+// that send messages or perform non-reception operations are allowed.
+// Clause 20.4 restriction d) (CR7688):
+// The loop statements for, while, and do-while can be used with statement blocks that
+// do not contain reception statements, even if a reception statement follows the loop in
+// the enclosing interleave branch.
+
+module Sem_2004_InterleaveStatement_023 {
+
+    type port MyPort message {
+        inout integer
+    }
+
+    type component GeneralComp {
+        port MyPort pt_In, pt_Out;
+    }
+
+    function f_sendHelper(in integer p_val) runs on GeneralComp {
+        pt_Out.send(p_val);
+    }
+
+    testcase TC_Sem_2004_InterleaveStatement_023() runs on GeneralComp {
+        var integer v_acc := 0;
+        connect(mtc:pt_In, mtc:pt_Out);
+
+        f_sendHelper(1);
+        f_sendHelper(2);
+
+        interleave {
+            [] pt_In.receive(integer:1) {
+                for (var integer i := 0; i < 3; i := i + 1) {
+                    v_acc := v_acc + 1;
+                }
+                // User-defined function with send (no reception statements) + subsequent receive:
+                f_sendHelper(3);
+                pt_In.receive(integer:3);
+                v_acc := v_acc + 10;
+            }
+            [] pt_In.receive(integer:2) {
+                v_acc := v_acc + 100;
+            }
+        }
+
+        if (v_acc == 113) {
+            setverdict(pass);
+        } else {
+            setverdict(fail, "Unexpected accumulator value: ", v_acc);
+        }
+    }
+
+    control {
+        execute(TC_Sem_2004_InterleaveStatement_023());
+    }
+}

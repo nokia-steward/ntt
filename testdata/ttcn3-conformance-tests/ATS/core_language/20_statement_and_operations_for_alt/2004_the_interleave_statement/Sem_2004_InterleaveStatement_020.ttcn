@@ -1,0 +1,71 @@
+/*****************************************************************
+ ** @author   TTF T056
+ ** @version  0.0.1
+ ** @purpose  1:20.4, Verify that an active default altstep containing repeat can be invoked both initially and between reception steps of a multi-step interleave without losing branch progress.
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+// The following requirements are tested:
+// Clause 20.4 rule b), Clause 20.5.1 NOTE 1 (CR5833):
+// If none of the alternatives of the interleave statement can be executed, the default
+// mechanism will be invoked. The restrictions imposed on interleave statements in clause 20.4
+// do not apply to altsteps that are activated as default behaviour for interleave statements
+// (in particular, repeat is allowed inside the default altstep and re-evaluates the current state).
+
+module Sem_2004_InterleaveStatement_020 {
+
+    type port MyPort message {
+        inout integer
+    }
+
+    type record of integer IntList;
+
+    type component GeneralComp {
+        port MyPort pt_In, pt_Out;
+        var integer vc_defaultCount := 0;
+    }
+
+    altstep a_filterNoise() runs on GeneralComp {
+        [] pt_In.receive(integer:99) {
+            vc_defaultCount := vc_defaultCount + 1;
+            repeat;
+        }
+    }
+
+    testcase TC_Sem_2004_InterleaveStatement_020() runs on GeneralComp {
+        var IntList v_trace := {};
+        connect(mtc:pt_In, mtc:pt_Out);
+        activate(a_filterNoise());
+
+        // 99 arrives before step 1, then 1 (Branch 1 step 1), then 99 mid-branch,
+        // then 2 (Branch 2 step 1), then 99 mid-branch, then 3 (Branch 1 step 2).
+        pt_Out.send(integer:99);
+        pt_Out.send(integer:1);
+        pt_Out.send(integer:99);
+        pt_Out.send(integer:2);
+        pt_Out.send(integer:99);
+        pt_Out.send(integer:3);
+
+        interleave {
+            [] pt_In.receive(integer:1) {
+                v_trace[lengthof(v_trace)] := 1;
+                pt_In.receive(integer:3);
+                v_trace[lengthof(v_trace)] := 3;
+            }
+            [] pt_In.receive(integer:2) {
+                v_trace[lengthof(v_trace)] := 2;
+            }
+        }
+
+        const IntList c_expected := { 1, 2, 3 };
+        if (vc_defaultCount == 3 and v_trace == c_expected) {
+            setverdict(pass);
+        } else {
+            setverdict(fail, "Expected 3 default repeats and trace {1, 2, 3}, got: ", vc_defaultCount, v_trace);
+        }
+    }
+
+    control {
+        execute(TC_Sem_2004_InterleaveStatement_020());
+    }
+}

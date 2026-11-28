@@ -41,11 +41,11 @@ func newFormatter(name string, out io.Writer) (formatter, error) {
 	}
 }
 
-// colorsWanted reports whether auto should color out. NO_COLOR, K3_COLORS=never,
+// colorsWanted reports whether auto should color out. NO_COLOR, NTT_COLORS=never or K3_COLORS=never,
 // and TERM=dumb keep the console uncolored. An explicit color format does not
 // consult this.
 func colorsWanted(out io.Writer) bool {
-	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" || os.Getenv("K3_COLORS") == "never" {
+	if os.Getenv("NO_COLOR") != "" || os.Getenv("TERM") == "dumb" || os.Getenv("K3_COLORS") == "never" || os.Getenv("NTT_COLORS") == "never" {
 		return false
 	}
 	return isTerminal(out)

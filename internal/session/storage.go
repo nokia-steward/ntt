@@ -26,7 +26,8 @@ func New(path string) (*storage, error) {
 		return nil, err
 	}
 
-	os.Chmod(path, 0777)
+	// Best effort: a restrictive umask must not keep other users out.
+	_ = os.Chmod(path, 0777)
 
 	// TODO(5nord) session directory should be created.
 	return &storage{
@@ -50,7 +51,9 @@ func (s *storage) Acquire() (int, error) {
 		}
 	}
 	sessions = append(sessions, session{num: next, pid: os.Getpid()})
-	s.SetSessions(sessions)
+	if err := s.SetSessions(sessions); err != nil {
+		return 0, err
+	}
 	return next, nil
 }
 
@@ -67,7 +70,7 @@ func (s *storage) Release(num int) {
 			list = append(list, s)
 		}
 	}
-	s.SetSessions(list)
+	_ = s.SetSessions(list) // Release has no error to report.
 }
 
 // Sessions returns a sorted slice of active sessions from storage. If storage
@@ -115,15 +118,14 @@ func (s *storage) SetSessions(sessions []session) error {
 
 	// Some users might have a restrictive umask setting. It is okay to make the
 	// sessions file world wide writable.
-	os.Chmod(s.sessionsFile, 0666)
+	_ = os.Chmod(s.sessionsFile, 0666)
 
 	for _, s := range sessions {
 		if _, err := file.WriteString(s.String() + "\n"); err != nil {
 			return err
 		}
 	}
-	file.Sync()
-	return nil
+	return file.Sync()
 }
 
 // Lock blocks until flock could be acquired for storage.
@@ -133,7 +135,7 @@ func (s *storage) Lock() error {
 
 // Unlock releases the storage flock.
 func (s *storage) Unlock() {
-	s.lock.Unlock()
+	_ = s.lock.Unlock()
 }
 
 type session struct {

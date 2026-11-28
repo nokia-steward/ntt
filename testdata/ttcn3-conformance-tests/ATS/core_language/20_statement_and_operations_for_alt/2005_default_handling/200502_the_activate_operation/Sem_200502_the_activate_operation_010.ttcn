@@ -1,0 +1,33 @@
+/***************************************************
+ ** @author   STF 470
+ ** @version  0.0.1
+ ** @purpose  1:20.5.2, verify error is generated when passing local timer
+ ** @verdict  pass accept, ttcn3verdict:pass
+ ***************************************************/
+
+// The following requirement is tested:
+// All timer instances in the actual parameter list shall be declared as component type local timers.
+
+module NegSem_200502_the_activate_operation_002 {
+
+	type component GeneralComp {
+	}
+
+	altstep a(timer t_tmr) runs on GeneralComp {
+		[] t_tmr.timeout {}
+	}
+
+	testcase TC_NegSem_200502_the_activate_operation_002() runs on GeneralComp {
+		if (true) {
+			timer t_local := 0.5;
+			t_local.start;
+			activate(a(t_local));
+		}
+		any port.receive;
+		setverdict(pass);
+	}
+
+	control{
+		execute(TC_NegSem_200502_the_activate_operation_002());
+	}
+}

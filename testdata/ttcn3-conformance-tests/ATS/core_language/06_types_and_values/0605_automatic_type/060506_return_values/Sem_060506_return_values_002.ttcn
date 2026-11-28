@@ -1,0 +1,21 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure automatic type for substr.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060506_return_values_002 {
+
+type component GeneralComp {}
+
+function verifyType(inout bitstring bs) {
+	setverdict(pass);
+}
+
+testcase TC_Sem_060506_return_values_002() runs on GeneralComp {
+	var v := substr('00100110'B, 3, 4);
+	verifyType(v);
+}
+
+control {
+	execute(TC_Sem_060506_return_values_002());
+}
+
+}

@@ -1,0 +1,16 @@
+// @author   TTF T023
+// @purpose  1:16.1.6, Ensure ??? can be used as value in local expressions
+// @verdict  pass accept, ttcn3verdict:error
+module NegSem_160106_the_not_implemented_function_001 {
+
+type component GeneralComp {}
+
+testcase TC_NegSem_160106_the_not_implemented_function_001() runs on GeneralComp {
+	var integer i := ???;
+}
+
+control {
+	execute(TC_NegSem_160106_the_not_implemented_function_001());
+}
+
+}

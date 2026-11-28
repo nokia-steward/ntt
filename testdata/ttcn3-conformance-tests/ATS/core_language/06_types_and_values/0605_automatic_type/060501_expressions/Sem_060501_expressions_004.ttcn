@@ -1,0 +1,21 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure infinity bounds are inferred to integer.
+// @verdict  pass accept, ttcn3verdict:pass
+module Sem_060501_expressions_004 {
+
+type component GeneralComp {}
+
+testcase TC_Sem_060501_expressions_004() runs on GeneralComp {
+	var v := (-infinity..infinity);
+	if (match(7, v)) {
+		setverdict(pass);
+	} else {
+		setverdict(fail);
+	}
+}
+
+control {
+	execute(TC_Sem_060501_expressions_004());
+}
+
+}

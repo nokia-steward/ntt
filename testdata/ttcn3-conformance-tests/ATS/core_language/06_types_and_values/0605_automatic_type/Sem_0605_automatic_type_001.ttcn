@@ -1,0 +1,10 @@
+// @author   TTF T023
+// @purpose  1:6.5, Ensure variables provide automatic type inference.
+// @verdict  pass accept
+module Sem_0605_automatic_type_001 {
+
+function f() {
+	var x := 1;
+}
+
+}

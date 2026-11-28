@@ -218,7 +218,8 @@ type Compiler struct {
 	module      string
 	name        string // enclosing definition, for __SCOPE__
 	temps       int
-	nparams     map[string]int // template parameter counts, for forward modifies
+	nparams     map[string]int                 // template parameter counts, for forward modifies
+	formals     map[string][]*syntax.FormalPar // the module's behaviours, for the types of their actuals
 }
 
 func NewCompiler() *Compiler {
@@ -268,7 +269,7 @@ func (c *Compiler) applyPatches() {
 			c.errorf("%q undefined", p.name)
 			continue
 		}
-		c.e.Patch(p.addr, sym.op, sym.arg)
+		_ = c.e.Patch(p.addr, sym.op, sym.arg) // Patch never fails
 	}
 }
 
@@ -338,7 +339,11 @@ func (c *Compiler) compile(n syntax.Node) error {
 		}
 		c.module, c.name = n.Name.String(), n.Name.String()
 		c.nparams = map[string]int{}
+		c.formals = map[string][]*syntax.FormalPar{}
 		for _, child := range n.Defs {
+			if fd, ok := child.Def.(*syntax.FuncDecl); ok && fd.Name != nil && fd.Params != nil {
+				c.formals[fd.Name.String()] = fd.Params.List
+			}
 			td, ok := child.Def.(*syntax.TemplateDecl)
 			if !ok || td.Name == nil {
 				continue
@@ -410,7 +415,7 @@ func (c *Compiler) compile(n syntax.Node) error {
 		}
 
 		for _, decl := range n.Decls {
-			fn(k, n.TemplateRestriction, n.Modif, n.Type, decl, n.With)
+			_ = fn(k, n.TemplateRestriction, n.Modif, n.Type, decl, n.With) // errors go to c.err
 		}
 
 	case *syntax.ControlPart:
@@ -642,7 +647,7 @@ func (c *Compiler) compile(n syntax.Node) error {
 		c.compile(n.Decl)
 
 	case *syntax.CallExpr:
-		if c.compilePortCall(n) {
+		if c.compilePortCall(n) || c.compileCodecCall(n) {
 			break
 		}
 		var args []syntax.Expr
@@ -661,10 +666,18 @@ func (c *Compiler) compile(n syntax.Node) error {
 			if collect {
 				c.emit(opcode.MARK, 0)
 			}
+			// A compound actual parameter takes its fields from the type of
+			// its formal parameter.
+			var formals []*syntax.FormalPar
+			if id, isIdent := n.Fun.(*syntax.Ident); isIdent && (!ok || sym.op == opcode.REF) {
+				formals = c.formals[id.String()]
+			}
 			for i, arg := range args {
 				var sc *scope
 				if sym.op == opcode.MATCH && len(args) == 2 {
 					sc = c.typeScope(args[1-i])
+				} else if i < len(formals) && formals[i] != nil && formals[i].Type != nil && len(formals[i].ArrayDef) == 0 {
+					sc = c.typeScope(formals[i].Type)
 				}
 				if from, ok := arg.(*syntax.FromExpr); ok && sym.op == opcode.PERMUTATION {
 					c.compile(from.X)
@@ -1718,6 +1731,73 @@ func (c *Compiler) compileCommFieldIn(scope *scope, field syntax.Expr) bool {
 	return false
 }
 
+// compileCodecCall compiles the predefined functions of ETSI ES 201 873-1
+// C.5 that T3XF has no instruction for, by the bitstring encvalue and
+// decvalue they are defined from: decvalue_unichar(u, v) decodes
+// oct2bit(char2oct(u)) into v, decvalue_o(o, v) decodes oct2bit(o),
+// encvalue_unichar(v) is oct2char(bit2oct(encvalue(v))) and encvalue_o(v)
+// is bit2oct(encvalue(v)). Character strings are serialised as UTF-8, the
+// only serialisation supported; the input left over by a decoding is not
+// written back. A definition of the module by the same name is called as
+// usual.
+func (c *Compiler) compileCodecCall(call *syntax.CallExpr) bool {
+	id, ok := call.Fun.(*syntax.Ident)
+	if !ok {
+		return false
+	}
+	name := id.String()
+	switch name {
+	case "decvalue_unichar", "decvalue_o", "encvalue_unichar", "encvalue_o":
+	default:
+		return false
+	}
+	if _, ok := c.scope.lookup(name); ok {
+		return false
+	}
+	var args []syntax.Expr
+	if call.Args != nil {
+		args = call.Args.List
+	}
+	unichar := strings.HasSuffix(name, "_unichar")
+	decode := strings.HasPrefix(name, "dec")
+	min, max := 1, 3
+	if decode {
+		min, max = 2, 4
+	}
+	if !unichar {
+		max--
+	}
+	if len(args) < min || len(args) > max {
+		c.errorf("%s takes %d to %d arguments", name, min, max)
+		return true
+	}
+	// The serialisation is the argument after the value(s); decoding or
+	// encoding info after it does not change the encoding of the type.
+	if unichar && len(args) > min {
+		if lit, ok := args[min].(*syntax.ValueLiteral); !ok || strings.Trim(lit.Tok.String(), `"`) != "UTF-8" {
+			c.errorf("%s: only the UTF-8 serialisation is supported", name)
+			return true
+		}
+	}
+	if decode {
+		c.compile(args[0])
+		if unichar {
+			c.emit(opcode.CHAR2OCT, 0)
+		}
+		c.emit(opcode.OCT2BIT, 0)
+		c.compile(args[1])
+		c.emit(opcode.DECVALUE, 0)
+		return true
+	}
+	c.compile(args[0])
+	c.emit(opcode.ENCVALUE, 0)
+	c.emit(opcode.BIT2OCT, 0)
+	if unichar {
+		c.emit(opcode.OCT2CHR, 0)
+	}
+	return true
+}
+
 func (c *Compiler) compilePortCall(call *syntax.CallExpr) bool {
 	if c.compilePortConfig(call) {
 		return true
@@ -1774,7 +1854,6 @@ func (c *Compiler) compilePortSend(expr syntax.Expr) bool {
 	op := opcode.SEND
 	if id, ok := destination.(*syntax.Ident); ok && id.String() == "all component" {
 		op = opcode.SENDA
-		destination = nil
 	} else if list, ok := destination.(*syntax.ParenExpr); ok {
 		c.emit(opcode.MARK, 0)
 		for _, item := range list.List {

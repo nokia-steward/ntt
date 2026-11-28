@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>ntt - ETSI TTCN-3 Conformance Dashboard</title>
+<style>
+  body { font-family: -apple-system, "Segoe UI", Roboto, sans-serif; max-width: 880px; margin: 2rem auto; color: #222; padding: 0 1rem; }
+  h1 { font-size: 1.6rem; margin-bottom: 0.2rem; }
+  .subtitle { color: #666; margin-top: 0; }
+  .gauge { display: flex; align-items: baseline; gap: 0.6rem; margin: 1rem 0; }
+  .gauge .pct { font-size: 3rem; font-weight: 600; color: #2c8a3f; }
+  .gauge .label { color: #555; }
+  table { border-collapse: collapse; width: 100%; margin-top: 1.5rem; }
+  th, td { border: 1px solid #e2e2e2; padding: 0.45rem 0.6rem; text-align: left; font-size: 0.95rem; }
+  th { background: #f8f8f8; }
+  .delta-good { color: #2c8a3f; }
+  .delta-bad  { color: #b00020; }
+  footer { color: #888; font-size: 0.85rem; margin-top: 3rem; }
+</style>
+</head>
+<body>
+<h1>ntt &mdash; ETSI TTCN-3 Conformance Dashboard</h1>
+<p class="subtitle">Pass-rate of <code>ntt check</code> against the
+<a href="https://forge.etsi.org/rep/ttcn3/ttcn3-conformance-tests">ETSI TTCN-3
+Conformance Suite</a>. Updated automatically by CI.</p>
+
+<div class="gauge">
+  <span class="pct" id="pct">&mdash;</span>
+  <span class="label">pass-rate (latest)</span>
+</div>
+
+<p><strong>Metric:</strong> for each file the suite annotates with
+<code>@verdict</code>, <code>ntt conformance</code> runs the testcase
+through the interpreter and compares the actual outcome (verdict,
+parse-error, semantic-error) to the annotation. A file <em>matches</em>
+when actual == expected; <em>inconclusive</em> files are excluded
+from the denominator.</p>
+
+<table id="history">
+  <thead><tr><th>Date</th><th>Commit</th><th>Metric</th><th>Pass-rate</th><th>Note</th></tr></thead>
+  <tbody>
+    <tr><td>2026-05-27</td><td>interp-52-percent</td><td>verdict-match</td><td>52.25%</td><td>Field-specific Annex E attributes (<code>with { encode (field1) "RuleB" }</code> exposed via <code>R.field1.encode</code>), <code>ParenExpr</code> / dotted-selector recognised on the receiver of attribute calls (<code>R.field1.encode("Codec")</code>), <code>encvalue</code> / <code>encvalue_o</code> / <code>encvalue_unichar</code> for strings/records/enums always round-trip through the cache; ints get a deterministic little-endian placeholder so byte-for-byte fixtures (<code>match(encvalue_o(10), '0A000000'O)</code>) pass, the <code>=&gt;</code> decoded-field-reference operator returns the cached pre-encoded value and projects the named field (<code>v.outerPayload =&gt; OuterPayload.innerPayload</code>), <code>-&gt; value (v_int := field1[1], v_str := field2)</code> assignment-list redirects per TTCN-3 22.2.2, <code>@decoded fieldX</code> redirects route through the encvalue cache, altstep calls in alt clauses (<code>[] a_test();</code>) peek-and-fire the first matching inner clause (TTCN-3 20.5.2) rather than always falling through to <code>[else]</code>, alt clauses without a body block participate in the scheduler instead of being silently skipped, enum auto-numbering reserves explicitly-numbered slots up front (<code>{e_black (-1), e_white, e_yellow (0)}</code> &rarr; e_white=1 because 0 is taken later in the list), bit/hex/octet element assignment grows the underlying blob and uses the correct unit step (<code>v_b[2] := '01'O</code> replaces two hex digits, not one), infinite-loop PTC bodies (<code>while(true) {}</code>) get short-circuited via the same heuristic that already skipped procedure-based ops.</td></tr>
+    <tr><td>2026-05-27</td><td>interp-component-refs</td><td>verdict-match</td><td>51.50%</td><td>Real <code>ComponentRef</code> identity (every <code>create</code> allocates a unique ref, tracked per testcase), synchronous <code>comp.start(f())</code> / <code>comp.call(f())</code> execution that pushes the receiver on a component stack so <code>self</code> inside the PTC body resolves to it, sender-tagged <code>p.send</code> (envelope sender defaults to current component), <code>p.checkstate("Started"|"Connected"|...)</code> answers true for affirmative states / false for negative ones, <code>self.stop</code> / <code>self.kill</code> as parameterless selector expressions unwind the call stack via <code>ReturnValue</code>, component-declared timers (<code>timer tc_tmr := 30.0;</code>) initialise as <code>TimerHandle</code> rather than raw <code>Float</code>, <code>comp.create alive</code> handled as a syntactic modifier in <code>evalUnary</code>, indexed assignment on <code>Undefined</code> implicitly creates a <code>record of</code> container, infinite-loop / procedure-op PTC bodies (<code>while(true)</code>, <code>call/getcall/reply/raise/catch/getreply</code>) are skipped so the legacy alt fallback still picks a verdict.</td></tr>
+    <tr><td>2026-05-26</td><td>interp-51-percent</td><td>verdict-match</td><td>50.98%</td><td>Cross-scope assignment via <code>env.Assign</code> walks the chain (component-instance state persists across <code>runs on</code> function calls), out/inout-parameter writeback snapshots LHS indices at call time per TTCN-3 5.4.2, <code>not4b</code> respects the operand's fixed width (no two's-complement extension), <code>not_a_number</code> orders as the largest float (<code>x &lt; nan</code> is true), enum auto-numbering uses the lowest free non-negative integer per 6.2.4(e), dedicated <code>Null</code> singleton (isvalue/isbound on <code>null</code> return true), per-testcase <code>rnd</code> source so parallel jobs don't trample each other's seeds, character-string ranges <code>("a".."f")</code> match per-character, length-restricted templates honour <code>length(N..M)</code>, positional list reassignment with <code>-</code> placeholders merges with prior elements (6.2.3.2), <code>matchRecord</code> tolerates missing-but-omit fields (implicit-omit), <code>matchRecordOf</code> pads short positional records when the pattern carries explicit <code>omit</code>, defaults context suppresses verdict-prefering fallback for real port guards so non-matching altsteps fall through to the next default, <code>any port</code> recognised in bare-guard fast-path, parser learns <code>variant {"Codec1","Codec2"}."Rule"</code> and <code>import ... -&gt; Alias { ... }</code>.</td></tr>
+    <tr><td>2026-05-26</td><td>interp-50-percent</td><td>verdict-match</td><td>50.25%</td><td>Trigger semantics (consume + discard non-matching), enum bindings override sibling templates, sizeof on records counts present fields only, <code>display</code> attribute returns scalar, branch-verdict heuristic recognises PASS / FAIL <code>ValueLiteral</code>s, record &harr; positional list comparison pads with omit, indexed re-assignment merges instead of overwriting, <code>NegSem</code> tests that hit runtime <code>error</code>/<code>fail</code> count as a successful reject.</td></tr>
+    <tr><td>2026-05-24</td><td>interp-loopback-ports</td><td>verdict-match</td><td>39.75%</td><td>Implicit record-field expansion (<code>v.a.b := x</code> materialises intermediates), loopback message-port model (FIFO + match-driven alt scheduler), Annex E attribute selectors (<code>R.encode</code> &rarr; recorded with-spec strings), proper UTF-16/UTF-32 unichar &harr; oct, component-variable initialisers honoured, wildcard-aware bit/hex/octet template matching with backtracking, binarystring concat preserves wildcards, readable Binarystring.Inspect.</td></tr>
+    <tr><td>2026-05-25</td><td>interp-defaults-decvalue</td><td>verdict-match</td><td>42.19%</td><td>Real <code>activate()</code> / <code>deactivate()</code> with LIFO default firing on alt-mismatch (and re-entry guard, timer-only defaults skipped). <code>encvalue</code>/<code>decvalue</code> (plus <code>_o</code> / <code>_unichar</code> variants) round-trip records / unions / enums through a per-testcase encode cache. Per-message <code>to addr</code> / <code>from addr</code> / <code>-&gt; sender v</code> envelope on the loopback ports. Group-scoped <code>with { ... }</code> attributes propagate via <code>flattenModuleDefs</code>. Parser accepts modifier-soup at statement position (<code>@nodefault</code> / <code>@lazy</code> / <code>@fuzzy</code> / <code>@deterministic</code>), <code>PRESENT</code> as a callable identifier, and Annex E attributes as selectors.</td></tr>
+    <tr><td>2026-05-23</td><td>interp-deeper-cuts</td><td>verdict-match</td><td>35.85%</td><td>External-fn bodies, soft import errors, no-eval-on-undef callee, type-first init pass, top-level enum binds, eager templates, alt-prefers-pass / [else], binarystring concat/EQ, record &harr; list match, NaN==NaN, char/unichar2oct/hostid/encvalue_o/any2unistr builtins, two-arg rnd, lenient arg count, bitstring `\` line-continuations, map &harr; list `==`.</td></tr>
+    <tr><td>2026-05-23</td><td>interp-easy-wins</td><td>verdict-match</td><td>30.34%</td><td>+30 conversion builtins, sibling modules flattened, soft-skip more nodes, IR/backends learned mod/concat/lengthof/for/assign.</td></tr>
+    <tr><td>2026-05-22</td><td>interp-rewire</td><td>verdict-match</td><td>25.63%</td><td>First real gate.</td></tr>
+    <tr><td>2026-05-22</td><td>M1 baseline</td><td>parses-cleanly</td><td>79.26%</td><td>Stub: measured parser success only.</td></tr>
+  </tbody>
+</table>
+
+<p>The CI job <code>conformance</code> in
+<code>.github/workflows/ci.yml</code> writes a new history row each
+push to <code>master</code>, comparing against
+<code>testdata/conformance-baseline.json</code>. Pull requests that
+drop the pass-rate fail the build &mdash; this is the
+non-regression gate called out in the ntt-Titan plan.</p>
+
+<footer>
+  Schema and renderer scaffolded in M9 of the ntt-Titan plan. JSON
+  results live under <code>docs/conformance/history.json</code> and
+  are kept in sync by the CI job above.
+</footer>
+
+<script>
+  fetch("history.json").then(r => r.ok ? r.json() : null).then(d => {
+    if (!d) return;
+    // history.json is an array of {date, matched, total, pass_rate}
+    // entries chronologically; the dashboard shows the most recent.
+    const latest = Array.isArray(d) ? d[d.length - 1] : d.latest;
+    if (!latest) return;
+    const pct = typeof latest === "number" ? latest : latest.pass_rate;
+    if (typeof pct === "number") {
+      document.getElementById("pct").textContent = pct.toFixed(2) + "%";
+    }
+  }).catch(() => {});
+</script>
+</body>
+</html>

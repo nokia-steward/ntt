@@ -1,0 +1,72 @@
+/*****************************************************************
+ ** @author   TTF T056
+ ** @version  0.0.1
+ ** @purpose  1:20.4, Verify that a break statement inside an embedded alt statement exits only the inner alt and does not terminate the enclosing interleave statement.
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+// The following requirements are tested:
+// Clause 19.12 / Clause 20.4 rule d) / ES 201 873-4 Clause 7.5 & 7.8 (CR5807):
+// A break statement terminates the innermost currently executed loop, alt, or interleave.
+// When used inside an alt embedded in an interleave branch, break leaves only the inner alt,
+// and the remaining statements of the interleave branch and other branches still execute.
+
+module Sem_2004_InterleaveStatement_018 {
+
+    type port MyPort message {
+        inout integer
+    }
+
+    type record of integer IntList;
+
+    type component GeneralComp {
+        port MyPort pt_p1In, pt_p1Out;
+        port MyPort pt_p2In, pt_p2Out;
+    }
+
+    testcase TC_Sem_2004_InterleaveStatement_018() runs on GeneralComp {
+        var IntList v_trace := {};
+        connect(mtc:pt_p1In, mtc:pt_p1Out);
+        connect(mtc:pt_p2In, mtc:pt_p2Out);
+
+        pt_p1Out.send(integer:1);
+        pt_p2Out.send(integer:2);
+        pt_p1Out.send(integer:3);
+        pt_p1Out.send(integer:4);
+
+        interleave {
+            [] pt_p1In.receive(integer:1) {
+                v_trace[lengthof(v_trace)] := 1;
+                alt {
+                    [] pt_p1In.receive(integer:3) {
+                        v_trace[lengthof(v_trace)] := 3;
+                        break; // leaves only the inner alt, NOT the outer interleave
+                        v_trace[lengthof(v_trace)] := 999;
+                    }
+                    [] pt_p1In.receive(integer:99) {
+                        setverdict(fail);
+                    }
+                }
+                v_trace[lengthof(v_trace)] := 10;
+                pt_p1In.receive(integer:4);
+                v_trace[lengthof(v_trace)] := 4;
+            }
+            [] pt_p2In.receive(integer:2) {
+                v_trace[lengthof(v_trace)] := 2;
+            }
+        }
+
+        const IntList c_exp1 := { 1, 3, 10, 4, 2 };
+        const IntList c_exp2 := { 1, 2, 3, 10, 4 };
+        const IntList c_exp3 := { 1, 3, 10, 2, 4 };
+        if (v_trace == c_exp1 or v_trace == c_exp2 or v_trace == c_exp3) {
+            setverdict(pass);
+        } else {
+            setverdict(fail, "Unexpected trace: ", v_trace);
+        }
+    }
+
+    control {
+        execute(TC_Sem_2004_InterleaveStatement_018());
+    }
+}

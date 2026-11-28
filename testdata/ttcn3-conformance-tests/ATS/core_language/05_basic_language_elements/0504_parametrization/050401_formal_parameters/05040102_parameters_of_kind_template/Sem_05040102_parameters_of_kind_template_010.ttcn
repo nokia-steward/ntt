@@ -16,8 +16,8 @@ module Sem_05040102_parameters_of_kind_template_010 {
 
     type record R
     {
-        integer field1,
-        integer field2
+        integer field1 optional,
+        integer field2 optional
     }
 
     function f() {

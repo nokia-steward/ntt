@@ -1,0 +1,64 @@
+/*****************************************************************
+ ** @author   TTF T056
+ ** @version  0.0.1
+ ** @purpose  1:20.4, Verify textual branch priority on a shared snapshot and that a second reception in a branch is not enabled before the first reception matches.
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+// The following requirements are tested:
+// Clause 20.1 / 20.4:
+// Alternatives are evaluated in textual order against each snapshot, and the second
+// reception statement in an interleave branch is only enabled after the first reception
+// statement and its preceding non-reception statements have been executed.
+
+module Sem_2004_InterleaveStatement_016 {
+
+    type port MyPort message {
+        inout integer
+    }
+
+    type record of integer IntList;
+
+    type component GeneralComp {
+        port MyPort pt_p1In, pt_p1Out;
+        port MyPort pt_p2In, pt_p2Out;
+    }
+
+    testcase TC_Sem_2004_InterleaveStatement_016() runs on GeneralComp {
+        var IntList v_order := {};
+        connect(mtc:pt_p1In, mtc:pt_p1Out);
+        connect(mtc:pt_p2In, mtc:pt_p2Out);
+
+        // Both pt_p1In (10) and pt_p2In (20) are ready in the initial snapshot.
+        // Branch 1 must win snapshot 1 by textual order; then on snapshot 2,
+        // pt_p1In's head is 11 and pt_p2In's head is 20, so Branch 1 step 2 wins by textual priority.
+        pt_p1Out.send(integer:10);
+        pt_p1Out.send(integer:11);
+        pt_p2Out.send(integer:20);
+
+        interleave {
+            [] pt_p1In.receive(integer:10) {
+                v_order[lengthof(v_order)] := 10;
+                pt_p1In.receive(integer:11);
+                v_order[lengthof(v_order)] := 11;
+            }
+            [] pt_p2In.receive(integer:20) {
+                v_order[lengthof(v_order)] := 20;
+            }
+        }
+
+        // Snapshot 1: Branch 1 (10) and Branch 2 (20) both match -> Branch 1 wins (textual priority).
+        // Snapshot 2: Branch 1 step 2 (11) and Branch 2 (20) both match -> Branch 1 step 2 wins (textual priority).
+        // Snapshot 3: Branch 2 (20) matches.
+        const IntList c_expected := { 10, 11, 20 };
+        if (v_order == c_expected) {
+            setverdict(pass);
+        } else {
+            setverdict(fail, "Unexpected evaluation order: ", v_order);
+        }
+    }
+
+    control {
+        execute(TC_Sem_2004_InterleaveStatement_016());
+    }
+}

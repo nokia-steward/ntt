@@ -1,0 +1,74 @@
+/*****************************************************************
+ ** @author   TTF T056
+ ** @version  0.0.1
+ ** @purpose  1:20.4, Verify that a nested interleave statement inside an interleave branch interleaves with outer branches and completes before following statements in its branch.
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+// The following requirements are tested:
+// Clause 20.4 & ES 201 873-4 Clause 7.5:
+// Embedded interleave statements are allowed inside interleave branches; statements
+// following the inner interleave in the same branch execute only after all branches
+// of the inner interleave have completed, while outer branches remain interleaved.
+
+module Sem_2004_InterleaveStatement_019 {
+
+    type port MyPort message {
+        inout integer
+    }
+
+    type record of integer IntList;
+
+    type component GeneralComp {
+        port MyPort pt_p1In, pt_p1Out;
+        port MyPort pt_p2In, pt_p2Out;
+    }
+
+    testcase TC_Sem_2004_InterleaveStatement_019() runs on GeneralComp {
+        var IntList v_trace := {};
+        connect(mtc:pt_p1In, mtc:pt_p1Out);
+        connect(mtc:pt_p2In, mtc:pt_p2Out);
+
+        // Message 1 starts Branch 1; then inner interleave receives 3 (out of order before 2),
+        // then outer Branch 2 receives 4 on pt_p2In, then inner interleave finishes with 2,
+        // then Branch 1 executes trailing statement (99) and final receive (5).
+        pt_p1Out.send(integer:1);
+        pt_p1Out.send(integer:3);
+        pt_p1Out.send(integer:2);
+        pt_p1Out.send(integer:5);
+
+        interleave {
+            [] pt_p1In.receive(integer:1) {
+                v_trace[lengthof(v_trace)] := 1;
+                interleave {
+                    [] pt_p1In.receive(integer:2) {
+                        v_trace[lengthof(v_trace)] := 2;
+                    }
+                    [] pt_p1In.receive(integer:3) {
+                        v_trace[lengthof(v_trace)] := 3;
+                        pt_p2Out.send(integer:4);
+                    }
+                }
+                v_trace[lengthof(v_trace)] := 99;
+                pt_p1In.receive(integer:5);
+                v_trace[lengthof(v_trace)] := 5;
+            }
+            [] pt_p2In.receive(integer:4) {
+                v_trace[lengthof(v_trace)] := 4;
+            }
+        }
+
+        const IntList c_exp1 := { 1, 3, 2, 99, 5, 4 };
+        const IntList c_exp2 := { 1, 3, 4, 2, 99, 5 };
+        const IntList c_exp3 := { 1, 3, 2, 99, 4, 5 };
+        if (v_trace == c_exp1 or v_trace == c_exp2 or v_trace == c_exp3) {
+            setverdict(pass);
+        } else {
+            setverdict(fail, "Unexpected nested interleave trace: ", v_trace);
+        }
+    }
+
+    control {
+        execute(TC_Sem_2004_InterleaveStatement_019());
+    }
+}

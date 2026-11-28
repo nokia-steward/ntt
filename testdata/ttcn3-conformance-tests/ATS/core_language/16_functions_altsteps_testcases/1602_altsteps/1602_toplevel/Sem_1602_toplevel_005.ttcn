@@ -1,0 +1,81 @@
+/*****************************************************************
+ ** @author   TTF T056
+ ** @version  0.0.1
+ ** @purpose  1:16.2, Verify that an interleave altstep can be invoked as an alternative in an alt statement and activated as a default, handling reversed message arrival order (CR7619).
+ ** @verdict  pass accept, ttcn3verdict:pass
+ *****************************************************************/
+
+// The following requirements are tested:
+// Clause 16.2.0 & NOTE, Clause 16.2.1 (CR7619):
+// An altstep can also be used to define a named interleave statement by usage of the
+// interleave keyword. As an interleave statement is semantically equivalent with the
+// expanded alt statement, there are no further restrictions on usages of interleave
+// altsteps than on usages of normal altsteps. They can both be used as activated default
+// alternatives and as top-level alternatives in other alt statement blocks.
+
+module Sem_1602_toplevel_005 {
+
+    type port MyPort message {
+        inout integer
+    }
+
+    type record of integer IntList;
+
+    type component GeneralComp {
+        port MyPort pt_In, pt_Out;
+        var IntList vc_trace := {};
+    }
+
+    altstep interleave a_interleaveStep(in integer p_first, in integer p_second) runs on GeneralComp {
+        [] pt_In.receive(p_first) {
+            vc_trace[lengthof(vc_trace)] := p_first;
+        }
+        [] pt_In.receive(p_second) {
+            vc_trace[lengthof(vc_trace)] := p_second;
+        }
+    }
+
+    testcase TC_Sem_1602_toplevel_005() runs on GeneralComp {
+        var boolean v_altBlockExecuted := false;
+        var default v_def;
+        connect(mtc:pt_In, mtc:pt_Out);
+
+        // 1. Explicit invocation inside an alt statement with reverse arrival order (2 then 1):
+        // Once 2 matches the second branch of a_interleaveStep, the alt commits to a_interleaveStep,
+        // waits for 1 to complete the interleave altstep, and then runs the trailing statement block.
+        pt_Out.send(integer:2);
+        pt_Out.send(integer:1);
+
+        alt {
+            [] a_interleaveStep(1, 2) {
+                v_altBlockExecuted := true;
+            }
+            [] pt_In.receive(integer:99) {
+                setverdict(fail, "Unexpected branch selected");
+            }
+        }
+
+        // 2. Implicit invocation as an activated default (reverse arrival order 20 then 10):
+        v_def := activate(a_interleaveStep(10, 20));
+        pt_Out.send(integer:20);
+        pt_Out.send(integer:10);
+
+        alt {
+            [] pt_In.receive(integer:99) {
+                setverdict(fail, "Should be handled by activated interleave altstep default");
+            }
+        }
+        deactivate(v_def);
+
+        const IntList c_expected := { 2, 1, 20, 10 };
+        if (v_altBlockExecuted and vc_trace == c_expected) {
+            setverdict(pass);
+        } else {
+            setverdict(fail, "Unexpected altstep interleave trace: ", v_altBlockExecuted, vc_trace);
+        }
+    }
+
+    control {
+        execute(TC_Sem_1602_toplevel_005());
+    }
+}
