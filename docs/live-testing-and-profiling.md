@@ -661,11 +661,11 @@ existing Titan-style C/C++ ports, see
 - **JSON bodies are `charstring`, by design.** The port does not decode
   them: your suite owns its schema, and a port that knew about it would be
   a port you had to modify per service. To assert on individual fields,
-  decode in the suite with `decvalue_unichar(body, v, "JSON")` — which today
-  handles scalars and enumerated values; decoding a JSON *object* into a
-  record is scoped but not built (see
-  [remaining-work.md §1z](conformance/remaining-work.md)). Until then,
-  assertions are pattern matches against the body.
+  decode in the suite: declare the part of the body you check as a type
+  with `with { encode "JSON" }` and call `decvalue_unichar(body, v)`. An
+  object decodes into a record or set, an array into a `record of`; members
+  the type does not declare are ignored, and a missing mandatory field
+  makes the call return 1 (ES 201 873-11).
 
   Worth knowing regardless of decoding: **assert on a value you controlled
   in the stimulus**, not just on the value you expected back. Matching

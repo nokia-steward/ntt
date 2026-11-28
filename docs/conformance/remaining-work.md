@@ -1495,7 +1495,14 @@ elapsed time rather than on the verdict alone — a probe that only asked
 "is it done now" cannot tell waiting from answering early. Reverting fails
 it on the live clock.
 
-### 1z. `decvalue` structured decode — SCOPED, not started
+### 1z. `decvalue` structured decode — DONE
+
+Built in fa6a963a (2026-10-02), with the C.5 return codes in e008b79e: a
+value of a type with `with { encode "JSON" }`, or with "JSON" as the dynamic
+encoding, decodes by its type — an object into a record or set, an array
+into a `record of` or array, a union as its one alternative — and members
+the type does not declare are ignored. The scoping notes below are kept
+for the record.
 
 Raised 2026-09-09 by a suite driving a REST service through the built-in
 HTTP port: its assertions were substring matches against a JSON body, which
