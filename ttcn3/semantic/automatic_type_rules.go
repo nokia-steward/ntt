@@ -1,7 +1,9 @@
 // automatic_type_rules.go enforces ETSI ES 201 873-1 clause 6.5: a
 // declaration without a type takes the type of what it is initialised
 // with, which a matching symbol of no type, `?` or `*`, and `omit` do not
-// have.
+// have. A field of a variable's automatic record type is optional only
+// when the value it is initialised with is omit: omit is not assigned to
+// another later.
 package semantic
 
 import (
@@ -29,6 +31,67 @@ func (a *Analyzer) checkAutomaticTypes(mod *syntax.Module) []Diagnostic {
 					Message:  fmt.Sprintf("%s gives no type for %s declared without one (ETSI 6.5)", why, syntax.Name(d.Name)),
 					Node:     d,
 					Span:     syntax.SpanOf(d),
+				})
+			}
+		}
+		return true
+	})
+	syntax.Inspect(mod, func(n syntax.Node) bool {
+		if fn, ok := n.(*syntax.FuncDecl); ok && fn.Body != nil {
+			diags = append(diags, autoMandatoryOmits(fn.Body)...)
+			return false
+		}
+		return true
+	})
+	return diags
+}
+
+// autoMandatoryOmits reports omit assigned to a field of a variable
+// declared without a type in body whose initialiser gives the field a
+// value, which makes the field mandatory.
+func autoMandatoryOmits(body *syntax.BlockStmt) []Diagnostic {
+	mandatory := map[string]map[string]bool{}
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		vd, ok := n.(*syntax.ValueDecl)
+		if !ok || vd.Type != nil || vd.TemplateRestriction != nil || vd.KindTok == nil || vd.KindTok.Kind() != syntax.VAR {
+			return true
+		}
+		for _, d := range vd.Decls {
+			if d == nil || d.Name == nil {
+				continue
+			}
+			cl, ok := d.Value.(*syntax.CompositeLiteral)
+			if !ok || !isFieldAssignmentList(cl) {
+				continue
+			}
+			fields := map[string]bool{}
+			for _, el := range cl.List {
+				if be, ok := el.(*syntax.BinaryExpr); ok && be.Op != nil && be.Op.Kind() == syntax.ASSIGN && !isOmitLiteral(be.Y) {
+					fields[syntax.Name(be.X)] = true
+				}
+			}
+			mandatory[d.Name.String()] = fields
+		}
+		return true
+	})
+	var diags []Diagnostic
+	syntax.Inspect(body, func(n syntax.Node) bool {
+		es, ok := n.(*syntax.ExprStmt)
+		if !ok {
+			return true
+		}
+		be, ok := es.Expr.(*syntax.BinaryExpr)
+		if !ok || be.Op == nil || be.Op.Kind() != syntax.ASSIGN || !isOmitLiteral(be.Y) {
+			return true
+		}
+		if sel, ok := be.X.(*syntax.SelectorExpr); ok {
+			if v, ok := sel.X.(*syntax.Ident); ok && mandatory[v.String()][syntax.Name(sel.Sel)] {
+				diags = append(diags, Diagnostic{
+					Code:     "omit-mandatory-field",
+					Severity: SeverityError,
+					Message:  fmt.Sprintf("field %s of %s, declared without a type, is not optional: its initial value is not omit (ETSI 6.5)", syntax.Name(sel.Sel), v.String()),
+					Node:     be,
+					Span:     syntax.SpanOf(be),
 				})
 			}
 		}

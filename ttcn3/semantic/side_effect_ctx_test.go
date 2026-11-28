@@ -11,6 +11,23 @@ func TestSideEffectInRestrictedContext(t *testing.T) {
 		name, src string
 		reject    bool
 	}{
+		{"port expression of a receive", `module M {
+			type port P message { inout integer }
+			type component C { port P p[2]; var integer vc := 0; }
+			function f() runs on C return integer { vc := vc + 1; return 1; }
+			testcase tc() runs on C { p[f()].receive(integer:1); }
+		}`, true},
+		{"timer expression of a timeout", `module M {
+			type component C { timer T[2]; var integer vc := 0; }
+			function f() runs on C return integer { vc := vc + 1; return 1; }
+			testcase tc() runs on C { T[f()].timeout; }
+		}`, true},
+		{"pure function in a port expression", `module M {
+			type port P message { inout integer }
+			type component C { port P p[2]; }
+			function f() return integer { return 1; }
+			testcase tc() runs on C { p[f()].receive(integer:1); }
+		}`, false},
 		{"fuzzy template not used in a receive (15.0 g)", `module M {
 			type component C { var integer vc := 0; }
 			function f() runs on C return integer { vc := vc + 1; return vc; }

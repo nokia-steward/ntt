@@ -67,3 +67,70 @@ func TestScopeVisibilityRules(t *testing.T) {
 		}
 	}
 }
+
+func TestDefinitionNotImportedRejected(t *testing.T) {
+	tree := parse(t, `module A {
+		type component C {}
+		testcase TC() runs on C {
+			var MyInt v_i := 1;
+		}
+	}
+	module B {
+		type integer MyInt;
+	}`)
+	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree)
+	if !containsCode(diags, "definition-not-imported") {
+		t.Fatalf("expected definition-not-imported, got %v", codes(diags))
+	}
+}
+
+func TestDefinitionImportedAccepted(t *testing.T) {
+	tree := parse(t, `module A {
+		import from B { type MyInt }
+		type component C {}
+		testcase TC() runs on C {
+			var MyInt v_i := 1;
+			var B.MyInt v_j := 2;
+		}
+	}
+	module B {
+		type integer MyInt;
+	}`)
+	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree)
+	if containsCode(diags, "definition-not-imported") {
+		t.Fatalf("unexpected definition-not-imported, got %v", codes(diags))
+	}
+}
+
+func TestFieldNameOutsideTypeRejected(t *testing.T) {
+	tree := parse(t, `module M {
+		type record R { integer field1 }
+		type component C {}
+		testcase TC() runs on C {
+			var R v_r := { field1 := 1 };
+			var integer v_i := field1;
+		}
+	}`)
+	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree)
+	if !containsCode(diags, "field-name-outside-type") {
+		t.Fatalf("expected field-name-outside-type, got %v", codes(diags))
+	}
+}
+
+func TestFieldNameInRedirectAccepted(t *testing.T) {
+	tree := parse(t, `module M {
+		type enumerated E { field2, other }
+		type record R { integer field1[2], charstring field2, E e }
+		type port P message { inout R }
+		type component C { port P p }
+		testcase TC() runs on C {
+			var integer v_int;
+			var R v_r := { field1 := { 1, 2 }, field2 := "a", e := field2 };
+			p.receive(R:?) -> value (v_int := field1[1]);
+		}
+	}`)
+	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree)
+	if containsCode(diags, "field-name-outside-type") {
+		t.Fatalf("unexpected field-name-outside-type, got %v", codes(diags))
+	}
+}

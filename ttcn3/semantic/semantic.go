@@ -216,6 +216,7 @@ func (a *Analyzer) Analyze(tree *ttcn3.Tree) []Diagnostic {
 		out = append(out, a.checkExpressionFormRules(tree, mod)...)
 		out = append(out, a.checkTemplateOptionalFieldRules(tree, mod)...)
 		out = append(out, a.checkConstKindRules(tree, mod)...)
+		out = append(out, a.checkPatternMetacharRules(tree, mod)...)
 		out = append(out, a.checkAssignmentPrimitiveRules(mod)...)
 		out = append(out, a.checkTypeCompatRules(mod)...)
 		out = append(out, a.checkClassMemberRules(mod)...)

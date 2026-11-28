@@ -15,6 +15,8 @@ func TestValueNotationRules(t *testing.T) {
 	}{
 		{"value of another enumerated type", "var E2 v_e := e_a;", "enum-value-of-other-type"},
 		{"assigned value of another enumerated type", "var E2 v_e; v_e := e_b;", "enum-value-of-other-type"},
+		{"compared with a value of another enumerated type", "var E2 v_e := e_c; if (v_e == e_a) {}", "enum-value-of-other-type"},
+		{"matched with a value of another enumerated type", "var E2 v_e := e_c; log(match(v_e, e_b));", "enum-value-of-other-type"},
 		{"value with a list of integers used bare", "var E3 v_e := e_list;", "enum-value-without-integer"},
 		{"record of element by name", "var RoI v_r := { f1 := 1 };", "list-element-identifier"},
 		{"not used symbol in a union value", "var U v_u := { number := - };", "union-value-not-given"},
@@ -25,6 +27,7 @@ func TestValueNotationRules(t *testing.T) {
 
 		{"value with an integer expression", "var E3 v_e := e_expr;", ""},
 		{"value of its own type", "var E2 v_e := e_c;", ""},
+		{"compared with a value of its own type", "var E2 v_e := e_c; if (e_d != v_e) {}", ""},
 		{"value with a list of integers and one of them", "var E3 v_e := e_list(7);", ""},
 		{"variable of the enumerated type", "var E2 v_a := e_c; var E2 v_e := v_a;", ""},
 		{"record of element by index", "var RoI v_r := { [0] := 1 };", ""},

@@ -20,7 +20,9 @@
 // These narrow conditions are enough to reject
 // NegSem_1102_TemplateVars_001 without touching Sem
 // positives that legitimately copy from a freshly-assigned
-// template variable.
+// template variable. A local template definition initialised
+// from such a variable is rejected alike: its body shall be at
+// least partially initialised (15.0 d).
 package semantic
 
 import (
@@ -53,10 +55,32 @@ func checkUninitTemplateInBlock(body *syntax.BlockStmt) []Diagnostic {
 	}
 	var diags []Diagnostic
 	uninit := map[string]*syntax.Declarator{}
+	read := func(e syntax.Expr) {
+		if id, ok := e.(*syntax.Ident); ok && id != nil {
+			name := id.String()
+			if _, bad := uninit[name]; bad {
+				diags = append(diags, Diagnostic{
+					Code:     "uninit-template-read",
+					Severity: SeverityError,
+					Message: fmt.Sprintf(
+						"template variable %q is read before it is initialised (ETSI 11.2)",
+						name),
+					Node: e,
+					Span: syntax.SpanOf(e),
+				})
+			}
+		}
+	}
 	for _, stmt := range body.Stmts {
 		ds, ok := stmt.(*syntax.DeclStmt)
 		if !ok {
 			break
+		}
+		if td, ok := ds.Decl.(*syntax.TemplateDecl); ok {
+			if td.Value != nil && td.Base == nil {
+				read(td.Value)
+			}
+			continue
 		}
 		vd, ok := ds.Decl.(*syntax.ValueDecl)
 		if !ok || vd == nil || vd.KindTok == nil ||
@@ -71,20 +95,7 @@ func checkUninitTemplateInBlock(body *syntax.BlockStmt) []Diagnostic {
 				continue
 			}
 			if dc.Value != nil {
-				if id, ok := dc.Value.(*syntax.Ident); ok && id != nil {
-					name := id.String()
-					if _, bad := uninit[name]; bad {
-						diags = append(diags, Diagnostic{
-							Code:     "uninit-template-read",
-							Severity: SeverityError,
-							Message: fmt.Sprintf(
-								"template variable %q is read before it is initialised (ETSI 11.2)",
-								name),
-							Node: dc.Value,
-							Span: syntax.SpanOf(dc.Value),
-						})
-					}
-				}
+				read(dc.Value)
 				delete(uninit, dc.Name.String())
 				continue
 			}

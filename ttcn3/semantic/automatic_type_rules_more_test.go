@@ -32,3 +32,18 @@ func TestAutomaticTypeProblems(t *testing.T) {
 		}
 	}
 }
+
+// A field of an automatic record type is optional only when initialised
+// with omit (ETSI 6.5).
+func TestAutomaticTypeMandatoryField(t *testing.T) {
+	for body, reject := range map[string]bool{
+		`var v := { a := 1, b := 2 }; v.b := omit;`:    true,
+		`var v := { a := 1, b := omit }; v.b := omit;`: false,
+		`var v := { a := 1, b := 2 }; v.b := 3;`:       false,
+	} {
+		tree := parse(t, `module M { function f() { `+body+` } }`)
+		if got := containsCode(NewAnalyzer(&ttcn3.DB{}).Analyze(tree), "omit-mandatory-field"); got != reject {
+			t.Errorf("%s: omit-mandatory-field reported: %v, want %v", body, got, reject)
+		}
+	}
+}

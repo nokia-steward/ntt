@@ -8,6 +8,9 @@
 //	type enumerated E2 { e_c, e_d }
 //	var E2 v_e := e_a; // error
 //
+// The same holds for an enumerated value compared with a variable of an
+// enumerated type, with == or != or as an operand of match (15.9).
+//
 // A value declared with an associated list or range of integers is used
 // with one of them in parentheses after its name, never bare.
 package semantic
@@ -75,6 +78,17 @@ func (a *Analyzer) checkEnumValueContextRules(tree *ttcn3.Tree, mod *syntax.Modu
 			Span:     syntax.SpanOf(id),
 		})
 	}
+	// checkOperands checks each of a and b against the type of the other,
+	// a variable of an enumerated type.
+	checkOperands := func(a, b syntax.Expr) {
+		for _, p := range [][2]syntax.Expr{{a, b}, {b, a}} {
+			if id, ok := p[0].(*syntax.Ident); ok {
+				if t, tt := m.declType(id); t != nil {
+					check(tt, t, p[1])
+				}
+			}
+		}
+	}
 	syntax.Inspect(mod, func(n syntax.Node) bool {
 		switch x := n.(type) {
 		case *syntax.ValueDecl:
@@ -89,6 +103,14 @@ func (a *Analyzer) checkEnumValueContextRules(tree *ttcn3.Tree, mod *syntax.Modu
 		case *syntax.TemplateDecl:
 			if x.Type != nil && x.Value != nil && x.ModifiesTok == nil {
 				check(tree, x.Type, x.Value)
+			}
+		case *syntax.BinaryExpr:
+			if x.Op != nil && (x.Op.Kind() == syntax.EQ || x.Op.Kind() == syntax.NE) {
+				checkOperands(x.X, x.Y)
+			}
+		case *syntax.CallExpr:
+			if id, ok := x.Fun.(*syntax.Ident); ok && id.String() == "match" && x.Args != nil && len(x.Args.List) == 2 {
+				checkOperands(x.Args.List[0], x.Args.List[1])
 			}
 		case *syntax.ExprStmt:
 			be, ok := x.Expr.(*syntax.BinaryExpr)

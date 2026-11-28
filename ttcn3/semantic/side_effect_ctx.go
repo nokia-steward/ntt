@@ -16,7 +16,8 @@
 //     or inout parameters, which note 7 does not propagate).
 //  2. Walking each module for "restricted contexts" - alt branch
 //     guards, args to receive / trigger / check / getreply / getcall /
-//     catch, altstep local definitions, the body of a template used in
+//     catch and their port expression, the timer expression of a
+//     timeout, altstep local definitions, the body of a template used in
 //     one of those, and the body of a deterministic fuzzy template
 //     (15.0 g) - and for every CallExpr in such a context emitting a
 //     diagnostic if the callee has any forbidden op.
@@ -466,6 +467,13 @@ func (a *Analyzer) checkSideEffectInRestrictedContext(mod *syntax.Module) []Diag
 						}
 					}
 				}
+			}
+		case *syntax.SelectorExpr:
+			// The port expression of a receiving operation and the
+			// timer expression of a timeout, p[f()].receive(t) and
+			// T[f()].timeout.
+			if sid, ok := x.Sel.(*syntax.Ident); ok && (restrictedReceiveSels[sid.String()] || sid.String() == "timeout") {
+				inspectCallsIn(x.X)
 			}
 		}
 		return true
