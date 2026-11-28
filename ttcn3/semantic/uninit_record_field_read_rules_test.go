@@ -184,3 +184,49 @@ func TestRecordFieldReadBesideAttributeRetrievalRejected(t *testing.T) {
 		t.Fatalf("expected uninit-record-field-read, got %v", codes(diags))
 	}
 }
+
+func TestRecordFieldReadAfterOutActualParameterAccepted(t *testing.T) {
+	tree := parse(t, `module M {
+		type record R {
+			integer i
+		}
+		type component C {
+			var integer id;
+		}
+		function g(out R r, inout R s) {
+			r := { i := 1 };
+		}
+		function f(universal charstring body) runs on C {
+			var R a, b, c;
+			var integer rc := decvalue_unichar(body, a);
+			g(b, c);
+			id := a.i + b.i + c.i;
+		}
+	}`)
+	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree)
+	if containsCode(diags, "uninit-record-field-read") {
+		t.Fatalf("unexpected uninit-record-field-read, got %v", codes(diags))
+	}
+}
+
+func TestRecordFieldReadAfterInActualParameterRejected(t *testing.T) {
+	tree := parse(t, `module M {
+		type record R {
+			integer i
+		}
+		type component C {
+			var integer id;
+		}
+		function g(R r) {
+		}
+		function f() runs on C {
+			var R a;
+			g(a);
+			id := a.i;
+		}
+	}`)
+	diags := NewAnalyzer(&ttcn3.DB{}).Analyze(tree)
+	if !containsCode(diags, "uninit-record-field-read") {
+		t.Fatalf("expected uninit-record-field-read, got %v", codes(diags))
+	}
+}

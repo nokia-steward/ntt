@@ -13,7 +13,9 @@
 //   - subsequent whole-value assignments (v := ...) that wipe
 //     the uninitialized tag;
 //   - subsequent dot-assignments (v.field := ...) that mark the
-//     field as set.
+//     field as set;
+//   - out and inout actual parameters (f(v), decvalue(b, v)), which
+//     the call writes as an assignment does.
 //
 // We then report any expression reference to v.field that:
 //   - is NOT the LHS of an assignment;
@@ -39,6 +41,7 @@ func (a *Analyzer) checkUninitRecordFieldReadRules(mod *syntax.Module) []Diagnos
 	if len(records) == 0 {
 		return nil
 	}
+	byRef := collectByRefParams(mod)
 	var diags []Diagnostic
 	for _, d := range mod.Defs {
 		if d == nil {
@@ -48,7 +51,7 @@ func (a *Analyzer) checkUninitRecordFieldReadRules(mod *syntax.Module) []Diagnos
 		if !ok || fn == nil || fn.Body == nil {
 			continue
 		}
-		diags = append(diags, walkUninitRecord(fn.Body, records)...)
+		diags = append(diags, walkUninitRecord(fn.Body, records, byRef)...)
 	}
 	return diags
 }
@@ -56,20 +59,22 @@ func (a *Analyzer) checkUninitRecordFieldReadRules(mod *syntax.Module) []Diagnos
 type uninitRecordCtx struct {
 	uninit   map[string]string          // var -> recordTypeName
 	setField map[string]map[string]bool // var -> field name -> set?
+	byRef    byRefParams
 }
 
-func newUninitRecordCtx() *uninitRecordCtx {
+func newUninitRecordCtx(byRef byRefParams) *uninitRecordCtx {
 	return &uninitRecordCtx{
 		uninit:   map[string]string{},
 		setField: map[string]map[string]bool{},
+		byRef:    byRef,
 	}
 }
 
-func walkUninitRecord(body *syntax.BlockStmt, records map[string][]recordFieldFull) []Diagnostic {
+func walkUninitRecord(body *syntax.BlockStmt, records map[string][]recordFieldFull, byRef byRefParams) []Diagnostic {
 	if body == nil {
 		return nil
 	}
-	ctx := newUninitRecordCtx()
+	ctx := newUninitRecordCtx(byRef)
 	return walkUninitRecordStmts(body.Stmts, ctx, records)
 }
 
@@ -125,6 +130,11 @@ func updateUninitCtxAfterStmt(st syntax.Stmt, ctx *uninitRecordCtx, records map[
 		if ok && re != nil {
 			clearRedirectValueTargets(re, ctx)
 		}
+		if ce, ok := n.(*syntax.CallExpr); ok {
+			for _, arg := range ctx.byRef.args(ce) {
+				markUninitWritten(arg, ctx)
+			}
+		}
 		return true
 	})
 	es, ok := st.(*syntax.ExprStmt)
@@ -159,6 +169,27 @@ func updateUninitCtxAfterStmt(st syntax.Stmt, ctx *uninitRecordCtx, records map[
 			return
 		}
 		delete(ctx.uninit, root)
+	}
+}
+
+// markUninitWritten records that e, a variable or one of its fields, is
+// written as a whole.
+func markUninitWritten(e syntax.Expr, ctx *uninitRecordCtx) {
+	e = unparen(e)
+	if sel, ok := e.(*syntax.SelectorExpr); ok {
+		if root, field := dotChainRootField(sel); root != "" && field != "" {
+			if _, hit := ctx.uninit[root]; hit {
+				if ctx.setField[root] == nil {
+					ctx.setField[root] = map[string]bool{}
+				}
+				ctx.setField[root][field] = true
+			}
+			return
+		}
+	}
+	if name := rootIdentName(e); name != "" {
+		delete(ctx.uninit, name)
+		delete(ctx.setField, name)
 	}
 }
 
