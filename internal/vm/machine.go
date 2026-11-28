@@ -92,6 +92,12 @@ type ElementRef struct {
 	Index     any // The index, field name, or any TTCN-3 value used as a key
 }
 
+// notUsed is a not used symbol ("-") in a value list. Storing the list
+// leaves that element as it was, or takes it from the template being
+// modified (ETSI ES 201 873-1 6.2.1.1, 15.5); read in any other way it
+// is unbound.
+type notUsed struct{}
+
 // logCollection holds variadic log() arguments built by mark/collect.
 type logCollection []any
 
@@ -368,7 +374,7 @@ func (m *Machine) fnen(fn *runtime.Function) {
 			outBack[i] = outParamBack{target: arg}
 			m.Stack[base+i] = runtime.Undefined{}
 		default:
-			m.Stack[base+i] = m.deref(arg)
+			m.Stack[base+i] = m.actual(p, m.deref(arg))
 		}
 	}
 	args := m.Stack[base:m.SP]
@@ -639,7 +645,11 @@ func (m *Machine) arrayLen(base runtime.Type) int {
 func (m *Machine) store(target any, value any) {
 	if blk, ok := value.(Block); ok {
 		if blk.Begin >= blk.End {
-			m.store(target, runtime.Undefined{})
+			// A not used symbol leaves a bound value as it is.
+			switch m.deref(target).(type) {
+			case nil, runtime.Undefined:
+				m.store(target, runtime.Undefined{})
+			}
 			return
 		}
 		// k3r keeps the fields and elements the block does not assign.
@@ -657,12 +667,13 @@ func (m *Machine) store(target any, value any) {
 	}
 	// An element in assignment notation is a block that assigns the
 	// fields of its own element, once the list is stored; like a whole
-	// value block, it keeps the fields it does not assign.
-	if s, ok := value.([]any); ok && slices.ContainsFunc(s, isAssignBlock) {
+	// value block, it keeps the fields it does not assign. A not used
+	// element keeps the element it replaces.
+	if s, ok := value.([]any); ok && slices.ContainsFunc(s, isElemUpdate) {
 		prev, _ := m.deref(target).([]any)
 		elems := slices.Clone(s)
 		for i, e := range elems {
-			if isAssignBlock(e) {
+			if isElemUpdate(e) {
 				elems[i] = runtime.Undefined{}
 				if i < len(prev) {
 					elems[i] = prev[i]
@@ -671,7 +682,7 @@ func (m *Machine) store(target any, value any) {
 		}
 		m.store(target, elems)
 		for i, e := range s {
-			if isAssignBlock(e) {
+			if _, skip := e.(notUsed); !skip && isElemUpdate(e) {
 				m.store(&ElementRef{Container: target, Index: i}, e)
 			}
 		}
@@ -813,6 +824,26 @@ func (m *Machine) store(target any, value any) {
 func isAssignBlock(x any) bool {
 	blk, ok := x.(Block)
 	return ok && blk.Begin < blk.End
+}
+
+// isElemUpdateList reports whether x is a list holding an element that
+// updates the element it is stored over.
+func isElemUpdateList(x any) bool {
+	_, ok := x.([]any)
+	return ok && isElemUpdate(x)
+}
+
+// isElemUpdate reports whether the list element x updates the element it
+// is stored over instead of replacing it: a value in assignment notation,
+// a not used symbol, or a list holding one.
+func isElemUpdate(x any) bool {
+	switch x := x.(type) {
+	case notUsed:
+		return true
+	case []any:
+		return slices.ContainsFunc(x, isElemUpdate)
+	}
+	return isAssignBlock(x)
 }
 
 // operand returns x, or the operand block x leaves on the stack. A run
@@ -1351,7 +1382,7 @@ func (m *Machine) run(stopPC int) (err error) {
 			if op == opcode.VLIST {
 				for i, item := range m.Stack[mark:m.SP] {
 					if blk, ok := item.(Block); ok && blk.Begin >= blk.End {
-						objs[i] = runtime.Undefined{}
+						objs[i] = notUsed{}
 					} else {
 						objs[i] = m.deref(item)
 					}
@@ -1481,8 +1512,8 @@ func (m *Machine) run(stopPC int) (err error) {
 			m.Push(runtime.Rnd())
 
 		case opcode.ENCVALUE:
-			v := m.popValue()
-			bits, err := runtime.EncValue(v, nil)
+			opnd := m.Pop()
+			bits, err := runtime.EncValue(m.deref(opnd), m.exprType(opnd))
 			if err != nil {
 				return &Error{PC: m.PC, Err: err}
 			}
@@ -2205,9 +2236,21 @@ func (m *Machine) callee(blk Block) (*runtime.Function, []any) {
 	fn := m.Tags[addr>>2].(*runtime.Function)
 	args := make([]any, len(fn.Parameters))
 	for i := len(args) - 1; i >= 0; i-- {
-		args[i] = m.popValue()
+		args[i] = m.actual(fn.Parameters[i], m.popValue())
 	}
 	return fn, args
+}
+
+// actual returns the value v of an actual parameter of the formal p. A
+// compound value in assignment notation, or with not used elements,
+// takes its fields from the formal's type.
+func (m *Machine) actual(p *runtime.Var, v any) any {
+	if !isAssignBlock(v) && !isElemUpdateList(v) {
+		return v
+	}
+	tmp := &runtime.Var{Name: p.Name, Type: p.Type, Index: -1}
+	m.store(tmp, v)
+	return tmp.Value
 }
 
 var (
@@ -2878,7 +2921,7 @@ func (m *Machine) checkDefined(val any, typ runtime.Type, name string, allowTemp
 		return "", ""
 	}
 	switch v := val.(type) {
-	case nil, runtime.Undefined:
+	case nil, runtime.Undefined, notUsed:
 		return k3log.ErrUNDF, name
 	case runtime.ModifiedTemplate:
 		if !allowTemplate {
@@ -2959,7 +3002,7 @@ func (m *Machine) execMatch(logEvent bool) (bool, error) {
 			return v.Value
 		}
 		val := m.deref(opnd)
-		if s, ok := val.([]any); ok && slices.ContainsFunc(s, isAssignBlock) {
+		if s, ok := val.([]any); ok && slices.ContainsFunc(s, isElemUpdate) {
 			v := &runtime.Var{Name: "(anon)", Type: runtime.TemplateType{BaseType: runtime.BaseType(typ)}, Index: -1}
 			m.store(v, s)
 			return v.Value
@@ -3513,7 +3556,7 @@ func formatValue(v any, typ runtime.Type) string {
 			return (&runtime.Timer{Default: x}).String()
 		}
 		return runtime.FormatFloat(x)
-	case nil, runtime.Undefined:
+	case nil, runtime.Undefined, notUsed:
 		return "-"
 	case runtime.Range:
 		return fmt.Sprintf("(%s..%s)", formatValue(x.Lo, nil), formatValue(x.Hi, nil))

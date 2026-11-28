@@ -1656,6 +1656,57 @@ func TestRunModule(t *testing.T) {
 			},
 		},
 		{
+			name: "not used symbol in value lists",
+			src: `module M {
+  type record R { integer a, integer b, integer c }
+  type record of R RL;
+  template RL t_b := { { 1, 2, 3 }, { 4, 5, 6 } };
+  template RL t_m modifies t_b := { -, { a := 7 } };
+  template RL t_n modifies t_b := { { -, 8, - } };
+  control {
+    log(t_m);
+    log(t_n);
+    var R r := { 1, 2, 3 };
+    r := { -, 9, - };
+    log(r);
+  }
+}
+`,
+			want: []string{"{{1,2,3},{7,5,6}}", "{{1,8,3}}", "{1,9,3}"},
+		},
+		{
+			name: "JSON through decvalue_unichar and encvalue_unichar",
+			src: `module M {
+  type union U { integer i, charstring s }
+  type record R { integer a, charstring s optional, U u } with { encode "JSON" }
+  control {
+    var R r;
+    var universal charstring t := "{""a"":1,""u"":{""s"":""x""},""extra"":[2]}";
+    log(decvalue_unichar(t, r), r);
+    log(encvalue_unichar(r));
+    var R m;
+    log(decvalue_unichar("{""u"":{""i"":1}}", m));
+  }
+}
+`,
+			want: []string{`0{1,omit,{s:="x"}}`, `"{""a"":1,""u"":{""s"":""x""}}"`, "1"},
+		},
+		{
+			name: "compound actual parameters take the formal's type",
+			src: `module M {
+  type record R { integer a, integer b optional }
+  type record of R RL;
+  function f(RL p, R q) return integer { return p[0].b + q.a }
+  control {
+    log(f({ { a := 1, b := 2 } }, { a := 3 }));
+    log(g({ b := 5, a := 4 }));
+  }
+  function g(R r) return integer { return r.a }
+}
+`,
+			want: []string{"5", "4"},
+		},
+		{
 			name: "nested block local",
 			src: `module M {
   control { var integer a := 1; if (true) { var integer b := 2 }; log(a) }
@@ -3209,7 +3260,8 @@ func TestTemplates(t *testing.T) {
 		assert.Equal(t, []string{
 			"?*",
 			"{10,*}",
-			"{20,-}",
+			// b := - leaves the b of a bound value as it was (6.2.1.1).
+			"{20,*}",
 		}, logLines(t, input))
 	})
 
